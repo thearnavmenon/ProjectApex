@@ -45,7 +45,10 @@ struct CapturedFrame: Sendable {
 ///     Task { await visionService.analyse(frame) }
 /// }
 /// ```
-final class CameraManager: NSObject, Sendable {
+/// Not `Sendable`: wraps AVFoundation reference types (AVCaptureSession,
+/// AVCaptureVideoPreviewLayer) which are not safe to pass freely across
+/// concurrency domains. Access is serialised via `sessionQueue` internally.
+final class CameraManager: NSObject {
 
     // ---------------------------------------------------------------------------
     // MARK: Public Interfaces
@@ -75,8 +78,9 @@ final class CameraManager: NSObject, Sendable {
     private let photoOutput = AVCapturePhotoOutput()
 
     /// Tracks the monotonic frame index across the scanning session.
-    /// Protected by `sessionQueue` access pattern.
-    private var frameIndex: Int = 0
+    /// Marked nonisolated(unsafe) because it is exclusively mutated on `sessionQueue`
+    /// (including from the nonisolated delegate callback), satisfying the no-data-race contract.
+    private nonisolated(unsafe) var frameIndex: Int = 0
 
     /// The continuation for the currently active frame stream.
     /// Nil when no scan is in progress. Stored as nonisolated(unsafe)

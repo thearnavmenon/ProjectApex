@@ -203,10 +203,13 @@ struct ScannerView: View {
 
     /// Confirmation screen: editable equipment list before profile is saved.
     private var confirmingView: some View {
-        NavigationStack {
+        // @Bindable allows `$viewModel.detectedEquipment` bindings for the ForEach.
+        // This requires `detectedEquipment` to have a public setter on the @Observable class.
+        @Bindable var vm = viewModel
+        return NavigationStack {
             List {
                 Section {
-                    ForEach($viewModel.detectedEquipment) { $item in
+                    ForEach($vm.detectedEquipment) { $item in
                         EquipmentRowView(item: $item)
                     }
                     .onDelete { indexSet in

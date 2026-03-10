@@ -23,8 +23,8 @@ import Foundation
 /// Holds the runtime configuration for the Vision API endpoint.
 /// In production, the `apiKey` is loaded from the iOS Keychain (Section 6.3.1 of PRD).
 /// For the prototype, it defaults to an empty string — the mock service is used instead.
-struct VisionAPIConfiguration {
-    enum Provider {
+struct VisionAPIConfiguration: Sendable {
+    enum Provider: Sendable {
         case openAI   // GPT-4o Vision
         case anthropic // Claude Vision
     }
@@ -34,12 +34,6 @@ struct VisionAPIConfiguration {
     let modelID: String
     let timeoutSeconds: TimeInterval
 
-    static let `default` = VisionAPIConfiguration(
-        provider: .openAI,
-        apiKey: "",  // Populated from Keychain at runtime
-        modelID: "gpt-4o",
-        timeoutSeconds: 30
-    )
 }
 
 // MARK: - VisionAPIServiceProtocol
@@ -76,10 +70,17 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     // MARK: Init
     // ---------------------------------------------------------------------------
 
-    init(configuration: VisionAPIConfiguration = .default) {
-        self.configuration = configuration
+    init(configuration: VisionAPIConfiguration? = nil) {
+        // Resolve default outside of any actor isolation boundary
+        let resolvedConfig = configuration ?? VisionAPIConfiguration(
+            provider: .openAI,
+            apiKey: "",
+            modelID: "gpt-4o",
+            timeoutSeconds: 30
+        )
+        self.configuration = resolvedConfig
         let urlConfig = URLSessionConfiguration.default
-        urlConfig.timeoutIntervalForRequest = configuration.timeoutSeconds
+        urlConfig.timeoutIntervalForRequest = resolvedConfig.timeoutSeconds
         self.session = URLSession(configuration: urlConfig)
     }
 
@@ -198,9 +199,9 @@ actor VisionAPIService: VisionAPIServiceProtocol {
 
     /// Parses the raw API response data into [EquipmentItem].
     /// Non-conforming responses are discarded without crashing (FR-001-D).
+    /// Runs on the actor's executor — no nonisolated workarounds needed.
     private func parseResponse(data: Data) throws -> [EquipmentItem] {
         // Step 1: Extract the content string from the provider's chat response envelope.
-        // Both OpenAI and Anthropic wrap the model output in nested JSON.
         guard
             let topLevel = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let contentString = extractContentString(from: topLevel)
@@ -217,19 +218,17 @@ actor VisionAPIService: VisionAPIServiceProtocol {
 
         let decoder = JSONDecoder()
 
-        // Attempt primary decode as VisionAPIResponse { "equipment": [...] }
+        // Try to decode the wrapped response first
         if let apiResponse = try? decoder.decode(VisionAPIResponse.self, from: contentData) {
             return apiResponse.items
         }
 
-        // Fallback: attempt bare array decode [EquipmentItem]
+        // Fallback: Try to decode as a direct array
         if let items = try? decoder.decode([EquipmentItem].self, from: contentData) {
             return items
         }
 
-        // If both fail, the response is malformed — discard per FR-001-D.
-        let rawString = String(data: contentData, encoding: .utf8) ?? "<undecodable>"
-        throw ScannerError.apiResponseMalformed(rawResponse: rawString)
+        throw ScannerError.apiResponseMalformed(rawResponse: contentString)
     }
 
     /// Extracts the model's text output from either an OpenAI or Anthropic response envelope.

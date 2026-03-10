@@ -31,7 +31,9 @@ import AVFoundation
 // MARK: - ScannerState
 
 /// The finite-state machine driving the scanner UI.
-enum ScannerState: Equatable {
+/// Note: `GymProfile` and `ScannerError` are not auto-Equatable, so we implement
+/// Equatable manually for the cases that carry associated values.
+enum ScannerState {
     /// Initial state before any user interaction.
     case idle
 
@@ -72,7 +74,9 @@ final class ScannerViewModel {
 
     /// The live, deduplicated list of equipment detected so far.
     /// Updated in real time as API responses arrive. Rendered as the checklist.
-    private(set) var detectedEquipment: [EquipmentItem] = []
+    /// Public setter is intentional: SwiftUI's `@Bindable` wrapping needs write access
+    /// for the `ForEach($viewModel.detectedEquipment)` pattern in the confirmation list.
+    var detectedEquipment: [EquipmentItem] = []
 
     /// Number of camera frames that have been sent to the Vision API.
     private(set) var framesProcessed: Int = 0
@@ -102,17 +106,19 @@ final class ScannerViewModel {
     // ---------------------------------------------------------------------------
 
     /// - Parameters:
-    ///   - cameraManager: The AVFoundation session manager. Injected for testability.
-    ///   - visionService: The Vision API client. Defaults to `MockVisionAPIService`
-    ///     for prototype builds. Swap to `VisionAPIService` for production.
+    ///   - cameraManager: The AVFoundation session manager. Pass `nil` to use the default.
+    ///   - visionService: The Vision API client. Pass `nil` to use `MockVisionAPIService`
+    ///     (prototype). Swap to a live `VisionAPIService` instance for production.
     ///   - captureInterval: Seconds between frame captures. Default: 2.0s (FR-001-B).
     init(
-        cameraManager: CameraManager = CameraManager(),
-        visionService: any VisionAPIServiceProtocol = MockVisionAPIService(),
+        cameraManager: CameraManager? = nil,
+        visionService: (any VisionAPIServiceProtocol)? = nil,
         captureInterval: TimeInterval = 2.0
     ) {
-        self.cameraManager = cameraManager
-        self.visionService = visionService
+        // Instantiate defaults inside the body to avoid triggering actor-isolation
+        // warnings from default parameter expressions being evaluated in a nonisolated context.
+        self.cameraManager = cameraManager ?? CameraManager()
+        self.visionService = visionService ?? MockVisionAPIService()
         self.captureInterval = captureInterval
     }
 
