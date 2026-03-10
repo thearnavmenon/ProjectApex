@@ -1,16 +1,13 @@
 // VisionAPIDTOs.swift
 // ProjectApex — GymScanner Feature
 //
-// Data-Transfer Objects used exclusively in the Vision API request/response cycle.
+// Top-level JSON wrapper for the Vision API response envelope.
+// EquipmentItem and all domain types live in Models/GymProfile.swift.
 //
 // ISOLATION NOTE:
-// This target has SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor, which means every
-// type defaults to @MainActor unless explicitly opted out. Types used for JSON
-// decoding inside a background actor (VisionAPIService) MUST be marked
-// `nonisolated` so their synthesized Codable conformances are not @MainActor-isolated.
-//
-// Rule: Any struct that needs to be Codable AND decoded inside a non-MainActor
-// context (e.g., a Swift actor, a detached Task) must carry `nonisolated` here.
+// This target has SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor. This struct must be
+// `nonisolated` so its synthesized Codable conformance is not @MainActor-isolated,
+// keeping it decodable from a background actor (VisionAPIService).
 
 import Foundation
 

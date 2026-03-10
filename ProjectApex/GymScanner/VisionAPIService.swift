@@ -33,7 +33,6 @@ struct VisionAPIConfiguration: Sendable {
     let apiKey: String
     let modelID: String
     let timeoutSeconds: TimeInterval
-
 }
 
 // MARK: - VisionAPIServiceProtocol
@@ -54,9 +53,8 @@ protocol VisionAPIServiceProtocol: Actor {
 ///
 /// The Vision API system prompt is embedded here (Section 3.1.1 of PRD):
 /// "You are an expert gym equipment auditor. Analyze this image and identify every
-/// piece of strength training equipment visible. For each item, extract:
-/// equipment_type, estimated_weight_range_kg (if applicable),
-/// increments_available_kg (if identifiable), and count. Return ONLY valid JSON."
+/// piece of strength training equipment visible. Return ONLY valid JSON matching
+/// the GymProfile equipment schema with equipment_type, kind, and details fields."
 actor VisionAPIService: VisionAPIServiceProtocol {
 
     // ---------------------------------------------------------------------------
@@ -133,11 +131,12 @@ actor VisionAPIService: VisionAPIServiceProtocol {
         // --- System prompt (PRD Section 3.1.1) ---
         let systemPrompt = """
             You are an expert gym equipment auditor. Analyze this image and identify every \
-            piece of strength training equipment visible. For each item, extract: \
-            equipment_type (snake_case identifier), estimated_weight_range_kg \
-            (object with min_kg and max_kg, or null), increments_available_kg (number or null), \
-            and count (integer). Return ONLY a valid JSON object with a top-level key \
-            "equipment" containing an array of items. No prose, no markdown fences.
+            piece of strength training equipment visible. For each item return a JSON object \
+            with: equipment_type (snake_case, e.g. "dumbbell_set"), count (integer), \
+            detected_by_vision (true), and details (object with "kind" field set to \
+            "increment_based", "plate_based", or "bodyweight_only" plus relevant fields). \
+            Return ONLY a valid JSON object with a top-level key "equipment" containing \
+            an array of items. No prose, no markdown fences.
             """
 
         switch configuration.provider {
@@ -216,7 +215,7 @@ actor VisionAPIService: VisionAPIServiceProtocol {
             throw ScannerError.apiResponseMalformed(rawResponse: contentString)
         }
 
-        let decoder = JSONDecoder()
+        let decoder = JSONDecoder.gymProfile
 
         // Try to decode the wrapped response first
         if let apiResponse = try? decoder.decode(VisionAPIResponse.self, from: contentData) {
@@ -266,95 +265,102 @@ actor MockVisionAPIService: VisionAPIServiceProtocol {
     private var callCount: Int = 0
 
     // A pre-defined sequence of mock detection batches simulating a real gym scan.
+    // Uses the new EquipmentType + EquipmentDetails schema.
     private let mockBatches: [[EquipmentItem]] = [
         // Frame 0: User points camera at the free weights area
         [
             EquipmentItem(
-                equipmentType: "dumbbell_set",
-                estimatedWeightRangeKg: WeightRange(minKg: 2.5, maxKg: 45.0),
-                incrementsAvailableKg: 2.5,
-                count: 1
+                equipmentType: .dumbbellSet,
+                count: 1,
+                details: .incrementBased(minKg: 2.5, maxKg: 45.0, incrementKg: 2.5),
+                detectedByVision: true
             ),
             EquipmentItem(
-                equipmentType: "adjustable_bench",
-                estimatedWeightRangeKg: nil,
-                incrementsAvailableKg: nil,
-                count: 3
+                equipmentType: .adjustableBench,
+                count: 3,
+                details: .bodyweightOnly,
+                detectedByVision: true
             )
         ],
         // Frame 1: User pans to the barbell racks
         [
             EquipmentItem(
-                equipmentType: "barbell",
-                estimatedWeightRangeKg: WeightRange(minKg: 20.0, maxKg: 200.0),
-                incrementsAvailableKg: 2.5,
-                count: 4
+                equipmentType: .barbell,
+                count: 4,
+                details: .plateBased(
+                    barWeightKg: 20.0,
+                    availablePlatesKg: [1.25, 2.5, 5.0, 10.0, 20.0, 25.0]
+                ),
+                detectedByVision: true
             ),
             EquipmentItem(
-                equipmentType: "squat_rack",
-                estimatedWeightRangeKg: nil,
-                incrementsAvailableKg: nil,
-                count: 2
+                equipmentType: .unknown("squat_rack"),
+                count: 2,
+                details: .bodyweightOnly,
+                detectedByVision: true
             )
         ],
         // Frame 2: User reaches the cable section
         [
             EquipmentItem(
-                equipmentType: "cable_machine",
-                estimatedWeightRangeKg: WeightRange(minKg: 0.0, maxKg: 90.0),
-                incrementsAvailableKg: 2.5,
-                count: 2
+                equipmentType: .cableMachine,
+                count: 2,
+                details: .incrementBased(minKg: 2.5, maxKg: 90.0, incrementKg: 2.5),
+                detectedByVision: true
             ),
             EquipmentItem(
-                equipmentType: "lat_pulldown",
-                estimatedWeightRangeKg: WeightRange(minKg: 0.0, maxKg: 90.0),
-                incrementsAvailableKg: 5.0,
-                count: 1
+                equipmentType: .unknown("lat_pulldown"),
+                count: 1,
+                details: .incrementBased(minKg: 5.0, maxKg: 90.0, incrementKg: 5.0),
+                detectedByVision: true
             )
         ],
         // Frame 3: Machine area — plates + more machines detected
         [
             EquipmentItem(
-                equipmentType: "leg_press",
-                estimatedWeightRangeKg: WeightRange(minKg: 0.0, maxKg: 300.0),
-                incrementsAvailableKg: 10.0,
-                count: 1
+                equipmentType: .legPress,
+                count: 1,
+                details: .plateBased(
+                    barWeightKg: 0.0,
+                    availablePlatesKg: [10.0, 20.0, 25.0]
+                ),
+                detectedByVision: true
             ),
             EquipmentItem(
-                equipmentType: "smith_machine",
-                estimatedWeightRangeKg: WeightRange(minKg: 20.0, maxKg: 180.0),
-                incrementsAvailableKg: 2.5,
-                count: 1
+                equipmentType: .smithMachine,
+                count: 1,
+                details: .incrementBased(minKg: 20.0, maxKg: 180.0, incrementKg: 2.5),
+                detectedByVision: true
             )
         ],
         // Frame 4: Cardio corner — additional bodyweight equipment
         [
             EquipmentItem(
-                equipmentType: "pull_up_bar",
-                estimatedWeightRangeKg: nil,
-                incrementsAvailableKg: nil,
-                count: 2
+                equipmentType: .pullUpBar,
+                count: 2,
+                details: .bodyweightOnly,
+                detectedByVision: true
             ),
             EquipmentItem(
-                equipmentType: "kettlebell_set",
-                estimatedWeightRangeKg: WeightRange(minKg: 8.0, maxKg: 40.0),
-                incrementsAvailableKg: 4.0,
-                count: 1
+                equipmentType: .unknown("kettlebell_set"),
+                count: 1,
+                details: .incrementBased(minKg: 8.0, maxKg: 40.0, incrementKg: 4.0),
+                detectedByVision: true
             )
         ],
         // Frame 5: Overlapping frames — re-detects already-known items (tests dedup)
         [
             EquipmentItem(
-                equipmentType: "dumbbell_set",
-                estimatedWeightRangeKg: WeightRange(minKg: 2.5, maxKg: 45.0),
-                incrementsAvailableKg: 2.5,
-                count: 1
+                equipmentType: .dumbbellSet,
+                count: 1,
+                details: .incrementBased(minKg: 2.5, maxKg: 45.0, incrementKg: 2.5),
+                detectedByVision: true
             ),
             EquipmentItem(
-                equipmentType: "cable_machine",
-                estimatedWeightRangeKg: WeightRange(minKg: 0.0, maxKg: 90.0),
-                incrementsAvailableKg: 2.5,
-                count: 2
+                equipmentType: .cableMachine,
+                count: 2,
+                details: .incrementBased(minKg: 2.5, maxKg: 90.0, incrementKg: 2.5),
+                detectedByVision: true
             )
         ]
     ]

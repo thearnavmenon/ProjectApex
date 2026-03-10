@@ -40,7 +40,6 @@ struct ScannerView: View {
 
     // For the confirmation sheet presentation
     @State private var showingAddEquipmentSheet = false
-    @State private var newEquipmentName = ""
 
     var body: some View {
         ZStack {
@@ -290,7 +289,7 @@ struct ScannerView: View {
                 spacing: 8
             ) {
                 ForEach(profile.equipment.prefix(6)) { item in
-                    Text(item.displayName)
+                    Text(item.equipmentType.displayName)
                         .font(.caption)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -567,7 +566,7 @@ struct EquipmentChecklistOverlay: View {
     }
 }
 
-/// A single row in the live checklist: checkmark icon + equipment name + count badge.
+/// A single row in the live checklist: checkmark icon + equipment name + weight summary.
 struct EquipmentDetectionRow: View {
 
     let item: EquipmentItem
@@ -580,14 +579,15 @@ struct EquipmentDetectionRow: View {
                 .foregroundStyle(.green)
                 .font(.system(size: 16))
 
-            Text(item.displayName)
+            Text(item.equipmentType.displayName)
                 .font(.subheadline)
                 .foregroundStyle(.primary)
 
             Spacer()
 
-            if let range = item.estimatedWeightRangeKg {
-                Text("\(Int(range.minKg))–\(Int(range.maxKg)) kg")
+            // Show a compact weight summary from the details
+            if let weightSummary = item.details.weightSummary {
+                Text(weightSummary)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -622,11 +622,11 @@ struct EquipmentRowView: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.displayName)
+                Text(item.equipmentType.displayName)
                     .font(.body)
 
-                if let range = item.estimatedWeightRangeKg {
-                    Text("\(formatWeight(range.minKg))–\(formatWeight(range.maxKg)) kg")
+                if let weightSummary = item.details.weightSummary {
+                    Text(weightSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -661,12 +661,6 @@ struct EquipmentRowView: View {
             .foregroundStyle(.primary)
         }
     }
-
-    private func formatWeight(_ kg: Double) -> String {
-        kg.truncatingRemainder(dividingBy: 1) == 0
-            ? String(Int(kg))
-            : String(format: "%.1f", kg)
-    }
 }
 
 // MARK: - AddEquipmentSheet
@@ -676,30 +670,41 @@ struct AddEquipmentSheet: View {
 
     var onAdd: (EquipmentItem) -> Void
 
-    @State private var equipmentType = ""
+    @State private var equipmentTypeName = ""
     @State private var count = 1
-    @State private var hasWeightRange = false
+    @State private var detailsKind: DetailsKind = .bodyweightOnly
     @State private var minKg: Double = 0
     @State private var maxKg: Double = 100
-    @State private var increment: Double = 2.5
+    @State private var incrementKg: Double = 2.5
 
     @Environment(\.dismiss) private var dismiss
+
+    enum DetailsKind: String, CaseIterable, Identifiable {
+        case bodyweightOnly = "Bodyweight Only"
+        case incrementBased = "Stack / Dumbbell"
+        case plateBased     = "Plate Loaded"
+        var id: String { rawValue }
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Equipment") {
-                    TextField("Type (e.g. dumbbell_set)", text: $equipmentType)
+                    TextField("Type (e.g. dumbbell_set)", text: $equipmentTypeName)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
 
                     Stepper("Count: \(count)", value: $count, in: 1...20)
                 }
 
-                Section {
-                    Toggle("Has weight range", isOn: $hasWeightRange)
+                Section("Weight Details") {
+                    Picker("Kind", selection: $detailsKind) {
+                        ForEach(DetailsKind.allCases) { kind in
+                            Text(kind.rawValue).tag(kind)
+                        }
+                    }
 
-                    if hasWeightRange {
+                    if detailsKind == .incrementBased {
                         HStack {
                             Text("Min kg")
                             Spacer()
@@ -719,7 +724,18 @@ struct AddEquipmentSheet: View {
                         HStack {
                             Text("Increment kg")
                             Spacer()
-                            TextField("2.5", value: $increment, format: .number)
+                            TextField("2.5", value: $incrementKg, format: .number)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
+                        }
+                    }
+
+                    if detailsKind == .plateBased {
+                        HStack {
+                            Text("Bar weight kg")
+                            Spacer()
+                            TextField("20", value: $minKg, format: .number)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 80)
@@ -735,23 +751,107 @@ struct AddEquipmentSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        guard !equipmentType.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                        let trimmed = equipmentTypeName
+                            .trimmingCharacters(in: .whitespaces)
+                            .lowercased()
+                            .replacingOccurrences(of: " ", with: "_")
+                        guard !trimmed.isEmpty else { return }
+
+                        // Map the raw string to an EquipmentType (known or unknown)
+                        let equipType = EquipmentType(rawString: trimmed)
+
+                        let details: EquipmentDetails
+                        switch detailsKind {
+                        case .bodyweightOnly:
+                            details = .bodyweightOnly
+                        case .incrementBased:
+                            details = .incrementBased(minKg: minKg, maxKg: maxKg, incrementKg: incrementKg)
+                        case .plateBased:
+                            // Default plate set for a manually-added plate-based item
+                            details = .plateBased(
+                                barWeightKg: minKg,
+                                availablePlatesKg: [1.25, 2.5, 5.0, 10.0, 20.0]
+                            )
+                        }
+
                         let item = EquipmentItem(
-                            equipmentType: equipmentType
-                                .trimmingCharacters(in: .whitespaces)
-                                .lowercased()
-                                .replacingOccurrences(of: " ", with: "_"),
-                            estimatedWeightRangeKg: hasWeightRange
-                                ? WeightRange(minKg: minKg, maxKg: maxKg)
-                                : nil,
-                            incrementsAvailableKg: hasWeightRange ? increment : nil,
-                            count: count
+                            equipmentType: equipType,
+                            count: count,
+                            details: details,
+                            detectedByVision: false
                         )
                         onAdd(item)
                     }
-                    .disabled(equipmentType.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(equipmentTypeName.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
+        }
+    }
+}
+
+// MARK: - EquipmentDetails weight summary helper
+
+private extension EquipmentDetails {
+    /// A compact human-readable summary for display in list rows.
+    var weightSummary: String? {
+        switch self {
+        case .incrementBased(let min, let max, _):
+            return "\(formatKg(min))–\(formatKg(max)) kg"
+        case .plateBased(let bar, let plates):
+            let maxPlate = plates.max() ?? 0
+            let approxMax = bar + maxPlate * 2
+            return "up to ~\(formatKg(approxMax)) kg"
+        case .bodyweightOnly:
+            return nil
+        }
+    }
+
+    private func formatKg(_ kg: Double) -> String {
+        kg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(kg))
+            : String(format: "%.1f", kg)
+    }
+}
+
+// MARK: - EquipmentType display name helper
+
+private extension EquipmentType {
+    /// Human-readable display name derived from the enum case.
+    var displayName: String {
+        switch self {
+        case .dumbbellSet:    return "Dumbbell Set"
+        case .barbell:        return "Barbell"
+        case .ezCurlBar:      return "EZ Curl Bar"
+        case .cableMachine:   return "Cable Machine"
+        case .smithMachine:   return "Smith Machine"
+        case .legPress:       return "Leg Press"
+        case .adjustableBench: return "Adjustable Bench"
+        case .flatBench:      return "Flat Bench"
+        case .pullUpBar:      return "Pull-up Bar"
+        case .unknown(let raw):
+            return raw
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+        }
+    }
+}
+
+// MARK: - EquipmentType convenience init
+
+private extension EquipmentType {
+    /// Converts a raw snake_case string from the UI into the appropriate enum case.
+    init(rawString: String) {
+        switch rawString {
+        case "dumbbell_set":     self = .dumbbellSet
+        case "barbell":          self = .barbell
+        case "ez_curl_bar":      self = .ezCurlBar
+        case "cable_machine":    self = .cableMachine
+        case "smith_machine":    self = .smithMachine
+        case "leg_press":        self = .legPress
+        case "adjustable_bench": self = .adjustableBench
+        case "flat_bench":       self = .flatBench
+        case "pull_up_bar":      self = .pullUpBar
+        default:                 self = .unknown(rawString)
         }
     }
 }
@@ -766,10 +866,6 @@ struct AddEquipmentSheet: View {
 }
 
 #Preview("Confirming State — Mock Data") {
-    // Build a view model pre-loaded into confirming state with mock equipment
-    let vm = ScannerViewModel()
-    // We can observe state but can't easily inject it directly in previews;
-    // use the confirmation view standalone:
     NavigationStack {
         ScannerView()
     }

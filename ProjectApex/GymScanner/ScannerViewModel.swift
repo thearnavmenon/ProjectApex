@@ -9,8 +9,8 @@
 //   1. Permission gating: requests camera access before starting the session.
 //   2. Frame → API loop: consumes the CameraManager's AsyncStream, fans out
 //      concurrent Vision API calls (one Task per frame), and merges results.
-//   3. Deduplication (FR-001-E): merges EquipmentItems by `equipment_type`,
-//      preserving the highest observed count and latest weight metadata.
+//   3. Deduplication (FR-001-E): merges EquipmentItems by `equipmentType` enum,
+//      preserving the highest observed count and latest details.
 //   4. State machine: drives the UI through Idle → RequestingPermission →
 //      Scanning → Confirming → Completed / PermissionDenied / Error states.
 //   5. GymProfile finalisation: assembles and locally caches the confirmed profile.
@@ -31,8 +31,6 @@ import AVFoundation
 // MARK: - ScannerState
 
 /// The finite-state machine driving the scanner UI.
-/// Note: `GymProfile` and `ScannerError` are not auto-Equatable, so we implement
-/// Equatable manually for the cases that carry associated values.
 enum ScannerState {
     /// Initial state before any user interaction.
     case idle
@@ -192,8 +190,8 @@ final class ScannerViewModel {
         mergeItems([item])
     }
 
-    /// Removes an equipment item by its `equipmentType` key.
-    func removeEquipment(id: String) {
+    /// Removes an equipment item by its UUID.
+    func removeEquipment(id: UUID) {
         detectedEquipment.removeAll { $0.id == id }
     }
 
@@ -210,12 +208,16 @@ final class ScannerViewModel {
     /// Assembles the final `GymProfile` from the confirmed equipment list,
     /// persists it locally to UserDefaults, and transitions to `.completed`.
     func confirmProfile() {
+        let now = Date()
         let profile = GymProfile(
+            id: UUID(),
             scanSessionId: UUID().uuidString,
-            createdAt: Date(),
-            equipment: detectedEquipment
+            createdAt: now,
+            lastUpdatedAt: now,
+            equipment: detectedEquipment,
+            isActive: true
         )
-        profile.saveLocally()
+        profile.saveToUserDefaults()
         state = .completed(profile: profile)
     }
 
@@ -272,7 +274,6 @@ final class ScannerViewModel {
         } catch {
             // Non-fatal: log and continue scanning. A single API failure should not
             // abort the session — the next frame will retry naturally.
-            // In production, surface a subtle per-frame error indicator in the UI.
             print("[ScannerViewModel] Frame \(frame.index) API error: \(error.localizedDescription)")
         }
     }
@@ -283,13 +284,12 @@ final class ScannerViewModel {
 
     /// Merges an array of newly detected items into `detectedEquipment`.
     ///
-    /// Deduplication key: `equipment_type` (case-sensitive, snake_case).
+    /// Deduplication key: `equipmentType` (the EquipmentType enum value).
     /// Merge strategy:
     ///   - If an item with the same `equipmentType` already exists, take the
     ///     **maximum** observed `count` (conservative: avoids inflating counts).
-    ///   - Weight range and increment data from the latest detection override the
-    ///     existing values only if the new data is non-nil (a later frame with
-    ///     a clearer view may refine the weight estimate).
+    ///   - Details from the latest detection override only if the existing item
+    ///     has `bodyweightOnly` details (a later frame may provide richer weight info).
     private func mergeItems(_ newItems: [EquipmentItem]) {
         for newItem in newItems {
             if let existingIndex = detectedEquipment.firstIndex(where: {
@@ -301,12 +301,10 @@ final class ScannerViewModel {
                 // Take the maximum observed count
                 existing.count = max(existing.count, newItem.count)
 
-                // Refine weight range if the new detection provides data the old one didn't
-                if newItem.estimatedWeightRangeKg != nil {
-                    existing.estimatedWeightRangeKg = newItem.estimatedWeightRangeKg
-                }
-                if newItem.incrementsAvailableKg != nil {
-                    existing.incrementsAvailableKg = newItem.incrementsAvailableKg
+                // Upgrade details if the existing entry is bodyweightOnly and new one is richer
+                if case .bodyweightOnly = existing.details,
+                   newItem.details != .bodyweightOnly {
+                    existing.details = newItem.details
                 }
 
                 detectedEquipment[existingIndex] = existing
