@@ -7,8 +7,7 @@
 // Architecture:
 //   • Implemented as a Swift `actor` to serialise concurrent API calls and
 //     protect mutable state (request counter, retry bookkeeping) without locks.
-//   • The real API path is wired to OpenAI GPT-4o Vision or Anthropic Claude
-//     Vision (configurable via `VisionAPIConfiguration`).
+//   • The real API path uses the Anthropic Messages API with vision (Claude).
 //   • For prototype / simulator use, `MockVisionAPIService` is injected instead,
 //     returning deterministic mock data so the full UI pipeline can be exercised
 //     without burning API credits or requiring a live network connection.
@@ -22,7 +21,6 @@ import Foundation
 
 /// Holds the runtime configuration for the Vision API endpoint.
 /// In production, the `apiKey` is loaded from the iOS Keychain (Section 6.3.1 of PRD).
-/// For the prototype, it defaults to an empty string — the mock service is used instead.
 struct VisionAPIConfiguration: Sendable {
     enum Provider: Sendable {
         case openAI   // GPT-4o Vision
@@ -49,12 +47,13 @@ protocol VisionAPIServiceProtocol: Actor {
 // MARK: - VisionAPIService (Live)
 
 /// Production implementation. Constructs the multimodal Vision API request,
-/// handles HTTP errors, and parses the response against the EquipmentItem schema.
+/// handles HTTP errors, and parses the response against the VisionDetectedItem schema.
 ///
-/// The Vision API system prompt is embedded here (Section 3.1.1 of PRD):
-/// "You are an expert gym equipment auditor. Analyze this image and identify every
-/// piece of strength training equipment visible. Return ONLY valid JSON matching
-/// the GymProfile equipment schema with equipment_type, kind, and details fields."
+/// Follows TDD Section 5.3:
+///   - Provider: Anthropic Messages API
+///   - Model: claude-sonnet-4-20250514
+///   - Frame: JPEG 80% quality, Base64-encoded, sent as image/jpeg
+///   - Response: flat JSON array of VisionDetectedItem objects
 actor VisionAPIService: VisionAPIServiceProtocol {
 
     // ---------------------------------------------------------------------------
@@ -71,9 +70,9 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     init(configuration: VisionAPIConfiguration? = nil) {
         // Resolve default outside of any actor isolation boundary
         let resolvedConfig = configuration ?? VisionAPIConfiguration(
-            provider: .openAI,
+            provider: .anthropic,
             apiKey: "",
-            modelID: "gpt-4o",
+            modelID: "claude-sonnet-4-20250514",
             timeoutSeconds: 30
         )
         self.configuration = resolvedConfig
@@ -93,7 +92,15 @@ actor VisionAPIService: VisionAPIServiceProtocol {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
+
+        // Provider-specific auth header
+        switch configuration.provider {
+        case .anthropic:
+            request.setValue(configuration.apiKey, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        case .openAI:
+            request.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
+        }
 
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
 
@@ -101,11 +108,14 @@ actor VisionAPIService: VisionAPIServiceProtocol {
 
         guard let httpResponse = response as? HTTPURLResponse,
               (200..<300).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let rawBody = String(data: data, encoding: .utf8) ?? "<binary>"
+            print("[VisionAPIService] HTTP \(statusCode): \(rawBody.prefix(300))")
             throw ScannerError.apiRequestFailed(
                 underlying: NSError(
                     domain: "VisionAPIService",
-                    code: (response as? HTTPURLResponse)?.statusCode ?? -1,
-                    userInfo: [NSLocalizedDescriptionKey: "Non-2xx HTTP response"]
+                    code: statusCode,
+                    userInfo: [NSLocalizedDescriptionKey: "Non-2xx HTTP response (\(statusCode))"]
                 )
             )
         }
@@ -114,7 +124,7 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Private: Request Construction
+    // MARK: Private: Request Construction (TDD Section 5.3)
     // ---------------------------------------------------------------------------
 
     private func endpointURL() -> URL {
@@ -127,48 +137,24 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     }
 
     /// Builds the multimodal JSON request body for the configured provider.
+    /// The Anthropic format matches TDD Section 5.3 exactly.
     private func buildRequestBody(base64Image: String) -> [String: Any] {
-        // --- System prompt (PRD Section 3.1.1) ---
-        let systemPrompt = """
-            You are an expert gym equipment auditor. Analyze this image and identify every \
-            piece of strength training equipment visible. For each item return a JSON object \
-            with: equipment_type (snake_case, e.g. "dumbbell_set"), count (integer), \
-            detected_by_vision (true), and details (object with "kind" field set to \
-            "increment_based", "plate_based", or "bodyweight_only" plus relevant fields). \
-            Return ONLY a valid JSON object with a top-level key "equipment" containing \
-            an array of items. No prose, no markdown fences.
+        // TDD Section 5.3 — exact instruction text in the user message's text field
+        let visionInstruction = """
+            Identify gym equipment. Return ONLY JSON array: \
+            [{"equipment_type": string, "estimated_weight_range_kg": \
+            {"min": number, "max": number, "increment": number} | null, "count": number}]. \
+            Valid types: dumbbell_set, barbell, ez_curl_bar, cable_machine_single, \
+            cable_machine_dual, smith_machine, leg_press, hack_squat, adjustable_bench, \
+            flat_bench, incline_bench, pull_up_bar, dip_station, resistance_bands, \
+            kettlebell_set. Unknown: 'unknown:<description>'.
             """
 
         switch configuration.provider {
-        case .openAI:
-            return [
-                "model": configuration.modelID,
-                "max_tokens": 1024,
-                "messages": [
-                    [
-                        "role": "system",
-                        "content": systemPrompt
-                    ],
-                    [
-                        "role": "user",
-                        "content": [
-                            [
-                                "type": "image_url",
-                                "image_url": [
-                                    "url": "data:image/jpeg;base64,\(base64Image)",
-                                    "detail": "high"
-                                ]
-                            ]
-                        ]
-                    ]
-                ]
-            ]
-
         case .anthropic:
             return [
                 "model": configuration.modelID,
                 "max_tokens": 1024,
-                "system": systemPrompt,
                 "messages": [
                     [
                         "role": "user",
@@ -183,7 +169,31 @@ actor VisionAPIService: VisionAPIServiceProtocol {
                             ],
                             [
                                 "type": "text",
-                                "text": "Identify all gym equipment in this image."
+                                "text": visionInstruction
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+
+        case .openAI:
+            return [
+                "model": configuration.modelID,
+                "max_tokens": 1024,
+                "messages": [
+                    [
+                        "role": "user",
+                        "content": [
+                            [
+                                "type": "image_url",
+                                "image_url": [
+                                    "url": "data:image/jpeg;base64,\(base64Image)",
+                                    "detail": "high"
+                                ]
+                            ],
+                            [
+                                "type": "text",
+                                "text": visionInstruction
                             ]
                         ]
                     ]
@@ -193,12 +203,11 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Private: Response Parsing (FR-001-D)
+    // MARK: Private: Response Parsing (FR-001-D, TDD Section 5.3)
     // ---------------------------------------------------------------------------
 
     /// Parses the raw API response data into [EquipmentItem].
     /// Non-conforming responses are discarded without crashing (FR-001-D).
-    /// Runs on the actor's executor — no nonisolated workarounds needed.
     private func parseResponse(data: Data) throws -> [EquipmentItem] {
         // Step 1: Extract the content string from the provider's chat response envelope.
         guard
@@ -210,21 +219,32 @@ actor VisionAPIService: VisionAPIServiceProtocol {
             )
         }
 
-        // Step 2: Decode the content string as our VisionAPIResponse schema.
-        guard let contentData = contentString.data(using: .utf8) else {
+        // Step 2: Strip any accidental markdown code fences the model might have added.
+        let cleaned = stripMarkdownFences(from: contentString)
+
+        guard let contentData = cleaned.data(using: .utf8) else {
             throw ScannerError.apiResponseMalformed(rawResponse: contentString)
         }
 
-        let decoder = JSONDecoder.gymProfile
+        // Step 3: Attempt to decode as the Section 5.3 flat array format first.
+        if let detectedItems = try? JSONDecoder().decode([VisionDetectedItem].self, from: contentData) {
+            return detectedItems.map { $0.toEquipmentItem() }
+        }
 
-        // Try to decode the wrapped response first
+        // Step 4: Fallback — try legacy wrapped { "equipment": [...] } format.
+        let decoder = JSONDecoder.gymProfile
         if let apiResponse = try? decoder.decode(VisionAPIResponse.self, from: contentData) {
             return apiResponse.items
         }
 
-        // Fallback: Try to decode as a direct array
+        // Step 5: Fallback — try direct [EquipmentItem] array (legacy).
         if let items = try? decoder.decode([EquipmentItem].self, from: contentData) {
             return items
+        }
+
+        // Step 6: If the model returned an empty array literal, that is valid (no equipment).
+        if let array = try? JSONSerialization.jsonObject(with: contentData) as? [Any], array.isEmpty {
+            return []
         }
 
         throw ScannerError.apiResponseMalformed(rawResponse: contentString)
@@ -232,6 +252,13 @@ actor VisionAPIService: VisionAPIServiceProtocol {
 
     /// Extracts the model's text output from either an OpenAI or Anthropic response envelope.
     private func extractContentString(from json: [String: Any]) -> String? {
+        // Anthropic envelope: { "content": [{ "type": "text", "text": "..." }] }
+        if let contentArray = json["content"] as? [[String: Any]],
+           let firstContent = contentArray.first(where: { $0["type"] as? String == "text" }),
+           let text = firstContent["text"] as? String {
+            return text
+        }
+
         // OpenAI envelope: { "choices": [{ "message": { "content": "..." } }] }
         if let choices = json["choices"] as? [[String: Any]],
            let firstChoice = choices.first,
@@ -240,14 +267,25 @@ actor VisionAPIService: VisionAPIServiceProtocol {
             return content
         }
 
-        // Anthropic envelope: { "content": [{ "type": "text", "text": "..." }] }
-        if let contentArray = json["content"] as? [[String: Any]],
-           let firstContent = contentArray.first(where: { $0["type"] as? String == "text" }),
-           let text = firstContent["text"] as? String {
-            return text
-        }
-
         return nil
+    }
+
+    /// Removes leading/trailing markdown code fences (```json ... ```) that some
+    /// models include despite being instructed not to.
+    private func stripMarkdownFences(from text: String) -> String {
+        var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Remove opening fence variants: ```json, ```JSON, ```
+        if result.hasPrefix("```") {
+            // Drop everything up to the first newline after the fence marker
+            if let newlineRange = result.range(of: "\n") {
+                result = String(result[newlineRange.upperBound...])
+            }
+        }
+        // Remove closing fence
+        if result.hasSuffix("```") {
+            result = String(result.dropLast(3))
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

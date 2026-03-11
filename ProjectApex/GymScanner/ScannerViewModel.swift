@@ -105,8 +105,9 @@ final class ScannerViewModel {
 
     /// - Parameters:
     ///   - cameraManager: The AVFoundation session manager. Pass `nil` to use the default.
-    ///   - visionService: The Vision API client. Pass `nil` to use `MockVisionAPIService`
-    ///     (prototype). Swap to a live `VisionAPIService` instance for production.
+    ///   - visionService: The Vision API client. Pass `nil` to construct a live
+    ///     `VisionAPIService` using the Anthropic API key from the Keychain.
+    ///     Pass `MockVisionAPIService()` explicitly for unit tests.
     ///   - captureInterval: Seconds between frame captures. Default: 2.0s (FR-001-B).
     init(
         cameraManager: CameraManager? = nil,
@@ -116,7 +117,21 @@ final class ScannerViewModel {
         // Instantiate defaults inside the body to avoid triggering actor-isolation
         // warnings from default parameter expressions being evaluated in a nonisolated context.
         self.cameraManager = cameraManager ?? CameraManager()
-        self.visionService = visionService ?? MockVisionAPIService()
+
+        if let injectedService = visionService {
+            self.visionService = injectedService
+        } else {
+            // Load the Anthropic API key from Keychain for the live Vision API service.
+            let apiKey = (try? KeychainService.shared.retrieve(.anthropicAPIKey)) ?? ""
+            let config = VisionAPIConfiguration(
+                provider: .anthropic,
+                apiKey: apiKey,
+                modelID: "claude-sonnet-4-20250514",
+                timeoutSeconds: 30
+            )
+            self.visionService = VisionAPIService(configuration: config)
+        }
+
         self.captureInterval = captureInterval
     }
 
