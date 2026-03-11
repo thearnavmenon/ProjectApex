@@ -309,9 +309,9 @@ nonisolated enum PrescriptionValidationError: LocalizedError {
 
 extension SetPrescription {
     // Compiled once at file scope to avoid repeated regex construction.
-    private static let tempoRegex = try! NSRegularExpression(pattern: #"^\d-\d-\d-\d$"#)
+    private nonisolated static let tempoRegex = try! NSRegularExpression(pattern: #"^\d-\d-\d-\d$"#)
 
-    func validate() throws {
+    nonisolated func validate() throws {
         guard weightKg > 0, weightKg <= 500 else {
             throw PrescriptionValidationError.invalidWeight(weightKg)
         }
@@ -351,6 +351,99 @@ nonisolated enum FallbackReason: Sendable {
 nonisolated enum PrescriptionResult: Sendable {
     case success(SetPrescription)
     case fallback(reason: FallbackReason)
+}
+
+// MARK: ─── WorkoutContext Mock ───────────────────────────────────────────────
+
+extension WorkoutContext {
+    /// Returns a fully populated `WorkoutContext` suitable for tests and previews.
+    /// Every optional field is non-nil so that round-trip tests exercise all paths.
+    nonisolated static func mockContext() -> WorkoutContext {
+        let setDate = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let completedSet = CompletedSet(
+            setNumber: 1,
+            weightKg: 80.0,
+            reps: 8,
+            rirActual: 2,
+            rpe: 7.5,
+            tempo: "3-1-1-0",
+            restTakenSeconds: 120,
+            completedAt: setDate
+        )
+
+        return WorkoutContext(
+            requestType: "set_prescription",
+            sessionMetadata: SessionMetadata(
+                sessionId: "session-mock-001",
+                startedAt: setDate,
+                programName: "PPL Hypertrophy",
+                dayLabel: "Push A",
+                weekNumber: 3,
+                totalSessionCount: 42
+            ),
+            biometrics: Biometrics(
+                bodyweightKg: 80.0,
+                restingHeartRate: 52,
+                readinessScore: 8,
+                sleepHours: 7.5
+            ),
+            currentExercise: CurrentExercise(
+                name: "Barbell Bench Press",
+                equipmentTypeKey: "barbell",
+                setNumber: 2,
+                plannedSets: 4,
+                planTarget: PlanTarget(
+                    minReps: 6,
+                    maxReps: 10,
+                    rirTarget: 2,
+                    intensityPercent: 75.0
+                ),
+                primaryMuscles: ["pectoralis_major", "anterior_deltoid"],
+                secondaryMuscles: ["triceps_brachii"]
+            ),
+            sessionHistoryToday: [
+                ExerciseHistoryItem(
+                    exerciseName: "Overhead Press",
+                    sets: [completedSet]
+                )
+            ],
+            currentExerciseSetsToday: [completedSet],
+            historicalPerformance: HistoricalPerformance(
+                personalBest: CompletedSet(
+                    setNumber: 1,
+                    weightKg: 100.0,
+                    reps: 5,
+                    rirActual: 0,
+                    rpe: 9.5,
+                    tempo: "2-0-1-0",
+                    restTakenSeconds: 180,
+                    completedAt: setDate
+                ),
+                recentAverage: RecentAverage(
+                    sessionCount: 5,
+                    avgWeightKg: 82.5,
+                    avgReps: 8.2,
+                    avgRir: 1.8
+                ),
+                trend: "improving"
+            ),
+            qualitativeNotesToday: [
+                QualitativeNote(
+                    category: "energy",
+                    text: "Feeling strong today, slept well.",
+                    loggedAt: setDate
+                )
+            ],
+            ragRetrievedMemory: [
+                RAGMemoryItem(
+                    relevanceScore: 0.91,
+                    summary: "Last week bench felt heavy; reduced weight by 5 kg.",
+                    sourceDate: setDate
+                )
+            ]
+        )
+    }
 }
 
 // MARK: ─── AIInferenceService ────────────────────────────────────────────────
@@ -393,7 +486,13 @@ actor AIInferenceService {
     func prescribe(context: WorkoutContext) async -> PrescriptionResult {
 
         // 1. Encode context to JSON (user payload for the LLM)
-        let encoder = JSONEncoder.gymProfile
+        // Construct encoder inline to avoid accessing the @MainActor-isolated
+        // JSONEncoder.gymProfile static property from this background actor.
+        let encoder: JSONEncoder = {
+            let e = JSONEncoder()
+            e.dateEncodingStrategy = .iso8601
+            return e
+        }()
         guard let contextData = try? encoder.encode(context),
               let contextJSON = String(data: contextData, encoding: .utf8)
         else {
@@ -418,12 +517,15 @@ actor AIInferenceService {
             }
 
             // 2. Call LLM with 8-second timeout
+            // Snapshot `userPayload` into an immutable let so the closure
+            // captures a value rather than a mutable variable (Swift 6 safety).
+            let payloadSnapshot = userPayload
             let rawResponse: String
             do {
                 rawResponse = try await withTimeout(seconds: 8.0) {
                     try await self.provider.complete(
                         systemPrompt: systemPrompt,
-                        userPayload: userPayload
+                        userPayload: payloadSnapshot
                     )
                 }
             } catch is TimeoutError {
@@ -441,7 +543,12 @@ actor AIInferenceService {
                 continue
             }
 
-            let decoder = JSONDecoder.gymProfile
+            // Construct decoder inline (same reason as encoder above).
+            let decoder: JSONDecoder = {
+                let d = JSONDecoder()
+                d.dateDecodingStrategy = .iso8601
+                return d
+            }()
             let wrapper: SetPrescriptionWrapper
             do {
                 wrapper = try decoder.decode(SetPrescriptionWrapper.self, from: responseData)
@@ -564,7 +671,7 @@ private nonisolated struct SetPrescriptionWrapper: Codable {
 
 extension EquipmentType {
     /// Constructs an EquipmentType from a snake_case key stored in WorkoutContext.
-    init(rawString: String) {
+    nonisolated init(rawString: String) {
         switch rawString {
         case "dumbbell_set":      self = .dumbbellSet
         case "barbell":           self = .barbell

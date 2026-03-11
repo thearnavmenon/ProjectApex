@@ -9,7 +9,13 @@
     }
   ],
   "defaultOptions" : {
-    "codeCoverage" : false
+    "codeCoverage" : false,
+    "environmentVariableEntries" : [
+      {
+        "key" : "APEX_INTEGRATION_TESTS",
+        "value" : "1"
+      }
+    ]
   },
   "testTargets" : [
     {

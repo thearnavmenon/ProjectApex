@@ -203,6 +203,24 @@ extension EquipmentDetails: Codable {
     }
 }
 
+// MARK: - BarbellConstraint
+
+/// A value-type snapshot of the barbell configuration extracted from a GymProfile.
+/// Passed to LLM prompts and used in equipment validation to communicate what
+/// barbell loads are physically achievable.
+nonisolated struct BarbellConstraint: Codable, Equatable, Hashable, Sendable {
+    /// Weight of the barbell itself (bar only, no plates), in kg.
+    let barWeightKg: Double
+    /// Available plate denominations (single-plate weights in kg).
+    /// Each denomination can be loaded on both sides.
+    let availablePlatesKg: [Double]
+
+    /// Maximum achievable total load: bar + both sides fully loaded.
+    var maxLoadKg: Double {
+        barWeightKg + 2.0 * availablePlatesKg.reduce(0, +)
+    }
+}
+
 // MARK: - EquipmentItem
 
 /// A single piece of equipment detected in the gym scan.
@@ -293,6 +311,23 @@ nonisolated struct GymProfile: Codable, Equatable, Hashable, Sendable {
 extension GymProfile {
 
     // ---------------------------------------------------------------------------
+    // MARK: Barbell Constraint
+    // ---------------------------------------------------------------------------
+
+    /// Returns the barbell load constraint derived from this profile's barbell item,
+    /// or nil if no barbell is present.
+    ///
+    /// Used by `ProgramGenerationService` to pass equipment bounds to the LLM and
+    /// by tests to verify the profile's barbell configuration in one call.
+    var barbellLoadConstraint: BarbellConstraint? {
+        guard let item = item(for: .barbell),
+              case .plateBased(let barWeight, let plates) = item.details else {
+            return nil
+        }
+        return BarbellConstraint(barWeightKg: barWeight, availablePlatesKg: plates)
+    }
+
+    // ---------------------------------------------------------------------------
     // MARK: Lookup
     // ---------------------------------------------------------------------------
 
@@ -302,7 +337,7 @@ extension GymProfile {
     }
 
     /// Returns the first equipment item matching the given type, or nil.
-    func item(for type: EquipmentType) -> EquipmentItem? {
+    nonisolated func item(for type: EquipmentType) -> EquipmentItem? {
         equipment.first { $0.equipmentType == type }
     }
 

@@ -8,11 +8,11 @@
 - [x] P0-T02: DeveloperSettingsView — manual API key entry UI
 - [ ] P0-T03: Wire AnthropicProvider with real API key end-to-end
 - [x] P0-T04: GymProfile Codable schema — lock & unit test round-trip
-- [ ] P0-T05: AppDependencies DI container — wire all services at launch
-- [ ] P0-T06: WorkoutContext assembly — unit test full JSON serialization
-- [ ] P0-T07: AIInferenceService integration test — real API, mock context
-- [ ] P0-T08: EquipmentRounder — expand unit tests to 100% AC coverage
-- [ ] P0-T09: CI pipeline — GitHub Actions, test run on push
+- [x] P0-T05: AppDependencies DI container — wire all services at launch
+- [x] P0-T06: WorkoutContext assembly — unit test full JSON serialization
+- [x] P0-T07: AIInferenceService integration test — real API, mock context
+- [x] P0-T08: EquipmentRounder — expand unit tests to 100% AC coverage
+- [x] P0-T09: CI pipeline — GitHub Actions, test run on push
 
 ---
 

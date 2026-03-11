@@ -6,8 +6,36 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */; };
+		47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CA32F619741007B3B34 /* KeychainServiceTests.swift */; };
+		47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CB02F619817007B3B34 /* AIInferenceSpikeTests.swift */; };
+		47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CB22F61A8CB007B3B34 /* GymProfileTests.swift */; };
+		47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */; };
+		47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */; };
+		6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6DC23D0A3EB460CF97B18574 /* Foundation.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		ED298EE400BD72C86935D45D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 47D91BB82F60266A007B3B34 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 47D91BBF2F60266A007B3B34;
+			remoteInfo = ProjectApex;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		47D91BC02F60266A007B3B34 /* ProjectApex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProjectApex.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		47D91CA32F619741007B3B34 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
+		47D91CB02F619817007B3B34 /* AIInferenceSpikeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceSpikeTests.swift; sourceTree = "<group>"; };
+		47D91CB22F61A8CB007B3B34 /* GymProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymProfileTests.swift; sourceTree = "<group>"; };
+		47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutContextAssemblyTests.swift; sourceTree = "<group>"; };
+		47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceServiceTests.swift; sourceTree = "<group>"; };
+		6DC23D0A3EB460CF97B18574 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentRounderTests.swift; sourceTree = "<group>"; };
+		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -26,14 +54,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B0995D1A425F6A0D4A64DE43 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		46D6D0F8AAFB99EF747FA10E /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F001F5E175C68A407AB1AFF0 /* iOS */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		47D91BB72F60266A007B3B34 = {
 			isa = PBXGroup;
 			children = (
 				47D91BC22F60266A007B3B34 /* ProjectApex */,
 				47D91BC12F60266A007B3B34 /* Products */,
+				46D6D0F8AAFB99EF747FA10E /* Frameworks */,
+				FD123486A0EC3A9B64454993 /* ProjectApexTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -41,13 +87,53 @@
 			isa = PBXGroup;
 			children = (
 				47D91BC02F60266A007B3B34 /* ProjectApex.app */,
+				EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		F001F5E175C68A407AB1AFF0 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				6DC23D0A3EB460CF97B18574 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		FD123486A0EC3A9B64454993 /* ProjectApexTests */ = {
+			isa = PBXGroup;
+			children = (
+				70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */,
+				47D91CA32F619741007B3B34 /* KeychainServiceTests.swift */,
+				47D91CB02F619817007B3B34 /* AIInferenceSpikeTests.swift */,
+				47D91CB22F61A8CB007B3B34 /* GymProfileTests.swift */,
+				47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */,
+				47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */,
+			);
+			path = ProjectApexTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		3468A4C0FD8EBC33946C10EF /* ProjectApexTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0F657660D0B15D0E03C5BDE7 /* Build configuration list for PBXNativeTarget "ProjectApexTests" */;
+			buildPhases = (
+				33906876BC4323CE14CEB130 /* Sources */,
+				B0995D1A425F6A0D4A64DE43 /* Frameworks */,
+				B8720CAAF189D619D3FBD267 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				79B86F7D6F8F83A54328459B /* PBXTargetDependency */,
+			);
+			name = ProjectApexTests;
+			productName = ProjectApexTests;
+			productReference = EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		47D91BBF2F60266A007B3B34 /* ProjectApex */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 47D91BCB2F60266C007B3B34 /* Build configuration list for PBXNativeTarget "ProjectApex" */;
@@ -64,8 +150,6 @@
 				47D91BC22F60266A007B3B34 /* ProjectApex */,
 			);
 			name = ProjectApex;
-			packageProductDependencies = (
-			);
 			productName = ProjectApex;
 			productReference = 47D91BC02F60266A007B3B34 /* ProjectApex.app */;
 			productType = "com.apple.product-type.application";
@@ -100,6 +184,7 @@
 			projectRoot = "";
 			targets = (
 				47D91BBF2F60266A007B3B34 /* ProjectApex */,
+				3468A4C0FD8EBC33946C10EF /* ProjectApexTests */,
 			);
 		};
 /* End PBXProject section */
@@ -112,9 +197,29 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B8720CAAF189D619D3FBD267 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		33906876BC4323CE14CEB130 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */,
+				47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */,
+				47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */,
+				32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */,
+				47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */,
+				47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		47D91BBC2F60266A007B3B34 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -123,6 +228,15 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		79B86F7D6F8F83A54328459B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = ProjectApex;
+			target = 47D91BBF2F60266A007B3B34 /* ProjectApex */;
+			targetProxy = ED298EE400BD72C86935D45D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		47D91BC92F60266C007B3B34 /* Debug */ = {
@@ -249,11 +363,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ProjectApex/ProjectApex.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3AF96AAKH6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Project Apex uses the camera to scan gym equipment and build your gym profile.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -269,7 +385,6 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Project Apex uses the camera to scan gym equipment and build your gym profile.";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -282,11 +397,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = ProjectApex/ProjectApex.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3AF96AAKH6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Project Apex uses the camera to scan gym equipment and build your gym profile.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -302,7 +419,6 @@
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Project Apex uses the camera to scan gym equipment and build your gym profile.";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -310,9 +426,57 @@
 			};
 			name = Release;
 		};
+		700512504A045F0C54538EBD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				DEVELOPMENT_TEAM = 3AF96AAKH6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleName = ProjectApexTests;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = RTG.ProjectApexTests;
+				PRODUCT_NAME = ProjectApexTests;
+				SDKROOT = iphoneos;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ProjectApex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ProjectApex";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		9DA541EADDA0CD727D5B236E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				DEVELOPMENT_TEAM = 3AF96AAKH6;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleName = ProjectApexTests;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_BUNDLE_IDENTIFIER = RTG.ProjectApexTests;
+				PRODUCT_NAME = ProjectApexTests;
+				SDKROOT = iphoneos;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ProjectApex.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ProjectApex";
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		0F657660D0B15D0E03C5BDE7 /* Build configuration list for PBXNativeTarget "ProjectApexTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				700512504A045F0C54538EBD /* Release */,
+				9DA541EADDA0CD727D5B236E /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		47D91BBB2F60266A007B3B34 /* Build configuration list for PBXProject "ProjectApex" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -9,9 +9,13 @@ import SwiftUI
 
 @main
 struct ProjectApexApp: App {
+
+    @State private var deps = AppDependencies()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environment(deps)
         }
     }
 }

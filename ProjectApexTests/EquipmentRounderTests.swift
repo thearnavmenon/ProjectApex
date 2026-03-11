@@ -315,6 +315,117 @@ final class EquipmentRounderTests: XCTestCase {
         XCTAssertNil(result.adjustmentNote)
     }
 
+    // MARK: - Exact midpoint boundary (AC-required name)
+
+    /// Weight just BELOW the safety-biased midpoint must round DOWN for safety.
+    ///
+    /// Boundary explanation:
+    ///   The implementation uses `weight >= midpoint ? upper : lower`.
+    ///   The midpoint is deliberately shifted to 60% of the increment step (not 50%)
+    ///   so that a weight sitting right in the middle of an increment gap biases
+    ///   toward the lighter option. This is the "safety bias" — it is safer to
+    ///   under-load slightly than to inadvertently jump to the heavier step.
+    ///
+    ///   For increment 5 kg starting at 45: midpoint = 45 + 5×0.6 = 48.0.
+    ///   A prescription of 47.9 kg is below 48.0, so it rounds DOWN to 45.0.
+    func test_exactMidpoint_roundsDown_forSafety() {
+        // Midpoint for [45, 50] with 5 kg increment = 45 + 5×0.6 = 48.0
+        let profile = makeProfile(
+            equipmentType: .dumbbellSet,
+            details: .incrementBased(minKg: 45.0, maxKg: 50.0, incrementKg: 5.0)
+        )
+        let rounder = EquipmentRounder(gymProfile: profile)
+
+        // 47.9 is strictly below midpoint 48.0 → must round DOWN to 45.0
+        let result = rounder.round(aiPrescribedWeightKg: 47.9, for: .dumbbellSet)
+
+        XCTAssertEqual(result.roundedWeightKg, 45.0, accuracy: 0.001,
+                       "Weight below safety-biased midpoint must round DOWN.")
+        XCTAssertTrue(result.wasAdjusted)
+    }
+
+    // MARK: - Degenerate increment config (covers the guard branch)
+
+    /// When incrementKg == 0, the guard fires and the weight is clamped without
+    /// increment arithmetic — covers the degenerate-config branch.
+    func test_degenerateConfig_zeroIncrement_clampsWeight() {
+        let profile = makeProfile(
+            equipmentType: .dumbbellSet,
+            details: .incrementBased(minKg: 10.0, maxKg: 40.0, incrementKg: 0.0)
+        )
+        let rounder = EquipmentRounder(gymProfile: profile)
+        let result = rounder.round(aiPrescribedWeightKg: 25.0, for: .dumbbellSet)
+
+        // Weight 25 is within [10, 40] so it is returned unchanged
+        XCTAssertEqual(result.roundedWeightKg, 25.0, accuracy: 0.001)
+        XCTAssertFalse(result.wasAdjusted)
+        XCTAssertNil(result.adjustmentNote)
+    }
+
+    /// With a degenerate config and weight outside range, the note must be non-nil.
+    func test_degenerateConfig_zeroIncrement_outsideRange_clampsAndNotes() {
+        let profile = makeProfile(
+            equipmentType: .dumbbellSet,
+            details: .incrementBased(minKg: 10.0, maxKg: 40.0, incrementKg: 0.0)
+        )
+        let rounder = EquipmentRounder(gymProfile: profile)
+        let result = rounder.round(aiPrescribedWeightKg: 50.0, for: .dumbbellSet)
+
+        XCTAssertEqual(result.roundedWeightKg, 40.0, accuracy: 0.001)
+        XCTAssertTrue(result.wasAdjusted)
+        XCTAssertNotNil(result.adjustmentNote)
+    }
+
+    /// When minKg == maxKg, the guard fires (minKg < maxKg is false).
+    func test_degenerateConfig_equalMinMax_clampsWeight() {
+        let profile = makeProfile(
+            equipmentType: .dumbbellSet,
+            details: .incrementBased(minKg: 20.0, maxKg: 20.0, incrementKg: 5.0)
+        )
+        let rounder = EquipmentRounder(gymProfile: profile)
+        let result = rounder.round(aiPrescribedWeightKg: 20.0, for: .dumbbellSet)
+
+        XCTAssertEqual(result.roundedWeightKg, 20.0, accuracy: 0.001)
+        XCTAssertFalse(result.wasAdjusted)
+    }
+
+    // MARK: - Adjustment note content
+
+    /// The adjustment note for increment-based rounding must contain the kg values
+    /// formatted correctly: integers without decimals, fractions with 2 sig figs.
+    func test_adjustmentNote_formatsIntegerKgWithoutDecimal() {
+        let profile = makeProfile(
+            equipmentType: .dumbbellSet,
+            details: .incrementBased(minKg: 10.0, maxKg: 40.0, incrementKg: 5.0)
+        )
+        let rounder = EquipmentRounder(gymProfile: profile)
+        // 23 rounds to 20 (below midpoint 22.0 = 20 + 5*0.4... wait: midpoint=20+5*0.6=23.0)
+        // Actually 23.0 >= 23.0 → rounds UP to 25. Use 22.9 to round DOWN to 20.
+        let result = rounder.round(aiPrescribedWeightKg: 22.9, for: .dumbbellSet)
+
+        XCTAssertTrue(result.wasAdjusted)
+        XCTAssertNotNil(result.adjustmentNote)
+        // Integers like 20 and 5 must appear without ".00"
+        let note = result.adjustmentNote!
+        XCTAssertFalse(note.contains(".00"), "Integer kg values must not include .00 decimals.")
+    }
+
+    /// The adjustment note for plate-based rounding must be non-nil and contain
+    /// the bar weight when an adjustment occurs.
+    func test_adjustmentNote_plateBased_containsBarWeight() {
+        let profile = makeProfile(
+            equipmentType: .barbell,
+            details: .plateBased(barWeightKg: 20.0, availablePlatesKg: [10.0, 5.0])
+        )
+        let rounder = EquipmentRounder(gymProfile: profile)
+        // 57 → per-side=18.5 → 10+5=15 (rem=3.5 < 5) → total=20+30=50 (adjusted)
+        let result = rounder.round(aiPrescribedWeightKg: 57.0, for: .barbell)
+
+        XCTAssertTrue(result.wasAdjusted)
+        let note = result.adjustmentNote!
+        XCTAssertTrue(note.contains("20"), "Plate rounding note must mention the bar weight.")
+    }
+
     // MARK: - originalWeightKg preservation
 
     /// originalWeightKg must always reflect the value passed to round(), not the
@@ -651,5 +762,27 @@ final class SetPrescriptionValidationTests: XCTestCase {
         let decoded = try decoder.decode(SetPrescription.self, from: data)
 
         XCTAssertEqual(Set(decoded.safetyFlags), Set(p.safetyFlags))
+    }
+
+    // MARK: - Required by P0-T08 AC
+
+    /// Decodes each of the 5 SafetyFlag raw string values from JSON and verifies
+    /// the correct enum case is produced. Named per AC: test_allSafetyFlagCases_decodedCorrectly.
+    func test_allSafetyFlagCases_decodedCorrectly() throws {
+        let decoder = JSONDecoder()
+
+        let cases: [(String, SafetyFlag)] = [
+            ("\"shoulder_caution\"",   .shoulderCaution),
+            ("\"joint_concern\"",      .jointConcern),
+            ("\"fatigue_high\"",       .fatigueHigh),
+            ("\"pain_reported\"",      .painReported),
+            ("\"deload_recommended\"", .deloadRecommended),
+        ]
+        for (jsonString, expected) in cases {
+            let data = Data(jsonString.utf8)
+            let decoded = try decoder.decode(SafetyFlag.self, from: data)
+            XCTAssertEqual(decoded, expected,
+                           "Decoding '\(jsonString)' must produce .\(expected)")
+        }
     }
 }

@@ -126,8 +126,12 @@ final class GymProfileCodableTests: XCTestCase {
             details: .bodyweightOnly,
             detectedByVision: false
         )
+        // Use a fixed whole-second Date so ISO8601 round-trip doesn't lose sub-seconds.
+        let fixedDate = Date(timeIntervalSince1970: 1_741_690_011)
         let profile = GymProfile(
             scanSessionId: "test-unknown",
+            createdAt: fixedDate,
+            lastUpdatedAt: fixedDate,
             equipment: [item]
         )
         let data = try JSONEncoder.gymProfile.encode(profile)
