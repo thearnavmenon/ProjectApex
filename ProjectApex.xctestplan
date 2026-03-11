@@ -1,0 +1,24 @@
+{
+  "configurations" : [
+    {
+      "id" : "06D4F7B2-E2D9-4B4E-B45B-E4ABC96A2B89",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:ProjectApex.xcodeproj",
+        "identifier" : "3468A4C0FD8EBC33946C10EF",
+        "name" : "ProjectApexTests"
+      }
+    }
+  ],
+  "version" : 1
+}
