@@ -18,13 +18,13 @@
 
 ## Phase 1 — Gym Scanner — Live
 
-- [ ] P1-T01: SupabaseClient — core CRUD and RPC wrapper
+- [x] P1-T01: SupabaseClient — core CRUD and RPC wrapper
 - [ ] P1-T02: Live VisionAPIService — replace MockVisionAPIService
-- [ ] P1-T03: EquipmentMerger — multi-frame deduplication logic
-- [ ] P1-T04: GymProfile → Supabase persist & fetch
+- [x] P1-T03: EquipmentMerger — multi-frame deduplication logic
+- [x] P1-T04: GymProfile → Supabase persist & fetch
 - [ ] P1-T05: EquipmentConfirmationView — edit, add, delete items
 - [ ] P1-T06: Re-scan flow with confirmation dialog
-- [ ] P1-T07: EquipmentMerger unit tests
+- [x] P1-T07: EquipmentMerger unit tests
 
 ---
 

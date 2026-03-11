@@ -202,6 +202,56 @@ actor SupabaseClient {
         try await perform(request)
     }
 
+    // MARK: - GymProfile helpers
+
+    /// Deactivates all currently active gym profiles for `userId` by patching
+    /// `is_active = false` on every row that matches.
+    ///
+    /// Called immediately before inserting a new active profile so the user
+    /// always has at most one `is_active = true` profile at a time.
+    ///
+    /// - Parameter userId: The authenticated user's UUID.
+    /// - Throws: `SupabaseError` on HTTP or encoding failure.
+    func deactivateGymProfiles(userId: UUID) async throws {
+        struct IsActivePatch: Encodable {
+            let isActive: Bool
+            enum CodingKeys: String, CodingKey {
+                case isActive = "is_active"
+            }
+        }
+        var components = URLComponents(url: try tableURL(table: "gym_profiles"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "user_id", value: "eq.\(userId.uuidString)")]
+        guard let url = components?.url else { throw SupabaseError.invalidURL }
+        var request = baseRequest(url: url, method: "PATCH")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = try encoder.encode(IsActivePatch(isActive: false))
+        try await perform(request)
+    }
+
+    /// Fetches the most recent `is_active = true` gym profile for `userId`.
+    ///
+    /// Returns `nil` when no active profile exists (e.g. first-time user).
+    ///
+    /// - Parameter userId: The authenticated user's UUID.
+    /// - Returns: The most recently created active `GymProfileRow`, or `nil`.
+    /// - Throws: `SupabaseError` on HTTP or decoding failure.
+    func fetchActiveProfile(userId: UUID) async throws -> GymProfileRow? {
+        let filters = [
+            Filter(column: "user_id", op: .eq,  value: userId.uuidString),
+            Filter(column: "is_active", op: .is, value: "true")
+        ]
+        var components = URLComponents(url: try tableURL(table: "gym_profiles"), resolvingAgainstBaseURL: false)
+        components?.queryItems = filters.map { URLQueryItem(name: $0.column, value: "\($0.op.rawValue).\($0.value)") }
+        // Order by created_at descending; take only the most recent row.
+        components?.queryItems?.append(URLQueryItem(name: "order", value: "created_at.desc"))
+        components?.queryItems?.append(URLQueryItem(name: "limit", value: "1"))
+        guard let url = components?.url else { throw SupabaseError.invalidURL }
+        let request = baseRequest(url: url, method: "GET")
+        let data = try await performReturningData(request)
+        let rows = try decodeArray(GymProfileRow.self, from: data)
+        return rows.first
+    }
+
     /// Calls a PostgREST RPC function and decodes the result.
     ///
     /// Sends a `POST` to `/rest/v1/rpc/<function>` with `params` encoded as the

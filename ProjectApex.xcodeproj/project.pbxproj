@@ -14,6 +14,7 @@
 		47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */; };
 		47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */; };
 		47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */; };
+		47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */; };
 		6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6DC23D0A3EB460CF97B18574 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
@@ -35,6 +36,7 @@
 		47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutContextAssemblyTests.swift; sourceTree = "<group>"; };
 		47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceServiceTests.swift; sourceTree = "<group>"; };
 		47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClientTests.swift; sourceTree = "<group>"; };
+		47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentMergerTests.swift; sourceTree = "<group>"; };
 		6DC23D0A3EB460CF97B18574 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentRounderTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -112,6 +114,7 @@
 				47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */,
 				47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */,
 				47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */,
+				47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -216,6 +219,7 @@
 			files = (
 				47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */,
 				47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */,
+				47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */,
 				47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */,
 				32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */,
 				47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */,

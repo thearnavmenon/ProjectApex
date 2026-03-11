@@ -83,15 +83,6 @@ final class SupabaseClientTests: XCTestCase {
 
     // MARK: ─── Helpers ────────────────────────────────────────────────────────
 
-    private func requireIntegration() throws {
-        guard ProcessInfo.processInfo.environment["APEX_INTEGRATION_TESTS"] == "1" else {
-            throw XCTSkip(
-                "Integration test skipped. Set APEX_INTEGRATION_TESTS=1 in the scheme " +
-                "environment variables to run live Supabase tests."
-            )
-        }
-    }
-
     private func requireSupabaseKey() throws -> String {
         guard let key = try KeychainService.shared.retrieve(.supabaseAnonKey),
               !key.isEmpty else {
@@ -286,18 +277,82 @@ final class SupabaseClientTests: XCTestCase {
         }
     }
 
-    // MARK: ─── 4. Integration test (live Supabase) ────────────────────────────
+    // MARK: ─── 4. GymProfile unit tests (stub) ───────────────────────────────
+
+    /// deactivateGymProfiles() must PATCH gym_profiles with user_id filter.
+    func test_deactivateGymProfiles_sendsPatchWithUserIdFilter() async throws {
+        StubURLProtocol.stubbedStatusCode = 200
+        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+
+        let uid = UUID()
+        let client = makeClient()
+        try await client.deactivateGymProfiles(userId: uid)
+
+        let req = try XCTUnwrap(StubURLProtocol.lastRequest)
+        XCTAssertEqual(req.httpMethod, "PATCH")
+        XCTAssertTrue(
+            req.url?.path.hasSuffix("/rest/v1/gym_profiles") == true,
+            "PATCH must target /rest/v1/gym_profiles."
+        )
+        let components = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)
+        let userIdItem = components?.queryItems?.first { $0.name == "user_id" }
+        XCTAssertEqual(userIdItem?.value, "eq.\(uid.uuidString)",
+            "user_id filter must be eq.<uuid>.")
+
+        // Verify the body contains is_active. URLSession may deliver the body
+        // either in httpBody or httpBodyStream depending on size.
+        let bodyData: Data?
+        if let direct = req.httpBody {
+            bodyData = direct
+        } else if let stream = req.httpBodyStream {
+            stream.open()
+            var data = Data()
+            let bufferSize = 1024
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+            defer { buffer.deallocate() }
+            while stream.hasBytesAvailable {
+                let bytesRead = stream.read(buffer, maxLength: bufferSize)
+                if bytesRead > 0 { data.append(buffer, count: bytesRead) }
+            }
+            stream.close()
+            bodyData = data.isEmpty ? nil : data
+        } else {
+            bodyData = nil
+        }
+
+        let body = try XCTUnwrap(bodyData, "Request must have a non-empty body.")
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let isActive = json?["is_active"] as? Bool
+        XCTAssertEqual(isActive, false, "Body must set is_active to false.")
+    }
+
+    /// fetchActiveProfile() must GET gym_profiles with is_active and user_id filters.
+    func test_fetchActiveProfile_sendsGetWithCorrectFilters() async throws {
+        StubURLProtocol.stubbedStatusCode = 200
+        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+
+        let uid = UUID()
+        let client = makeClient()
+        let result = try await client.fetchActiveProfile(userId: uid)
+
+        let req = try XCTUnwrap(StubURLProtocol.lastRequest)
+        XCTAssertEqual(req.httpMethod, "GET")
+        XCTAssertTrue(
+            req.url?.path.hasSuffix("/rest/v1/gym_profiles") == true,
+            "GET must target /rest/v1/gym_profiles."
+        )
+        // When no rows are returned the method must return nil, not throw.
+        XCTAssertNil(result, "Empty response must return nil, not throw.")
+    }
+
+    // MARK: ─── 5. Integration test (live Supabase) ───────────────────────────
 
     /// Inserts a minimal workout_sessions row, fetches it back, asserts fields
-    /// match, then deletes the row to keep the DB clean.
+    /// match, then patches it to mark it complete (cleanup).
     ///
-    /// This test requires:
-    ///   • APEX_INTEGRATION_TESTS=1 in the scheme's environment variables.
-    ///   • A valid Supabase anon key stored in the Keychain.
-    ///   • Config.supabaseURL pointing to your live Supabase project.
-    ///   • A row in public.users whose UUID you supply as testUserId below.
+    /// Skips automatically when no Supabase anon key is in the Keychain.
+    /// Requires Config.supabaseURL to point to your live Supabase project.
     func test_integration_insertAndFetch_workoutSession() async throws {
-        try requireIntegration()
         let anonKey = try requireSupabaseKey()
 
         // Replace this UUID with a real user_id from your Supabase `users` table.
@@ -390,6 +445,72 @@ final class SupabaseClientTests: XCTestCase {
             filters: [Filter(column: "id", op: .eq, value: row.id.uuidString)]
         )
         XCTAssertEqual(patched.first?.completed, true, "Patch must update completed to true.")
+    }
+
+    // MARK: ─── 6. GymProfile integration test (live Supabase) ────────────────
+
+    /// Inserts a GymProfile row into `gym_profiles`, fetches it back via
+    /// `fetchActiveProfile(userId:)`, asserts the equipment array survives the
+    /// JSONB round-trip, then deactivates the row for cleanup.
+    ///
+    /// Skips automatically when no Supabase anon key is in the Keychain.
+    /// Requires Config.supabaseURL to point to your live Supabase project and
+    /// a row with id `00000000-0000-0000-0000-000000000001` in `public.users`.
+    func test_integration_saveAndFetch_gymProfile() async throws {
+        let anonKey = try requireSupabaseKey()
+
+        // Must be a real user_id row in public.users for the FK to pass.
+        let testUserId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let client = SupabaseClient(supabaseURL: Config.supabaseURL, anonKey: anonKey)
+
+        let mockProfile = GymProfile.mockProfile()
+        let rowToInsert = GymProfileRow.forInsert(from: mockProfile, userId: testUserId)
+
+        // 1. Deactivate any prior active profiles for the test user.
+        try await client.deactivateGymProfiles(userId: testUserId)
+
+        // 2. Insert and echo back the new row.
+        let inserted: [GymProfileRow] = try await client.insertReturning(
+            rowToInsert,
+            table: "gym_profiles",
+            returning: GymProfileRow.self
+        )
+        XCTAssertEqual(inserted.count, 1, "Insert should echo back exactly one row.")
+        let insertedRow = try XCTUnwrap(inserted.first)
+        XCTAssertEqual(insertedRow.userId,        testUserId)
+        XCTAssertEqual(insertedRow.scanSessionId, mockProfile.scanSessionId)
+        XCTAssertTrue(insertedRow.isActive, "Newly inserted profile must be active.")
+
+        // 3. Fetch the active profile back.
+        let fetched = try await client.fetchActiveProfile(userId: testUserId)
+        let fetchedRow = try XCTUnwrap(fetched,
+            "fetchActiveProfile must return the row we just inserted.")
+
+        XCTAssertEqual(fetchedRow.userId,        testUserId)
+        XCTAssertEqual(fetchedRow.scanSessionId, mockProfile.scanSessionId)
+        XCTAssertTrue(fetchedRow.isActive)
+
+        // 4. Verify the equipment array round-trips through JSONB correctly.
+        XCTAssertEqual(
+            fetchedRow.equipment.count,
+            mockProfile.equipment.count,
+            "Equipment item count must match after Supabase JSONB round-trip."
+        )
+        for (expected, actual) in zip(mockProfile.equipment, fetchedRow.equipment) {
+            XCTAssertEqual(expected.equipmentType, actual.equipmentType,
+                "equipment_type must survive the JSONB round-trip.")
+            XCTAssertEqual(expected.count, actual.count,
+                "count must survive the JSONB round-trip.")
+        }
+
+        // 5. Cleanup — deactivate the inserted row.
+        let insertedId = try XCTUnwrap(insertedRow.id,
+            "Inserted row must have a server-generated id.")
+        struct IsActivePatch: Encodable {
+            let isActive: Bool
+            enum CodingKeys: String, CodingKey { case isActive = "is_active" }
+        }
+        try await client.update(IsActivePatch(isActive: false), table: "gym_profiles", id: insertedId)
     }
 }
 

@@ -89,6 +89,15 @@ final class ScannerViewModel {
     private let cameraManager: CameraManager
     private let visionService: any VisionAPIServiceProtocol
 
+    /// Optional reference to the app-level DI container. When set,
+    /// `confirmProfile()` will also persist to Supabase and reinitialise
+    /// `AIInferenceService` with the new profile.
+    weak var appDependencies: AppDependencies?
+
+    /// The authenticated user's UUID. Required for Supabase writes.
+    /// Set from the sign-in flow before `confirmProfile()` is called.
+    var userId: UUID?
+
     /// Configurable frame capture interval in seconds (FR-001-B default: 2s).
     let captureInterval: TimeInterval
 
@@ -221,7 +230,13 @@ final class ScannerViewModel {
     // ---------------------------------------------------------------------------
 
     /// Assembles the final `GymProfile` from the confirmed equipment list,
-    /// persists it locally to UserDefaults, and transitions to `.completed`.
+    /// persists it locally to UserDefaults, and (when `appDependencies` and
+    /// `userId` are set) writes it to Supabase and reinitialises `AIInferenceService`.
+    ///
+    /// Supabase write failures are non-blocking: the local save always completes
+    /// first so the app transitions to `.completed` even if the remote write
+    /// fails. A Supabase failure surfaces in `lastSupabaseError` for optional
+    /// non-blocking UI feedback.
     func confirmProfile() {
         let now = Date()
         let profile = GymProfile(
@@ -232,8 +247,55 @@ final class ScannerViewModel {
             equipment: detectedEquipment,
             isActive: true
         )
+
+        // 1. Local save — always happens first regardless of network.
         profile.saveToUserDefaults()
+
+        // 2. Transition to completed so the UI responds immediately.
         state = .completed(profile: profile)
+
+        // 3. Reinitialise AIInferenceService with fresh equipment data.
+        appDependencies?.reinitialiseAIInference(with: profile)
+
+        // 4. Async Supabase write — non-blocking; errors are surfaced but do
+        //    not roll back the local save or change the UI state.
+        guard let deps = appDependencies, let uid = userId else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.persistProfileToSupabase(profile, userId: uid, deps: deps)
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // MARK: Private: Supabase persistence (P1-T04)
+    // ---------------------------------------------------------------------------
+
+    /// Non-blocking error reported if the Supabase write fails.
+    /// Observe this from SwiftUI to show a banner when needed.
+    private(set) var lastSupabaseError: Error?
+
+    /// Deactivates the previous profile and inserts the new one into Supabase.
+    ///
+    /// Any thrown error is captured into `lastSupabaseError` and printed; it
+    /// does not affect the local UserDefaults state or the scanner state machine.
+    private func persistProfileToSupabase(
+        _ profile: GymProfile,
+        userId: UUID,
+        deps: AppDependencies
+    ) async {
+        do {
+            // Deactivate all existing active profiles for this user.
+            try await deps.supabaseClient.deactivateGymProfiles(userId: userId)
+
+            // Insert the new profile.
+            let row = GymProfileRow.forInsert(from: profile, userId: userId)
+            try await deps.supabaseClient.insert(row, table: "gym_profiles")
+
+            lastSupabaseError = nil
+        } catch {
+            lastSupabaseError = error
+            print("[ScannerViewModel] Supabase write failed (non-fatal): \(error.localizedDescription)")
+        }
     }
 
     // ---------------------------------------------------------------------------
