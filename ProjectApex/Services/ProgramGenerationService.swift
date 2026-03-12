@@ -571,8 +571,8 @@ extension AnthropicProvider {
         AnthropicProvider(
             apiKey: apiKey,
             model: "claude-sonnet-4-5",
-            maxTokens: 16000,
-            requestTimeout: 180
+            maxTokens: 8000,
+            requestTimeout: 120
         )
     }
 }

@@ -12,6 +12,9 @@
 		47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */; };
 		47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */; };
 		47BB8E662F6273F30082C53F /* ProgramPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */; };
+		47BB8E752F6294B00082C53F /* WorkoutSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E742F6294B00082C53F /* WorkoutSessionManagerTests.swift */; };
+		47C5C1AF2F62A64E0005F99E /* WriteAheadQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47C5C1AE2F62A64E0005F99E /* WriteAheadQueueTests.swift */; };
+		47C5C1B82F62BB3D0005F99E /* GymStreakServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47C5C1B72F62BB3D0005F99E /* GymStreakServiceTests.swift */; };
 		47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CA32F619741007B3B34 /* KeychainServiceTests.swift */; };
 		47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CB02F619817007B3B34 /* AIInferenceSpikeTests.swift */; };
 		47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CB22F61A8CB007B3B34 /* GymProfileTests.swift */; };
@@ -39,6 +42,9 @@
 		47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGenerationServiceTests.swift; sourceTree = "<group>"; };
 		47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentConstraintValidationTests.swift; sourceTree = "<group>"; };
 		47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPersistenceTests.swift; sourceTree = "<group>"; };
+		47BB8E742F6294B00082C53F /* WorkoutSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSessionManagerTests.swift; sourceTree = "<group>"; };
+		47C5C1AE2F62A64E0005F99E /* WriteAheadQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriteAheadQueueTests.swift; sourceTree = "<group>"; };
+		47C5C1B72F62BB3D0005F99E /* GymStreakServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymStreakServiceTests.swift; sourceTree = "<group>"; };
 		47D91BC02F60266A007B3B34 /* ProjectApex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProjectApex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		47D91CA32F619741007B3B34 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		47D91CB02F619817007B3B34 /* AIInferenceSpikeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceSpikeTests.swift; sourceTree = "<group>"; };
@@ -47,7 +53,6 @@
 		47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceServiceTests.swift; sourceTree = "<group>"; };
 		47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClientTests.swift; sourceTree = "<group>"; };
 		47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentMergerTests.swift; sourceTree = "<group>"; };
-		47E356D62F61CE4C00C69CD6 /* WeightCorrectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeightCorrectionView.swift; sourceTree = "<group>"; };
 		47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultWeightIncrementsTests.swift; sourceTree = "<group>"; };
 		47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymFactStoreTests.swift; sourceTree = "<group>"; };
 		6DC23D0A3EB460CF97B18574 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -121,7 +126,6 @@
 		47E356D52F61CE4100C69CD6 /* Workout */ = {
 			isa = PBXGroup;
 			children = (
-				47E356D62F61CE4C00C69CD6 /* WeightCorrectionView.swift */,
 			);
 			path = Workout;
 			sourceTree = "<group>";
@@ -151,6 +155,9 @@
 				47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */,
 				47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */,
 				47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */,
+				47BB8E742F6294B00082C53F /* WorkoutSessionManagerTests.swift */,
+				47C5C1AE2F62A64E0005F99E /* WriteAheadQueueTests.swift */,
+				47C5C1B72F62BB3D0005F99E /* GymStreakServiceTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -256,13 +263,16 @@
 				47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */,
 				47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */,
 				47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */,
+				47BB8E752F6294B00082C53F /* WorkoutSessionManagerTests.swift in Sources */,
 				47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */,
 				47BB8E5A2F626C900082C53F /* WorkoutProgramTests.swift in Sources */,
 				47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */,
 				47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */,
 				47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */,
+				47C5C1B82F62BB3D0005F99E /* GymStreakServiceTests.swift in Sources */,
 				47BB8E662F6273F30082C53F /* ProgramPersistenceTests.swift in Sources */,
 				32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */,
+				47C5C1AF2F62A64E0005F99E /* WriteAheadQueueTests.swift in Sources */,
 				47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */,
 				47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */,
 				47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */,

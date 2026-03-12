@@ -9,5 +9,12 @@ import Foundation
 /// Fetches HealthKit biometrics and computes a ReadinessScore.
 /// Fully implemented in P4-T01.
 final class HealthKitService: @unchecked Sendable {
+
     init() {}
+
+    /// Stub — returns nil until P4-T01.
+    func fetchTodayBiometrics() async -> Biometrics? { nil }
+
+    /// Stub — returns a neutral ReadinessScore until P4-T01.
+    func computeReadinessScore() async -> ReadinessScore { .neutral }
 }

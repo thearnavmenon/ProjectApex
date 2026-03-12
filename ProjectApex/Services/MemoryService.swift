@@ -17,4 +17,13 @@ final class MemoryService: @unchecked Sendable {
         self.supabase = supabase
         self.embeddingAPIKey = embeddingAPIKey
     }
+
+    /// Stub — embedding write path is implemented in P4-T04.
+    /// Queued via Task.detached from WorkoutSessionManager; safe to no-op here.
+    func embed(text: String, metadata: [String: String]) async {
+        // Full implementation: P4-T04
+        // 1. Tag classification (Haiku)
+        // 2. POST to OpenAI embeddings API
+        // 3. Upsert to memory_embeddings (Supabase)
+    }
 }

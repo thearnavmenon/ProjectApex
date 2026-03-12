@@ -26,6 +26,7 @@ nonisolated struct WorkoutContext: Codable, Sendable {
     let requestType: String           // always "set_prescription"
     let sessionMetadata: SessionMetadata
     let biometrics: Biometrics?
+    let streakResult: StreakResult?   // Training consistency — modulates AI intensity ceiling
     let currentExercise: CurrentExercise
     let sessionHistoryToday: [ExerciseHistoryItem]
     let currentExerciseSetsToday: [CompletedSet]
@@ -37,6 +38,7 @@ nonisolated struct WorkoutContext: Codable, Sendable {
         case requestType                = "request_type"
         case sessionMetadata            = "session_metadata"
         case biometrics
+        case streakResult               = "streak_result"
         case currentExercise            = "current_exercise"
         case sessionHistoryToday        = "session_history_today"
         case currentExerciseSetsToday   = "current_exercise_sets_today"
@@ -389,6 +391,7 @@ extension WorkoutContext {
                 readinessScore: 8,
                 sleepHours: 7.5
             ),
+            streakResult: StreakResult.compute(currentStreakDays: 7, longestStreak: 10),
             currentExercise: CurrentExercise(
                 name: "Barbell Bench Press",
                 equipmentTypeKey: "barbell",

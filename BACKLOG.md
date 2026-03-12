@@ -28,7 +28,7 @@
 - [x] P1-T08: DefaultWeightIncrements — hardcoded commercial gym weight defaults
 - [x] P1-T09: GymFactStore — runtime weight correction persistence actor
 - [x] P1-T10: WeightCorrectionView — user weight substitution sheet
-- [ ] P1-T11: Wire WeightCorrectionView into ActiveSetView ("Weight not available" button)
+- [x] P1-T11: Wire WeightCorrectionView into ActiveSetView ("Weight not available" button)
 - [x] P1-T12: Guided per-equipment photo scanner — single-shot capture, result review card, guided UX replaces continuous frame loop
 
 ---
@@ -49,15 +49,15 @@
 
 ## Phase 3 — Active Workout Loop
 
-- [ ] P3-T01: WorkoutSessionManager actor — session lifecycle
-- [ ] P3-T02: WorkoutViewModel — bridge actor state to SwiftUI
-- [ ] P3-T03: PreWorkoutView — readiness display, session start
-- [ ] P3-T04: ActiveSetView — prescription card, Set Complete
-- [ ] P3-T05: RestTimerView — countdown, haptics, AI arrival update
-- [ ] P3-T06: Set log writes — Supabase + local write-ahead queue
-- [ ] P3-T07: Fallback path UI — "Coach offline" banner
-- [ ] P3-T08: PostWorkoutSummaryView — volume, PRs, adjustments
-- [ ] P3-T09: End session early — partial session logging
+- [x] P3-T01: WorkoutSessionManager actor — session lifecycle
+- [x] P3-T02: WorkoutViewModel — bridge actor state to SwiftUI
+- [x] P3-T03: PreWorkoutView — streak ring display, session start
+- [x] P3-T04: ActiveSetView — prescription card, Set Complete
+- [x] P3-T05: RestTimerView — countdown, haptics, AI arrival update
+- [x] P3-T06: Set log writes — Supabase + local write-ahead queue
+- [x] P3-T07: Fallback path UI — "Coach offline" banner
+- [x] P3-T08: PostWorkoutSummaryView — volume, PRs, adjustments
+- [x] P3-T09: End session early — partial session logging
 - [ ] P3-T10: Exercise swap — manual substitution within session
 
 ---
@@ -71,6 +71,27 @@
 - [ ] P4-T05: MemoryService — RAG retrieval read path + integration
 - [ ] P4-T06: Voice note UI — mic button, live transcript modal
 - [ ] P4-T07: Memory event taxonomy — auto-generated structured events
-- [ ] P4-T08: HRV 30-day baseline computation
-- [ ] P4-T09: App launch flow — onboarding → scan → generate → workout
+- ~~[ ] P4-T08: HRV 30-day baseline computation~~ **REMOVED** — Apple Watch support dropped from MVP
+- [ ] P4-T09: App launch flow — onboarding → scan → generate → workout (Step 3: notification permissions prompt, not HealthKit)
 - [ ] P4-T10: 5-session stability run — manual QA pass
+
+---
+
+## Phase 4 Extension — Gym Streak & Intensity Modulation (P4-E1)
+
+- [x] P4-T01 [E1]: GymStreakService — consecutive training days streak computation
+  - actor GymStreakService with computeStreak(userId:) -> StreakResult
+  - fetchSessionHistory queries workout_sessions (completed=true, last 90 days)
+  - StreakResult: currentStreakDays, longestStreak, streakScore (0–100), streakTier
+  - streakScore = min(100, currentStreakDays * 8); tiers: 0–2 Cold, 3–5 Warming Up, 6–9 Active, 10+ On Fire
+  - 6-hour cache with isStale(); Supabase unreachable → neutral score 50 (Warming Up)
+  - StreakResult included in WorkoutContext payload on every inference call
+  - GymStreakServiceTests.swift: 100% branch coverage on all tier boundaries and edge cases
+- [x] P4-T02 [E1]: StreakScore edge case matrix — all boundary and interruption scenarios
+  - No session history: streak=0, Cold, score=0
+  - 1-day gap: rest day allowed, streak continues
+  - 2+ day gap: streak resets to 0 / 1
+  - Stale cache (>6h): re-fetch triggered
+  - Supabase unreachable: last cache / neutral fallback
+  - Two sessions same day: counted as 1 streak day
+  - All scenarios covered by unit tests in GymStreakServiceTests.swift

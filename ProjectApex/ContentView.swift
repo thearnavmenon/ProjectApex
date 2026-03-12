@@ -50,10 +50,8 @@ struct ContentView: View {
             }
             .tag(0)
 
-            // ── Tab 1: Workout (placeholder — Phase 3) ─────────────────────
-            NavigationStack {
-                workoutPlaceholderView
-            }
+            // ── Tab 1: Workout ─────────────────────────────────────────────
+            workoutTab
             .tabItem {
                 Label("Workout", systemImage: "figure.strengthtraining.traditional")
             }
@@ -96,31 +94,62 @@ struct ContentView: View {
             .ignoresSafeArea()
     }
 
-    // MARK: - Workout Placeholder
+    // MARK: - Workout Tab
 
-    private var workoutPlaceholderView: some View {
-        VStack(spacing: 24) {
-            Spacer()
-            Image(systemName: "figure.strengthtraining.traditional")
-                .font(.system(size: 72))
-                .foregroundStyle(.white.opacity(0.25))
-            VStack(spacing: 8) {
-                Text("Workout Coming Soon")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                Text("Active workout session will be available in a future update.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.50))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+    /// The Workout tab. If a program is loaded it routes into `WorkoutView` with
+    /// the current day. Otherwise it shows a prompt to generate a program first.
+    @ViewBuilder
+    private var workoutTab: some View {
+        if let vm = programViewModel, case .loaded(let mesocycle) = vm.viewState {
+            // Derive the relevant training day: current week, first day.
+            let weekIndex = vm.currentWeekIndex(in: mesocycle)
+            let week = mesocycle.weeks[min(weekIndex, mesocycle.weeks.count - 1)]
+            if let day = week.trainingDays.first {
+                WorkoutView(trainingDay: day, programId: mesocycle.id)
+            } else {
+                noWorkoutView
             }
-            Spacer()
+        } else {
+            noWorkoutView
         }
-        .background(Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea())
-        .navigationTitle("Workout")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
-        .toolbarColorScheme(.dark, for: .navigationBar)
+    }
+
+    private var noWorkoutView: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                Spacer()
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.system(size: 64))
+                    .foregroundStyle(.white.opacity(0.20))
+                VStack(spacing: 8) {
+                    Text("No Program Yet")
+                        .font(.title2.bold())
+                        .foregroundStyle(.white)
+                    Text("Generate a program in the Program tab to start working out.")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.45))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+                Button {
+                    selectedTab = 0
+                } label: {
+                    Text("Go to Program")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 12)
+                        .background(.white.opacity(0.12), in: Capsule())
+                }
+                .padding(.top, 8)
+                Spacer()
+            }
+            .background(Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea())
+            .navigationTitle("Workout")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+        }
     }
 
     // MARK: - Settings Root

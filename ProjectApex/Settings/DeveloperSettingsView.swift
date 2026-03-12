@@ -26,6 +26,12 @@ import SwiftUI
 
 struct DeveloperSettingsView: View {
 
+    // MARK: - Dependencies (optional — injected when available)
+
+    /// The active workout view model, used to display the current fallback reason.
+    /// Nil when no workout session is active.
+    var workoutViewModel: WorkoutViewModel?
+
     // MARK: - State
 
     @State private var anthropicKey: String = ""
@@ -53,6 +59,7 @@ struct DeveloperSettingsView: View {
     var body: some View {
         Form {
             keychainStatusSection
+            aiCoachDiagnosticsSection
             anthropicSection
             openAISection
             supabaseSection
@@ -73,6 +80,41 @@ struct DeveloperSettingsView: View {
     }
 
     // MARK: - Sections
+
+    /// AI Coach diagnostics — shows fallback reason when coach is offline (P3-T07 AC).
+    private var aiCoachDiagnosticsSection: some View {
+        Section("AI Coach Diagnostics") {
+            if let vm = workoutViewModel, vm.isAIOffline {
+                HStack {
+                    Image(systemName: "brain.head.profile.slash")
+                        .foregroundStyle(.orange)
+                    Text("Coach Offline")
+                        .foregroundStyle(.orange)
+                }
+                if let devDesc = vm.developerFallbackDescription {
+                    HStack {
+                        Text("Reason")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(devDesc)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.70))
+                            .lineLimit(2)
+                    }
+                }
+            } else {
+                HStack {
+                    Image(systemName: "brain.head.profile")
+                        .foregroundStyle(.green)
+                    Text("Coach Online")
+                        .foregroundStyle(.green)
+                }
+                Text("No fallback active")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
 
     /// Quick-glance summary of which keys are present in the Keychain.
     private var keychainStatusSection: some View {

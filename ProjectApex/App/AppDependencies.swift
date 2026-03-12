@@ -9,6 +9,7 @@
 //   KeychainService → SupabaseClient → HealthKitService
 //     → MemoryService → SpeechService → GymFactStore
 //     → AIInferenceService → ProgramGenerationService
+//     → WorkoutSessionManager
 
 import SwiftUI
 
@@ -24,9 +25,21 @@ final class AppDependencies {
     let memoryService: MemoryService
     let speechService: SpeechService
     let gymFactStore: GymFactStore
+    /// Computes gym streak score for AI intensity modulation (P4-E1).
+    let gymStreakService: GymStreakService
     private(set) var aiInferenceService: AIInferenceService
     /// Generates 12-week periodized programs on demand using claude-opus-4.
     private(set) var programGenerationService: ProgramGenerationService
+    /// Local write-ahead queue for reliable Supabase writes during workouts.
+    let writeAheadQueue: WriteAheadQueue
+    /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
+    let workoutSessionManager: WorkoutSessionManager
+
+    // MARK: - Placeholder Auth (MVP)
+
+    /// Fixed placeholder user ID used throughout the MVP until real auth is wired.
+    /// Matches the hardcoded UUID used in WorkoutSessionManager for session creation.
+    static let placeholderUserId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
     // MARK: Private: Stored Anthropic key for re-init
 
@@ -56,16 +69,35 @@ final class AppDependencies {
         // 6. GymFactStore — persists user weight corrections
         self.gymFactStore = GymFactStore()
 
+        // 6b. GymStreakService — training consistency for AI intensity modulation (P4-E1)
+        self.gymStreakService = GymStreakService(supabase: supabaseClient)
+
         // 7. AI Inference — needs Anthropic key (sonnet model, 8-second timeout)
         let anthropicKey = (try? keychain.retrieve(.anthropicAPIKey)) ?? ""
         self.anthropicKey = anthropicKey
-        self.aiInferenceService = AIInferenceService(
+        let inferenceService = AIInferenceService(
             provider: AnthropicProvider(apiKey: anthropicKey)
         )
+        self.aiInferenceService = inferenceService
 
         // 8. Program Generation — uses opus model; no timeout (user waits explicitly)
         self.programGenerationService = ProgramGenerationService(
             provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
+        )
+
+        // 9. WriteAheadQueue — reliable Supabase write queue (P3-T06)
+        let waq = WriteAheadQueue(supabase: supabaseClient)
+        self.writeAheadQueue = waq
+
+        // 10. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak
+        self.workoutSessionManager = WorkoutSessionManager(
+            aiInference: inferenceService,
+            healthKit: healthKitService,
+            memoryService: memoryService,
+            supabase: supabaseClient,
+            gymFactStore: gymFactStore,
+            writeAheadQueue: waq,
+            gymStreakService: gymStreakService
         )
     }
 

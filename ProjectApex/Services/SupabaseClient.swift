@@ -202,6 +202,25 @@ actor SupabaseClient {
         try await perform(request)
     }
 
+    // MARK: - Raw JSON Insert
+
+    /// Inserts pre-encoded JSON data directly into `table`.
+    ///
+    /// Used by `WriteAheadQueue` which stores payloads as raw `Data` blobs.
+    /// The data must already be valid JSON matching the table's column schema.
+    ///
+    /// - Parameters:
+    ///   - jsonData: Pre-encoded JSON payload.
+    ///   - table: The PostgREST table name.
+    /// - Throws: `SupabaseError` on HTTP failure.
+    func insertRawJSON(_ jsonData: Data, table: String) async throws {
+        let url = try tableURL(table: table)
+        var request = baseRequest(url: url, method: "POST")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = jsonData
+        try await perform(request)
+    }
+
     // MARK: - Programs helpers
 
     /// Deactivates all currently active programs for `userId` by patching

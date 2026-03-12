@@ -145,12 +145,13 @@ ProjectApex/
 │   │   ├── ProgramDayDetailView.swift
 │   │   └── ProgramViewModel.swift
 │   └── Workout/
-│       ├── WorkoutView.swift
-│       ├── ActiveSetView.swift
-│       ├── RestTimerView.swift
-│       ├── PostWorkoutSummaryView.swift
-│       ├── WeightCorrectionView.swift # User weight substitution sheet
-│       └── WorkoutViewModel.swift
+│       ├── WorkoutView.swift         # ZStack state-machine router (idle/active/resting/complete)
+│       ├── PreWorkoutView.swift      # Readiness ring, session info card, Start button
+│       ├── ActiveSetView.swift       # P3-T04: Prescription card, Set Complete, rep/RPE sheet, end-early menu, weight correction (P1-T11)
+│       ├── RestTimerView.swift       # P3-T05: Circular ring, haptics, audio tone, skip button, end-early menu
+│       ├── PostWorkoutSummaryView.swift  # P3-T08: Volume, sets ring, PRs, AI adjustments, share, done
+│       ├── WeightCorrectionView.swift    # User weight substitution sheet (P1-T10)
+│       └── WorkoutViewModel.swift    # @Observable bridge from actor state to SwiftUI
 │
 ├── AICoach/
 │   ├── AIInferenceService.swift      # actor — core inference engine
@@ -164,6 +165,8 @@ ProjectApex/
 │   ├── MemoryService.swift
 │   ├── SpeechService.swift
 │   ├── GymFactStore.swift            # actor — runtime weight correction persistence
+│   ├── GymStreakService.swift        # actor — consecutive training day streak + StreakResult (P4-E1)
+│   ├── WriteAheadQueue.swift         # actor — local FIFO queue for reliable Supabase writes (P3-T06)
 │   └── KeychainService.swift
 │
 ├── Extensions/
@@ -191,6 +194,7 @@ final class AppDependencies {
     let memoryService: MemoryService
     let speechService: SpeechService
     let gymFactStore: GymFactStore       // runtime weight correction persistence
+    let gymStreakService: GymStreakService // training streak for AI intensity modulation (P4-E1)
     var aiInferenceService: AIInferenceService
 
     init() {
@@ -310,6 +314,33 @@ struct DefaultWeightIncrements {
                                excluding: Set<Double> = []) -> (lower: Double?, upper: Double?)
 }
 
+// Training streak (P4-E1)
+nonisolated enum StreakTier: String, Codable, Sendable {
+    case cold       = "Cold"
+    case warmingUp  = "Warming Up"
+    case active     = "Active"
+    case onFire     = "On Fire"
+}
+
+nonisolated struct StreakResult: Codable, Sendable {
+    let currentStreakDays: Int
+    let longestStreak: Int
+    let streakScore: Int          // min(100, currentStreakDays * 8)
+    let streakTier: StreakTier
+    let computedAt: Date
+
+    static let neutral = StreakResult(currentStreakDays: 0, longestStreak: 0, streakScore: 50,
+                                      streakTier: .warmingUp, computedAt: .distantPast)
+    static func compute(currentStreakDays: Int, longestStreak: Int, now: Date = Date()) -> StreakResult
+    func isStale(after: TimeInterval = 6 * 3600, relativeTo: Date = Date()) -> Bool
+}
+
+actor GymStreakService {
+    init(supabase: SupabaseClient, lookbackDays: Int = 90)
+    func computeStreak(userId: UUID) async -> StreakResult
+    func invalidate(userId: UUID) async
+}
+
 actor GymFactStore {
     // Persists user-confirmed weight corrections to UserDefaults.
     func recordCorrection(equipmentType: EquipmentType, availableKg: Double) async
@@ -418,9 +449,12 @@ struct SessionNote: Codable, Identifiable, Sendable {
 struct SessionSummary: Codable, Sendable {
     let totalVolumeKg: Double
     let setsCompleted: Int
+    let setsPlanned: Int                // Total planned sets for the training day
     let personalRecords: [PersonalRecord]
     let aiAdjustmentCount: Int
     let notableNotes: [String]
+    let earlyExitReason: String?        // Non-nil when session ended early (P3-T09)
+    let durationSeconds: Int            // Wall-clock session duration
 }
 
 struct PersonalRecord: Codable, Sendable {
@@ -777,11 +811,18 @@ actor WorkoutSessionManager {
     private(set) var restSecondsRemaining: Int = 0
     private(set) var completedSets: [SetLog] = []
 
+    // Dependencies: AIInferenceService, HealthKitService, MemoryService,
+    //               SupabaseClient, GymFactStore, WriteAheadQueue
+
     func startSession(trainingDay: TrainingDay, programId: UUID) async
     func completeSet(actualReps: Int, rpeFelt: Int?) async
     func addVoiceNote(transcript: String, exerciseId: String) async
-    func endSessionEarly() async
+    func endSessionEarly() async     // Partial session → .sessionComplete (P3-T09)
     func endSession() async
+    func resetToIdle()               // Resets all state to .idle after session dismissed
+    func skipRest()                  // Advances past rest timer immediately
+    func applyWeightCorrection(confirmedWeight: Double, equipmentType: EquipmentType) async
+        // Updates current prescription weight + records in GymFactStore (P1-T11)
 }
 
 enum SessionState: Sendable {
@@ -800,17 +841,27 @@ enum SessionState: Sendable {
 ```
 User taps "Set Complete"
     │
-    ├── 1. Write SetLog to Supabase (fire-and-forget)
+    ├── 1. Write SetLog via WriteAheadQueue.enqueue() (P3-T06)
+    │       → persisted locally, then async-POST to Supabase
+    │       → exponential backoff retry on failure (1s, 2s, 4s, 8s, 16s)
     ├── 2. state → .resting (rest timer starts immediately)
     ├── 3. [parallel] Assemble WorkoutContext:
     │       - sessionHistoryToday (accumulated sets)
     │       - healthKitContext (cached)
+    │       - streakResult (cached from GymStreakService, P4-E1)
     │       - ragMemory (retrieved for next exercise)
     │       - gymConstraints (from GymProfile)
     ├── 4. await aiInferenceService.prescribe(context:)
     │       → .success(prescription) OR .fallback(reason)
     └── 5. When timer expires OR prescription arrives (whichever later):
             state → .active(nextExercise, setNumber + 1)
+
+Session End:
+    ├── 1. Build SessionSummary (volume, sets, PRs, notes, duration)
+    ├── 2. BLOCKING write: WriteAheadQueue.updateBlocking() patches workout_sessions
+    │       → Must complete before PostWorkoutSummaryView is shown
+    │       → Fallback: enqueue for retry if blocking write fails
+    └── 3. state → .sessionComplete(summary)
 ```
 
 ### 7.3 Voice Note Lifecycle
@@ -1183,12 +1234,17 @@ UI: Non-blocking "Coach offline" banner, 3 seconds
 | `SupabaseClientTests.swift` | ✅ Green | CRUD + RPC |
 | `EquipmentConstraintValidationTests.swift` | ✅ Green | Post-generation equipment constraint violations |
 | `ProgramPersistenceTests.swift` | ✅ Green | UserDefaults cache round-trip, clearUserDefaults |
+| `WorkoutSessionManagerTests.swift` | ✅ Green | Start→active, completeSet→resting, fallback path, safety gate, endSessionEarly, reentrancy guard, context assembly |
+| `WriteAheadQueueTests.swift` | ✅ Green | FIFO ordering, flush on success, retry with backoff, clearAll, QueuedWrite Codable round-trip |
+| `GymStreakServiceTests.swift` | ✅ Green | All 4 tier boundaries, score formula, no sessions, 1-day gap, 2+ day gap, duplicate dates, stale cache, neutral fallback (P4-E1) |
 
 ### 14.3 Planned Tests
 
 | File | Priority | Key Scenarios |
 |---|---|---|
 | `ReadinessScoreTests` | P0 | All Section 11.4 edge cases, boundary scores, nil biometrics |
+| `ActiveSetViewTests.swift` | P0 | Rep/RPE auto-dismiss countdown, offline banner 3s dismiss, safety flag colours |
+| `RestTimerViewTests.swift` | P0 | Ring progress calculation, haptic firing at 10s/0s, skipRest() transition |
 | `MemoryServiceTests.swift` | P1 | Pain keyword detection, event generation, threshold filtering |
 | `ScannerViewModelTests.swift` | P1 | State machine transitions, captureAndIdentify happy/empty path |
 | `DayStatusTests.swift` | P1 | DayStatus.resolve() — today/future/past boundaries, edge cases |

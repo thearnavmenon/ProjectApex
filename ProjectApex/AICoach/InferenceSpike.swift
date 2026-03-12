@@ -171,6 +171,7 @@ enum InferenceSpike {
                 readinessScore: 7,
                 sleepHours: 7.5
             ),
+            streakResult: nil,
             currentExercise: CurrentExercise(
                 name: "Barbell Bench Press",
                 equipmentTypeKey: "barbell",
