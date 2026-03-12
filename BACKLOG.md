@@ -11,7 +11,7 @@
 - [x] P0-T05: AppDependencies DI container — wire all services at launch
 - [x] P0-T06: WorkoutContext assembly — unit test full JSON serialization
 - [x] P0-T07: AIInferenceService integration test — real API, mock context
-- [x] P0-T08: EquipmentRounder — expand unit tests to 100% AC coverage
+- [x] P0-T08: SetPrescription.validate() — unit tests to 100% AC coverage (EquipmentRounder retired)
 - [x] P0-T09: CI pipeline — GitHub Actions, test run on push
 
 ---
@@ -19,12 +19,17 @@
 ## Phase 1 — Gym Scanner — Live
 
 - [x] P1-T01: SupabaseClient — core CRUD and RPC wrapper
-- [ ] P1-T02: Live VisionAPIService — replace MockVisionAPIService
-- [x] P1-T03: EquipmentMerger — multi-frame deduplication logic
+- [x] P1-T02: Live VisionAPIService — presence-only strength scanner (no weight ranges)
+- [x] P1-T03: EquipmentMerger — cardio/junk blocklists, presence-only deduplication
 - [x] P1-T04: GymProfile → Supabase persist & fetch
-- [ ] P1-T05: EquipmentConfirmationView — edit, add, delete items
-- [ ] P1-T06: Re-scan flow with confirmation dialog
-- [x] P1-T07: EquipmentMerger unit tests
+- [x] P1-T05: EquipmentConfirmationView — edit, add, delete items
+- [x] P1-T06: Re-scan flow with confirmation dialog
+- [x] P1-T07: EquipmentMerger unit tests — rewritten for presence-only API
+- [x] P1-T08: DefaultWeightIncrements — hardcoded commercial gym weight defaults
+- [x] P1-T09: GymFactStore — runtime weight correction persistence actor
+- [x] P1-T10: WeightCorrectionView — user weight substitution sheet
+- [ ] P1-T11: Wire WeightCorrectionView into ActiveSetView ("Weight not available" button)
+- [x] P1-T12: Guided per-equipment photo scanner — single-shot capture, result review card, guided UX replaces continuous frame loop
 
 ---
 

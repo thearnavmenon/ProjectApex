@@ -1,26 +1,24 @@
 // ScannerView.swift
 // ProjectApex — GymScanner Feature
 //
-// The main SwiftUI view for the gym equipment scanning flow. Composed of:
+// The main SwiftUI view for the guided gym equipment scanning flow.
 //
-//   ┌─────────────────────────────────────┐
-//   │         CameraPreviewView            │  ← Full-screen live camera feed
-//   │                                      │
-//   │    [Scanning overlay + crosshair]    │  ← Animated scan indicator
-//   │                                      │
-//   │  ┌─── EquipmentChecklistOverlay ───┐ │  ← Bottom sheet: live checklist
-//   │  │  ✅ Dumbbell Set                │ │
-//   │  │  ✅ Barbell                     │ │
-//   │  │  ⏳ Cable Machine...            │ │
-//   │  └────────────────────────────────┘ │
-//   └─────────────────────────────────────┘
+// UX Flow:
+//   1. Idle        — "Start" button with instructional text
+//   2. Previewing  — Live camera + shutter button + item count + "Done" button
+//   3. Analyzing   — Spinner overlay while Vision API runs
+//   4. Reviewed    — Result card (identified equipment) with "Add" / "Discard"
+//   5. Confirming  — Editable equipment list before saving the profile
+//   6. Completed   — Success screen
 //
 // State transitions rendered by this view (driven by ScannerViewModel.state):
-//   .idle              → "Start Scanning" button
+//   .idle              → "Start" button
 //   .requestingPermission → spinner
-//   .scanning          → live feed + checklist overlay + "Done" button
+//   .previewing        → live feed + shutter + count badge + "Done"
+//   .analyzing         → live feed + centered spinner
+//   .reviewed          → dimmed feed + result card
 //   .confirming        → editable equipment list + "Confirm Profile" button
-//   .completed         → success screen (triggers navigation pop in parent)
+//   .completed         → success screen
 //   .permissionDenied  → settings deep-link prompt
 //   .error             → inline error with retry option
 
@@ -31,19 +29,20 @@ import AVFoundation
 
 struct ScannerView: View {
 
-    // `@State` is the correct property wrapper for `@Observable` classes (iOS 17+).
-    // The ViewModel is owned by this view — not injected from a parent.
     @State private var viewModel = ScannerViewModel()
 
     /// Callback invoked when a confirmed GymProfile is ready for the parent to persist.
     var onProfileConfirmed: ((GymProfile) -> Void)?
 
-    // For the confirmation sheet presentation
+    // For the confirmation sheet presentations
     @State private var showingAddEquipmentSheet = false
+    @State private var itemBeingEdited: EquipmentItem?
+
+    // For editing the reviewed item before confirming
+    @State private var showingEditBeforeAddSheet = false
 
     var body: some View {
         ZStack {
-            // Background: always black so camera preview has a clean surround
             Color.black.ignoresSafeArea()
 
             switch viewModel.state {
@@ -53,8 +52,14 @@ struct ScannerView: View {
             case .requestingPermission:
                 permissionSpinnerView
 
-            case .scanning:
-                scanningView
+            case .previewing:
+                previewingView
+
+            case .analyzing:
+                analyzingView
+
+            case .reviewed(let item):
+                reviewedView(item: item)
 
             case .confirming:
                 confirmingView
@@ -93,7 +98,7 @@ struct ScannerView: View {
                     .font(.largeTitle.bold())
                     .foregroundStyle(.white)
 
-                Text("Pan your camera slowly around your gym.\nCapture all machines, free weights, cables, and benches.")
+                Text("Take a photo of each piece of equipment,\none at a time, to build your gym profile.")
                     .font(.body)
                     .foregroundStyle(.white.opacity(0.7))
                     .multilineTextAlignment(.center)
@@ -102,7 +107,7 @@ struct ScannerView: View {
 
             Spacer()
 
-            Button(action: { viewModel.startScan() }) {
+            Button(action: { viewModel.startCapture() }) {
                 Label("Start Scanning", systemImage: "camera.fill")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
@@ -129,87 +134,206 @@ struct ScannerView: View {
         }
     }
 
-    /// The core scanning experience: camera preview + overlay.
-    private var scanningView: some View {
-        ZStack(alignment: .bottom) {
+    /// The main guided capture state: live camera preview + shutter button.
+    private var previewingView: some View {
+        ZStack {
             // Live camera feed fills the screen
             CameraPreviewView(previewLayer: viewModel.previewLayer)
                 .ignoresSafeArea()
 
-            // Scanning animation overlay
-            ScanAnimationOverlay(pendingRequests: viewModel.pendingAPIRequests)
+            // Top bar: item count + Done button
+            VStack {
+                HStack {
+                    // Item count badge
+                    if !viewModel.detectedEquipment.isEmpty {
+                        HStack(spacing: 5) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.caption)
+                            Text("\(viewModel.detectedEquipment.count) item\(viewModel.detectedEquipment.count == 1 ? "" : "s") captured")
+                                .font(.caption.bold())
+                                .foregroundStyle(.white)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.55), in: Capsule())
+                    }
 
-            VStack(spacing: 0) {
-                // Top HUD: frame counter + pending indicator
-                scanHUD
-                    .padding(.top, 60) // Below the notch / Dynamic Island
+                    Spacer()
+
+                    // Done button (only visible when ≥1 item captured)
+                    if !viewModel.detectedEquipment.isEmpty {
+                        Button(action: { viewModel.doneCapturing() }) {
+                            Text("Done")
+                                .font(.headline)
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(.white, in: Capsule())
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 60)
 
                 Spacer()
 
-                // Bottom: live equipment checklist sheet
-                EquipmentChecklistOverlay(
-                    equipment: viewModel.detectedEquipment,
-                    framesProcessed: viewModel.framesProcessed
-                )
+                // Instruction label
+                Text("Point at one piece of equipment")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.45), in: Capsule())
+                    .padding(.bottom, 20)
 
-                // Done scanning button
-                Button(action: { viewModel.stopScan() }) {
-                    Text("Done Scanning")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                // Shutter button
+                Button(action: { viewModel.captureAndIdentify() }) {
+                    ZStack {
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 72, height: 72)
+                        Circle()
+                            .stroke(.white.opacity(0.4), lineWidth: 3)
+                            .frame(width: 86, height: 86)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.white)
-                .foregroundStyle(.black)
-                .padding(.horizontal, 24)
-                .padding(.bottom, 36)
+                .padding(.bottom, 52)
+            }
+
+            // "Nothing detected" toast
+            if viewModel.nothingDetectedToast {
+                VStack {
+                    Spacer()
+                    Text("No gym equipment detected — try again")
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(.red.opacity(0.85), in: Capsule())
+                        .padding(.bottom, 160)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+                .animation(.easeInOut(duration: 0.3), value: viewModel.nothingDetectedToast)
             }
         }
     }
 
-    /// HUD bar shown during scanning with frame count and in-flight request indicator.
-    private var scanHUD: some View {
-        HStack {
-            // Frames processed counter
-            Label("\(viewModel.framesProcessed) frames", systemImage: "photo.stack")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.5), in: Capsule())
+    /// Shown while the Vision API is processing the captured photo.
+    private var analyzingView: some View {
+        ZStack {
+            CameraPreviewView(previewLayer: viewModel.previewLayer)
+                .ignoresSafeArea()
 
-            Spacer()
+            // Frosted overlay
+            Color.black.opacity(0.4).ignoresSafeArea()
 
-            // In-flight API request indicator
-            if viewModel.pendingAPIRequests > 0 {
-                HStack(spacing: 4) {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                        .scaleEffect(0.7)
-                    Text("Analysing…")
-                        .font(.caption)
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.black.opacity(0.5), in: Capsule())
+            VStack(spacing: 16) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+                    .scaleEffect(1.8)
+
+                Text("Identifying equipment…")
+                    .font(.headline)
+                    .foregroundStyle(.white)
             }
         }
-        .padding(.horizontal, 20)
+    }
+
+    /// Shown when the Vision API identified an item. User confirms or discards.
+    private func reviewedView(item: EquipmentItem) -> some View {
+        ZStack {
+            CameraPreviewView(previewLayer: viewModel.previewLayer)
+                .ignoresSafeArea()
+
+            Color.black.opacity(0.55).ignoresSafeArea()
+
+            VStack(spacing: 24) {
+                Spacer()
+
+                // Result card
+                VStack(spacing: 20) {
+                    // Equipment icon (system image) and name
+                    VStack(spacing: 10) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.green)
+
+                        Text(item.equipmentType.displayName)
+                            .font(.title2.bold())
+                            .foregroundStyle(.primary)
+
+                        Text("×\(item.count) detected")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+
+                    Divider()
+
+                    // Action buttons
+                    HStack(spacing: 12) {
+                        // Discard
+                        Button(action: { viewModel.rejectDetection() }) {
+                            Label("Discard", systemImage: "xmark")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+
+                        // Add to list
+                        Button(action: { viewModel.confirmDetection() }) {
+                            Label("Add to List", systemImage: "plus")
+                                .font(.headline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.green)
+                    }
+
+                    // Edit before adding link
+                    Button(action: { showingEditBeforeAddSheet = true }) {
+                        Text("Edit before adding")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(24)
+                .background(
+                    .regularMaterial,
+                    in: RoundedRectangle(cornerRadius: 20, style: .continuous)
+                )
+                .padding(.horizontal, 20)
+                .padding(.bottom, 48)
+            }
+        }
+        .sheet(isPresented: $showingEditBeforeAddSheet) {
+            EquipmentEditSheet(
+                existingItem: item,
+                onSave: { edited in
+                    showingEditBeforeAddSheet = false
+                    // Add the edited item then dismiss the reviewed state.
+                    viewModel.addEquipment(edited)
+                    viewModel.rejectDetection() // Clears the .reviewed state
+                },
+                onCancel: { showingEditBeforeAddSheet = false }
+            )
+        }
     }
 
     /// Confirmation screen: editable equipment list before profile is saved.
     private var confirmingView: some View {
-        // @Bindable allows `$viewModel.detectedEquipment` bindings for the ForEach.
-        // This requires `detectedEquipment` to have a public setter on the @Observable class.
-        @Bindable var vm = viewModel
-        return NavigationStack {
+        NavigationStack {
             List {
                 Section {
-                    ForEach($vm.detectedEquipment) { $item in
-                        EquipmentRowView(item: $item)
+                    ForEach(viewModel.detectedEquipment) { item in
+                        EquipmentRowView(item: item)
+                            .contentShape(Rectangle())
+                            .onTapGesture { itemBeingEdited = item }
                     }
                     .onDelete { indexSet in
                         for index in indexSet {
@@ -217,7 +341,7 @@ struct ScannerView: View {
                         }
                     }
                 } header: {
-                    Text("\(viewModel.detectedEquipment.count) items detected")
+                    Text("\(viewModel.detectedEquipment.count) item\(viewModel.detectedEquipment.count == 1 ? "" : "s") detected")
                         .textCase(nil)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -249,17 +373,32 @@ struct ScannerView: View {
                             onProfileConfirmed?(profile)
                         }
                     }) {
-                        Text("Confirm")
+                        Text("Save")
                             .bold()
                     }
+                    .disabled(viewModel.detectedEquipment.isEmpty)
                 }
             }
         }
         .sheet(isPresented: $showingAddEquipmentSheet) {
-            AddEquipmentSheet(onAdd: { item in
-                viewModel.addEquipment(item)
-                showingAddEquipmentSheet = false
-            })
+            EquipmentEditSheet(
+                existingItem: nil,
+                onSave: { item in
+                    viewModel.addEquipment(item)
+                    showingAddEquipmentSheet = false
+                },
+                onCancel: { showingAddEquipmentSheet = false }
+            )
+        }
+        .sheet(item: $itemBeingEdited) { item in
+            EquipmentEditSheet(
+                existingItem: item,
+                onSave: { updated in
+                    viewModel.updateEquipment(updated)
+                    itemBeingEdited = nil
+                },
+                onCancel: { itemBeingEdited = nil }
+            )
         }
         .colorScheme(.dark)
     }
@@ -283,7 +422,6 @@ struct ScannerView: View {
                     .foregroundStyle(.white.opacity(0.7))
             }
 
-            // Summary chips
             LazyVGrid(
                 columns: Array(repeating: GridItem(.flexible()), count: 2),
                 spacing: 8
@@ -304,7 +442,7 @@ struct ScannerView: View {
         }
     }
 
-    /// Shown when camera permission has been denied (FR-001-A graceful degradation).
+    /// Shown when camera permission has been denied.
     private var permissionDeniedView: some View {
         VStack(spacing: 24) {
             Image(systemName: "camera.slash.fill")
@@ -332,16 +470,13 @@ struct ScannerView: View {
             .foregroundStyle(.black)
 
             Button("Enter Equipment Manually") {
-                // Manually populate an empty list and go straight to confirming
                 viewModel.reset()
-                // Bypass scanning, go direct to confirm with empty list
-                // In a full implementation, this would push to a form-based entry flow
             }
             .foregroundStyle(.white.opacity(0.7))
         }
     }
 
-    /// Shown for non-permission errors (camera setup failure, etc.).
+    /// Shown for non-permission errors.
     private func errorView(error: ScannerError) -> some View {
         VStack(spacing: 24) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -372,8 +507,7 @@ struct ScannerView: View {
 // MARK: - CameraPreviewView
 
 /// `UIViewRepresentable` wrapper that hosts the `AVCaptureVideoPreviewLayer`
-/// in a SwiftUI hierarchy. Needed because `AVCaptureVideoPreviewLayer` is a
-/// `CALayer` subclass and requires a `UIView` to host it.
+/// in a SwiftUI hierarchy.
 struct CameraPreviewView: UIViewRepresentable {
 
     let previewLayer: AVCaptureVideoPreviewLayer
@@ -388,12 +522,10 @@ struct CameraPreviewView: UIViewRepresentable {
         uiView.setPreviewLayer(previewLayer)
     }
 
-    // Internal UIView subclass that manages the preview layer's frame.
     class PreviewUIView: UIView {
         private var currentPreviewLayer: AVCaptureVideoPreviewLayer?
 
         func setPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
-            // Remove old layer if present
             currentPreviewLayer?.removeFromSuperlayer()
             currentPreviewLayer = layer
             self.layer.addSublayer(layer)
@@ -407,226 +539,21 @@ struct CameraPreviewView: UIViewRepresentable {
     }
 }
 
-// MARK: - ScanAnimationOverlay
+// MARK: - EquipmentRowView (Confirmation Screen)
 
-/// Animating scan lines + corner brackets to give visual feedback that scanning is active.
-struct ScanAnimationOverlay: View {
-
-    let pendingRequests: Int
-
-    @State private var scanLineOffset: CGFloat = -200
-    @State private var opacity: Double = 1.0
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                // Subtle grid tint
-                Color.black.opacity(0.15)
-                    .ignoresSafeArea()
-
-                // Corner bracket decorations
-                CornerBrackets()
-                    .stroke(.white.opacity(0.8), lineWidth: 3)
-                    .frame(width: geo.size.width * 0.7, height: geo.size.width * 0.7)
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
-
-                // Animated horizontal scan line
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [.clear, .green.opacity(0.6), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(height: 2)
-                    .offset(y: scanLineOffset)
-                    .position(x: geo.size.width / 2, y: geo.size.height / 2)
-                    .opacity(pendingRequests > 0 ? opacity : 0.3)
-            }
-        }
-        .onAppear {
-            withAnimation(
-                .easeInOut(duration: 1.5)
-                .repeatForever(autoreverses: true)
-            ) {
-                scanLineOffset = 200
-                opacity = 0.4
-            }
-        }
-        .allowsHitTesting(false) // Pass touches through to camera controls
-    }
-}
-
-/// A `Shape` that draws four L-shaped corner brackets (like a viewfinder).
-struct CornerBrackets: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let length: CGFloat = 24
-        let corners: [(CGPoint, (CGFloat, CGFloat), (CGFloat, CGFloat))] = [
-            (rect.origin,
-             (rect.minX + length, rect.minY), (rect.minX, rect.minY + length)),
-            (CGPoint(x: rect.maxX, y: rect.minY),
-             (rect.maxX - length, rect.minY), (rect.maxX, rect.minY + length)),
-            (CGPoint(x: rect.minX, y: rect.maxY),
-             (rect.minX + length, rect.maxY), (rect.minX, rect.maxY - length)),
-            (CGPoint(x: rect.maxX, y: rect.maxY),
-             (rect.maxX - length, rect.maxY), (rect.maxX, rect.maxY - length))
-        ]
-        for (origin, h, v) in corners {
-            path.move(to: CGPoint(x: h.0, y: h.1))
-            path.addLine(to: origin)
-            path.addLine(to: CGPoint(x: v.0, y: v.1))
-        }
-        return path
-    }
-}
-
-// MARK: - EquipmentChecklistOverlay
-
-/// Bottom sheet overlay shown during scanning. Displays the live-updating
-/// checklist of detected equipment categories (PRD Section 3.1.1, Step 2).
-struct EquipmentChecklistOverlay: View {
-
-    let equipment: [EquipmentItem]
-    let framesProcessed: Int
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Handle / drag indicator
-            RoundedRectangle(cornerRadius: 2.5)
-                .fill(.white.opacity(0.4))
-                .frame(width: 36, height: 5)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-
-            // Header
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Detected Equipment")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Text(framesProcessed == 0
-                         ? "Move your camera around the gym…"
-                         : "\(framesProcessed) frames analysed")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.6))
-                        .monospacedDigit()
-                }
-                Spacer()
-
-                if equipment.isEmpty {
-                    // Pulsing dot when nothing found yet
-                    Circle()
-                        .fill(.orange)
-                        .frame(width: 8, height: 8)
-                } else {
-                    Text("\(equipment.count)")
-                        .font(.caption.bold())
-                        .foregroundStyle(.black)
-                        .padding(6)
-                        .background(.green, in: Circle())
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
-
-            // Equipment list (scrollable, max ~3 visible items, then scrolls)
-            if equipment.isEmpty {
-                HStack {
-                    Spacer()
-                    Text("Pan your camera to start detecting equipment")
-                        .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .padding(.vertical, 20)
-                    Spacer()
-                }
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 2) {
-                        ForEach(equipment) { item in
-                            EquipmentDetectionRow(item: item)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .frame(maxHeight: 180)
-            }
-        }
-        .background(
-            .ultraThinMaterial,
-            in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-        )
-        .padding(.horizontal, 12)
-        .padding(.bottom, 8)
-        // Animate new items appearing
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: equipment.count)
-    }
-}
-
-/// A single row in the live checklist: checkmark icon + equipment name + weight summary.
-struct EquipmentDetectionRow: View {
+/// A display row for the confirmation list. Tap to open the edit sheet.
+struct EquipmentRowView: View {
 
     let item: EquipmentItem
 
-    @State private var appeared = false
-
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .font(.system(size: 16))
-
-            Text(item.equipmentType.displayName)
-                .font(.subheadline)
-                .foregroundStyle(.primary)
-
-            Spacer()
-
-            // Show a compact weight summary from the details
-            if let weightSummary = item.details.weightSummary {
-                Text(weightSummary)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Text("×\(item.count)")
-                .font(.caption.monospacedDigit())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(.green.opacity(0.18), in: Capsule())
-                .foregroundStyle(.green)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-        .background(Color(.tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 10))
-        .scaleEffect(appeared ? 1.0 : 0.9)
-        .opacity(appeared ? 1.0 : 0)
-        .onAppear {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                appeared = true
-            }
-        }
-    }
-}
-
-// MARK: - EquipmentRowView (Confirmation Screen)
-
-/// An editable row for the confirmation list. Allows inline count editing.
-struct EquipmentRowView: View {
-
-    @Binding var item: EquipmentItem
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(item.equipmentType.displayName)
                     .font(.body)
 
-                if let weightSummary = item.details.weightSummary {
-                    Text(weightSummary)
+                if let notes = item.notes {
+                    Text(notes)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -634,225 +561,97 @@ struct EquipmentRowView: View {
 
             Spacer()
 
-            // Inline stepper for count editing
-            HStack(spacing: 0) {
-                Button {
-                    if item.count > 1 { item.count -= 1 }
-                } label: {
-                    Image(systemName: "minus")
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.borderless)
-                .disabled(item.count <= 1)
+            Text("×\(item.count)")
+                .font(.caption.monospacedDigit())
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color(.tertiarySystemFill), in: Capsule())
+                .foregroundStyle(.primary)
 
-                Text("\(item.count)")
-                    .font(.body.monospacedDigit())
-                    .frame(width: 24)
-                    .multilineTextAlignment(.center)
+            Text(item.detectedByVision ? "AI" : "Manual")
+                .font(.caption2.bold())
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(
+                    item.detectedByVision
+                        ? Color.blue.opacity(0.18)
+                        : Color.orange.opacity(0.18),
+                    in: Capsule()
+                )
+                .foregroundStyle(item.detectedByVision ? Color.blue : Color.orange)
 
-                Button {
-                    item.count += 1
-                } label: {
-                    Image(systemName: "plus")
-                        .frame(width: 32, height: 32)
-                }
-                .buttonStyle(.borderless)
-            }
-            .foregroundStyle(.primary)
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
     }
 }
 
-// MARK: - AddEquipmentSheet
+// MARK: - EquipmentEditSheet
 
-/// Modal sheet for manually adding an equipment item (FR-001-F).
-struct AddEquipmentSheet: View {
+/// Modal sheet for adding new equipment or editing existing items.
+struct EquipmentEditSheet: View {
 
-    var onAdd: (EquipmentItem) -> Void
+    let existingItem: EquipmentItem?
+    var onSave: (EquipmentItem) -> Void
+    var onCancel: () -> Void
 
-    @State private var equipmentTypeName = ""
-    @State private var count = 1
-    @State private var detailsKind: DetailsKind = .bodyweightOnly
-    @State private var minKg: Double = 0
-    @State private var maxKg: Double = 100
-    @State private var incrementKg: Double = 2.5
+    @State private var selectedType: EquipmentType = .dumbbellSet
+    @State private var count: Int = 1
+    @State private var notes: String = ""
 
-    @Environment(\.dismiss) private var dismiss
-
-    enum DetailsKind: String, CaseIterable, Identifiable {
-        case bodyweightOnly = "Bodyweight Only"
-        case incrementBased = "Stack / Dumbbell"
-        case plateBased     = "Plate Loaded"
-        var id: String { rawValue }
-    }
+    private var isEditing: Bool { existingItem != nil }
+    private var title: String { isEditing ? "Edit Equipment" : "Add Equipment" }
+    private var saveLabel: String { isEditing ? "Save" : "Add" }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Equipment") {
-                    TextField("Type (e.g. dumbbell_set)", text: $equipmentTypeName)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                Section("Equipment Type") {
+                    Picker("Type", selection: $selectedType) {
+                        ForEach(EquipmentType.knownCases, id: \.self) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    }
+                    .pickerStyle(.menu)
 
-                    Stepper("Count: \(count)", value: $count, in: 1...20)
+                    Stepper("Count: \(count)", value: $count, in: 1...50)
                 }
 
-                Section("Weight Details") {
-                    Picker("Kind", selection: $detailsKind) {
-                        ForEach(DetailsKind.allCases) { kind in
-                            Text(kind.rawValue).tag(kind)
-                        }
-                    }
-
-                    if detailsKind == .incrementBased {
-                        HStack {
-                            Text("Min kg")
-                            Spacer()
-                            TextField("0", value: $minKg, format: .number)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                        }
-                        HStack {
-                            Text("Max kg")
-                            Spacer()
-                            TextField("100", value: $maxKg, format: .number)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                        }
-                        HStack {
-                            Text("Increment kg")
-                            Spacer()
-                            TextField("2.5", value: $incrementKg, format: .number)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                        }
-                    }
-
-                    if detailsKind == .plateBased {
-                        HStack {
-                            Text("Bar weight kg")
-                            Spacer()
-                            TextField("20", value: $minKg, format: .number)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                        }
-                    }
+                Section("Notes (optional)") {
+                    TextField("e.g. broken cable, limited plates…", text: $notes)
                 }
             }
-            .navigationTitle("Add Equipment")
+            .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel", action: onCancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        let trimmed = equipmentTypeName
-                            .trimmingCharacters(in: .whitespaces)
-                            .lowercased()
-                            .replacingOccurrences(of: " ", with: "_")
-                        guard !trimmed.isEmpty else { return }
-
-                        // Map the raw string to an EquipmentType (known or unknown)
-                        let equipType = EquipmentType(rawString: trimmed)
-
-                        let details: EquipmentDetails
-                        switch detailsKind {
-                        case .bodyweightOnly:
-                            details = .bodyweightOnly
-                        case .incrementBased:
-                            details = .incrementBased(minKg: minKg, maxKg: maxKg, incrementKg: incrementKg)
-                        case .plateBased:
-                            // Default plate set for a manually-added plate-based item
-                            details = .plateBased(
-                                barWeightKg: minKg,
-                                availablePlatesKg: [1.25, 2.5, 5.0, 10.0, 20.0]
-                            )
-                        }
-
-                        let item = EquipmentItem(
-                            equipmentType: equipType,
-                            count: count,
-                            details: details,
-                            detectedByVision: false
-                        )
-                        onAdd(item)
-                    }
-                    .disabled(equipmentTypeName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Button(saveLabel) { commitSave() }
                 }
             }
         }
-    }
-}
-
-// MARK: - EquipmentDetails weight summary helper
-
-private extension EquipmentDetails {
-    /// A compact human-readable summary for display in list rows.
-    var weightSummary: String? {
-        switch self {
-        case .incrementBased(let min, let max, _):
-            return "\(formatKg(min))–\(formatKg(max)) kg"
-        case .plateBased(let bar, let plates):
-            let maxPlate = plates.max() ?? 0
-            let approxMax = bar + maxPlate * 2
-            return "up to ~\(formatKg(approxMax)) kg"
-        case .bodyweightOnly:
-            return nil
-        }
+        .onAppear { populateFromExisting() }
     }
 
-    private func formatKg(_ kg: Double) -> String {
-        kg.truncatingRemainder(dividingBy: 1) == 0
-            ? String(Int(kg))
-            : String(format: "%.1f", kg)
+    private func populateFromExisting() {
+        guard let item = existingItem else { return }
+        selectedType = item.equipmentType
+        count = item.count
+        notes = item.notes ?? ""
     }
-}
 
-// MARK: - EquipmentType display name helper
-
-private extension EquipmentType {
-    /// Human-readable display name derived from the enum case.
-    var displayName: String {
-        switch self {
-        case .dumbbellSet:    return "Dumbbell Set"
-        case .barbell:        return "Barbell"
-        case .ezCurlBar:      return "EZ Curl Bar"
-        case .cableMachine:   return "Cable Machine"
-        case .smithMachine:   return "Smith Machine"
-        case .legPress:       return "Leg Press"
-        case .adjustableBench: return "Adjustable Bench"
-        case .flatBench:      return "Flat Bench"
-        case .pullUpBar:      return "Pull-up Bar"
-        case .unknown(let raw):
-            return raw
-                .replacingOccurrences(of: "_", with: " ")
-                .capitalized
-        }
-    }
-}
-
-// MARK: - EquipmentType convenience init
-
-private extension EquipmentType {
-    /// Converts a raw snake_case string from the UI into the appropriate enum case.
-    init(rawString: String) {
-        switch rawString {
-        case "dumbbell_set":     self = .dumbbellSet
-        case "barbell":          self = .barbell
-        case "ez_curl_bar":      self = .ezCurlBar
-        case "cable_machine":    self = .cableMachine
-        case "smith_machine":    self = .smithMachine
-        case "leg_press":        self = .legPress
-        case "adjustable_bench": self = .adjustableBench
-        case "flat_bench":       self = .flatBench
-        case "pull_up_bar":      self = .pullUpBar
-        default:                 self = .unknown(rawString)
-        }
+    private func commitSave() {
+        let item = EquipmentItem(
+            id: existingItem?.id ?? UUID(),
+            equipmentType: selectedType,
+            count: count,
+            notes: notes.isEmpty ? nil : notes,
+            detectedByVision: existingItem?.detectedByVision ?? false
+        )
+        onSave(item)
     }
 }
 

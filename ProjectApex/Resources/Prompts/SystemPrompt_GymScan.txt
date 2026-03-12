@@ -1,0 +1,21 @@
+Identify every piece of STRENGTH TRAINING equipment in this image.
+Ignore ALL cardio equipment including: bikes, treadmills, rowers, 
+ellipticals, stair climbers, ski ergs, assault bikes.
+
+Return ONLY a valid JSON array. No explanation, no markdown fences.
+Each item must follow this exact structure:
+{"equipment_type": "<type>", "count": <integer>, "confidence": <float>}
+
+You MUST use ONLY these exact equipment_type string values:
+"dumbbell_set" | "barbell" | "ez_curl_bar" | "cable_machine_single" |
+"cable_machine_dual" | "smith_machine" | "leg_press" | "hack_squat" |
+"adjustable_bench" | "flat_bench" | "incline_bench" | "pull_up_bar" |
+"dip_station" | "resistance_bands" | "kettlebell_set" | "power_rack" |
+"squat_rack" | "lat_pulldown" | "seated_row" | "chest_press_machine" |
+"shoulder_press_machine" | "leg_extension" | "leg_curl" | "pec_deck" |
+"preacher_curl" | "cable_crossover"
+
+count = the number of individual units visible (2 benches = count 2).
+confidence = your confidence that this identification is correct (0.0-1.0).
+Only include items where confidence >= 0.7.
+If no strength training equipment is visible, return: []

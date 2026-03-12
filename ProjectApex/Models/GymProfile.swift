@@ -2,8 +2,10 @@
 // ProjectApex
 //
 // The canonical GymProfile schema. This is the single source of truth for all
-// equipment available to the user. Every AI-generated exercise prescription must
-// be achievable with equipment described here.
+// equipment available to the user. The scanner identifies WHAT equipment exists
+// (presence only). Weight ranges are NOT stored here — they are provided by
+// DefaultWeightIncrements as standard commercial gym defaults, and refined at
+// runtime through the GymFactStore weight correction loop.
 //
 // ISOLATION NOTE — SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor:
 // All types here are `nonisolated` to opt their synthesised (or custom) Codable
@@ -23,12 +25,29 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
     case dumbbellSet
     case barbell
     case ezCurlBar
-    case cableMachine
+    case cableMachine          // generic cable machine (single or dual)
+    case cableMachineDual
     case smithMachine
     case legPress
+    case hackSquat
     case adjustableBench
     case flatBench
+    case inclineBench
     case pullUpBar
+    case dipStation
+    case resistanceBands
+    case kettlebellSet
+    case powerRack
+    case sqatRack
+    case latPulldown
+    case seatedRow
+    case chestPressMachine
+    case shoulderPressMachine
+    case legExtension
+    case legCurl
+    case pecDeck
+    case preacherCurl
+    case cableCrossover
     case unknown(String)
 
     // ---------------------------------------------------------------------------
@@ -38,32 +57,66 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
     /// The canonical string key written to JSON for known cases.
     var typeKey: String {
         switch self {
-        case .dumbbellSet:      return "dumbbell_set"
-        case .barbell:          return "barbell"
-        case .ezCurlBar:        return "ez_curl_bar"
-        case .cableMachine:     return "cable_machine"
-        case .smithMachine:     return "smith_machine"
-        case .legPress:         return "leg_press"
-        case .adjustableBench:  return "adjustable_bench"
-        case .flatBench:        return "flat_bench"
-        case .pullUpBar:        return "pull_up_bar"
-        case .unknown:          return "unknown"
+        case .dumbbellSet:            return "dumbbell_set"
+        case .barbell:                return "barbell"
+        case .ezCurlBar:              return "ez_curl_bar"
+        case .cableMachine:           return "cable_machine_single"
+        case .cableMachineDual:       return "cable_machine_dual"
+        case .smithMachine:           return "smith_machine"
+        case .legPress:               return "leg_press"
+        case .hackSquat:              return "hack_squat"
+        case .adjustableBench:        return "adjustable_bench"
+        case .flatBench:              return "flat_bench"
+        case .inclineBench:           return "incline_bench"
+        case .pullUpBar:              return "pull_up_bar"
+        case .dipStation:             return "dip_station"
+        case .resistanceBands:        return "resistance_bands"
+        case .kettlebellSet:          return "kettlebell_set"
+        case .powerRack:              return "power_rack"
+        case .sqatRack:               return "squat_rack"
+        case .latPulldown:            return "lat_pulldown"
+        case .seatedRow:              return "seated_row"
+        case .chestPressMachine:      return "chest_press_machine"
+        case .shoulderPressMachine:   return "shoulder_press_machine"
+        case .legExtension:           return "leg_extension"
+        case .legCurl:                return "leg_curl"
+        case .pecDeck:                return "pec_deck"
+        case .preacherCurl:           return "preacher_curl"
+        case .cableCrossover:         return "cable_crossover"
+        case .unknown:                return "unknown"
         }
     }
 
     /// Human-readable display name.
     var displayName: String {
         switch self {
-        case .dumbbellSet:      return "Dumbbell Set"
-        case .barbell:          return "Barbell"
-        case .ezCurlBar:        return "EZ Curl Bar"
-        case .cableMachine:     return "Cable Machine"
-        case .smithMachine:     return "Smith Machine"
-        case .legPress:         return "Leg Press"
-        case .adjustableBench:  return "Adjustable Bench"
-        case .flatBench:        return "Flat Bench"
-        case .pullUpBar:        return "Pull-Up Bar"
-        case .unknown(let raw): return raw
+        case .dumbbellSet:            return "Dumbbell Set"
+        case .barbell:                return "Barbell"
+        case .ezCurlBar:              return "EZ Curl Bar"
+        case .cableMachine:           return "Cable Machine"
+        case .cableMachineDual:       return "Cable Machine (Dual)"
+        case .smithMachine:           return "Smith Machine"
+        case .legPress:               return "Leg Press"
+        case .hackSquat:              return "Hack Squat"
+        case .adjustableBench:        return "Adjustable Bench"
+        case .flatBench:              return "Flat Bench"
+        case .inclineBench:           return "Incline Bench"
+        case .pullUpBar:              return "Pull-Up Bar"
+        case .dipStation:             return "Dip Station"
+        case .resistanceBands:        return "Resistance Bands"
+        case .kettlebellSet:          return "Kettlebell Set"
+        case .powerRack:              return "Power Rack"
+        case .sqatRack:               return "Squat Rack"
+        case .latPulldown:            return "Lat Pulldown"
+        case .seatedRow:              return "Seated Row"
+        case .chestPressMachine:      return "Chest Press Machine"
+        case .shoulderPressMachine:   return "Shoulder Press Machine"
+        case .legExtension:           return "Leg Extension"
+        case .legCurl:                return "Leg Curl"
+        case .pecDeck:                return "Pec Deck"
+        case .preacherCurl:           return "Preacher Curl"
+        case .cableCrossover:         return "Cable Crossover"
+        case .unknown(let raw):       return raw
         }
     }
 
@@ -71,19 +124,47 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
     // MARK: Init from String
     // ---------------------------------------------------------------------------
 
+    /// All known (non-unknown) equipment types, for use in pickers.
+    static let knownCases: [EquipmentType] = [
+        .dumbbellSet, .barbell, .ezCurlBar, .cableMachine, .cableMachineDual,
+        .smithMachine, .legPress, .hackSquat, .adjustableBench, .flatBench,
+        .inclineBench, .pullUpBar, .dipStation, .resistanceBands, .kettlebellSet,
+        .powerRack, .sqatRack, .latPulldown, .seatedRow, .chestPressMachine,
+        .shoulderPressMachine, .legExtension, .legCurl, .pecDeck, .preacherCurl,
+        .cableCrossover
+    ]
+
     init(typeKey: String, rawValue: String? = nil) {
         switch typeKey {
-        case "dumbbell_set":    self = .dumbbellSet
-        case "barbell":         self = .barbell
-        case "ez_curl_bar":     self = .ezCurlBar
-        case "cable_machine":   self = .cableMachine
-        case "smith_machine":   self = .smithMachine
-        case "leg_press":       self = .legPress
-        case "adjustable_bench": self = .adjustableBench
-        case "flat_bench":      self = .flatBench
-        case "pull_up_bar":     self = .pullUpBar
-        case "unknown":         self = .unknown(rawValue ?? typeKey)
-        default:                self = .unknown(typeKey)
+        case "dumbbell_set":           self = .dumbbellSet
+        case "barbell":                self = .barbell
+        case "ez_curl_bar":            self = .ezCurlBar
+        case "cable_machine_single",
+             "cable_machine":          self = .cableMachine
+        case "cable_machine_dual":     self = .cableMachineDual
+        case "smith_machine":          self = .smithMachine
+        case "leg_press":              self = .legPress
+        case "hack_squat":             self = .hackSquat
+        case "adjustable_bench":       self = .adjustableBench
+        case "flat_bench":             self = .flatBench
+        case "incline_bench":          self = .inclineBench
+        case "pull_up_bar":            self = .pullUpBar
+        case "dip_station":            self = .dipStation
+        case "resistance_bands":       self = .resistanceBands
+        case "kettlebell_set":         self = .kettlebellSet
+        case "power_rack":             self = .powerRack
+        case "squat_rack":             self = .sqatRack
+        case "lat_pulldown":           self = .latPulldown
+        case "seated_row":             self = .seatedRow
+        case "chest_press_machine":    self = .chestPressMachine
+        case "shoulder_press_machine": self = .shoulderPressMachine
+        case "leg_extension":          self = .legExtension
+        case "leg_curl":               self = .legCurl
+        case "pec_deck":               self = .pecDeck
+        case "preacher_curl":          self = .preacherCurl
+        case "cable_crossover":        self = .cableCrossover
+        case "unknown":                self = .unknown(rawValue ?? typeKey)
+        default:                       self = .unknown(typeKey)
         }
     }
 }
@@ -115,115 +196,12 @@ extension EquipmentType: Codable {
     }
 }
 
-// MARK: - EquipmentDetails
-
-/// The physical parameters of a piece of equipment.
-///
-/// Different equipment categories require fundamentally different arithmetic
-/// for computing available weights, so this is an enum with associated values
-/// rather than a flat struct with many optionals.
-nonisolated enum EquipmentDetails: Equatable, Hashable, Sendable {
-
-    /// Pin-loaded or dumbbell-style equipment: discrete weights from min to max
-    /// at a fixed increment. E.g., dumbbells 2.5–45 kg in 2.5 kg steps.
-    case incrementBased(minKg: Double, maxKg: Double, incrementKg: Double)
-
-    /// Barbell or plate-loaded equipment. `availablePlatesKg` is the full set of
-    /// plates available (listed as single-plate weights; they always come in pairs).
-    /// E.g., plates: [25, 20, 15, 10, 5, 2.5, 1.25] on a 20 kg bar.
-    case plateBased(barWeightKg: Double, availablePlatesKg: [Double])
-
-    /// Bodyweight-only equipment (pull-up bars, benches used for bodyweight moves).
-    case bodyweightOnly
-}
-
-// MARK: EquipmentDetails: Codable
-
-extension EquipmentDetails: Codable {
-    // Discriminator key: "kind"
-    // incrementBased: { "kind": "increment_based", "min_kg": .., "max_kg": .., "increment_kg": .. }
-    // plateBased:     { "kind": "plate_based", "bar_weight_kg": .., "available_plates_kg": [..] }
-    // bodyweightOnly: { "kind": "bodyweight_only" }
-
-    private enum CodingKeys: String, CodingKey {
-        case kind
-        case minKg          = "min_kg"
-        case maxKg          = "max_kg"
-        case incrementKg    = "increment_kg"
-        case barWeightKg    = "bar_weight_kg"
-        case availablePlatesKg = "available_plates_kg"
-    }
-
-    private enum Kind: String {
-        case incrementBased  = "increment_based"
-        case plateBased      = "plate_based"
-        case bodyweightOnly  = "bodyweight_only"
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        switch self {
-        case .incrementBased(let min, let max, let increment):
-            try container.encode(Kind.incrementBased.rawValue, forKey: .kind)
-            try container.encode(min, forKey: .minKg)
-            try container.encode(max, forKey: .maxKg)
-            try container.encode(increment, forKey: .incrementKg)
-        case .plateBased(let barWeight, let plates):
-            try container.encode(Kind.plateBased.rawValue, forKey: .kind)
-            try container.encode(barWeight, forKey: .barWeightKg)
-            try container.encode(plates, forKey: .availablePlatesKg)
-        case .bodyweightOnly:
-            try container.encode(Kind.bodyweightOnly.rawValue, forKey: .kind)
-        }
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        let kindRaw = try container.decode(String.self, forKey: .kind)
-        guard let kind = Kind(rawValue: kindRaw) else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .kind,
-                in: container,
-                debugDescription: "Unknown EquipmentDetails kind: '\(kindRaw)'"
-            )
-        }
-        switch kind {
-        case .incrementBased:
-            let min = try container.decode(Double.self, forKey: .minKg)
-            let max = try container.decode(Double.self, forKey: .maxKg)
-            let inc = try container.decode(Double.self, forKey: .incrementKg)
-            self = .incrementBased(minKg: min, maxKg: max, incrementKg: inc)
-        case .plateBased:
-            let bar    = try container.decode(Double.self, forKey: .barWeightKg)
-            let plates = try container.decode([Double].self, forKey: .availablePlatesKg)
-            self = .plateBased(barWeightKg: bar, availablePlatesKg: plates)
-        case .bodyweightOnly:
-            self = .bodyweightOnly
-        }
-    }
-}
-
-// MARK: - BarbellConstraint
-
-/// A value-type snapshot of the barbell configuration extracted from a GymProfile.
-/// Passed to LLM prompts and used in equipment validation to communicate what
-/// barbell loads are physically achievable.
-nonisolated struct BarbellConstraint: Codable, Equatable, Hashable, Sendable {
-    /// Weight of the barbell itself (bar only, no plates), in kg.
-    let barWeightKg: Double
-    /// Available plate denominations (single-plate weights in kg).
-    /// Each denomination can be loaded on both sides.
-    let availablePlatesKg: [Double]
-
-    /// Maximum achievable total load: bar + both sides fully loaded.
-    var maxLoadKg: Double {
-        barWeightKg + 2.0 * availablePlatesKg.reduce(0, +)
-    }
-}
-
 // MARK: - EquipmentItem
 
 /// A single piece of equipment detected in the gym scan.
+/// The scanner records presence only — no weight ranges.
+/// Weight defaults come from DefaultWeightIncrements; real availability
+/// is refined at runtime via GymFactStore.
 nonisolated struct EquipmentItem: Codable, Identifiable, Equatable, Hashable, Sendable {
 
     /// Stable identity for SwiftUI lists and Supabase upserts.
@@ -235,31 +213,31 @@ nonisolated struct EquipmentItem: Codable, Identifiable, Equatable, Hashable, Se
     /// Number of units present in the gym (e.g., 4 squat racks).
     var count: Int
 
-    /// Physical parameters used for weight arithmetic.
-    var details: EquipmentDetails
+    /// Optional freeform notes (e.g., "left side broken").
+    var notes: String?
 
-    /// Whether this item was added by the Vision API (vs. manually by the user).
+    /// Whether this item was detected by the Vision API (vs. manually added).
     var detectedByVision: Bool
 
     init(
         id: UUID = UUID(),
         equipmentType: EquipmentType,
         count: Int = 1,
-        details: EquipmentDetails,
+        notes: String? = nil,
         detectedByVision: Bool
     ) {
         self.id = id
         self.equipmentType = equipmentType
         self.count = count
-        self.details = details
+        self.notes = notes
         self.detectedByVision = detectedByVision
     }
 
     enum CodingKeys: String, CodingKey {
         case id
-        case equipmentType   = "equipment_type"
+        case equipmentType    = "equipment_type"
         case count
-        case details
+        case notes
         case detectedByVision = "detected_by_vision"
     }
 }
@@ -269,8 +247,8 @@ nonisolated struct EquipmentItem: Codable, Identifiable, Equatable, Hashable, Se
 /// The master equipment profile for the user's gym.
 ///
 /// Built during onboarding, cached locally, and sent as context in every
-/// AI inference payload (PRD Section 5.1). All exercises in the generated
-/// 12-week program must be achievable with this equipment.
+/// AI inference payload. Records equipment presence only — weight ranges
+/// are provided by DefaultWeightIncrements.
 nonisolated struct GymProfile: Codable, Equatable, Hashable, Sendable {
 
     var id: UUID
@@ -310,123 +288,19 @@ nonisolated struct GymProfile: Codable, Equatable, Hashable, Sendable {
 
 extension GymProfile {
 
-    // ---------------------------------------------------------------------------
-    // MARK: Barbell Constraint
-    // ---------------------------------------------------------------------------
-
-    /// Returns the barbell load constraint derived from this profile's barbell item,
-    /// or nil if no barbell is present.
-    ///
-    /// Used by `ProgramGenerationService` to pass equipment bounds to the LLM and
-    /// by tests to verify the profile's barbell configuration in one call.
-    var barbellLoadConstraint: BarbellConstraint? {
-        guard let item = item(for: .barbell),
-              case .plateBased(let barWeight, let plates) = item.details else {
-            return nil
-        }
-        return BarbellConstraint(barWeightKg: barWeight, availablePlatesKg: plates)
-    }
-
-    // ---------------------------------------------------------------------------
-    // MARK: Lookup
-    // ---------------------------------------------------------------------------
-
     /// Returns true if the profile contains at least one item of the given type.
     func hasEquipment(_ type: EquipmentType) -> Bool {
         equipment.contains { $0.equipmentType == type }
     }
 
+    /// Returns the count of items of the given type (0 if absent).
+    func count(of type: EquipmentType) -> Int {
+        equipment.first { $0.equipmentType == type }?.count ?? 0
+    }
+
     /// Returns the first equipment item matching the given type, or nil.
     nonisolated func item(for type: EquipmentType) -> EquipmentItem? {
         equipment.first { $0.equipmentType == type }
-    }
-
-    // ---------------------------------------------------------------------------
-    // MARK: Weight Arithmetic
-    // ---------------------------------------------------------------------------
-
-    /// Returns a sorted array of all physically achievable weights for the
-    /// given equipment type. Used by `EquipmentRounder` to snap AI prescriptions
-    /// to the nearest real weight.
-    ///
-    /// - `incrementBased`: steps from `minKg` to `maxKg` at `incrementKg`.
-    /// - `plateBased`: all achievable totals using pairs of the available plates
-    ///   added to the bar. Plates may be combined in any quantity.
-    /// - `bodyweightOnly`: returns `[0.0]` (bodyweight = 0 additional kg).
-    /// - No match: returns `[]`.
-    func availableWeights(for equipmentType: EquipmentType) -> [Double] {
-        guard let item = item(for: equipmentType) else { return [] }
-
-        switch item.details {
-        case .incrementBased(let min, let max, let increment):
-            guard increment > 0 else { return [min, max] }
-            var weights: [Double] = []
-            var current = min
-            while current <= max + 0.001 {
-                weights.append((current * 100).rounded() / 100) // Round to 2dp
-                current += increment
-            }
-            return weights.sorted()
-
-        case .plateBased(let barWeight, let plates):
-            return Self.barbellWeights(barWeight: barWeight, plates: plates)
-
-        case .bodyweightOnly:
-            return [0.0]
-        }
-    }
-
-    /// Returns the absolute maximum achievable weight for the given type, or nil
-    /// if the type is not in this profile.
-    func maxWeightKg(for equipmentType: EquipmentType) -> Double? {
-        guard let item = item(for: equipmentType) else { return nil }
-        switch item.details {
-        case .incrementBased(_, let max, _):
-            return max
-        case .plateBased(let bar, let plates):
-            // Max = bar + 2 × sum of all available plates (one full set per side)
-            return bar + 2.0 * plates.reduce(0, +)
-        case .bodyweightOnly:
-            return 0.0
-        }
-    }
-
-    // ---------------------------------------------------------------------------
-    // MARK: Private: Barbell weight set generation
-    // ---------------------------------------------------------------------------
-
-    /// Generates every achievable barbell total by exhaustively combining plate pairs.
-    ///
-    /// Algorithm: dynamic programming on achievable per-side loads.
-    /// Each plate denomination can be used multiple times (one pair per addition).
-    /// Complexity is bounded in practice because plate sets are small (≤ 10 types).
-    private static func barbellWeights(barWeight: Double, plates: [Double]) -> [Double] {
-        // We work in integer 0.25 kg units to avoid floating-point accumulation errors.
-        // Scale factor: 1 kg = 4 units (handles 0.25 kg micro-plates).
-        let scale = 4
-        let maxPerSideUnits = plates.reduce(0) { $0 + Int(($1 * Double(scale)).rounded()) }
-
-        // dp[load] = true if `load` units per side is achievable
-        var dp = Array(repeating: false, count: maxPerSideUnits + 1)
-        dp[0] = true
-
-        let plateUnits = plates.map { Int(($0 * Double(scale)).rounded()) }
-        for unit in plateUnits {
-            guard unit > 0 else { continue }
-            // Unbounded knapsack: iterate forward so a plate can be used multiple times
-            for load in unit...maxPerSideUnits {
-                if dp[load - unit] { dp[load] = true }
-            }
-        }
-
-        let barUnits = Int((barWeight * Double(scale)).rounded())
-        var result: [Double] = []
-        for load in 0...maxPerSideUnits where dp[load] {
-            let totalUnits = barUnits + load * 2  // both sides
-            let totalKg = Double(totalUnits) / Double(scale)
-            result.append(totalKg)
-        }
-        return result.sorted()
     }
 }
 
@@ -446,38 +320,30 @@ extension GymProfile {
                     id: UUID(uuidString: "11111111-0000-0000-0000-000000000001") ?? UUID(),
                     equipmentType: .dumbbellSet,
                     count: 1,
-                    details: .incrementBased(minKg: 2.5, maxKg: 45.0, incrementKg: 2.5),
                     detectedByVision: true
                 ),
                 EquipmentItem(
                     id: UUID(uuidString: "11111111-0000-0000-0000-000000000002") ?? UUID(),
                     equipmentType: .barbell,
                     count: 3,
-                    details: .plateBased(
-                        barWeightKg: 20.0,
-                        availablePlatesKg: [25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25]
-                    ),
                     detectedByVision: true
                 ),
                 EquipmentItem(
                     id: UUID(uuidString: "11111111-0000-0000-0000-000000000003") ?? UUID(),
                     equipmentType: .adjustableBench,
                     count: 4,
-                    details: .bodyweightOnly,
                     detectedByVision: true
                 ),
                 EquipmentItem(
                     id: UUID(uuidString: "11111111-0000-0000-0000-000000000004") ?? UUID(),
                     equipmentType: .cableMachine,
                     count: 2,
-                    details: .incrementBased(minKg: 2.5, maxKg: 90.0, incrementKg: 2.5),
                     detectedByVision: true
                 ),
                 EquipmentItem(
                     id: UUID(uuidString: "11111111-0000-0000-0000-000000000005") ?? UUID(),
                     equipmentType: .pullUpBar,
                     count: 2,
-                    details: .bodyweightOnly,
                     detectedByVision: true
                 )
             ],
@@ -488,8 +354,6 @@ extension GymProfile {
     // ---------------------------------------------------------------------------
     // MARK: Canonical JSON string matching mockProfile()
     // ---------------------------------------------------------------------------
-    // Use this as the expected output when prompting the Vision API, and as the
-    // reference fixture in unit tests that validate the full encode/decode round-trip.
 
     static let mockJSONResponse: String = """
     {
@@ -503,50 +367,31 @@ extension GymProfile {
           "id": "11111111-0000-0000-0000-000000000001",
           "equipment_type": { "type": "dumbbell_set" },
           "count": 1,
-          "detected_by_vision": true,
-          "details": {
-            "kind": "increment_based",
-            "min_kg": 2.5,
-            "max_kg": 45.0,
-            "increment_kg": 2.5
-          }
+          "detected_by_vision": true
         },
         {
           "id": "11111111-0000-0000-0000-000000000002",
           "equipment_type": { "type": "barbell" },
           "count": 3,
-          "detected_by_vision": true,
-          "details": {
-            "kind": "plate_based",
-            "bar_weight_kg": 20.0,
-            "available_plates_kg": [25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25]
-          }
+          "detected_by_vision": true
         },
         {
           "id": "11111111-0000-0000-0000-000000000003",
           "equipment_type": { "type": "adjustable_bench" },
           "count": 4,
-          "detected_by_vision": true,
-          "details": { "kind": "bodyweight_only" }
+          "detected_by_vision": true
         },
         {
           "id": "11111111-0000-0000-0000-000000000004",
-          "equipment_type": { "type": "cable_machine" },
+          "equipment_type": { "type": "cable_machine_single" },
           "count": 2,
-          "detected_by_vision": true,
-          "details": {
-            "kind": "increment_based",
-            "min_kg": 2.5,
-            "max_kg": 90.0,
-            "increment_kg": 2.5
-          }
+          "detected_by_vision": true
         },
         {
           "id": "11111111-0000-0000-0000-000000000005",
           "equipment_type": { "type": "pull_up_bar" },
           "count": 2,
-          "detected_by_vision": true,
-          "details": { "kind": "bodyweight_only" }
+          "detected_by_vision": true
         }
       ]
     }

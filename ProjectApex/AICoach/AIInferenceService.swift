@@ -2,7 +2,7 @@
 // ProjectApex — AICoach Feature
 //
 // Orchestrates the full "set prescription" inference pipeline:
-//   WorkoutContext → JSON → LLM → SetPrescription → EquipmentRounder → caller
+//   WorkoutContext → JSON → LLM → SetPrescription → caller
 //
 // Key design decisions:
 //   • Swift actor for safe concurrent LLM calls (no data races on callCount, etc.)
@@ -10,7 +10,8 @@
 //   • Retries up to `maxRetries` times on decode / validation failure, appending
 //     the previous error to the follow-up prompt for in-context correction.
 //   • Safety gate: if safetyFlags contains .painReported, rest is raised to ≥180 s.
-//   • EquipmentRounder is applied after validation to clamp to achievable weights.
+//   • Weight rounding is NOT done here — the GymFactStore + WeightCorrectionView
+//     handle unavailable weights at runtime during active sets.
 //
 // ISOLATION NOTE:
 // All DTO types (WorkoutContext, SetPrescription, …) are `nonisolated` to opt
@@ -463,18 +464,15 @@ actor AIInferenceService {
     // MARK: Dependencies
 
     private let provider: any LLMProvider
-    private let gymProfile: GymProfile
     let maxRetries: Int
 
     // MARK: Init
 
     init(
         provider: any LLMProvider,
-        gymProfile: GymProfile,
         maxRetries: Int = 2
     ) {
         self.provider = provider
-        self.gymProfile = gymProfile
         self.maxRetries = maxRetries
     }
 
@@ -567,24 +565,76 @@ actor AIInferenceService {
                 continue
             }
 
-            // 6. Equipment rounding
-            let equipmentType = EquipmentType(rawString: context.currentExercise.equipmentTypeKey)
-            let rounder = EquipmentRounder(gymProfile: gymProfile)
-            let rounded = rounder.round(
-                aiPrescribedWeightKg: prescription.weightKg,
-                for: equipmentType
-            )
-            prescription.weightKg = rounded.roundedWeightKg
+            // 6. Safety gate: pain reported → rest ≥ 180 s
+            if prescription.safetyFlags.contains(.painReported) {
+                prescription.restSeconds = max(prescription.restSeconds, 180)
+            }
 
-            // 7. Safety gate: pain reported → rest ≥ 180 s
+            // 7. Return successful prescription.
+            // Note: weight availability is handled at runtime via GymFactStore
+            // + WeightCorrectionView — not here.
+            return .success(prescription)
+        }
+
+        return .fallback(reason: .maxRetriesExceeded(lastError: lastErrorDescription))
+    }
+
+    // MARK: - Public API: Weight Adaptation
+
+    /// Produces a re-prescribed `SetPrescription` given a weight adaptation payload.
+    /// Used by `WorkoutSessionManager.handleWeightCorrection()` when the user
+    /// reports a prescribed weight is unavailable.
+    ///
+    /// The `userPayload` is the full adaptation instruction string; `workoutContext`
+    /// provides the system context. Returns `.fallback` if the LLM call fails or
+    /// times out (the caller should apply the client-side formula fallback).
+    func prescribeAdaptation(
+        userPayload: String,
+        workoutContext: WorkoutContext
+    ) async -> PrescriptionResult {
+        let systemPrompt = Self.systemPrompt
+
+        do {
+            let rawResponse = try await withTimeout(seconds: 8.0) {
+                try await self.provider.complete(
+                    systemPrompt: systemPrompt,
+                    userPayload: userPayload
+                )
+            }
+
+            let stripped = Self.stripMarkdownFences(rawResponse)
+            guard let responseData = stripped.data(using: .utf8) else {
+                return .fallback(reason: .encodingFailed("Adaptation response could not be decoded."))
+            }
+
+            let decoder: JSONDecoder = {
+                let d = JSONDecoder()
+                d.dateDecodingStrategy = .iso8601
+                return d
+            }()
+
+            guard let wrapper = try? decoder.decode(SetPrescriptionWrapper.self, from: responseData) else {
+                return .fallback(reason: .maxRetriesExceeded(lastError: "Adaptation decode failed."))
+            }
+
+            var prescription = wrapper.setPrescription
+            do {
+                try prescription.validate()
+            } catch {
+                return .fallback(reason: .maxRetriesExceeded(lastError: "Adaptation validation failed: \(error.localizedDescription)"))
+            }
+
             if prescription.safetyFlags.contains(.painReported) {
                 prescription.restSeconds = max(prescription.restSeconds, 180)
             }
 
             return .success(prescription)
-        }
 
-        return .fallback(reason: .maxRetriesExceeded(lastError: lastErrorDescription))
+        } catch is TimeoutError {
+            return .fallback(reason: .timeout)
+        } catch {
+            return .fallback(reason: .llmProviderError(error.localizedDescription))
+        }
     }
 
     // MARK: - Private: Timeout Wrapper
@@ -671,18 +721,28 @@ private nonisolated struct SetPrescriptionWrapper: Codable {
 
 extension EquipmentType {
     /// Constructs an EquipmentType from a snake_case key stored in WorkoutContext.
+    /// Forwards to the canonical typeKey initialiser in GymProfile.swift.
     nonisolated init(rawString: String) {
-        switch rawString {
-        case "dumbbell_set":      self = .dumbbellSet
-        case "barbell":           self = .barbell
-        case "ez_curl_bar":       self = .ezCurlBar
-        case "cable_machine":     self = .cableMachine
-        case "smith_machine":     self = .smithMachine
-        case "leg_press":         self = .legPress
-        case "adjustable_bench":  self = .adjustableBench
-        case "flat_bench":        self = .flatBench
-        case "pull_up_bar":       self = .pullUpBar
-        default:                  self = .unknown(rawString)
-        }
+        self.init(typeKey: rawString)
+    }
+}
+
+// MARK: - GymProfileConstraints
+
+/// Equipment constraints injected into every WorkoutContext payload.
+/// Tells the AI what equipment is present and what weight corrections are known.
+nonisolated struct GymProfileConstraints: Codable, Sendable {
+
+    /// List of equipment type keys available in this gym.
+    /// e.g. ["dumbbell_set", "barbell", "cable_machine_single"]
+    let availableEquipment: [String]
+
+    /// Confirmed weight facts from GymFactStore, injected per exercise.
+    /// e.g. ["16.0kg not available — use 15.0kg instead"]
+    let confirmedWeightFacts: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case availableEquipment  = "available_equipment"
+        case confirmedWeightFacts = "confirmed_weight_facts"
     }
 }

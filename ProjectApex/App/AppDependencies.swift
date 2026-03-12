@@ -7,11 +7,7 @@
 //
 // Init order:
 //   KeychainService → SupabaseClient → HealthKitService
-//     → MemoryService → SpeechService → AIInferenceService
-//
-// After a successful gym scan, call `reinitialiseAIInference(with:)` so that
-// the EquipmentRounder inside AIInferenceService reflects the new GymProfile
-// without requiring a full app restart.
+//     → MemoryService → SpeechService → GymFactStore → AIInferenceService
 
 import SwiftUI
 
@@ -26,7 +22,7 @@ final class AppDependencies {
     let healthKitService: HealthKitService
     let memoryService: MemoryService
     let speechService: SpeechService
-    /// Mutable so it can be replaced when a new GymProfile is confirmed.
+    let gymFactStore: GymFactStore
     private(set) var aiInferenceService: AIInferenceService
 
     // MARK: Private: Stored Anthropic key for re-init
@@ -54,28 +50,24 @@ final class AppDependencies {
         // 5. Speech — no dependencies
         self.speechService = SpeechService()
 
-        // 6. AI Inference — needs Anthropic key + GymProfile
+        // 6. GymFactStore — persists user weight corrections
+        self.gymFactStore = GymFactStore()
+
+        // 7. AI Inference — needs Anthropic key
         let anthropicKey = (try? keychain.retrieve(.anthropicAPIKey)) ?? ""
         self.anthropicKey = anthropicKey
-        let gymProfile = GymProfile.loadFromUserDefaults() ?? GymProfile.mockProfile()
         self.aiInferenceService = AIInferenceService(
-            provider: AnthropicProvider(apiKey: anthropicKey),
-            gymProfile: gymProfile
+            provider: AnthropicProvider(apiKey: anthropicKey)
         )
     }
 
-    // MARK: - Profile-driven re-initialisation
+    // MARK: - Re-initialisation
 
-    /// Replaces the current `AIInferenceService` with a fresh instance built
-    /// from `newProfile`. Call this immediately after a new GymProfile has been
-    /// confirmed and saved so the EquipmentRounder inside the service uses the
-    /// latest equipment data without requiring an app restart.
-    ///
-    /// - Parameter newProfile: The newly confirmed and saved `GymProfile`.
-    func reinitialiseAIInference(with newProfile: GymProfile) {
+    /// Replaces the current `AIInferenceService` with a fresh instance.
+    /// Call this if the Anthropic API key changes (e.g. after re-login).
+    func reinitialiseAIInference() {
         aiInferenceService = AIInferenceService(
-            provider: AnthropicProvider(apiKey: anthropicKey),
-            gymProfile: newProfile
+            provider: AnthropicProvider(apiKey: anthropicKey)
         )
     }
 }

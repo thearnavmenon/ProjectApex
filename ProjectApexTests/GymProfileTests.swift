@@ -1,14 +1,13 @@
 // GymProfileTests.swift
 // ProjectApexTests
 //
-// P0-T04: Lock GymProfile Codable schema & unit test round-trip
+// Unit tests for the GymProfile model (presence-only architecture).
 //
 // Covers:
 //   • EquipmentType.unknown encode/decode contract
 //   • GymProfile full encode → JSON → decode round-trip
 //   • GymProfile+Persistence: saveToUserDefaults / loadFromUserDefaults / clear
-//   • availableWeights(for:), hasEquipment(_:), maxWeightKg(for:)
-//   • barbellLoadConstraint computed property
+//   • hasEquipment(_:), item(for:), count(of:) helpers
 //   • mockProfile() factory returns a valid, Equatable profile
 
 import XCTest
@@ -123,7 +122,6 @@ final class GymProfileCodableTests: XCTestCase {
         let item = EquipmentItem(
             equipmentType: .unknown("atlas_stone"),
             count: 1,
-            details: .bodyweightOnly,
             detectedByVision: false
         )
         // Use a fixed whole-second Date so ISO8601 round-trip doesn't lose sub-seconds.
@@ -140,40 +138,27 @@ final class GymProfileCodableTests: XCTestCase {
         XCTAssertEqual(decoded.equipment.first?.equipmentType, .unknown("atlas_stone"))
     }
 
-    func test_equipmentDetails_incrementBased_roundTrips() throws {
+    func test_equipmentItem_withNotes_roundTrips() throws {
         let item = EquipmentItem(
             equipmentType: .dumbbellSet,
             count: 1,
-            details: .incrementBased(minKg: 2.5, maxKg: 45.0, incrementKg: 2.5),
+            notes: "Fixed dumbbells only, 5–50 kg",
             detectedByVision: true
         )
         let data = try JSONEncoder.gymProfile.encode(item)
         let decoded = try JSONDecoder.gymProfile.decode(EquipmentItem.self, from: data)
-        XCTAssertEqual(decoded.details, item.details)
+        XCTAssertEqual(decoded.notes, item.notes)
     }
 
-    func test_equipmentDetails_plateBased_roundTrips() throws {
-        let item = EquipmentItem(
-            equipmentType: .barbell,
-            count: 1,
-            details: .plateBased(barWeightKg: 20.0, availablePlatesKg: [25.0, 20.0, 10.0, 5.0, 2.5]),
-            detectedByVision: true
-        )
-        let data = try JSONEncoder.gymProfile.encode(item)
-        let decoded = try JSONDecoder.gymProfile.decode(EquipmentItem.self, from: data)
-        XCTAssertEqual(decoded.details, item.details)
-    }
-
-    func test_equipmentDetails_bodyweightOnly_roundTrips() throws {
+    func test_equipmentItem_withoutNotes_roundTrips() throws {
         let item = EquipmentItem(
             equipmentType: .pullUpBar,
             count: 1,
-            details: .bodyweightOnly,
             detectedByVision: true
         )
         let data = try JSONEncoder.gymProfile.encode(item)
         let decoded = try JSONDecoder.gymProfile.decode(EquipmentItem.self, from: data)
-        XCTAssertEqual(decoded.details, item.details)
+        XCTAssertNil(decoded.notes)
     }
 }
 
@@ -259,123 +244,29 @@ final class GymProfileEquipmentHelperTests: XCTestCase {
         XCTAssertFalse(profile.hasEquipment(.ezCurlBar))
     }
 
-    // MARK: availableWeights
+    // MARK: item(for:)
 
-    func test_availableWeights_dumbbells_startAtMin() {
-        let weights = profile.availableWeights(for: .dumbbellSet)
-        XCTAssertFalse(weights.isEmpty)
-        XCTAssertEqual(weights.first!, 2.5, accuracy: 0.001)
+    func test_itemFor_returnsPresentItem() {
+        let item = profile.item(for: .dumbbellSet)
+        XCTAssertNotNil(item, "item(for:) must return non-nil for a present equipment type")
+        XCTAssertEqual(item?.equipmentType, .dumbbellSet)
     }
 
-    func test_availableWeights_dumbbells_endAtMax() {
-        let weights = profile.availableWeights(for: .dumbbellSet)
-        XCTAssertEqual(weights.last!, 45.0, accuracy: 0.001)
+    func test_itemFor_returnsNilForAbsentType() {
+        XCTAssertNil(profile.item(for: .smithMachine))
     }
 
-    func test_availableWeights_dumbbells_correctIncrement() {
-        let weights = profile.availableWeights(for: .dumbbellSet)
-        // All consecutive differences should be 2.5 kg
-        for i in 1..<weights.count {
-            XCTAssertEqual(weights[i] - weights[i-1], 2.5, accuracy: 0.001,
-                "Increment between index \(i-1) and \(i) must be 2.5 kg")
-        }
+    // MARK: count(of:)
+
+    func test_countOf_returnsCorrectCount() {
+        // mockProfile has adjustableBench count = 4
+        XCTAssertEqual(profile.count(of: .adjustableBench), 4,
+            "count(of:) must return the item count from the profile")
     }
 
-    func test_availableWeights_cableMachine_correctRange() {
-        let weights = profile.availableWeights(for: .cableMachine)
-        XCTAssertEqual(weights.first!, 2.5, accuracy: 0.001)
-        XCTAssertEqual(weights.last!, 90.0, accuracy: 0.001)
-    }
-
-    func test_availableWeights_barbell_containsBar() {
-        // Bar alone (no plates) = 20 kg — must be in the list
-        let weights = profile.availableWeights(for: .barbell)
-        XCTAssertTrue(weights.contains(where: { abs($0 - 20.0) < 0.001 }),
-            "Barbell weights must include bar weight (20 kg)")
-    }
-
-    func test_availableWeights_barbell_containsCommonLoad() {
-        // 20 kg bar + 2×20 kg plates = 60 kg
-        let weights = profile.availableWeights(for: .barbell)
-        XCTAssertTrue(weights.contains(where: { abs($0 - 60.0) < 0.001 }),
-            "Barbell weights must include 60 kg (bar + 2×20 kg)")
-    }
-
-    func test_availableWeights_bodyweightOnly_returnsZeroArray() {
-        let weights = profile.availableWeights(for: .pullUpBar)
-        XCTAssertEqual(weights, [0.0], "Bodyweight-only equipment must return [0.0]")
-    }
-
-    func test_availableWeights_absentEquipment_returnsEmpty() {
-        let weights = profile.availableWeights(for: .smithMachine)
-        XCTAssertTrue(weights.isEmpty, "Absent equipment must return empty array")
-    }
-
-    // MARK: maxWeightKg
-
-    func test_maxWeightKg_dumbbells() {
-        let max = profile.maxWeightKg(for: .dumbbellSet)
-        XCTAssertEqual(try XCTUnwrap(max), 45.0, accuracy: 0.001)
-    }
-
-    func test_maxWeightKg_cableMachine() {
-        let max = profile.maxWeightKg(for: .cableMachine)
-        XCTAssertEqual(try XCTUnwrap(max), 90.0, accuracy: 0.001)
-    }
-
-    func test_maxWeightKg_barbell_equalsBarPlusTwoFullSets() {
-        // bar=20, plates=[25,20,15,10,5,2.5,1.25]
-        // max = 20 + 2 × (25+20+15+10+5+2.5+1.25) = 20 + 2 × 78.75 = 177.5
-        let max = profile.maxWeightKg(for: .barbell)
-        XCTAssertEqual(try XCTUnwrap(max), 177.5, accuracy: 0.001)
-    }
-
-    func test_maxWeightKg_bodyweightOnly_returnsZero() {
-        let max = profile.maxWeightKg(for: .pullUpBar)
-        XCTAssertEqual(try XCTUnwrap(max), 0.0, accuracy: 0.001)
-    }
-
-    func test_maxWeightKg_absentEquipment_returnsNil() {
-        XCTAssertNil(profile.maxWeightKg(for: .smithMachine))
-    }
-
-    // MARK: barbellLoadConstraint
-
-    func test_barbellLoadConstraint_presentWhenBarbellExists() {
-        let constraint = profile.barbellLoadConstraint
-        XCTAssertNotNil(constraint, "barbellLoadConstraint must be non-nil when profile contains a barbell")
-    }
-
-    func test_barbellLoadConstraint_correctBarWeight() throws {
-        let constraint = try XCTUnwrap(profile.barbellLoadConstraint)
-        XCTAssertEqual(constraint.barWeightKg, 20.0, accuracy: 0.001)
-    }
-
-    func test_barbellLoadConstraint_correctPlates() throws {
-        let constraint = try XCTUnwrap(profile.barbellLoadConstraint)
-        XCTAssertEqual(constraint.availablePlatesKg, [25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25])
-    }
-
-    func test_barbellLoadConstraint_maxLoadKg() throws {
-        // bar=20, plates=[25,20,15,10,5,2.5,1.25] → sum/side=78.75 → max=177.5
-        let constraint = try XCTUnwrap(profile.barbellLoadConstraint)
-        XCTAssertEqual(constraint.maxLoadKg, 177.5, accuracy: 0.001)
-    }
-
-    func test_barbellLoadConstraint_nilWhenNoBarbellInProfile() {
-        let noBarbellProfile = GymProfile(
-            scanSessionId: "no-barbell",
-            equipment: [
-                EquipmentItem(
-                    equipmentType: .dumbbellSet,
-                    count: 1,
-                    details: .incrementBased(minKg: 5.0, maxKg: 30.0, incrementKg: 2.5),
-                    detectedByVision: false
-                )
-            ]
-        )
-        XCTAssertNil(noBarbellProfile.barbellLoadConstraint,
-            "barbellLoadConstraint must be nil when profile has no barbell")
+    func test_countOf_returnsZeroForAbsentType() {
+        XCTAssertEqual(profile.count(of: .smithMachine), 0,
+            "count(of:) must return 0 for equipment not in the profile")
     }
 
     // MARK: mockProfile() factory
@@ -391,12 +282,5 @@ final class GymProfileEquipmentHelperTests: XCTestCase {
     func test_mockProfile_hasStableId() {
         // Two calls must return the same UUID (fixed seed)
         XCTAssertEqual(GymProfile.mockProfile().id, GymProfile.mockProfile().id)
-    }
-
-    func test_mockProfile_isValidForEquipmentRounder() {
-        // Smoke test: constructing a rounder from mockProfile must not crash
-        let rounder = EquipmentRounder(gymProfile: profile)
-        let result = rounder.round(aiPrescribedWeightKg: 30.0, for: .dumbbellSet)
-        XCTAssertGreaterThan(result.roundedWeightKg, 0.0)
     }
 }

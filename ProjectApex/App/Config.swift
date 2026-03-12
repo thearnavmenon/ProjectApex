@@ -15,5 +15,5 @@ import Foundation
 enum Config {
     /// Base URL for the Supabase project's REST/PostgREST endpoint.
     /// Replace with your project URL — this is not a secret.
-    static let supabaseURL = URL(string: "https://your-project-ref.supabase.co")!
+    static let supabaseURL = URL(string: "https://hqjgrlzvrttnyfjqjewe.supabase.co")!
 }

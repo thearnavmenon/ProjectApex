@@ -1,36 +1,33 @@
 // ScannerViewModel.swift
 // ProjectApex — GymScanner Feature
 //
-// The orchestration brain of the gym scanning pipeline. Connects:
-//   CameraManager (frame production) → VisionAPIService (frame analysis)
-//   → internal deduplication logic → published equipment list → SwiftUI
+// The orchestration brain of the guided gym scanning pipeline. Connects:
+//   CameraManager (one-shot capture) → VisionAPIService (single-item identification)
+//   → user review (confirm / discard) → accumulated equipment list → SwiftUI
 //
 // Key responsibilities:
 //   1. Permission gating: requests camera access before starting the session.
-//   2. Frame → API loop: consumes the CameraManager's AsyncStream, fans out
-//      concurrent Vision API calls (one Task per frame), and merges results.
-//   3. Deduplication (FR-001-E): merges EquipmentItems by `equipmentType` enum,
-//      preserving the highest observed count and latest details.
-//   4. State machine: drives the UI through Idle → RequestingPermission →
-//      Scanning → Confirming → Completed / PermissionDenied / Error states.
-//   5. GymProfile finalisation: assembles and locally caches the confirmed profile.
+//   2. Guided capture loop: user triggers one photo at a time via the shutter button.
+//      Each photo is sent to the Vision API for single-item identification.
+//   3. Review flow: detected item is shown for user confirmation before being added.
+//   4. Deduplication: mergeItems() collapses duplicates (same type photographed twice).
+//   5. State machine: drives the UI through:
+//      Idle → RequestingPermission → Previewing → Analyzing → Reviewed
+//      → (back to Previewing or Confirming) → Completed
+//   6. GymProfile finalisation: assembles and persists the confirmed profile.
 //
 // Threading:
 //   • `@MainActor` ensures all `@Observable` state mutations land on the main
-//     thread for safe SwiftUI diffing — no manual `DispatchQueue.main.async`.
-//   • API calls are dispatched via `Task` (inherits the actor context of the caller,
-//     which is MainActor here). Since VisionAPIService is itself an actor, calls
-//     are serialised within the service but the Tasks run concurrently relative
-//     to each other — providing natural parallelism across in-flight frames.
-//
-// FR coverage: FR-001-A, B, C, D, E, F, G
+//     thread for safe SwiftUI diffing.
+//   • `captureAndIdentify()` uses structured concurrency — awaits the one-shot
+//     frame capture and the Vision API call in sequence.
 
 import Foundation
 import AVFoundation
 
 // MARK: - ScannerState
 
-/// The finite-state machine driving the scanner UI.
+/// The finite-state machine driving the guided scanner UI.
 enum ScannerState {
     /// Initial state before any user interaction.
     case idle
@@ -38,26 +35,32 @@ enum ScannerState {
     /// Awaiting the OS permission dialog response.
     case requestingPermission
 
-    /// Session is live; camera is running; frames are being sent to the API.
-    /// Associated value: number of frames processed so far.
-    case scanning(framesProcessed: Int)
+    /// Camera is live; user sees the preview and can tap the shutter button.
+    case previewing
 
-    /// Scanning has stopped; user is reviewing the detected equipment list.
+    /// A photo was taken; the Vision API call is in-flight.
+    case analyzing
+
+    /// The Vision API returned a result. User reviews the identified item
+    /// and either confirms (adds to list) or discards it.
+    case reviewed(item: EquipmentItem)
+
+    /// Camera has stopped; user is reviewing and editing the full equipment list.
     case confirming
 
     /// The user has accepted the profile; it has been persisted locally.
     case completed(profile: GymProfile)
 
-    /// Camera permission was denied — graceful degradation path (FR-001-A).
+    /// Camera permission was denied — graceful degradation path.
     case permissionDenied
 
-    /// An unrecoverable error occurred during setup or scanning.
+    /// An unrecoverable error occurred during setup or capture.
     case error(ScannerError)
 }
 
 // MARK: - ScannerViewModel
 
-/// `@Observable` view model for the gym equipment scanning flow.
+/// `@Observable` view model for the guided gym equipment scanning flow.
 /// Instantiated as `@State` in `ScannerView` (modern Observation pattern).
 @Observable
 @MainActor
@@ -70,17 +73,14 @@ final class ScannerViewModel {
     /// Current phase of the scanning state machine.
     private(set) var state: ScannerState = .idle
 
-    /// The live, deduplicated list of equipment detected so far.
-    /// Updated in real time as API responses arrive. Rendered as the checklist.
+    /// The accumulated, deduplicated list of equipment the user has confirmed.
     /// Public setter is intentional: SwiftUI's `@Bindable` wrapping needs write access
     /// for the `ForEach($viewModel.detectedEquipment)` pattern in the confirmation list.
     var detectedEquipment: [EquipmentItem] = []
 
-    /// Number of camera frames that have been sent to the Vision API.
-    private(set) var framesProcessed: Int = 0
-
-    /// Number of API calls currently in-flight (used for a subtle loading indicator).
-    private(set) var pendingAPIRequests: Int = 0
+    /// Brief toast message shown when a capture returns no result (e.g. non-gym image).
+    /// Automatically clears after a short delay.
+    private(set) var nothingDetectedToast: Bool = false
 
     // ---------------------------------------------------------------------------
     // MARK: Dependencies
@@ -95,42 +95,21 @@ final class ScannerViewModel {
     weak var appDependencies: AppDependencies?
 
     /// The authenticated user's UUID. Required for Supabase writes.
-    /// Set from the sign-in flow before `confirmProfile()` is called.
     var userId: UUID?
-
-    /// Configurable frame capture interval in seconds (FR-001-B default: 2s).
-    let captureInterval: TimeInterval
-
-    // ---------------------------------------------------------------------------
-    // MARK: Internal Scan Task
-    // ---------------------------------------------------------------------------
-
-    /// The root Task that drives the frame → API loop. Cancelled on stopScan().
-    private var scanTask: Task<Void, Never>?
 
     // ---------------------------------------------------------------------------
     // MARK: Init
     // ---------------------------------------------------------------------------
 
-    /// - Parameters:
-    ///   - cameraManager: The AVFoundation session manager. Pass `nil` to use the default.
-    ///   - visionService: The Vision API client. Pass `nil` to construct a live
-    ///     `VisionAPIService` using the Anthropic API key from the Keychain.
-    ///     Pass `MockVisionAPIService()` explicitly for unit tests.
-    ///   - captureInterval: Seconds between frame captures. Default: 2.0s (FR-001-B).
     init(
         cameraManager: CameraManager? = nil,
-        visionService: (any VisionAPIServiceProtocol)? = nil,
-        captureInterval: TimeInterval = 2.0
+        visionService: (any VisionAPIServiceProtocol)? = nil
     ) {
-        // Instantiate defaults inside the body to avoid triggering actor-isolation
-        // warnings from default parameter expressions being evaluated in a nonisolated context.
         self.cameraManager = cameraManager ?? CameraManager()
 
         if let injectedService = visionService {
             self.visionService = injectedService
         } else {
-            // Load the Anthropic API key from Keychain for the live Vision API service.
             let apiKey = (try? KeychainService.shared.retrieve(.anthropicAPIKey)) ?? ""
             let config = VisionAPIConfiguration(
                 provider: .anthropic,
@@ -140,21 +119,19 @@ final class ScannerViewModel {
             )
             self.visionService = VisionAPIService(configuration: config)
         }
-
-        self.captureInterval = captureInterval
     }
 
     // ---------------------------------------------------------------------------
     // MARK: Public API — called by ScannerView
     // ---------------------------------------------------------------------------
 
-    /// Entry point: requests camera permission and, on success, starts the scan.
-    /// Transitions state machine through Idle → RequestingPermission → Scanning.
-    func startScan() {
+    /// Entry point: requests camera permission and, on success, starts the live preview.
+    /// Transitions: Idle → RequestingPermission → Previewing.
+    func startCapture() {
         guard case .idle = state else { return }
         state = .requestingPermission
 
-        scanTask = Task { [weak self] in
+        Task { [weak self] in
             guard let self else { return }
             do {
                 let granted = try await cameraManager.requestAccessAndConfigure()
@@ -162,14 +139,8 @@ final class ScannerViewModel {
                     state = .permissionDenied
                     return
                 }
-
-                // Session is configured — start the camera and enter scanning state
                 cameraManager.startSession()
-                state = .scanning(framesProcessed: 0)
-
-                // Begin consuming the frame stream
-                await runFrameLoop()
-
+                state = .previewing
             } catch let scannerError as ScannerError {
                 state = .error(scannerError)
             } catch {
@@ -178,35 +149,85 @@ final class ScannerViewModel {
         }
     }
 
-    /// Stops the active camera session and transitions to the confirmation state.
-    /// Called when the user taps "Done Scanning" or after an auto-stop trigger.
-    func stopScan() {
-        scanTask?.cancel()
-        scanTask = nil
-        cameraManager.stopSession()
+    /// User tapped the shutter button. Captures one photo, sends it to the Vision API,
+    /// and transitions to `.reviewed` with the identified item, or back to `.previewing`
+    /// with a toast if nothing was detected.
+    ///
+    /// Transitions: Previewing → Analyzing → Reviewed | Previewing
+    func captureAndIdentify() {
+        guard case .previewing = state else { return }
+        state = .analyzing
 
-        // Only transition to confirming if we actually have results
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let frame = try await cameraManager.captureOneFrame()
+                let items = try await visionService.analyseFrame(frame)
+
+                // Take the first item — the prompt instructs the model to return
+                // exactly one item for a single-equipment photo.
+                let best = items.first
+
+                if let detected = best {
+                    state = .reviewed(item: detected)
+                } else {
+                    // Nothing recognisable — show a brief toast and go back to preview.
+                    state = .previewing
+                    showNothingDetectedToast()
+                }
+            } catch ScannerError.apiResponseEmpty {
+                state = .previewing
+                showNothingDetectedToast()
+            } catch {
+                // Non-fatal: log and return to preview so user can try again.
+                print("[ScannerViewModel] Capture error: \(error.localizedDescription)")
+                state = .previewing
+                showNothingDetectedToast()
+            }
+        }
+    }
+
+    /// User confirmed the reviewed item. Adds it to the accumulated list and
+    /// returns to previewing for the next capture.
+    ///
+    /// Transitions: Reviewed → Previewing
+    func confirmDetection() {
+        guard case .reviewed(let item) = state else { return }
+        mergeItems([item])
+        state = .previewing
+    }
+
+    /// User discarded the reviewed item. Returns to previewing without adding anything.
+    ///
+    /// Transitions: Reviewed → Previewing
+    func rejectDetection() {
+        guard case .reviewed = state else { return }
+        state = .previewing
+    }
+
+    /// User tapped "Done" — stops the camera and moves to the confirmation list.
+    /// If the list is empty, goes back to idle.
+    ///
+    /// Transitions: Previewing → Confirming | Idle
+    func doneCapturing() {
+        cameraManager.stopSession()
         if !detectedEquipment.isEmpty {
             state = .confirming
         } else {
-            // Nothing detected — go back to idle so user can retry
             state = .idle
         }
     }
 
-    /// Resets the scanner to its initial state. Used for the "Re-scan" flow (FR-001-H).
+    /// Resets the scanner to its initial state. Used for the "Re-scan" flow.
     func reset() {
-        scanTask?.cancel()
-        scanTask = nil
         cameraManager.stopSession()
         detectedEquipment = []
-        framesProcessed = 0
-        pendingAPIRequests = 0
+        nothingDetectedToast = false
         state = .idle
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Manual Equipment Management (FR-001-F)
+    // MARK: Manual Equipment Management
     // ---------------------------------------------------------------------------
 
     /// Adds a new equipment item to the confirmed list.
@@ -226,17 +247,11 @@ final class ScannerViewModel {
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Profile Finalisation (FR-001-G)
+    // MARK: Profile Finalisation
     // ---------------------------------------------------------------------------
 
     /// Assembles the final `GymProfile` from the confirmed equipment list,
-    /// persists it locally to UserDefaults, and (when `appDependencies` and
-    /// `userId` are set) writes it to Supabase and reinitialises `AIInferenceService`.
-    ///
-    /// Supabase write failures are non-blocking: the local save always completes
-    /// first so the app transitions to `.completed` even if the remote write
-    /// fails. A Supabase failure surfaces in `lastSupabaseError` for optional
-    /// non-blocking UI feedback.
+    /// persists it locally, and (when dependencies are set) writes to Supabase.
     func confirmProfile() {
         let now = Date()
         let profile = GymProfile(
@@ -248,17 +263,10 @@ final class ScannerViewModel {
             isActive: true
         )
 
-        // 1. Local save — always happens first regardless of network.
         profile.saveToUserDefaults()
-
-        // 2. Transition to completed so the UI responds immediately.
         state = .completed(profile: profile)
+        appDependencies?.reinitialiseAIInference()
 
-        // 3. Reinitialise AIInferenceService with fresh equipment data.
-        appDependencies?.reinitialiseAIInference(with: profile)
-
-        // 4. Async Supabase write — non-blocking; errors are surfaced but do
-        //    not roll back the local save or change the UI state.
         guard let deps = appDependencies, let uid = userId else { return }
         Task { [weak self] in
             guard let self else { return }
@@ -267,39 +275,7 @@ final class ScannerViewModel {
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Private: Supabase persistence (P1-T04)
-    // ---------------------------------------------------------------------------
-
-    /// Non-blocking error reported if the Supabase write fails.
-    /// Observe this from SwiftUI to show a banner when needed.
-    private(set) var lastSupabaseError: Error?
-
-    /// Deactivates the previous profile and inserts the new one into Supabase.
-    ///
-    /// Any thrown error is captured into `lastSupabaseError` and printed; it
-    /// does not affect the local UserDefaults state or the scanner state machine.
-    private func persistProfileToSupabase(
-        _ profile: GymProfile,
-        userId: UUID,
-        deps: AppDependencies
-    ) async {
-        do {
-            // Deactivate all existing active profiles for this user.
-            try await deps.supabaseClient.deactivateGymProfiles(userId: userId)
-
-            // Insert the new profile.
-            let row = GymProfileRow.forInsert(from: profile, userId: userId)
-            try await deps.supabaseClient.insert(row, table: "gym_profiles")
-
-            lastSupabaseError = nil
-        } catch {
-            lastSupabaseError = error
-            print("[ScannerViewModel] Supabase write failed (non-fatal): \(error.localizedDescription)")
-        }
-    }
-
-    // ---------------------------------------------------------------------------
-    // MARK: Convenience (read-only preview layer for SwiftUI)
+    // MARK: Convenience
     // ---------------------------------------------------------------------------
 
     /// Exposes the camera preview layer for `CameraPreviewView`.
@@ -308,88 +284,58 @@ final class ScannerViewModel {
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Private: Frame → API Loop
+    // MARK: Private: Supabase persistence
     // ---------------------------------------------------------------------------
 
-    /// Consumes the camera frame stream, dispatching a concurrent Vision API call
-    /// for each frame. Runs until `scanTask` is cancelled or the stream finishes.
-    private func runFrameLoop() async {
-        for await frame in cameraManager.frames(interval: captureInterval) {
-            // Check for cancellation between frames (cooperative cancellation)
-            guard !Task.isCancelled else { break }
+    private(set) var lastSupabaseError: Error?
 
-            framesProcessed += 1
-            state = .scanning(framesProcessed: framesProcessed)
-
-            // Fire-and-forget: each API call runs concurrently.
-            // Results are merged back on MainActor via the `mergeItems` call inside.
-            Task { [weak self] in
-                guard let self else { return }
-                await self.processFrame(frame)
-            }
-        }
-    }
-
-    /// Sends a single frame to the Vision API, handles errors gracefully,
-    /// and merges returned items into `detectedEquipment`.
-    private func processFrame(_ frame: CapturedFrame) async {
-        pendingAPIRequests += 1
-        defer { pendingAPIRequests -= 1 }
-
+    private func persistProfileToSupabase(
+        _ profile: GymProfile,
+        userId: UUID,
+        deps: AppDependencies
+    ) async {
         do {
-            let items = try await visionService.analyseFrame(frame)
-
-            // Guard: empty response is not an error — just skip (no new equipment in frame)
-            guard !items.isEmpty else { return }
-
-            // Merge into the master list on MainActor (we're already on it)
-            mergeItems(items)
-
-        } catch ScannerError.apiResponseEmpty {
-            // Expected: not every frame has equipment — silently continue
-            return
+            try await deps.supabaseClient.deactivateGymProfiles(userId: userId)
+            let row = GymProfileRow.forInsert(from: profile, userId: userId)
+            try await deps.supabaseClient.insert(row, table: "gym_profiles")
+            lastSupabaseError = nil
         } catch {
-            // Non-fatal: log and continue scanning. A single API failure should not
-            // abort the session — the next frame will retry naturally.
-            print("[ScannerViewModel] Frame \(frame.index) API error: \(error.localizedDescription)")
+            lastSupabaseError = error
+            print("[ScannerViewModel] Supabase write failed (non-fatal): \(error.localizedDescription)")
         }
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Private: Deduplication & Merge Logic (FR-001-E)
+    // MARK: Private: Deduplication & Merge Logic
     // ---------------------------------------------------------------------------
 
-    /// Merges an array of newly detected items into `detectedEquipment`.
-    ///
-    /// Deduplication key: `equipmentType` (the EquipmentType enum value).
-    /// Merge strategy:
-    ///   - If an item with the same `equipmentType` already exists, take the
-    ///     **maximum** observed `count` (conservative: avoids inflating counts).
-    ///   - Details from the latest detection override only if the existing item
-    ///     has `bodyweightOnly` details (a later frame may provide richer weight info).
+    /// Merges newly confirmed items into `detectedEquipment`.
+    /// Deduplication key: `equipmentType`. Merge strategy: max count.
     private func mergeItems(_ newItems: [EquipmentItem]) {
         for newItem in newItems {
             if let existingIndex = detectedEquipment.firstIndex(where: {
                 $0.equipmentType == newItem.equipmentType
             }) {
-                // --- Existing item: apply merge strategy ---
                 var existing = detectedEquipment[existingIndex]
-
-                // Take the maximum observed count
                 existing.count = max(existing.count, newItem.count)
-
-                // Upgrade details if the existing entry is bodyweightOnly and new one is richer
-                if case .bodyweightOnly = existing.details,
-                   newItem.details != .bodyweightOnly {
-                    existing.details = newItem.details
-                }
-
                 detectedEquipment[existingIndex] = existing
-
             } else {
-                // --- New equipment type: append ---
                 detectedEquipment.append(newItem)
             }
         }
     }
+
+    // ---------------------------------------------------------------------------
+    // MARK: Private: Toast
+    // ---------------------------------------------------------------------------
+
+    private func showNothingDetectedToast() {
+        nothingDetectedToast = true
+        Task {
+            try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
+            nothingDetectedToast = false
+        }
+    }
 }
+
+

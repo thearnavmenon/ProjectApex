@@ -91,6 +91,13 @@ final class CameraManager: NSObject {
     /// Timer driving periodic frame capture. Lives on `sessionQueue`.
     private nonisolated(unsafe) var captureTimer: Timer?
 
+    /// One-shot continuation for `captureOneFrame()`. When non-nil, the next
+    /// photo delegate callback resolves this continuation instead of yielding
+    /// to the stream. Access is safe: written on sessionQueue before
+    /// `triggerPhotoCapture()` is called, and read/cleared on sessionQueue
+    /// inside the delegate callback.
+    private nonisolated(unsafe) var oneFrameContinuation: CheckedContinuation<CapturedFrame, Error>?
+
     // ---------------------------------------------------------------------------
     // MARK: Init
     // ---------------------------------------------------------------------------
@@ -224,6 +231,32 @@ final class CameraManager: NSObject {
     }
 
     // ---------------------------------------------------------------------------
+    // MARK: One-Shot Capture (Guided Scanner)
+    // ---------------------------------------------------------------------------
+
+    /// Captures a single still frame and returns it asynchronously.
+    ///
+    /// Used by the guided per-equipment scanner. The caller awaits this method
+    /// after the user taps the shutter button; the result is sent immediately
+    /// to the Vision API for single-item identification.
+    ///
+    /// - Throws: `ScannerError.frameCaptureFailed` if the session is not running
+    ///   or the photo capture delegate reports an error.
+    func captureOneFrame() async throws -> CapturedFrame {
+        try await withCheckedThrowingContinuation { continuation in
+            sessionQueue.async { [weak self] in
+                guard let self, self.captureSession.isRunning else {
+                    continuation.resume(throwing: ScannerError.frameCaptureFailed)
+                    return
+                }
+                // Store the continuation — the delegate callback will resolve it.
+                self.oneFrameContinuation = continuation
+                self.triggerPhotoCapture()
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------
     // MARK: Frame Stream (FR-001-B, FR-001-C)
     // ---------------------------------------------------------------------------
 
@@ -291,12 +324,39 @@ final class CameraManager: NSObject {
 extension CameraManager: AVCapturePhotoCaptureDelegate {
 
     /// Called on `sessionQueue` after a photo capture completes.
-    /// Extracts the JPEG data, Base64-encodes it, and yields to the frame stream.
+    /// Extracts the JPEG data, Base64-encodes it, and either:
+    ///   - Resolves the one-shot `captureOneFrame()` continuation (guided scanner), or
+    ///   - Yields to the repeating frame stream (legacy interval scanner).
     nonisolated func photoOutput(
         _ output: AVCapturePhotoOutput,
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
+        // If a one-shot continuation is pending, always resolve it (even on error).
+        if let oneShotContinuation = oneFrameContinuation {
+            oneFrameContinuation = nil
+            guard error == nil, let jpegData = photo.fileDataRepresentation() else {
+                oneShotContinuation.resume(throwing: ScannerError.frameCaptureFailed)
+                return
+            }
+            guard
+                let image = UIImage(data: jpegData),
+                let compressedData = image.jpegData(compressionQuality: 0.8)
+            else {
+                oneShotContinuation.resume(throwing: ScannerError.frameCaptureFailed)
+                return
+            }
+            let index = frameIndex
+            frameIndex += 1
+            oneShotContinuation.resume(returning: CapturedFrame(
+                base64JPEG: compressedData.base64EncodedString(),
+                index: index,
+                capturedAt: Date()
+            ))
+            return
+        }
+
+        // Fallback: yield to the repeating stream (used by legacy interval scanner / mock).
         // Silently skip failed frames — we rely on interval retries.
         guard error == nil, let jpegData = photo.fileDataRepresentation() else { return }
 

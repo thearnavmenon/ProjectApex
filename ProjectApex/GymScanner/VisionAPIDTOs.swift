@@ -2,6 +2,7 @@
 // ProjectApex — GymScanner Feature
 //
 // Wire-format DTOs for the Vision API response (TDD Section 5.3).
+// The scanner identifies equipment PRESENCE only — no weight ranges.
 // EquipmentItem and all domain types live in Models/GymProfile.swift.
 //
 // ISOLATION NOTE:
@@ -33,36 +34,27 @@ nonisolated struct VisionAPIResponse: Codable, Sendable {
 
 // MARK: - VisionDetectedItem (TDD Section 5.3 wire format)
 
-/// The exact JSON shape returned by the Vision API per TDD Section 5.3.
+/// The exact JSON shape returned by the Vision API per the gym scan prompt.
 ///
 /// Each item in the flat array looks like:
 /// ```json
 /// {
 ///   "equipment_type": "dumbbell_set",
-///   "estimated_weight_range_kg": { "min": 2.5, "max": 45.0, "increment": 2.5 },
-///   "count": 1
+///   "count": 1,
+///   "confidence": 0.95
 /// }
 /// ```
-/// For bodyweight equipment, `estimated_weight_range_kg` is `null`.
-/// Unknown types are encoded as `"unknown:<description>"` (colon-separated).
+/// No weight range fields — the scanner records presence only.
 nonisolated struct VisionDetectedItem: Decodable, Sendable {
 
     let equipmentType: String
-    let estimatedWeightRangeKg: WeightRange?
     let count: Int
+    let confidence: Double?
 
     enum CodingKeys: String, CodingKey {
-        case equipmentType         = "equipment_type"
-        case estimatedWeightRangeKg = "estimated_weight_range_kg"
+        case equipmentType = "equipment_type"
         case count
-    }
-
-    // MARK: - Nested weight range DTO
-
-    nonisolated struct WeightRange: Decodable, Sendable {
-        let min: Double
-        let max: Double
-        let increment: Double?
+        case confidence
     }
 }
 
@@ -73,33 +65,13 @@ extension VisionDetectedItem {
     /// Maps the Vision API wire-format item to the domain `EquipmentItem`.
     ///
     /// - `equipment_type` strings are mapped via `EquipmentType.init(typeKey:rawValue:)`.
-    ///   Unknown strings (including the `"unknown:<desc>"` convention) become
-    ///   `EquipmentType.unknown("<string>")`.
-    /// - `estimated_weight_range_kg` is mapped to `.incrementBased` when present,
-    ///   or `.bodyweightOnly` when nil.
+    ///   Unknown strings become `EquipmentType.unknown("<string>")`.
+    /// - No weight range fields are present; weight defaults come from
+    ///   `DefaultWeightIncrements` at runtime.
     func toEquipmentItem() -> EquipmentItem {
-        // Parse the equipment type, handling the "unknown:<description>" convention
-        let parsedType: EquipmentType
-        if equipmentType.hasPrefix("unknown:") {
-            let description = String(equipmentType.dropFirst("unknown:".count))
-            parsedType = .unknown(description)
-        } else {
-            parsedType = EquipmentType(typeKey: equipmentType)
-        }
-
-        // Map weight range to EquipmentDetails
-        let details: EquipmentDetails
-        if let range = estimatedWeightRangeKg {
-            let increment = range.increment ?? 2.5
-            details = .incrementBased(minKg: range.min, maxKg: range.max, incrementKg: increment)
-        } else {
-            details = .bodyweightOnly
-        }
-
-        return EquipmentItem(
-            equipmentType: parsedType,
+        EquipmentItem(
+            equipmentType: EquipmentType(typeKey: equipmentType),
             count: max(1, count),
-            details: details,
             detectedByVision: true
         )
     }

@@ -12,15 +12,16 @@
 //     returning deterministic mock data so the full UI pipeline can be exercised
 //     without burning API credits or requiring a live network connection.
 //
-// FR coverage: FR-001-C (Base64 input), FR-001-D (strict schema parsing + discard),
-//              FR-001-E (merge/dedup is handled upstream in ScannerViewModel)
+// SCANNER PRINCIPLE: Equipment presence only.
+// The Vision API prompt requests equipment_type, count, and confidence.
+// No weight ranges — those are handled by DefaultWeightIncrements + GymFactStore.
 
 import Foundation
 
 // MARK: - VisionAPIConfiguration
 
 /// Holds the runtime configuration for the Vision API endpoint.
-/// In production, the `apiKey` is loaded from the iOS Keychain (Section 6.3.1 of PRD).
+/// In production, the `apiKey` is loaded from the iOS Keychain.
 struct VisionAPIConfiguration: Sendable {
     enum Provider: Sendable {
         case openAI   // GPT-4o Vision
@@ -49,11 +50,10 @@ protocol VisionAPIServiceProtocol: Actor {
 /// Production implementation. Constructs the multimodal Vision API request,
 /// handles HTTP errors, and parses the response against the VisionDetectedItem schema.
 ///
-/// Follows TDD Section 5.3:
-///   - Provider: Anthropic Messages API
-///   - Model: claude-sonnet-4-20250514
-///   - Frame: JPEG 80% quality, Base64-encoded, sent as image/jpeg
-///   - Response: flat JSON array of VisionDetectedItem objects
+/// Uses the strength-training-only gym scan prompt that requests:
+///   - equipment_type (one of a fixed vocabulary of 25 types)
+///   - count (integer number of units visible)
+///   - confidence (float 0.0–1.0; items below 0.7 are not returned)
 actor VisionAPIService: VisionAPIServiceProtocol {
 
     // ---------------------------------------------------------------------------
@@ -124,7 +124,7 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Private: Request Construction (TDD Section 5.3)
+    // MARK: Private: Request Construction
     // ---------------------------------------------------------------------------
 
     private func endpointURL() -> URL {
@@ -137,17 +137,38 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     }
 
     /// Builds the multimodal JSON request body for the configured provider.
-    /// The Anthropic format matches TDD Section 5.3 exactly.
+    /// The system prompt is optimised for a single focused equipment photo.
     private func buildRequestBody(base64Image: String) -> [String: Any] {
-        // TDD Section 5.3 — exact instruction text in the user message's text field
         let visionInstruction = """
-            Identify gym equipment. Return ONLY JSON array: \
-            [{"equipment_type": string, "estimated_weight_range_kg": \
-            {"min": number, "max": number, "increment": number} | null, "count": number}]. \
-            Valid types: dumbbell_set, barbell, ez_curl_bar, cable_machine_single, \
-            cable_machine_dual, smith_machine, leg_press, hack_squat, adjustable_bench, \
-            flat_bench, incline_bench, pull_up_bar, dip_station, resistance_bands, \
-            kettlebell_set. Unknown: 'unknown:<description>'.
+            You are a gym equipment identifier. The user has taken a photo of \
+            ONE piece of gym equipment for you to identify.
+
+            STRICT RULES:
+            1. If no strength training equipment is clearly visible, \
+            you MUST return: []
+            2. Return exactly ONE item — the primary piece of equipment \
+            in the photo. Do not list secondary objects.
+            3. Do NOT guess, hallucinate, or infer equipment that is not \
+            clearly visible in the photo.
+            4. Ignore ALL cardio equipment (bikes, treadmills, rowers, \
+            ellipticals, stair climbers, ski ergs, assault bikes).
+            5. Ignore furniture, screens, computers, walls, floors, and \
+            any non-equipment objects.
+            6. You MUST use ONLY these exact equipment_type values — \
+            any other string is forbidden:
+            "dumbbell_set" | "barbell" | "ez_curl_bar" | "cable_machine_single" |
+            "cable_machine_dual" | "smith_machine" | "leg_press" | "hack_squat" |
+            "adjustable_bench" | "flat_bench" | "incline_bench" | "pull_up_bar" |
+            "dip_station" | "resistance_bands" | "kettlebell_set" | "power_rack" |
+            "squat_rack" | "lat_pulldown" | "seated_row" | "chest_press_machine" |
+            "shoulder_press_machine" | "leg_extension" | "leg_curl" | "pec_deck" |
+            "preacher_curl" | "cable_crossover"
+
+            Return ONLY a valid JSON array with ONE item. No explanation, \
+            no markdown fences.
+            Format: [{"equipment_type": "<type>", "count": <integer>, "confidence": <float>}]
+            Only include the item if confidence >= 0.85.
+            If nothing from the allowed list is visible, return: []
             """
 
         switch configuration.provider {
@@ -203,11 +224,11 @@ actor VisionAPIService: VisionAPIServiceProtocol {
     }
 
     // ---------------------------------------------------------------------------
-    // MARK: Private: Response Parsing (FR-001-D, TDD Section 5.3)
+    // MARK: Private: Response Parsing
     // ---------------------------------------------------------------------------
 
     /// Parses the raw API response data into [EquipmentItem].
-    /// Non-conforming responses are discarded without crashing (FR-001-D).
+    /// Non-conforming responses are discarded without crashing.
     private func parseResponse(data: Data) throws -> [EquipmentItem] {
         // Step 1: Extract the content string from the provider's chat response envelope.
         guard
@@ -226,7 +247,7 @@ actor VisionAPIService: VisionAPIServiceProtocol {
             throw ScannerError.apiResponseMalformed(rawResponse: contentString)
         }
 
-        // Step 3: Attempt to decode as the Section 5.3 flat array format first.
+        // Step 3: Attempt to decode as the flat VisionDetectedItem array.
         if let detectedItems = try? JSONDecoder().decode([VisionDetectedItem].self, from: contentData) {
             return detectedItems.map { $0.toEquipmentItem() }
         }
@@ -294,113 +315,26 @@ actor VisionAPIService: VisionAPIServiceProtocol {
 /// Prototype-safe mock that returns realistic gym equipment data without any
 /// network calls. Simulates variable latency to exercise the loading states in the UI.
 ///
-/// Rotates through several mock response payloads to simulate progressive scanning,
-/// where different equipment is "discovered" across successive frames.
+/// Each call simulates the guided single-photo-per-equipment flow: returns ONE item
+/// (or empty for the "nothing detected" toast path) per `analyseFrame` call.
 actor MockVisionAPIService: VisionAPIServiceProtocol {
 
-    // Mock response rotation: each call returns the next batch in sequence,
-    // cycling back to the start after exhaustion.
+    // Mock response rotation: each call returns the next single item in sequence.
     private var callCount: Int = 0
 
-    // A pre-defined sequence of mock detection batches simulating a real gym scan.
-    // Uses the new EquipmentType + EquipmentDetails schema.
-    private let mockBatches: [[EquipmentItem]] = [
-        // Frame 0: User points camera at the free weights area
-        [
-            EquipmentItem(
-                equipmentType: .dumbbellSet,
-                count: 1,
-                details: .incrementBased(minKg: 2.5, maxKg: 45.0, incrementKg: 2.5),
-                detectedByVision: true
-            ),
-            EquipmentItem(
-                equipmentType: .adjustableBench,
-                count: 3,
-                details: .bodyweightOnly,
-                detectedByVision: true
-            )
-        ],
-        // Frame 1: User pans to the barbell racks
-        [
-            EquipmentItem(
-                equipmentType: .barbell,
-                count: 4,
-                details: .plateBased(
-                    barWeightKg: 20.0,
-                    availablePlatesKg: [1.25, 2.5, 5.0, 10.0, 20.0, 25.0]
-                ),
-                detectedByVision: true
-            ),
-            EquipmentItem(
-                equipmentType: .unknown("squat_rack"),
-                count: 2,
-                details: .bodyweightOnly,
-                detectedByVision: true
-            )
-        ],
-        // Frame 2: User reaches the cable section
-        [
-            EquipmentItem(
-                equipmentType: .cableMachine,
-                count: 2,
-                details: .incrementBased(minKg: 2.5, maxKg: 90.0, incrementKg: 2.5),
-                detectedByVision: true
-            ),
-            EquipmentItem(
-                equipmentType: .unknown("lat_pulldown"),
-                count: 1,
-                details: .incrementBased(minKg: 5.0, maxKg: 90.0, incrementKg: 5.0),
-                detectedByVision: true
-            )
-        ],
-        // Frame 3: Machine area — plates + more machines detected
-        [
-            EquipmentItem(
-                equipmentType: .legPress,
-                count: 1,
-                details: .plateBased(
-                    barWeightKg: 0.0,
-                    availablePlatesKg: [10.0, 20.0, 25.0]
-                ),
-                detectedByVision: true
-            ),
-            EquipmentItem(
-                equipmentType: .smithMachine,
-                count: 1,
-                details: .incrementBased(minKg: 20.0, maxKg: 180.0, incrementKg: 2.5),
-                detectedByVision: true
-            )
-        ],
-        // Frame 4: Cardio corner — additional bodyweight equipment
-        [
-            EquipmentItem(
-                equipmentType: .pullUpBar,
-                count: 2,
-                details: .bodyweightOnly,
-                detectedByVision: true
-            ),
-            EquipmentItem(
-                equipmentType: .unknown("kettlebell_set"),
-                count: 1,
-                details: .incrementBased(minKg: 8.0, maxKg: 40.0, incrementKg: 4.0),
-                detectedByVision: true
-            )
-        ],
-        // Frame 5: Overlapping frames — re-detects already-known items (tests dedup)
-        [
-            EquipmentItem(
-                equipmentType: .dumbbellSet,
-                count: 1,
-                details: .incrementBased(minKg: 2.5, maxKg: 45.0, incrementKg: 2.5),
-                detectedByVision: true
-            ),
-            EquipmentItem(
-                equipmentType: .cableMachine,
-                count: 2,
-                details: .incrementBased(minKg: 2.5, maxKg: 90.0, incrementKg: 2.5),
-                detectedByVision: true
-            )
-        ]
+    // A sequence of single-item detections, each representing one focused equipment photo.
+    // Presence only — no weight ranges in mock data.
+    private let mockItems: [EquipmentItem] = [
+        EquipmentItem(equipmentType: .dumbbellSet, count: 1, detectedByVision: true),
+        EquipmentItem(equipmentType: .barbell, count: 4, detectedByVision: true),
+        EquipmentItem(equipmentType: .powerRack, count: 2, detectedByVision: true),
+        EquipmentItem(equipmentType: .cableMachine, count: 2, detectedByVision: true),
+        EquipmentItem(equipmentType: .adjustableBench, count: 3, detectedByVision: true),
+        EquipmentItem(equipmentType: .latPulldown, count: 1, detectedByVision: true),
+        EquipmentItem(equipmentType: .legPress, count: 1, detectedByVision: true),
+        EquipmentItem(equipmentType: .smithMachine, count: 1, detectedByVision: true),
+        EquipmentItem(equipmentType: .pullUpBar, count: 2, detectedByVision: true),
+        EquipmentItem(equipmentType: .kettlebellSet, count: 1, detectedByVision: true)
     ]
 
     func analyseFrame(_ frame: CapturedFrame) async throws -> [EquipmentItem] {
@@ -408,13 +342,14 @@ actor MockVisionAPIService: VisionAPIServiceProtocol {
         let simulatedLatencyMs = UInt64.random(in: 800_000_000...1_800_000_000)
         try await Task.sleep(nanoseconds: simulatedLatencyMs)
 
-        // Occasionally simulate an empty frame (e.g., camera pointed at ceiling)
-        if frame.index % 7 == 6 {
+        // Every 5th call simulates a "nothing detected" result (non-gym image).
+        if callCount % 5 == 4 {
+            callCount += 1
             return []
         }
 
-        let batch = mockBatches[callCount % mockBatches.count]
+        let item = mockItems[callCount % mockItems.count]
         callCount += 1
-        return batch
+        return [item]
     }
 }

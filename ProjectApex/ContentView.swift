@@ -1,9 +1,12 @@
 // ContentView.swift
 // ProjectApex
 //
-// Root entry point. For the current prototype phase, routes directly to
-// ScannerView so the full FR-001 pipeline can be exercised immediately.
-// In the final app this will be replaced by an onboarding/tab navigation flow.
+// Root entry point. Hosts a two-tab navigation flow:
+//   • Scanner tab  — FR-001 gym scanner → GymProfile flow
+//   • Settings tab — Settings → Developer Settings (API key management)
+//
+// The Settings tab satisfies the P0-T02 acceptance criterion:
+// "Accessible from Settings tab, behind a 'Developer' row."
 
 import SwiftUI
 
@@ -12,18 +15,47 @@ struct ContentView: View {
     /// Stores the confirmed GymProfile once the scanner flow completes.
     @State private var confirmedProfile: GymProfile?
 
+    /// When true, the Scanner tab shows ScannerView in re-scan mode
+    /// (triggered from Settings). The existing profile stays active until
+    /// a new profile is confirmed — no partial state (P1-T06).
+    @State private var isRescanning = false
+
+    /// Controls which tab is visible — lets Settings trigger a tab switch.
+    @State private var selectedTab: Int = 0
+
     var body: some View {
-        NavigationStack {
-            if let profile = confirmedProfile {
-                // ── Post-scan placeholder ────────────────────────────────────
-                // Replace with the macro-program generation flow (FR-002) in V2.
-                profileSummaryView(profile: profile)
-            } else {
-                // ── Scanner entry point ──────────────────────────────────────
-                ScannerView { profile in
-                    confirmedProfile = profile
+        TabView(selection: $selectedTab) {
+            // ── Scanner tab ──────────────────────────────────────────────────
+            NavigationStack {
+                if let profile = confirmedProfile, !isRescanning {
+                    // Post-scan placeholder; replace with FR-002 in V2.
+                    profileSummaryView(profile: profile)
+                } else {
+                    ScannerView { newProfile in
+                        // New profile replaces old only after user confirms.
+                        confirmedProfile = newProfile
+                        isRescanning = false
+                    }
                 }
             }
+            .tabItem {
+                Label("Scanner", systemImage: "camera.fill")
+            }
+            .tag(0)
+
+            // ── Settings tab ─────────────────────────────────────────────────
+            SettingsView(
+                hasExistingProfile: confirmedProfile != nil,
+                onRescan: {
+                    // Existing profile stays untouched until new one is confirmed.
+                    isRescanning = true
+                    selectedTab = 0  // Navigate to Scanner tab automatically.
+                }
+            )
+            .tabItem {
+                Label("Settings", systemImage: "gearshape.fill")
+            }
+            .tag(1)
         }
         .preferredColorScheme(.dark)
     }
@@ -52,7 +84,7 @@ struct ContentView: View {
             // Equipment chips
             FlowLayout(spacing: 8) {
                 ForEach(profile.equipment) { item in
-                    Text(item.displayName)
+                    Text(item.equipmentType.displayName)
                         .font(.caption)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)

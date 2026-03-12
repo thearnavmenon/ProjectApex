@@ -15,6 +15,8 @@
 		47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */; };
 		47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */; };
 		47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */; };
+		47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */; };
+		47E356DC2F61D07B00C69CD6 /* GymFactStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */; };
 		6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6DC23D0A3EB460CF97B18574 /* Foundation.framework */; };
 /* End PBXBuildFile section */
 
@@ -37,6 +39,9 @@
 		47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceServiceTests.swift; sourceTree = "<group>"; };
 		47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClientTests.swift; sourceTree = "<group>"; };
 		47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentMergerTests.swift; sourceTree = "<group>"; };
+		47E356D62F61CE4C00C69CD6 /* WeightCorrectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeightCorrectionView.swift; sourceTree = "<group>"; };
+		47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultWeightIncrementsTests.swift; sourceTree = "<group>"; };
+		47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymFactStoreTests.swift; sourceTree = "<group>"; };
 		6DC23D0A3EB460CF97B18574 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentRounderTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -84,6 +89,7 @@
 				47D91BC12F60266A007B3B34 /* Products */,
 				46D6D0F8AAFB99EF747FA10E /* Frameworks */,
 				FD123486A0EC3A9B64454993 /* ProjectApexTests */,
+				47E356D42F61CE3E00C69CD6 /* Features */,
 			);
 			sourceTree = "<group>";
 		};
@@ -94,6 +100,22 @@
 				EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		47E356D42F61CE3E00C69CD6 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				47E356D52F61CE4100C69CD6 /* Workout */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		47E356D52F61CE4100C69CD6 /* Workout */ = {
+			isa = PBXGroup;
+			children = (
+				47E356D62F61CE4C00C69CD6 /* WeightCorrectionView.swift */,
+			);
+			path = Workout;
 			sourceTree = "<group>";
 		};
 		F001F5E175C68A407AB1AFF0 /* iOS */ = {
@@ -115,6 +137,8 @@
 				47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */,
 				47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */,
 				47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */,
+				47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */,
+				47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -220,11 +244,13 @@
 				47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */,
 				47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */,
 				47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */,
+				47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */,
 				47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */,
 				32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */,
 				47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */,
 				47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */,
 				47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */,
+				47E356DC2F61D07B00C69CD6 /* GymFactStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

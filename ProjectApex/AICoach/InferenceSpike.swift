@@ -75,10 +75,8 @@ enum InferenceSpike {
 
         // 3. Build the provider and service.
         let provider = AnthropicProvider(apiKey: apiKey)
-        let gymProfile = GymProfile.mockProfile()
         let service = AIInferenceService(
             provider: provider,
-            gymProfile: gymProfile,
             maxRetries: 2
         )
 
@@ -95,29 +93,17 @@ enum InferenceSpike {
         // 6. Print result details.
         switch result {
         case .success(let prescription):
-            // Apply equipment rounding for the spike console output.
-            let equipmentType = EquipmentType(rawString: context.currentExercise.equipmentTypeKey)
-            let rounder = EquipmentRounder(gymProfile: gymProfile)
-            let rounded = rounder.round(
-                aiPrescribedWeightKg: prescription.weightKg,
-                for: equipmentType
-            )
-
-            print("\(tag) ✅ SetPrescription validated & rounded:")
-            print("\(tag)   weight_kg:      \(prescription.weightKg)")
-            print("\(tag)   reps:           \(prescription.reps)")
-            print("\(tag)   tempo:          \(prescription.tempo)")
-            print("\(tag)   rir_target:     \(prescription.rirTarget)")
-            print("\(tag)   rest_seconds:   \(prescription.restSeconds)")
-            print("\(tag)   coaching_cue:   \"\(prescription.coachingCue)\"")
-            print("\(tag)   reasoning:      \"\(prescription.reasoning)\"")
-            print("\(tag)   safety_flags:   \(prescription.safetyFlags.map(\.rawValue))")
+            print("\(tag) ✅ SetPrescription:")
+            print("\(tag)   weight_kg:    \(prescription.weightKg)")
+            print("\(tag)   reps:         \(prescription.reps)")
+            print("\(tag)   tempo:        \(prescription.tempo)")
+            print("\(tag)   rir_target:   \(prescription.rirTarget)")
+            print("\(tag)   rest_seconds: \(prescription.restSeconds)")
+            print("\(tag)   coaching_cue: \"\(prescription.coachingCue)\"")
+            print("\(tag)   reasoning:    \"\(prescription.reasoning)\"")
+            print("\(tag)   safety_flags: \(prescription.safetyFlags.map(\.rawValue))")
             if let c = prescription.confidence {
-                print("\(tag)   confidence:     \(String(format: "%.2f", c))")
-            }
-            print("\(tag)   wasAdjusted:    \(rounded.wasAdjusted)")
-            if let note = rounded.adjustmentNote {
-                print("\(tag)   adjustmentNote: \(note)")
+                print("\(tag)   confidence:   \(String(format: "%.2f", c))")
             }
 
         case .fallback(let reason):
