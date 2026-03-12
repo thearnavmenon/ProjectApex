@@ -1,6 +1,6 @@
 # Project Apex — Architecture Reference
 ### Combines: Technical Design Document v1.0 + UI/UX Specification v1.0
-### Platform: iOS 26+ | Last Updated: 2026-03-11
+### Platform: iOS 26+ | Last Updated: 2026-03-12
 
 ---
 
@@ -78,7 +78,7 @@ This document is versioned in lockstep with the codebase. Any architectural chan
 │  ┌──────▼─────────────────▼──────────────────────▼────────────┐ │
 │  │                    Service Layer                            │ │
 │  │  AIInferenceService │ HealthKitService │ MemoryService      │ │
-│  │  SupabaseClient     │ EquipmentRounder │ SpeechService      │ │
+│  │  SupabaseClient     │ GymFactStore     │ SpeechService      │ │
 │  └──────┬──────────────┬──────────────────┬────────────────────┘ │
 │         │              │                  │                      │
 └─────────┼──────────────┼──────────────────┼──────────────────────┘
@@ -99,7 +99,7 @@ This document is versioned in lockstep with the codebase. Any architectural chan
 
 **Principle 3 — Strict Data Contracts**: All AI input and output is validated against typed Swift `Codable` schemas. The LLM is never trusted to produce safe output without client-side validation.
 
-**Principle 4 — Equipment-Constrained Output**: AI weight prescriptions are always in continuous space; physical rounding is always applied client-side before any value is shown to the user or written to the database.
+**Principle 4 — Equipment-Constrained Output**: AI weight prescriptions are always in continuous space; physical rounding to available weights is applied client-side via `DefaultWeightIncrements` (commercial gym defaults) and `GymFactStore` (user-confirmed corrections) before any value is shown to the user or written to the database.
 
 **Principle 5 — Persistent Stateful Memory**: The app is not a stateless LLM chat wrapper. Every workout enriches the vector memory store. The AI is always given historical context; it is never inferring cold.
 
@@ -129,7 +129,8 @@ ProjectApex/
 │   └── AppDependencies.swift         # Dependency injection container
 │
 ├── Models/
-│   ├── GymProfile.swift              # GymProfile, EquipmentItem, EquipmentType, WeightIncrement
+│   ├── GymProfile.swift              # GymProfile, EquipmentItem, EquipmentType (presence-only)
+│   ├── DefaultWeightIncrements.swift # Hardcoded commercial gym weight defaults (no scan data)
 │   ├── WorkoutProgram.swift          # Mesocycle, Week, TrainingDay, Exercise
 │   ├── WorkoutSession.swift          # WorkoutSession, SetLog, SessionNote
 │   └── User.swift                    # AppUser model
@@ -137,9 +138,8 @@ ProjectApex/
 ├── Features/
 │   ├── Onboarding/
 │   ├── Scanner/
-│   │   ├── ScannerView.swift
-│   │   ├── ScannerViewModel.swift
-│   │   └── EquipmentConfirmationView.swift
+│   │   ├── ScannerView.swift         # Guided per-equipment capture UI
+│   │   └── ScannerViewModel.swift    # State machine: idle→previewing→analyzing→reviewed→confirming
 │   ├── Program/
 │   │   ├── ProgramOverviewView.swift
 │   │   ├── ProgramDayDetailView.swift
@@ -149,18 +149,21 @@ ProjectApex/
 │       ├── ActiveSetView.swift
 │       ├── RestTimerView.swift
 │       ├── PostWorkoutSummaryView.swift
+│       ├── WeightCorrectionView.swift # User weight substitution sheet
 │       └── WorkoutViewModel.swift
 │
 ├── AICoach/
 │   ├── AIInferenceService.swift      # actor — core inference engine
-│   ├── LLMProvider.swift             # protocol + AnthropicProvider + OpenAIProvider
-│   └── EquipmentRounder.swift        # struct — weight snapping
+│   └── LLMProvider.swift             # protocol + AnthropicProvider + OpenAIProvider
+│   # NOTE: EquipmentRounder.swift removed — weight snapping handled by
+│   #       DefaultWeightIncrements (defaults) + GymFactStore (corrections)
 │
 ├── Services/
 │   ├── SupabaseClient.swift
 │   ├── HealthKitService.swift
 │   ├── MemoryService.swift
 │   ├── SpeechService.swift
+│   ├── GymFactStore.swift            # actor — runtime weight correction persistence
 │   └── KeychainService.swift
 │
 ├── Extensions/
@@ -171,6 +174,7 @@ ProjectApex/
 └── Resources/
     └── Prompts/
         ├── SystemPrompt_Inference.txt
+        ├── SystemPrompt_GymScan.txt
         └── SystemPrompt_MacroGeneration.txt
 ```
 
@@ -186,20 +190,27 @@ final class AppDependencies {
     let healthKitService: HealthKitService
     let memoryService: MemoryService
     let speechService: SpeechService
-    let aiInferenceService: AIInferenceService
+    let gymFactStore: GymFactStore       // runtime weight correction persistence
+    var aiInferenceService: AIInferenceService
 
     init() {
         self.keychainService = KeychainService()
-        let anthropicKey = keychainService.retrieve(.anthropicAPIKey) ?? ""
-        let gymProfile = GymProfile.loadFromUserDefaults() ?? .mockProfile()
+        let anthropicKey = (try? keychainService.retrieve(.anthropicAPIKey)) ?? ""
         self.supabaseClient = SupabaseClient(url: Config.supabaseURL, anonKey: Config.supabaseAnonKey)
         self.healthKitService = HealthKitService()
-        self.memoryService = MemoryService(supabase: supabaseClient, embeddingAPIKey: keychainService.retrieve(.openAIAPIKey) ?? "")
+        self.memoryService = MemoryService(supabase: supabaseClient, embeddingAPIKey: (try? keychainService.retrieve(.openAIAPIKey)) ?? "")
         self.speechService = SpeechService()
+        self.gymFactStore = GymFactStore()
+        // GymProfile no longer passed to AIInferenceService at init —
+        // the profile is assembled per-request from UserDefaults.
         self.aiInferenceService = AIInferenceService(
-            provider: AnthropicProvider(apiKey: anthropicKey, model: "claude-sonnet-4-20250514"),
-            gymProfile: gymProfile
+            provider: AnthropicProvider(apiKey: anthropicKey)
         )
+    }
+
+    func reinitialiseAIInference() {
+        let key = (try? keychainService.retrieve(.anthropicAPIKey)) ?? ""
+        aiInferenceService = AIInferenceService(provider: AnthropicProvider(apiKey: key))
     }
 }
 ```
@@ -243,69 +254,69 @@ The active workout flow uses a `SessionState` machine rendered via `ZStack` — 
 
 ### 4.1 GymProfile (Swift)
 
+**Scanner principle: presence-only.** The scanner records *what* equipment exists, not weight ranges. Weight availability is resolved at runtime by two independent sources:
+- `DefaultWeightIncrements` — hardcoded commercial gym defaults (e.g. dumbbells 2.5–60 kg in 2.5 kg steps)
+- `GymFactStore` — user-confirmed weight corrections persisted to UserDefaults
+
 ```swift
-enum EquipmentType: Codable, Hashable, Sendable {
-    case dumbbellSet
-    case barbell
-    case ezCurlBar
-    case cableMachine(CableConfiguration)
-    case smithMachine
-    case legPress
-    case hackSquat
-    case adjustableBench
-    case flatBench
-    case inclineBench
-    case pullUpBar
-    case dipStation
-    case resistanceBands
-    case kettlebellSet
-    case unknown(String)
+// 27 known cases + unknown(String) catch-all.
+// All nonisolated to opt out of @MainActor for Codable (SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor).
+nonisolated enum EquipmentType: Codable, Hashable, Sendable {
+    case dumbbellSet, barbell, ezCurlBar
+    case cableMachine, cableMachineDual   // single-stack and dual-stack
+    case smithMachine, legPress, hackSquat
+    case adjustableBench, flatBench, inclineBench
+    case pullUpBar, dipStation, resistanceBands, kettlebellSet
+    case powerRack, sqatRack, latPulldown, seatedRow
+    case chestPressMachine, shoulderPressMachine
+    case legExtension, legCurl, pecDeck, preacherCurl, cableCrossover
+    case unknown(String)                  // always dropped by EquipmentMerger
 
-    enum CableConfiguration: String, Codable, Sendable {
-        case singleStack, dualStack
-    }
+    var typeKey: String { /* canonical snake_case JSON key */ }
+    var displayName: String { /* human-readable */ }
+    static let knownCases: [EquipmentType]  // all non-unknown, for pickers
+    init(typeKey: String, rawValue: String? = nil)
 }
 
-struct WeightIncrement: Codable, Hashable, Sendable {
-    let minKg: Double
-    let maxKg: Double
-    let incrementKg: Double
-
-    var availableWeightsKg: [Double] {
-        stride(from: minKg, through: maxKg, by: incrementKg).map { $0 }
-    }
-}
-
-struct EquipmentItem: Codable, Hashable, Identifiable, Sendable {
-    let id: UUID
+// Presence-only — no weight ranges stored.
+nonisolated struct EquipmentItem: Codable, Identifiable, Equatable, Hashable, Sendable {
+    var id: UUID
     var equipmentType: EquipmentType
-    var count: Int
-    var weightRange: WeightIncrement?
-    var notes: String?
+    var count: Int              // number of units present
+    var notes: String?          // optional freeform (e.g. "left cable broken")
     var detectedByVision: Bool
 }
 
-struct BarbellConstraint: Codable, Hashable, Sendable {
-    let barWeightKg: Double
-    let availablePlatesKg: [Double]  // sorted descending; individual plates
-
-    var maxLoadKg: Double {
-        barWeightKg + 2 * availablePlatesKg.reduce(0, +)
-    }
-}
-
-struct GymProfile: Codable, Identifiable, Sendable {
-    let id: UUID
-    let scanSessionId: String
-    let createdAt: Date
+nonisolated struct GymProfile: Codable, Equatable, Hashable, Sendable {
+    var id: UUID
+    var scanSessionId: String
+    var createdAt: Date
     var lastUpdatedAt: Date
     var equipment: [EquipmentItem]
     var isActive: Bool
 
-    func availableWeights(for type: EquipmentType) -> [Double]
     func hasEquipment(_ type: EquipmentType) -> Bool
-    func maxWeightKg(for type: EquipmentType) -> Double?
-    var barbellLoadConstraint: BarbellConstraint?
+    func count(of type: EquipmentType) -> Int
+    func item(for type: EquipmentType) -> EquipmentItem?
+}
+
+// Weight availability resolution (replaces the removed WeightIncrement / BarbellConstraint):
+struct DefaultWeightIncrements {
+    static func defaults(for type: EquipmentType) -> WeightRange?
+    // Returns (start: Double, end: Double, step: Double)? for weight-bearing equipment.
+    // Returns nil for benches, racks, bars, etc.
+
+    static func nearestWeights(to target: Double, for type: EquipmentType,
+                               excluding: Set<Double> = []) -> (lower: Double?, upper: Double?)
+}
+
+actor GymFactStore {
+    // Persists user-confirmed weight corrections to UserDefaults.
+    func recordCorrection(equipmentType: EquipmentType, availableKg: Double) async
+    func knownSubstitution(for type: EquipmentType, target: Double) async -> Double?
+    func contextStrings(for type: EquipmentType) async -> [String]
+    func allContextStrings() async -> [String]
+    func clearAll() async
 }
 ```
 
@@ -598,30 +609,37 @@ enum SafetyFlag: String, Codable, Hashable, Sendable {
 
 | Component | Type | Responsibility |
 |---|---|---|
-| `ScannerView` | SwiftUI View | Camera preview, scanning overlay, checklist |
-| `ScannerViewModel` | `@Observable` class | Orchestrates capture, API calls, merge logic |
-| `VisionAPIService` | `actor` | Sends frames to Vision API, parses JSON |
-| `EquipmentMerger` | `struct` | Deduplicates and merges multi-frame detections |
-| `EquipmentConfirmationView` | SwiftUI View | Editable list of detected equipment |
+| `ScannerView` | SwiftUI View | Guided capture UI: live preview, shutter, result card, confirmation list |
+| `ScannerViewModel` | `@Observable` class | State machine; one-shot capture → Vision API → user review → accumulate |
+| `CameraManager` | `@Observable` class | AVCaptureSession wrapper; `captureOneFrame()` for guided mode |
+| `VisionAPIService` | `actor` | Sends single photo to Vision API, parses one-item JSON response |
+| `EquipmentMerger` | `struct` | Deduplicates across multiple captures (same equipment photographed twice) |
 
-### 5.2 Camera Pipeline
+### 5.2 Camera Pipeline (Guided Mode)
 
 ```
-AVCaptureSession
-    └── AVCaptureVideoDataOutput
-            └── ScannerViewModel.captureOutput(_:didOutput:from:)
-                    │  (fires every frame at 30fps)
-                    │
-                    ├── Frame rate gate: only process 1 frame per 2 seconds
-                    │
-                    ├── CMSampleBuffer → CVPixelBuffer → UIImage → JPEG Data
-                    │
-                    └── Dispatch to VisionAPIService.analyze(frameData:)
+User taps shutter
+    │
+    └── ScannerViewModel.captureAndIdentify()
+            │
+            ├── CameraManager.captureOneFrame()   ← awaits CheckedContinuation
+            │       │  AVCapturePhotoOutput.capturePhoto (one-shot still)
+            │       └── AVCapturePhotoCaptureDelegate → resume continuation
+            │
+            ├── frame → VisionAPIService.analyseFrame(frame)
+            │       └── POST /messages (Anthropic) — single-item prompt
+            │
+            ├── Result: [EquipmentItem] (0 or 1 items)
+            │       ├── 1 item → state = .reviewed(item:)  ← user confirms/discards
+            │       └── 0 items → state = .previewing + toast "nothing detected"
+            │
+            └── User confirms → mergeItems() → state = .previewing (next capture)
+                User discards → state = .previewing (try again)
 ```
 
 ### 5.3 Vision API Call Contract
 
-**Request format:**
+**Request format (single-item mode):**
 
 ```json
 {
@@ -631,32 +649,51 @@ AVCaptureSession
     "role": "user",
     "content": [
       { "type": "image", "source": { "type": "base64", "media_type": "image/jpeg", "data": "<base64>" } },
-      { "type": "text", "text": "Identify gym equipment. Return ONLY JSON array: [{\"equipment_type\": string, \"estimated_weight_range_kg\": {\"min\": number, \"max\": number, \"increment\": number} | null, \"count\": number}]. Valid types: dumbbell_set, barbell, ez_curl_bar, cable_machine_single, cable_machine_dual, smith_machine, leg_press, hack_squat, adjustable_bench, flat_bench, incline_bench, pull_up_bar, dip_station, resistance_bands, kettlebell_set. Unknown: 'unknown:<description>'." }
+      { "type": "text", "text": "You are a gym equipment identifier. This photo shows ONE piece of gym equipment. Return exactly ONE item. confidence >= 0.85 required. Return: [{\"equipment_type\": \"<type>\", \"count\": <int>, \"confidence\": <float>}] or []." }
     ]
   }]
 }
 ```
 
-### 5.4 Equipment Merge Rules
+**Prompt rules:**
+- Return exactly ONE item (the primary equipment in the photo)
+- Confidence threshold: >= 0.85
+- Fixed vocabulary of 26 `equipment_type` values enforced; any other string is forbidden
+- If not a gym image or nothing identifiable: return `[]`
+- Ignore cardio, furniture, screens, walls, floors
+
+**Response shape** (`VisionDetectedItem`):
+```json
+[{"equipment_type": "dumbbell_set", "count": 1, "confidence": 0.92}]
+```
+
+### 5.4 Equipment Merge Rules (Multi-Capture Deduplication)
 
 ```
-1. Group all detections by equipment_type (exact string match)
-2. For each group:
-   a. count = max(count across all frames)
-   b. weightRange:
-      - min = min(all observed mins)
-      - max = max(all observed maxes)
-      - increment = mode(all observed increments), fallback to min observed
-3. Filter out count == 0
-4. Map strings to EquipmentType enum
-5. Unknown strings → EquipmentType.unknown("<string>")
+On each user confirmation, new item is merged into detectedEquipment:
+1. If equipmentType already present → count = max(existing, new)
+2. If new type → append to list
+3. .unknown(_) types are dropped by EquipmentMerger before reaching the view model
+   (model returning a string outside the fixed vocabulary = noise)
+
+Cardio blocklist (treadmill, bike, rower, etc.) and junk blocklist
+(furniture, screens, etc.) filtered inside EquipmentMerger.merge().
 ```
 
 ### 5.5 Scanner State Machine
 
 ```
-.idle → .scanning(framesCaptured:, detectedCategories:) → .processing → .confirming(items:) → .complete(profile:)
-                                                                                                     └── re-scan → .idle
+.idle
+  └── startCapture() → .requestingPermission
+        └── granted → .previewing  (camera live, shutter available)
+              ├── captureAndIdentify() → .analyzing  (API in-flight)
+              │     ├── item found → .reviewed(item:)
+              │     │     ├── confirmDetection() → mergeItems() → .previewing
+              │     │     └── rejectDetection() → .previewing
+              │     └── empty result → .previewing + toast
+              └── doneCapturing() → .confirming  (editable list)
+                    └── confirmProfile() → .completed(profile:)
+                          └── reset() → .idle  (re-scan)
 ```
 
 ---
@@ -810,8 +847,9 @@ prescribe(context:)
             ├── Decode: { "set_prescription": SetPrescription }
             ├── prescription.validate()
             ├── SUCCESS:
-            │   ├── EquipmentRounder.round(weightKg, for: exerciseType)
-            │   ├── Append rounding note to reasoning if adjusted
+            │   ├── DefaultWeightIncrements.nearestWeights(to: weightKg, for: exerciseType)
+            │   │   + GymFactStore.knownSubstitution(for: exerciseType, target: weightKg)
+            │   │   → snap to nearest available weight, append note to reasoning if adjusted
             │   ├── Safety gate: painReported → restSeconds = max(restSeconds, 180)
             │   └── return .success(prescription)
             └── FAILURE: append error to prompt, retry (max 2 retries)
@@ -1125,33 +1163,41 @@ UI: Non-blocking "Coach offline" banner, 3 seconds
 
 ### 14.1 Test Pyramid
 
-- **Unit (60%)**: `EquipmentRounder`, `SetPrescription.validate()`, `ReadinessScore`, `EquipmentMerger`, `WorkoutContext` assembly
+- **Unit (60%)**: `SetPrescription.validate()`, `ReadinessScore`, `EquipmentMerger`, `DefaultWeightIncrements`, `GymFactStore`, `WorkoutContext` assembly
 - **Integration (30%)**: Service interactions, Supabase writes, HealthKit queries
 - **UI (10%)**: XCUITest end-to-end flows
 
 ### 14.2 Current Status
 
-- `EquipmentRounderTests.swift` — ✅ Green (dumbbell rounding, barbell plate math, boundaries, clamp, empty profile)
-- `KeychainServiceTests.swift` — ✅ Implemented
-- `AIInferenceSpikeTests.swift` — ✅ Implemented
+| File | Status | Coverage |
+|---|---|---|
+| `EquipmentMergerTests.swift` | ✅ Green | Presence-only dedup, cardio/junk blocklists, unknown-always-dropped |
+| `GymProfileTests.swift` | ✅ Green | Round-trip Codable, notes, count(of:), item(for:) |
+| `DefaultWeightIncrementsTests.swift` | ✅ Green | defaults(for:), nearestWeights, dumbbell/barbell/cable/kettlebell ranges |
+| `GymFactStoreTests.swift` | ✅ Green | recordCorrection, knownSubstitution, contextStrings, persistence, clearAll |
+| `EquipmentRounderTests.swift` | ✅ Green | Now contains `SetPrescriptionValidationTests` only (EquipmentRounder retired) |
+| `KeychainServiceTests.swift` | ✅ Green | Store, retrieve, delete |
+| `AIInferenceSpikeTests.swift` | ✅ Green | Live API spike |
+| `AIInferenceServiceTests.swift` | ✅ Green | Retry loop, fallback paths |
+| `WorkoutContextAssemblyTests.swift` | ✅ Green | Full JSON round-trip |
+| `SupabaseClientTests.swift` | ✅ Green | CRUD + RPC |
 
 ### 14.3 Planned Tests
 
 | File | Priority | Key Scenarios |
 |---|---|---|
-| `AIInferenceServiceTests.swift` | P0 | Retry loop, timeout fallback, markdown stripping, pain safety gate, rounding integration |
 | `ReadinessScoreTests` | P0 | All Section 11.4 edge cases, boundary scores, nil biometrics |
 | `MemoryServiceTests.swift` | P1 | Pain keyword detection, event generation, threshold filtering |
-| `WorkoutContextAssemblyTests.swift` | P1 | Full JSON round-trip, nil biometrics path |
-| `EquipmentMergerTests.swift` | P1 | Multi-frame deduplication, count aggregation |
-| `EquipmentRounderTests.swift` | P0 | Expand to 100% AC coverage |
+| `ScannerViewModelTests.swift` | P1 | State machine transitions, captureAndIdentify happy/empty path |
 
 ### 14.4 Coverage Targets
 
 | Module | Target |
 |---|---|
-| `EquipmentRounder` | 100% |
 | `SetPrescription.validate()` | 100% |
+| `DefaultWeightIncrements` | 100% |
+| `GymFactStore` | 100% |
+| `EquipmentMerger` | 100% |
 | `AIInferenceService` (retry/fallback paths) | 90% |
 | `HealthKitService.computeReadinessScore` | 100% |
 | `MemoryService` (write path) | 80% |
@@ -1266,14 +1312,17 @@ jobs:
 
 ## 18. Appendix: Sequence Diagrams
 
-### 18.1 Gym Scan
+### 18.1 Gym Scan (Guided Mode)
 
 ```
-User → ScannerView → ScannerViewModel → VisionAPIService → EquipmentMerger → Supabase
-tap Scan → AVCaptureSession start
-[every 2s] → analyze(frame) → POST Vision API → detectedItems → merge() → updateUI
-tap Done → .confirming state
-tap Save → saveToUserDefaults + POST gym_profiles → .complete
+User → ScannerView → ScannerViewModel → CameraManager → VisionAPIService → EquipmentMerger → Supabase
+tap Start → requestPermission → AVCaptureSession start → .previewing
+tap Shutter → captureOneFrame() → one-shot AVCapturePhoto
+  → analyseFrame(frame) → POST Vision API (single-item prompt)
+  → .reviewed(item) → user taps "Add to List"
+  → mergeItems() → .previewing (repeat for each equipment)
+tap Done → .confirming
+tap Save → saveToUserDefaults + POST gym_profiles → .completed
 ```
 
 ### 18.2 Active Workout Set Loop
@@ -1559,20 +1608,23 @@ Three dots in liquid wave pattern, `easeInOut(duration: 0.5).repeatForever()` wi
 
 ## Screen Specifications
 
-### Gym Scanner
+### Gym Scanner (Guided Mode)
 
-- Camera: full-screen live feed
-- Overlay: animated corner brackets (drawingGroup stroke)
-- Bottom glass panel slides up with detected items
-- Each detected item pops in with `.apexSnap`
-- "DONE SCANNING" enabled after 5+ frames captured
+- Camera: full-screen live feed (`CameraPreviewView`)
+- **Shutter button**: large white circle, bottom-centre
+- **Item count badge**: top-left pill showing "N items captured" (hidden when 0)
+- **"Done" button**: top-right, visible only when ≥1 item captured
+- **Analyzing overlay**: frosted black + spinner + "Identifying equipment…" while API runs
+- **Result card**: `regularMaterial` card with detected equipment name, count, "Add to List" / "Discard" / "Edit before adding"
+- **Nothing detected toast**: red pill "No gym equipment detected — try again", 2.5s auto-dismiss
+- No continuous scan animation; no frame counter HUD
 
 ### Equipment Confirmation
 
-- Glass list cards per detected item
-- Edit/add/delete supported
-- AI disclaimer ghost text
-- Full-width "SAVE & BUILD MY PROGRAM" CTA
+- Glass list cards per detected item; tap to edit, swipe to delete
+- "Add Equipment Manually" button at bottom
+- "Re-scan" (destructive, top-left) and "Save" (top-right) toolbar buttons
+- Full-width confirm action saves profile to UserDefaults + Supabase
 
 ### Program Overview (12-Week Calendar)
 
