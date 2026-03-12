@@ -465,14 +465,20 @@ actor AIInferenceService {
 
     private let provider: any LLMProvider
     let maxRetries: Int
+    /// The user's gym profile — used to scope the AI's equipment awareness.
+    /// Stored for future use in payload construction; currently included in
+    /// the WorkoutContext via the caller.
+    let gymProfile: GymProfile?
 
     // MARK: Init
 
     init(
         provider: any LLMProvider,
+        gymProfile: GymProfile? = nil,
         maxRetries: Int = 2
     ) {
         self.provider = provider
+        self.gymProfile = gymProfile
         self.maxRetries = maxRetries
     }
 

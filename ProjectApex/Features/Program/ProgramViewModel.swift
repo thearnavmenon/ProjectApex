@@ -79,23 +79,34 @@ final class ProgramViewModel {
         }
     }
 
+    // MARK: - Regenerate
+
+    /// Replaces the existing program with a freshly generated one.
+    /// Clears local cache + deactivates old Supabase row before generating.
+    /// Called from Settings → "Regenerate Program".
+    func regenerateProgram(gymProfile: GymProfile) async {
+        // Clear the local cache so the new program is not shadowed by the old one
+        Mesocycle.clearUserDefaults()
+        // Delegate to the shared generation path (handles generating state + Supabase persist)
+        await generateProgram(gymProfile: gymProfile)
+    }
+
     // MARK: - Generate
 
     /// Triggers program generation from a GymProfile and UserProfile.
-    /// Called from the empty state CTA.
+    /// Called from the empty state CTA and from regenerateProgram().
     func generateProgram(gymProfile: GymProfile) async {
-        guard !programGenerationService.isGenerating else { return }
+        guard await !programGenerationService.isGenerating else { return }
         viewState = .generating
 
         // Build a minimal user profile for generation.
         // In Phase 4 this will draw from HealthKit / onboarding data.
-        let userProfile = MacroProgramRequest.UserProfile(
-            age: 28,
-            biologicalSex: "male",
-            trainingAge: 3,
-            primaryGoal: "hypertrophy",
-            daysPerWeek: 4,
-            sessionDurationMinutes: 75
+        let userProfile = UserProfile(
+            userId: userId.uuidString,
+            experienceLevel: "intermediate",
+            goals: ["hypertrophy"],
+            bodyweightKg: nil,
+            ageYears: nil
         )
 
         do {
@@ -104,13 +115,13 @@ final class ProgramViewModel {
                 gymProfile: gymProfile
             )
             // Persist to Supabase (fire-and-forget for UX speed)
-            Task.detached { [weak self] in
-                guard let self else { return }
+            let capturedUserId = userId
+            let capturedClient = supabaseClient
+            Task.detached {
                 do {
-                    try await self.supabaseClient.deactivatePrograms(userId: self.userId)
-                    // Insert new program row
-                    let row = ProgramRow.forInsert(from: mesocycle, userId: self.userId)
-                    _ = try await self.supabaseClient.insertProgram(row)
+                    try await capturedClient.deactivatePrograms(userId: capturedUserId)
+                    let row = ProgramRow.forInsert(from: mesocycle, userId: capturedUserId)
+                    try await capturedClient.insert(row, table: "programs")
                 } catch {
                     // Non-fatal: program already in local cache
                 }

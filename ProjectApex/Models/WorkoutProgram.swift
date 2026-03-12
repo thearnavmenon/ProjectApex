@@ -53,19 +53,73 @@ nonisolated struct PlannedExercise: Codable, Identifiable, Sendable {
     let rirTarget: Int
     let coachingCues: [String]
 
+    // Explicit memberwise init (required because custom Decodable init suppresses synthesis).
+    nonisolated init(
+        id: UUID,
+        exerciseId: String,
+        name: String,
+        primaryMuscle: String,
+        synergists: [String],
+        equipmentRequired: EquipmentType,
+        sets: Int,
+        repRange: RepRange,
+        tempo: String,
+        restSeconds: Int,
+        rirTarget: Int,
+        coachingCues: [String]
+    ) {
+        self.id = id
+        self.exerciseId = exerciseId
+        self.name = name
+        self.primaryMuscle = primaryMuscle
+        self.synergists = synergists
+        self.equipmentRequired = equipmentRequired
+        self.sets = sets
+        self.repRange = repRange
+        self.tempo = tempo
+        self.restSeconds = restSeconds
+        self.rirTarget = rirTarget
+        self.coachingCues = coachingCues
+    }
+
     enum CodingKeys: String, CodingKey {
         case id
-        case exerciseId       = "exercise_id"
+        case exerciseId        = "exercise_id"
         case name
-        case primaryMuscle    = "primary_muscle"
+        case primaryMuscle     = "primary_muscle"
         case synergists
         case equipmentRequired = "equipment_required"
         case sets
-        case repRange         = "rep_range"
+        case repRange          = "rep_range"
         case tempo
-        case restSeconds      = "rest_seconds"
-        case rirTarget        = "rir_target"
-        case coachingCues     = "coaching_cues"
+        case restSeconds       = "rest_seconds"
+        case rirTarget         = "rir_target"
+        case coachingCues      = "coaching_cues"
+    }
+
+    // Custom decoder: `equipment_required` in LLM output is a plain string
+    // (e.g. "dumbbell_set"), but EquipmentType.Codable normally expects an
+    // object form {"type": "..."}. We handle both so round-trip encoding still works.
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id             = try c.decode(UUID.self,   forKey: .id)
+        exerciseId     = try c.decode(String.self, forKey: .exerciseId)
+        name           = try c.decode(String.self, forKey: .name)
+        primaryMuscle  = try c.decode(String.self, forKey: .primaryMuscle)
+        synergists     = try c.decode([String].self, forKey: .synergists)
+        sets           = try c.decode(Int.self,    forKey: .sets)
+        repRange       = try c.decode(RepRange.self, forKey: .repRange)
+        tempo          = try c.decode(String.self, forKey: .tempo)
+        restSeconds    = try c.decode(Int.self,    forKey: .restSeconds)
+        rirTarget      = try c.decode(Int.self,    forKey: .rirTarget)
+        coachingCues   = try c.decode([String].self, forKey: .coachingCues)
+
+        // Try plain-string form first (LLM output), fall back to object form (round-trip).
+        if let typeKey = try? c.decode(String.self, forKey: .equipmentRequired) {
+            equipmentRequired = EquipmentType(typeKey: typeKey)
+        } else {
+            equipmentRequired = try c.decode(EquipmentType.self, forKey: .equipmentRequired)
+        }
     }
 }
 

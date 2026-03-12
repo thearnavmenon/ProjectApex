@@ -35,44 +35,110 @@ private struct ThrowingLLMProvider: LLMProvider {
     }
 }
 
-// MARK: - Valid mock JSON
+// MARK: - Valid mock JSON (template format)
 
-/// Minimal valid MesocycleWrapper JSON that satisfies the decoder.
-/// Represents a 1-week accumulation mesocycle with 1 day and 1 exercise.
+/// Minimal valid mesocycle_template JSON that satisfies the two-stage decoder.
+/// Contains all 4 phase templates, each with 1 day and 1 exercise.
 private let validMesocycleJSON = """
 {
-  "mesocycle": {
-    "id": "DDDDDDDD-0000-0000-0000-000000000001",
-    "user_id": "AAAAAAAA-0000-0000-0000-000000000001",
-    "created_at": "2026-03-15T00:00:00Z",
-    "is_active": true,
-    "total_weeks": 12,
+  "mesocycle_template": {
     "periodization_model": "linear_periodization",
-    "weeks": [
+    "phase_templates": [
       {
-        "id": "AAAAAAAA-1111-0000-0000-000000000001",
-        "week_number": 1,
         "phase": "accumulation",
         "training_days": [
           {
-            "id": "BBBBBBBB-0000-0000-0000-000000000001",
             "day_of_week": 1,
             "day_label": "Push_A",
             "session_notes": null,
             "exercises": [
               {
-                "id": "CCCCCCCC-0000-0000-0000-000000000001",
-                "exercise_id": "barbell_bench_press",
-                "name": "Barbell Bench Press",
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
                 "primary_muscle": "pectoralis_major",
                 "synergists": ["anterior_deltoid", "triceps_brachii"],
-                "equipment_required": { "type": "barbell" },
-                "sets": 4,
+                "equipment_required": "dumbbell_set",
+                "sets": 3,
                 "rep_range": { "min": 8, "max": 12 },
-                "tempo": "3-1-1-0",
-                "rest_seconds": 150,
+                "tempo": "3-1-2-0",
+                "rest_seconds": 90,
                 "rir_target": 3,
-                "coaching_cues": ["Retract scapula", "Drive through bar"]
+                "coaching_cues": ["Retract scapula", "Control the descent"]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "phase": "intensification",
+        "training_days": [
+          {
+            "day_of_week": 1,
+            "day_label": "Push_A",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 3,
+                "rep_range": { "min": 6, "max": 10 },
+                "tempo": "3-1-2-0",
+                "rest_seconds": 120,
+                "rir_target": 2,
+                "coaching_cues": ["Retract scapula", "Control the descent"]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "phase": "peaking",
+        "training_days": [
+          {
+            "day_of_week": 1,
+            "day_label": "Push_A",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 3,
+                "rep_range": { "min": 4, "max": 8 },
+                "tempo": "3-1-2-0",
+                "rest_seconds": 150,
+                "rir_target": 1,
+                "coaching_cues": ["Retract scapula", "Maximal intent"]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "phase": "deload",
+        "training_days": [
+          {
+            "day_of_week": 1,
+            "day_label": "Push_A",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 2,
+                "rep_range": { "min": 10, "max": 15 },
+                "tempo": "2-1-2-0",
+                "rest_seconds": 60,
+                "rir_target": 4,
+                "coaching_cues": ["Easy effort", "Focus on form"]
               }
             ]
           }
@@ -147,10 +213,10 @@ final class ProgramGenerationServiceTests: XCTestCase {
             gymProfile: gymProfile
         )
 
-        // Must have 12 weeks
+        // Template is expanded client-side to exactly 12 weeks
         XCTAssertEqual(mesocycle.totalWeeks, 12)
         XCTAssertEqual(mesocycle.weeks.count, 12,
-                       "Live API must return exactly 12 weeks.")
+                       "Template expansion must produce exactly 12 weeks.")
 
         // Verify phase structure
         let phases = mesocycle.weeks.map { $0.phase }
@@ -200,7 +266,88 @@ final class ProgramGenerationServiceTests: XCTestCase {
         }
     }
 
-    // MARK: ─── 2. Valid JSON response decodes correctly ───────────────────────
+    // MARK: ─── 1b. Live API — dumbbell-only gym ──────────────────────────────────
+
+    /// Calls generate() with a single dumbbell_set gym profile.
+    /// Verifies all 12 weeks decode, expand correctly, and only use dumbbell_set.
+    func test_liveAPI_dumbbellOnly_generate_returns12WeekMesocycle() async throws {
+        try requireLiveAPI()
+        let apiKey = try requireAnthropicKey()
+
+        let service = ProgramGenerationService(
+            provider: AnthropicProvider.forProgramGeneration(apiKey: apiKey)
+        )
+
+        let userProfile = UserProfile(
+            userId: UUID().uuidString,
+            experienceLevel: "intermediate",
+            goals: ["hypertrophy"],
+            bodyweightKg: 75.0,
+            ageYears: 26
+        )
+
+        // Dumbbell-only gym profile
+        let dumbbellGymProfile = GymProfile(
+            id: UUID(),
+            scanSessionId: "test_dumbbell_only",
+            createdAt: Date(),
+            lastUpdatedAt: Date(),
+            equipment: [
+                EquipmentItem(
+                    id: UUID(),
+                    equipmentType: .dumbbellSet,
+                    count: 1,
+                    notes: nil,
+                    detectedByVision: false
+                )
+            ],
+            isActive: true
+        )
+
+        let mesocycle = try await service.generate(
+            userProfile: userProfile,
+            gymProfile: dumbbellGymProfile
+        )
+
+        // Shape checks
+        XCTAssertEqual(mesocycle.totalWeeks, 12)
+        XCTAssertEqual(mesocycle.weeks.count, 12, "Must expand to exactly 12 weeks.")
+
+        // Phase structure
+        XCTAssertTrue(mesocycle.weeks[0..<4].allSatisfy { $0.phase == MesocyclePhase.accumulation },
+                      "Weeks 1–4 must be accumulation.")
+        XCTAssertTrue(mesocycle.weeks[4..<8].allSatisfy { $0.phase == MesocyclePhase.intensification },
+                      "Weeks 5–8 must be intensification.")
+        XCTAssertTrue(mesocycle.weeks[8..<11].allSatisfy { $0.phase == MesocyclePhase.peaking },
+                      "Weeks 9–11 must be peaking.")
+        XCTAssertEqual(mesocycle.weeks[11].phase, MesocyclePhase.deload, "Week 12 must be deload.")
+
+        // Every week has training days with exercises
+        for week in mesocycle.weeks {
+            XCTAssertFalse(week.trainingDays.isEmpty,
+                           "Week \(week.weekNumber) must have training days.")
+            for day in week.trainingDays {
+                XCTAssertFalse(day.exercises.isEmpty,
+                               "Day '\(day.dayLabel)' in week \(week.weekNumber) must have exercises.")
+            }
+        }
+
+        // Equipment constraint: every exercise must use dumbbell_set
+        for week in mesocycle.weeks {
+            for day in week.trainingDays {
+                for exercise in day.exercises {
+                    if case .unknown = exercise.equipmentRequired { continue }
+                    XCTAssertEqual(
+                        exercise.equipmentRequired, EquipmentType.dumbbellSet,
+                        "Exercise '\(exercise.name)' (week \(week.weekNumber)) must use dumbbell_set, " +
+                        "got \(exercise.equipmentRequired.typeKey)."
+                    )
+                }
+            }
+        }
+    }
+
+    // MARK: ─── 2. Valid JSON response decodes + expands correctly ───────────────
 
     func test_generate_validJSON_returnsMesocycle() async throws {
         let service = ProgramGenerationService(
@@ -218,34 +365,38 @@ final class ProgramGenerationServiceTests: XCTestCase {
             gymProfile: GymProfile.mockProfile()
         )
 
-        XCTAssertEqual(mesocycle.id, UUID(uuidString: "DDDDDDDD-0000-0000-0000-000000000001"))
+        // Template is expanded to 12 weeks client-side
         XCTAssertEqual(mesocycle.totalWeeks, 12)
+        XCTAssertEqual(mesocycle.weeks.count, 12)
         XCTAssertTrue(mesocycle.isActive)
         XCTAssertEqual(mesocycle.periodizationModel, "linear_periodization")
-        XCTAssertEqual(mesocycle.weeks.count, 1)
 
-        let week = mesocycle.weeks[0]
-        XCTAssertEqual(week.weekNumber, 1)
-        XCTAssertEqual(week.phase, .accumulation)
-        XCTAssertFalse(week.isDeload)
-        XCTAssertEqual(week.trainingDays.count, 1)
+        // Phase structure
+        XCTAssertTrue(mesocycle.weeks[0..<4].allSatisfy { $0.phase == .accumulation })
+        XCTAssertTrue(mesocycle.weeks[4..<8].allSatisfy { $0.phase == .intensification })
+        XCTAssertTrue(mesocycle.weeks[8..<11].allSatisfy { $0.phase == .peaking })
+        XCTAssertEqual(mesocycle.weeks[11].phase, .deload)
 
-        let day = week.trainingDays[0]
-        XCTAssertEqual(day.dayLabel, "Push_A")
-        XCTAssertEqual(day.dayOfWeek, 1)
-        XCTAssertNil(day.sessionNotes)
-        XCTAssertEqual(day.exercises.count, 1)
+        // Each week has 1 day (mirrors the single-day template)
+        for week in mesocycle.weeks {
+            XCTAssertEqual(week.trainingDays.count, 1)
+        }
 
-        let exercise = day.exercises[0]
-        XCTAssertEqual(exercise.exerciseId, "barbell_bench_press")
-        XCTAssertEqual(exercise.name, "Barbell Bench Press")
-        XCTAssertEqual(exercise.equipmentRequired, .barbell)
-        XCTAssertEqual(exercise.sets, 4)
-        XCTAssertEqual(exercise.repRange.min, 8)
-        XCTAssertEqual(exercise.repRange.max, 12)
-        XCTAssertEqual(exercise.tempo, "3-1-1-0")
-        XCTAssertEqual(exercise.rirTarget, 3)
-        XCTAssertEqual(exercise.restSeconds, 150)
+        // Progressive overload: accumulation week 3 (index 2) should have +1 set vs template
+        let accumulationWeek1 = mesocycle.weeks[0].trainingDays[0].exercises[0]
+        let accumulationWeek3 = mesocycle.weeks[2].trainingDays[0].exercises[0]
+        XCTAssertEqual(accumulationWeek1.sets, 3) // baseline
+        XCTAssertEqual(accumulationWeek3.sets, 4) // +1 set at weekInPhase=2
+
+        // Equipment is dumbbell_set throughout
+        for week in mesocycle.weeks {
+            for day in week.trainingDays {
+                for exercise in day.exercises {
+                    XCTAssertEqual(exercise.equipmentRequired, .dumbbellSet,
+                                   "All exercises must use dumbbell_set in this test template.")
+                }
+            }
+        }
     }
 
     // MARK: ─── 3. Missing wrapper key → decodingFailed ────────────────────────

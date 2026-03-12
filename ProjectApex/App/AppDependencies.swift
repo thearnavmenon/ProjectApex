@@ -7,7 +7,8 @@
 //
 // Init order:
 //   KeychainService → SupabaseClient → HealthKitService
-//     → MemoryService → SpeechService → GymFactStore → AIInferenceService
+//     → MemoryService → SpeechService → GymFactStore
+//     → AIInferenceService → ProgramGenerationService
 
 import SwiftUI
 
@@ -24,6 +25,8 @@ final class AppDependencies {
     let speechService: SpeechService
     let gymFactStore: GymFactStore
     private(set) var aiInferenceService: AIInferenceService
+    /// Generates 12-week periodized programs on demand using claude-opus-4.
+    private(set) var programGenerationService: ProgramGenerationService
 
     // MARK: Private: Stored Anthropic key for re-init
 
@@ -53,21 +56,29 @@ final class AppDependencies {
         // 6. GymFactStore — persists user weight corrections
         self.gymFactStore = GymFactStore()
 
-        // 7. AI Inference — needs Anthropic key
+        // 7. AI Inference — needs Anthropic key (sonnet model, 8-second timeout)
         let anthropicKey = (try? keychain.retrieve(.anthropicAPIKey)) ?? ""
         self.anthropicKey = anthropicKey
         self.aiInferenceService = AIInferenceService(
             provider: AnthropicProvider(apiKey: anthropicKey)
         )
+
+        // 8. Program Generation — uses opus model; no timeout (user waits explicitly)
+        self.programGenerationService = ProgramGenerationService(
+            provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
+        )
     }
 
     // MARK: - Re-initialisation
 
-    /// Replaces the current `AIInferenceService` with a fresh instance.
-    /// Call this if the Anthropic API key changes (e.g. after re-login).
+    /// Replaces AI services with fresh instances using the current Anthropic key.
+    /// Call this if the API key changes (e.g. after re-login via Developer Settings).
     func reinitialiseAIInference() {
         aiInferenceService = AIInferenceService(
             provider: AnthropicProvider(apiKey: anthropicKey)
+        )
+        programGenerationService = ProgramGenerationService(
+            provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
         )
     }
 }

@@ -20,19 +20,9 @@ import SwiftUI
 
 struct ProgramOverviewView: View {
 
-    @State private var viewModel: ProgramViewModel
+    @Bindable var viewModel: ProgramViewModel
     /// The confirmed gym profile passed in from ContentView.
     let gymProfile: GymProfile?
-
-    init(supabaseClient: SupabaseClient,
-         programGenerationService: ProgramGenerationService,
-         gymProfile: GymProfile?) {
-        _viewModel = State(initialValue: ProgramViewModel(
-            supabaseClient: supabaseClient,
-            programGenerationService: programGenerationService
-        ))
-        self.gymProfile = gymProfile
-    }
 
     var body: some View {
         ZStack {
@@ -210,7 +200,8 @@ struct ProgramOverviewView: View {
                     WeekRowView(
                         week: week,
                         isCurrent: index == currentWeekIndex,
-                        weekIndex: index
+                        weekIndex: index,
+                        mesocycleCreatedAt: mesocycle.createdAt
                     )
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
@@ -280,6 +271,7 @@ private struct WeekRowView: View {
     let week: TrainingWeek
     let isCurrent: Bool
     let weekIndex: Int
+    let mesocycleCreatedAt: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -318,7 +310,7 @@ private struct WeekRowView: View {
                 HStack(spacing: 8) {
                     ForEach(week.trainingDays) { day in
                         NavigationLink {
-                            ProgramDayDetailView(day: day, week: week)
+                            ProgramDayDetailView(day: day, week: week, mesocycleCreatedAt: mesocycleCreatedAt)
                         } label: {
                             DayCardView(day: day, week: week, isCurrentWeek: isCurrent)
                         }
@@ -503,8 +495,10 @@ private extension String {
 #Preview {
     NavigationStack {
         ProgramOverviewView(
-            supabaseClient: SupabaseClient(supabaseURL: URL(string: "https://example.supabase.co")!, anonKey: ""),
-            programGenerationService: ProgramGenerationService(provider: AnthropicProvider(apiKey: "")),
+            viewModel: ProgramViewModel(
+                supabaseClient: SupabaseClient(supabaseURL: URL(string: "https://example.supabase.co")!, anonKey: ""),
+                programGenerationService: ProgramGenerationService(provider: AnthropicProvider(apiKey: ""))
+            ),
             gymProfile: nil
         )
     }

@@ -1181,6 +1181,8 @@ UI: Non-blocking "Coach offline" banner, 3 seconds
 | `AIInferenceServiceTests.swift` | ✅ Green | Retry loop, fallback paths |
 | `WorkoutContextAssemblyTests.swift` | ✅ Green | Full JSON round-trip |
 | `SupabaseClientTests.swift` | ✅ Green | CRUD + RPC |
+| `EquipmentConstraintValidationTests.swift` | ✅ Green | Post-generation equipment constraint violations |
+| `ProgramPersistenceTests.swift` | ✅ Green | UserDefaults cache round-trip, clearUserDefaults |
 
 ### 14.3 Planned Tests
 
@@ -1189,6 +1191,7 @@ UI: Non-blocking "Coach offline" banner, 3 seconds
 | `ReadinessScoreTests` | P0 | All Section 11.4 edge cases, boundary scores, nil biometrics |
 | `MemoryServiceTests.swift` | P1 | Pain keyword detection, event generation, threshold filtering |
 | `ScannerViewModelTests.swift` | P1 | State machine transitions, captureAndIdentify happy/empty path |
+| `DayStatusTests.swift` | P1 | DayStatus.resolve() — today/future/past boundaries, edge cases |
 
 ### 14.4 Coverage Targets
 

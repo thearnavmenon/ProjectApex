@@ -35,14 +35,14 @@
 
 ## Phase 2 — Macro-Program Engine
 
-- [ ] P2-T01: WorkoutProgram data models — Mesocycle, Week, TrainingDay, Exercise
-- [ ] P2-T02: ProgramGenerationService actor — LLM call, decode, validate
-- [ ] P2-T03: Equipment constraint validation — post-generation pass
-- [ ] P2-T04: Supabase programs table — persist & fetch mesocycle
-- [ ] P2-T05: ProgramOverviewView — 12-week calendar grid
-- [ ] P2-T06: ProgramDayDetailView — drill-in exercise list
-- [ ] P2-T07: MacroGeneration system prompt — tune and lock
-- [ ] P2-T08: Regenerate Program — settings action
+- [x] P2-T01: WorkoutProgram data models — Mesocycle, Week, TrainingDay, Exercise
+- [x] P2-T02: ProgramGenerationService actor — LLM call, decode, validate
+- [x] P2-T03: Equipment constraint validation — post-generation pass
+- [x] P2-T04: Supabase programs table — persist & fetch mesocycle
+- [x] P2-T05: ProgramOverviewView — 12-week calendar grid
+- [x] P2-T06: ProgramDayDetailView — drill-in exercise list
+- [x] P2-T07: MacroGeneration system prompt — tune and lock
+- [x] P2-T08: Regenerate Program — settings action
 - [ ] P2-T09: SwiftData local cache for offline program access
 
 ---

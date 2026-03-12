@@ -47,7 +47,11 @@ struct ScannerView: View {
 
             switch viewModel.state {
             case .idle:
+                #if targetEnvironment(simulator)
+                simulatorIdleView
+                #else
                 idleView
+                #endif
 
             case .requestingPermission:
                 permissionSpinnerView
@@ -109,6 +113,44 @@ struct ScannerView: View {
 
             Button(action: { viewModel.startCapture() }) {
                 Label("Start Scanning", systemImage: "camera.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.white)
+            .foregroundStyle(.black)
+            .padding(.horizontal, 24)
+            .padding(.bottom, 48)
+        }
+    }
+
+    /// Simulator-specific idle state: camera unavailable, offer manual entry only.
+    private var simulatorIdleView: some View {
+        VStack(spacing: 28) {
+            Spacer()
+
+            Image(systemName: "iphone.slash")
+                .font(.system(size: 72))
+                .foregroundStyle(.white.opacity(0.5))
+
+            VStack(spacing: 10) {
+                Text("Camera Unavailable")
+                    .font(.title2.bold())
+                    .foregroundStyle(.white)
+
+                Text("The iOS Simulator has no camera.\nRun on a physical device to scan equipment,\nor add your gym equipment manually below.")
+                    .font(.subheadline)
+                    .foregroundStyle(.white.opacity(0.65))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
+
+            Spacer()
+
+            // Jump straight to confirming state with an empty list for manual entry
+            Button(action: { viewModel.skipToManualEntry() }) {
+                Label("Add Equipment Manually", systemImage: "plus.circle")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)

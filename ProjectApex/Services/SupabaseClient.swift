@@ -202,6 +202,61 @@ actor SupabaseClient {
         try await perform(request)
     }
 
+    // MARK: - Programs helpers
+
+    /// Deactivates all currently active programs for `userId` by patching
+    /// `is_active = false` on every matching row.
+    ///
+    /// Called before inserting a new program so the user always has at most one
+    /// `is_active = true` program at a time.
+    ///
+    /// - Parameter userId: The authenticated user's UUID.
+    /// - Throws: `SupabaseError` on HTTP failure.
+    func deactivatePrograms(userId: UUID) async throws {
+        struct IsActivePatch: Encodable {
+            let isActive: Bool
+            enum CodingKeys: String, CodingKey { case isActive = "is_active" }
+        }
+        var components = URLComponents(
+            url: try tableURL(table: "programs"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "user_id", value: "eq.\(userId.uuidString)")
+        ]
+        guard let url = components?.url else { throw SupabaseError.invalidURL }
+        var request = baseRequest(url: url, method: "PATCH")
+        request.setValue("return=representation", forHTTPHeaderField: "Prefer")
+        request.httpBody = try encoder.encode(IsActivePatch(isActive: false))
+        try await perform(request)
+    }
+
+    /// Fetches the most recent `is_active = true` program row for `userId`.
+    ///
+    /// Returns `nil` when no active program exists (e.g. first-time user or
+    /// after a reset). The caller should route to the program generation flow.
+    ///
+    /// - Parameter userId: The authenticated user's UUID.
+    /// - Returns: The most recently inserted active `ProgramRow`, or `nil`.
+    /// - Throws: `SupabaseError` on HTTP or decoding failure.
+    func fetchActiveProgram(userId: UUID) async throws -> ProgramRow? {
+        var components = URLComponents(
+            url: try tableURL(table: "programs"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "user_id",   value: "eq.\(userId.uuidString)"),
+            URLQueryItem(name: "is_active", value: "is.true"),
+            URLQueryItem(name: "order",     value: "created_at.desc"),
+            URLQueryItem(name: "limit",     value: "1")
+        ]
+        guard let url = components?.url else { throw SupabaseError.invalidURL }
+        let request = baseRequest(url: url, method: "GET")
+        let data = try await performReturningData(request)
+        let rows = try decodeArray(ProgramRow.self, from: data)
+        return rows.first
+    }
+
     // MARK: - GymProfile helpers
 
     /// Deactivates all currently active gym profiles for `userId` by patching

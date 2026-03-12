@@ -117,6 +117,18 @@ final class CameraManager: NSObject {
     ///
     /// - Throws: `ScannerError.cameraSetupFailed` if AVFoundation configuration fails.
     func requestAccessAndConfigure() async throws -> Bool {
+        // Simulator has no real camera — fail fast and cleanly instead of letting
+        // AVFoundation flood the console with FigCapture / XPC errors.
+        #if targetEnvironment(simulator)
+        throw ScannerError.cameraSetupFailed(
+            underlying: NSError(
+                domain: "CameraManager",
+                code: -99,
+                userInfo: [NSLocalizedDescriptionKey: "Camera is not available in the Simulator. Run on a physical device to scan gym equipment."]
+            )
+        )
+        #endif
+
         // Check / request authorisation asynchronously (modern AVFoundation API)
         let status = AVCaptureDevice.authorizationStatus(for: .video)
 
@@ -210,14 +222,21 @@ final class CameraManager: NSObject {
 
     /// Starts the capture session. Non-blocking: dispatches to `sessionQueue`.
     func startSession() {
+        #if targetEnvironment(simulator)
+        return
+        #else
         sessionQueue.async { [weak self] in
             guard let self, !self.captureSession.isRunning else { return }
             self.captureSession.startRunning()
         }
+        #endif
     }
 
     /// Stops the capture session and tears down any active frame stream.
     func stopSession() {
+        #if targetEnvironment(simulator)
+        return
+        #else
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.captureTimer?.invalidate()
@@ -228,6 +247,7 @@ final class CameraManager: NSObject {
                 self.captureSession.stopRunning()
             }
         }
+        #endif
     }
 
     // ---------------------------------------------------------------------------

@@ -149,6 +149,14 @@ final class ScannerViewModel {
         }
     }
 
+    /// Bypasses the camera and jumps directly to the manual equipment entry list.
+    /// Used on the iOS Simulator where no camera hardware is available.
+    ///
+    /// Transitions: Idle → Confirming
+    func skipToManualEntry() {
+        state = .confirming
+    }
+
     /// User tapped the shutter button. Captures one photo, sends it to the Vision API,
     /// and transitions to `.reviewed` with the identified item, or back to `.previewing`
     /// with a toast if nothing was detected.

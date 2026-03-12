@@ -52,14 +52,29 @@ nonisolated struct AnthropicProvider: LLMProvider {
 
     let apiKey: String
     let model: String
+    /// Maximum tokens in the completion. Defaults to 1024 (set inference).
+    /// Use 32000 for macro-program generation.
+    let maxTokens: Int
+    /// URLSession request timeout in seconds.
+    /// Set inference uses 30s; program generation uses 600s (Opus + 32k tokens can take 2+ min).
+    let requestTimeout: TimeInterval
 
     private let session: URLSession
 
-    init(apiKey: String, model: String = "claude-sonnet-4-5") {
+    init(
+        apiKey: String,
+        model: String = "claude-sonnet-4-5",
+        maxTokens: Int = 1024,
+        requestTimeout: TimeInterval = 30
+    ) {
         self.apiKey = apiKey
         self.model = model
+        self.maxTokens = maxTokens
+        self.requestTimeout = requestTimeout
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForRequest = requestTimeout
+        // Resource timeout must be at least as large as the request timeout.
+        config.timeoutIntervalForResource = max(requestTimeout, 660)
         self.session = URLSession(configuration: config)
     }
 
@@ -73,7 +88,7 @@ nonisolated struct AnthropicProvider: LLMProvider {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 1024,
+            "max_tokens": maxTokens,
             "system": systemPrompt,
             "messages": [
                 ["role": "user", "content": userPayload]

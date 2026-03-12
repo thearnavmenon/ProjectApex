@@ -8,6 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */; };
+		47BB8E5A2F626C900082C53F /* WorkoutProgramTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */; };
+		47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */; };
+		47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */; };
+		47BB8E662F6273F30082C53F /* ProgramPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */; };
 		47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CA32F619741007B3B34 /* KeychainServiceTests.swift */; };
 		47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CB02F619817007B3B34 /* AIInferenceSpikeTests.swift */; };
 		47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CB22F61A8CB007B3B34 /* GymProfileTests.swift */; };
@@ -31,6 +35,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgramTests.swift; sourceTree = "<group>"; };
+		47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGenerationServiceTests.swift; sourceTree = "<group>"; };
+		47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentConstraintValidationTests.swift; sourceTree = "<group>"; };
+		47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPersistenceTests.swift; sourceTree = "<group>"; };
 		47D91BC02F60266A007B3B34 /* ProjectApex.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ProjectApex.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		47D91CA32F619741007B3B34 /* KeychainServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainServiceTests.swift; sourceTree = "<group>"; };
 		47D91CB02F619817007B3B34 /* AIInferenceSpikeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceSpikeTests.swift; sourceTree = "<group>"; };
@@ -139,6 +147,10 @@
 				47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */,
 				47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */,
 				47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */,
+				47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */,
+				47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */,
+				47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */,
+				47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -241,11 +253,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */,
 				47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */,
 				47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */,
+				47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */,
+				47BB8E5A2F626C900082C53F /* WorkoutProgramTests.swift in Sources */,
 				47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */,
 				47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */,
 				47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */,
+				47BB8E662F6273F30082C53F /* ProgramPersistenceTests.swift in Sources */,
 				32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */,
 				47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */,
 				47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */,
