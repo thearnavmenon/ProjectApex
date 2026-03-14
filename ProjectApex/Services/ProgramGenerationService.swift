@@ -327,7 +327,8 @@ actor ProgramGenerationService {
         // Strip markdown fences, then extract the outermost { } block in case the
         // model emits any preamble or postamble text despite being instructed not to.
         let fenceStripped = Self.stripMarkdownFences(rawResponse)
-        let jsonString = Self.extractOutermostObject(fenceStripped) ?? fenceStripped
+        let extracted = Self.extractOutermostObject(fenceStripped) ?? fenceStripped
+        let jsonString = Self.repairLLMJSON(extracted)
 
         guard let data = jsonString.data(using: .utf8) else {
             throw ProgramGenerationError.decodingFailed("LLM response is not valid UTF-8.")
@@ -516,6 +517,137 @@ actor ProgramGenerationService {
         throw ProgramGenerationError.systemPromptNotFound
     }
 
+    // MARK: - Private: LLM JSON repair
+
+    /// Best-effort repair of common LLM JSON corruption before decoding.
+    ///
+    /// Patterns fixed:
+    ///   1. `"key". "value"`   -> `"key": "value"`     (period instead of colon separator)
+    ///   2. `"key": I[`        -> `"key": [`            (stray uppercase letter before array/object)
+    ///   3. `[ "key": value ]` -> `[ {"key": value} ]` (bare object members inside array)
+    private static func repairLLMJSON(_ input: String) -> String {
+        var s = input
+
+        // Fix 1: `"...". ` -> `"...": `
+        if let regex = try? NSRegularExpression(
+            pattern: #"("(?:[^"\\]|\\.)*")\s*\.\s*(?=["0-9\[{tfn])"#
+        ) {
+            let range = NSRange(s.startIndex..., in: s)
+            s = regex.stringByReplacingMatches(in: s, range: range, withTemplate: "$1: ")
+        }
+
+        // Fix 2: `": X[` or `": X{` where X is a stray single uppercase letter
+        if let regex = try? NSRegularExpression(
+            pattern: #"(:\s*)[A-Z]([\[{])"#
+        ) {
+            let range = NSRange(s.startIndex..., in: s)
+            s = regex.stringByReplacingMatches(in: s, range: range, withTemplate: "$1$2")
+        }
+
+        // Fix 3: bare object members inside arrays — missing { } wrappers
+        s = Self.insertMissingObjectBraces(s)
+
+        return s
+    }
+
+    /// Wraps bare `"key": value` sequences that appear directly inside a `[…]` array
+    /// without a surrounding `{}`. Injects `{` before the first bare key and `}` before
+    /// the closing `]` or the comma that separates the next bare sibling.
+    private static func insertMissingObjectBraces(_ input: String) -> String {
+        let chars = Array(input)
+        var result: [Character] = []
+        result.reserveCapacity(chars.count + 64)
+
+        var i = 0
+        var arrayBareStack: [Bool] = []  // true = this array level uses bare object elements
+        var objectDepth = 0              // `{` depth relative to current array level
+        var inString = false
+        var escaped = false
+
+        func skipWS(from j: Int) -> Int {
+            var k = j
+            while k < chars.count && (chars[k] == " " || chars[k] == "\n" || chars[k] == "\r" || chars[k] == "\t") { k += 1 }
+            return k
+        }
+
+        func looksLikeKey(at j: Int) -> Bool {
+            guard j < chars.count && chars[j] == "\"" else { return false }
+            var k = j + 1
+            var esc = false
+            while k < chars.count {
+                if esc { esc = false; k += 1; continue }
+                if chars[k] == "\\" { esc = true; k += 1; continue }
+                if chars[k] == "\"" { k += 1; break }
+                k += 1
+            }
+            let afterQuote = skipWS(from: k)
+            return afterQuote < chars.count && chars[afterQuote] == ":"
+        }
+
+        while i < chars.count {
+            let ch = chars[i]
+
+            if escaped { escaped = false; result.append(ch); i += 1; continue }
+
+            if inString {
+                if ch == "\\" { escaped = true }
+                else if ch == "\"" { inString = false }
+                result.append(ch); i += 1; continue
+            }
+
+            switch ch {
+            case "\"":
+                inString = true; result.append(ch); i += 1
+
+            case "{":
+                objectDepth += 1; result.append(ch); i += 1
+
+            case "}":
+                objectDepth -= 1; result.append(ch); i += 1
+
+            case "[":
+                result.append(ch); i += 1
+                let next = skipWS(from: i)
+                if next < chars.count
+                    && chars[next] != "{"
+                    && chars[next] != "["
+                    && chars[next] != "]"
+                    && looksLikeKey(at: next)
+                {
+                    arrayBareStack.append(true)
+                    result.append("{")
+                } else {
+                    arrayBareStack.append(false)
+                }
+
+            case "]":
+                if arrayBareStack.last == true {
+                    result.append("}")
+                    arrayBareStack[arrayBareStack.count - 1] = false
+                }
+                _ = arrayBareStack.popLast()
+                result.append(ch); i += 1
+
+            case ",":
+                if arrayBareStack.last == true && objectDepth == 0 {
+                    let next = skipWS(from: i + 1)
+                    if next < chars.count && chars[next] != "{" && looksLikeKey(at: next) {
+                        result.append("}")   // close current bare element
+                        result.append(ch)    // comma
+                        result.append("{")   // open next bare element
+                        i += 1; continue
+                    }
+                }
+                result.append(ch); i += 1
+
+            default:
+                result.append(ch); i += 1
+            }
+        }
+
+        return String(result)
+    }
+
     // MARK: - Private: Markdown fence stripping
 
     private static func stripMarkdownFences(_ input: String) -> String {
@@ -565,14 +697,14 @@ actor ProgramGenerationService {
 // MARK: - AnthropicProvider convenience: program generation
 
 extension AnthropicProvider {
-    /// Sonnet model with 8k token budget and 120s timeout.
-    /// Template output is ~4k–8k tokens; Sonnet completes in ~15–25s.
+    /// Sonnet model with 16k token budget and 180s timeout.
+    /// Template output observed at 10k–14k tokens for a 4-day program; 16k provides headroom.
     static func forProgramGeneration(apiKey: String) -> AnthropicProvider {
         AnthropicProvider(
             apiKey: apiKey,
             model: "claude-sonnet-4-5",
-            maxTokens: 8000,
-            requestTimeout: 120
+            maxTokens: 16000,
+            requestTimeout: 180
         )
     }
 }

@@ -1,9 +1,9 @@
 // Features/Workout/ActiveSetView.swift
-// ProjectApex — P3-T04
+// ProjectApex — P3-T04 / P4-T06
 //
 // Full-screen active set screen rendered during SessionState.active.
 //
-// Acceptance criteria:
+// Acceptance criteria (P3-T04):
 //   ✓ Prescription card: exercise name, set X of Y, weight (kg), reps, tempo, RIR target, rest
 //   ✓ Coaching cue in italics below prescription
 //   ✓ Reasoning in small muted monospaced text — collapsible
@@ -15,7 +15,16 @@
 //   ✓ Microphone button always visible — opens STT modal
 //   ✓ "Coach offline" banner when fallbackReason set (auto-dismisses in 3s)
 //
-// DEPENDS ON: P3-T02 (WorkoutViewModel, WorkoutSessionManager)
+// Acceptance criteria (P4-T06):
+//   ✓ Mic button labelled "Coach, note this" always visible
+//   ✓ Permission denied → "Enable Microphone" text link replaces mic button
+//   ✓ Tap opens modal: large mic animation, live transcript text updates in real time
+//   ✓ Auto-stop after 4s silence; tap again to stop early
+//   ✓ Transcript appended to WorkoutContext.qualitativeNotesToday (via WorkoutViewModel)
+//   ✓ MemoryService.embed() called non-blocking after transcript confirmed
+//   ✓ Transcript shown in PostWorkoutSummaryView via session notes
+//
+// DEPENDS ON: P3-T02 (WorkoutViewModel, WorkoutSessionManager), P4-T03 (SpeechService)
 
 import SwiftUI
 import UIKit
@@ -28,6 +37,8 @@ struct ActiveSetView: View {
     let exercise: PlannedExercise
     let setNumber: Int
     let streak: StreakResult
+    /// Injected SpeechService for live voice notes (P4-T06).
+    let speechService: SpeechService
 
     // MARK: - Local UI state
 
@@ -50,12 +61,26 @@ struct ActiveSetView: View {
     /// Controls the voice note modal
     @State private var showVoiceNoteModal: Bool = false
 
-    /// Controls the weight correction sheet (P1-T11)
+    /// Controls the weight correction sheet (P1-T11 — "Weight not available")
     @State private var showWeightCorrection: Bool = false
+
+    /// Controls the inline weight override sheet (FB-001 — tapping the weight value)
+    @State private var showWeightOverride: Bool = false
 
     /// Controls the "Coach offline" non-blocking banner visibility
     @State private var showOfflineBanner: Bool = false
     @State private var offlineBannerTask: Task<Void, Never>?
+
+    // MARK: - Voice note state (P4-T06)
+
+    /// Whether microphone permission has been denied.
+    @State private var micPermissionDenied: Bool = false
+    /// Whether SpeechService is currently listening.
+    @State private var isRecording: Bool = false
+    /// Live partial transcript shown inside the modal.
+    @State private var liveTranscript: String = ""
+    /// Task managing the recording stream lifecycle.
+    @State private var recordingTask: Task<Void, Never>?
 
     // MARK: - Body
 
@@ -119,7 +144,13 @@ struct ActiveSetView: View {
                 .presentationDetents([.medium])
                 .presentationCornerRadius(24)
         }
-        // Weight correction sheet (P1-T11)
+        // Inline weight override sheet — tapping the weight value (FB-001)
+        .sheet(isPresented: $showWeightOverride) {
+            weightOverrideSheet
+                .presentationDetents([.medium])
+                .presentationCornerRadius(24)
+        }
+        // Weight correction sheet (P1-T11 — "Weight not available")
         .sheet(isPresented: $showWeightCorrection) {
             weightCorrectionSheet
                 .presentationDetents([.medium, .large])
@@ -243,15 +274,32 @@ struct ActiveSetView: View {
 
             // Weight / Reps hero numbers
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(weightString(prescription.weightKg))
-                    .font(.system(size: 72, weight: .black, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                    .id("weight_\(prescription.weightKg)")
-                Text("kg")
-                    .font(.system(size: 24, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .baselineOffset(6)
+                // Tappable weight value — opens inline override sheet (FB-001)
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    showWeightOverride = true
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(weightString(prescription.weightKg))
+                            .font(.system(size: 72, weight: .black, design: .rounded).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                            .id("weight_\(prescription.weightKg)")
+                            .underline(true, color: .white.opacity(0.28))
+                        Text("kg")
+                            .font(.system(size: 24, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .baselineOffset(6)
+                        Image(systemName: "pencil")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.35))
+                            .baselineOffset(8)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Adjust weight: \(weightString(prescription.weightKg)) kilograms")
+                .accessibilityHint("Double tap to change the weight")
+
                 Spacer()
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Text("\(prescription.reps)")
@@ -267,7 +315,21 @@ struct ActiveSetView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 4)
 
-            // Adjusted weight annotation
+            // "Adjusted" badge — shown after user overrides weight (FB-001)
+            if prescription.userCorrectedWeight == true {
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Adjusted")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.3)
+                }
+                .foregroundStyle(Color(red: 0.40, green: 0.85, blue: 0.60))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 4)
+            }
+
+            // Adjusted weight annotation (equipment snap note from AI)
             if let adjustedNote = viewModel.weightAdjustmentNote {
                 Text(adjustedNote)
                     .font(.system(size: 11, weight: .medium))
@@ -423,25 +485,51 @@ struct ActiveSetView: View {
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: viewModel.isCompletingSet)
     }
 
-    // MARK: - Voice Note Button
+    // MARK: - Voice Note Button (P4-T06)
 
+    @ViewBuilder
     private var voiceNoteButton: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            showVoiceNoteModal = true
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 56, height: 56)
-                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 0.5))
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.75))
+        if micPermissionDenied {
+            // Permission denied state: text link to open Settings
+            Button {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                Text("Enable Microphone")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.white.opacity(0.06), in: Capsule())
+                    .overlay(Capsule().stroke(.white.opacity(0.10), lineWidth: 0.5))
             }
+            .accessibilityLabel("Enable Microphone")
+            .accessibilityHint("Opens Settings to grant microphone permission")
+        } else {
+            Button {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                showVoiceNoteModal = true
+            } label: {
+                VStack(spacing: 4) {
+                    ZStack {
+                        Circle()
+                            .fill(.white.opacity(0.08))
+                            .frame(width: 56, height: 56)
+                            .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 0.5))
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                    }
+                    Text("Coach, note this")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.40))
+                        .tracking(0.3)
+                }
+            }
+            .accessibilityLabel("Coach, note this")
+            .accessibilityHint("Open speech recording for a training note")
         }
-        .accessibilityLabel("Voice note")
-        .accessibilityHint("Open speech recording for a training note")
     }
 
     // MARK: - Rep / RPE Confirmation Sheet
@@ -535,28 +623,184 @@ struct ActiveSetView: View {
         .onDisappear { dismissTask?.cancel() }
     }
 
-    // MARK: - Voice Note Modal
+    // MARK: - Voice Note Modal (P4-T06)
 
     private var voiceNoteModal: some View {
-        VStack(spacing: 20) {
-            Text("Voice Note")
-                .font(.system(size: 20, weight: .semibold))
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Voice Note")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.white)
+                Spacer()
+                if isRecording {
+                    // Recording indicator dot
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                        .opacity(1.0)
+                        .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: isRecording)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.top, 28)
+            .padding(.bottom, 20)
+
+            // Mic animation (liquid wave dots)
+            HStack(spacing: 8) {
+                ForEach(0..<3, id: \.self) { i in
+                    Circle()
+                        .fill(isRecording ? Color.red.opacity(0.85) : streak.tintColor.opacity(0.60))
+                        .frame(width: 12, height: 12)
+                        .modifier(LiquidWaveModifier(index: i))
+                }
+            }
+            .padding(.vertical, 24)
+
+            // Live transcript text
+            ScrollView {
+                Text(liveTranscript.isEmpty
+                     ? (isRecording ? "Listening…" : "Tap the button below to start recording")
+                     : liveTranscript)
+                    .font(.system(size: 17, weight: liveTranscript.isEmpty ? .regular : .medium))
+                    .foregroundStyle(liveTranscript.isEmpty ? .white.opacity(0.35) : .white.opacity(0.88))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+                    .animation(.easeInOut(duration: 0.2), value: liveTranscript)
+            }
+            .frame(minHeight: 80, maxHeight: 140)
+
+            Spacer(minLength: 20)
+
+            // Record / Stop button
+            Button {
+                if isRecording {
+                    stopRecording()
+                } else {
+                    startRecording()
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: isRecording ? "stop.circle.fill" : "mic.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                    Text(isRecording ? "Stop Recording" : "Start Recording")
+                        .font(.system(size: 17, weight: .bold))
+                }
                 .foregroundStyle(.white)
-            Text("Speech recording is enabled in Phase 4 (P4-T03). For now, use text input.")
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.55))
-                .multilineTextAlignment(.center)
-            Image(systemName: "mic.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(streak.tintColor)
-            Spacer()
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(
+                    isRecording
+                        ? Color.red.opacity(0.80)
+                        : streak.tintColor.opacity(0.85),
+                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                )
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 32)
+            .animation(.spring(response: 0.28, dampingFraction: 0.82), value: isRecording)
         }
-        .padding(28)
         .background(Color(red: 0.07, green: 0.08, blue: 0.10))
         .preferredColorScheme(.dark)
+        .onAppear {
+            // Request permission and auto-start recording
+            Task { await requestPermissionAndRecord() }
+        }
+        .onDisappear {
+            // If dismissed while recording, stop cleanly
+            recordingTask?.cancel()
+            recordingTask = nil
+            isRecording = false
+        }
     }
 
-    // MARK: - Weight Correction Sheet (P1-T11)
+    // MARK: - Voice Note Actions (P4-T06)
+
+    private func requestPermissionAndRecord() async {
+        let status = await speechService.requestSpeechPermissions()
+        switch status {
+        case .authorized:
+            micPermissionDenied = false
+            startRecording()
+        case .denied, .notDetermined:
+            micPermissionDenied = true
+            showVoiceNoteModal = false
+        }
+    }
+
+    private func startRecording() {
+        guard !isRecording else { return }
+        liveTranscript = ""
+        isRecording = true
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+
+        recordingTask = Task {
+            do {
+                let stream = try await speechService.startListening()
+                for await partial in stream {
+                    if Task.isCancelled { break }
+                    liveTranscript = partial
+                }
+                // Stream finished (silence or stop) — finalise
+                await finaliseTranscript()
+            } catch {
+                isRecording = false
+            }
+        }
+    }
+
+    private func stopRecording() {
+        recordingTask?.cancel()
+        recordingTask = nil
+        Task { await finaliseTranscript() }
+    }
+
+    private func finaliseTranscript() async {
+        isRecording = false
+        // Attempt to get final transcript from stopListening()
+        let finalText: String
+        do {
+            finalText = try await speechService.stopListening()
+        } catch {
+            // Already stopped (e.g. silence auto-stop fired) — use what we have
+            finalText = liveTranscript
+        }
+
+        let trimmed = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            showVoiceNoteModal = false
+            return
+        }
+
+        liveTranscript = trimmed
+        // Brief pause so user can read the final transcript
+        try? await Task.sleep(nanoseconds: 600_000_000)
+
+        // Submit to session manager (writes session_notes + appends qualitative context)
+        viewModel.onAddVoiceNote(transcript: trimmed, exerciseId: exercise.exerciseId)
+
+        showVoiceNoteModal = false
+        liveTranscript = ""
+    }
+
+    // MARK: - Weight Override Sheet (FB-001 — tapping the weight value)
+
+    @ViewBuilder
+    private var weightOverrideSheet: some View {
+        let weight = viewModel.currentPrescription?.weightKg ?? 0
+        WeightOverrideView(
+            currentWeight: weight,
+            equipmentType: exercise.equipmentRequired,
+            onConfirmed: { confirmedWeight in
+                viewModel.onWeightCorrection(
+                    confirmedWeight: confirmedWeight,
+                    equipmentType: exercise.equipmentRequired
+                )
+            }
+        )
+    }
+
+    // MARK: - Weight Correction Sheet (P1-T11 — "Weight not available")
 
     @ViewBuilder
     private var weightCorrectionSheet: some View {
@@ -835,7 +1079,8 @@ private extension AnyTransition {
             coachingCues: ["Retract scapulae before unracking"]
         ),
         setNumber: 2,
-        streak: StreakResult.compute(currentStreakDays: 7, longestStreak: 10)
+        streak: StreakResult.compute(currentStreakDays: 7, longestStreak: 10),
+        speechService: SpeechService()
     )
     .preferredColorScheme(.dark)
 }
@@ -870,7 +1115,8 @@ private extension AnyTransition {
             coachingCues: []
         ),
         setNumber: 3,
-        streak: StreakResult.compute(currentStreakDays: 2, longestStreak: 7)
+        streak: StreakResult.compute(currentStreakDays: 2, longestStreak: 7),
+        speechService: SpeechService()
     )
     .preferredColorScheme(.dark)
 }

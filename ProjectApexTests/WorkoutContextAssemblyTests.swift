@@ -123,9 +123,11 @@ struct WorkoutContextAssemblyTests {
             "session_metadata",
             "biometrics",
             "streak_result",
+            "is_first_session",
             "current_exercise",
             "session_history_today",
             "current_exercise_sets_today",
+            "within_session_performance",
             "historical_performance",
             "qualitative_notes_today",
             "rag_retrieved_memory"
@@ -218,6 +220,7 @@ struct WorkoutContextAssemblyTests {
 
         // Top-level
         #expect(decoded.requestType == original.requestType)
+        #expect(decoded.isFirstSession == original.isFirstSession)
 
         // SessionMetadata
         #expect(decoded.sessionMetadata.sessionId == original.sessionMetadata.sessionId)
@@ -297,9 +300,12 @@ struct WorkoutContextAssemblyTests {
             sessionMetadata: WorkoutContext.mockContext().sessionMetadata,
             biometrics: nil,
             streakResult: nil,
+            userProfile: nil,
+            isFirstSession: false,
             currentExercise: WorkoutContext.mockContext().currentExercise,
             sessionHistoryToday: [],
             currentExerciseSetsToday: [],
+            withinSessionPerformance: [],
             historicalPerformance: nil,
             qualitativeNotesToday: [],
             ragRetrievedMemory: []
@@ -320,9 +326,12 @@ struct WorkoutContextAssemblyTests {
             sessionMetadata: WorkoutContext.mockContext().sessionMetadata,
             biometrics: nil,
             streakResult: nil,
+            userProfile: nil,
+            isFirstSession: false,
             currentExercise: WorkoutContext.mockContext().currentExercise,
             sessionHistoryToday: [],
             currentExerciseSetsToday: [],
+            withinSessionPerformance: [],
             historicalPerformance: nil,
             qualitativeNotesToday: [],
             ragRetrievedMemory: []

@@ -24,6 +24,11 @@ struct WorkoutView: View {
     // ViewModel is owned here and passed down to child views.
     @State private var viewModel: WorkoutViewModel?
     @State private var streak: StreakResult = .neutral
+    /// True when the user has never completed a session (session_count == 0 in UserDefaults).
+    /// Drives the first-session calibration banner in PreWorkoutView (FB-005).
+    private var isFirstSession: Bool {
+        UserDefaults.standard.integer(forKey: UserProfileConstants.sessionCountKey) == 0
+    }
 
     // The training day to start — set when user picks a day from the program.
     // For Phase 3 MVP this defaults to the first day of the active mesocycle.
@@ -70,7 +75,8 @@ struct WorkoutView: View {
                     viewModel: vm,
                     trainingDay: trainingDay,
                     programId: programId,
-                    streak: streak
+                    streak: streak,
+                    isFirstSession: isFirstSession
                 )
             }
 
@@ -79,7 +85,8 @@ struct WorkoutView: View {
                 viewModel: vm,
                 exercise: exercise,
                 setNumber: setNumber,
-                streak: streak
+                streak: streak,
+                speechService: deps.speechService
             )
             .transition(.apexSetComplete)
 

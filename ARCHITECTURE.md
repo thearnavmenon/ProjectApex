@@ -1,6 +1,6 @@
 # Project Apex — Architecture Reference
 ### Combines: Technical Design Document v1.0 + UI/UX Specification v1.0
-### Platform: iOS 26+ | Last Updated: 2026-03-12
+### Platform: iOS 26+ | Last Updated: 2026-03-14
 
 ---
 
@@ -147,10 +147,11 @@ ProjectApex/
 │   └── Workout/
 │       ├── WorkoutView.swift         # ZStack state-machine router (idle/active/resting/complete)
 │       ├── PreWorkoutView.swift      # Readiness ring, session info card, Start button
-│       ├── ActiveSetView.swift       # P3-T04: Prescription card, Set Complete, rep/RPE sheet, end-early menu, weight correction (P1-T11)
+│       ├── ActiveSetView.swift       # P3-T04: Prescription card (weight tappable FB-001), Set Complete, rep/RPE sheet, end-early menu, weight correction (P1-T11)
 │       ├── RestTimerView.swift       # P3-T05: Circular ring, haptics, audio tone, skip button, end-early menu
 │       ├── PostWorkoutSummaryView.swift  # P3-T08: Volume, sets ring, PRs, AI adjustments, share, done
-│       ├── WeightCorrectionView.swift    # User weight substitution sheet (P1-T10)
+│       ├── WeightCorrectionView.swift    # "Weight not available" substitution sheet (P1-T10)
+│       ├── WeightOverrideView.swift      # Inline weight override sheet — tappable weight hero (FB-001)
 │       └── WorkoutViewModel.swift    # @Observable bridge from actor state to SwiftUI
 │
 ├── AICoach/
@@ -477,11 +478,15 @@ enum PRMetric: String, Codable, Sendable {
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- Users
+-- Users (FB-003: biometric columns added)
 CREATE TABLE IF NOT EXISTS public.users (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  display_name TEXT,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  display_name  TEXT,
+  bodyweight_kg DOUBLE PRECISION,    -- optional; calibrates AI weight prescriptions
+  height_cm     DOUBLE PRECISION,
+  age           INTEGER,
+  training_age  TEXT,                -- "Beginner (< 1 yr)" | "Intermediate (1–3 yrs)" | "Advanced (3+ yrs)"
+  created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Gym Profiles
@@ -603,28 +608,26 @@ ALTER TABLE public.session_notes       ENABLE ROW LEVEL SECURITY;
 
 ```swift
 struct SetPrescription: Codable, Sendable {
-    let weightKg: Double
-    let reps: Int
-    let tempo: String          // regex: ^\d-\d-\d-\d$
-    let rirTarget: Int
-    let restSeconds: Int
-    let coachingCue: String    // ≤ 100 chars
-    let reasoning: String      // ≤ 200 chars
-    let safetyFlags: [SafetyFlag]
-    let confidence: Double?    // 0.0–1.0
+    var weightKg: Double
+    var reps: Int
+    var tempo: String          // regex: ^\d-\d-\d-\d$
+    var rirTarget: Int
+    var restSeconds: Int
+    var coachingCue: String    // ≤ 100 chars
+    var reasoning: String      // ≤ 200 chars
+    var safetyFlags: [SafetyFlag]
+    var confidence: Double?    // 0.0–1.0
+    /// Set to true when the user has manually overridden the AI-suggested weight (FB-001).
+    /// Propagated into CompletedSet and WorkoutContext so the AI knows the weight was user-corrected.
+    var userCorrectedWeight: Bool?  // "user_corrected_weight"
 
-    enum CodingKeys: String, CodingKey {
-        case weightKg = "weight_kg"
-        case reps
-        case tempo
-        case rirTarget = "rir_target"
-        case restSeconds = "rest_seconds"
-        case coachingCue = "coaching_cue"
-        case reasoning
-        case safetyFlags = "safety_flags"
-        case confidence
-    }
+    // CodingKeys: weight_kg, reps, tempo, rir_target, rest_seconds,
+    //             coaching_cue, reasoning, safety_flags, confidence, user_corrected_weight
 }
+
+/// Included in CompletedSet for each set so the AI knows which sets had user-corrected weights.
+/// Also included in WorkoutContext.currentExerciseSetsToday (FB-001).
+// CompletedSet.userCorrectedWeight: Bool? — "user_corrected_weight"
 
 enum SafetyFlag: String, Codable, Hashable, Sendable {
     case shoulderCaution    = "shoulder_caution"
@@ -634,6 +637,36 @@ enum SafetyFlag: String, Codable, Hashable, Sendable {
     case deloadRecommended  = "deload_recommended"
 }
 ```
+
+### 4.6 UserProfileContext (FB-003)
+
+User biometric and training profile included in every `WorkoutContext` payload. Populated from `UserDefaults` (written during onboarding, editable from Settings). Keys shared via `UserProfileConstants`.
+
+```swift
+struct UserProfileContext: Codable, Sendable {
+    let bodyweightKg: Double?   // "bodyweight_kg" — optional; calibrates relative loading
+    let heightCm: Double?       // "height_cm"     — leverage-based adjustments
+    let age: Int?               // "age"           — rest targets for older users
+    let trainingAge: String?    // "training_age"  — e.g. "Beginner (< 1 yr)"
+}
+
+// UserDefaults keys (UserProfileConstants enum):
+//   com.projectapex.user.bodyweightKg
+//   com.projectapex.user.heightCm
+//   com.projectapex.user.age
+//   com.projectapex.user.trainingAge
+
+// WorkoutContext.userProfile: UserProfileContext?  ("user_profile")
+// WorkoutSessionManager.loadUserProfileFromDefaults() — reads at startSession()
+```
+
+**OnboardingProfile extended fields** (FB-003):
+- `bodyweightKg: Double?` — stored in kg regardless of display unit
+- `heightCm: Double?`
+- `age: Int?`
+- `bodyweightInKg: Bool` — controls kg/lbs display toggle; storage always in kg
+
+**Supabase `users` table** extended with: `bodyweight_kg DOUBLE PRECISION`, `height_cm DOUBLE PRECISION`, `age INTEGER`, `training_age TEXT`.
 
 ---
 
@@ -861,7 +894,11 @@ Session End:
     ├── 2. BLOCKING write: WriteAheadQueue.updateBlocking() patches workout_sessions
     │       → Must complete before PostWorkoutSummaryView is shown
     │       → Fallback: enqueue for retry if blocking write fails
-    └── 3. state → .sessionComplete(summary)
+    ├── 3. emitExerciseOutcomeEvents() [Task.detached, non-blocking]
+    │       → one RAG memory event per exercise (FB-006)
+    │       → outcome: "on_target" | "overloaded" | "underloaded"
+    ├── 4. Increment UserDefaults.sessionCountKey (non-early-exit only) (FB-005)
+    └── 5. state → .sessionComplete(summary)
 ```
 
 ### 7.3 Voice Note Lifecycle
@@ -924,18 +961,62 @@ Implementations: `AnthropicProvider`, `OpenAIProvider`.
 
 ### 8.3 System Prompt for Set Inference
 
-Stored in `Resources/Prompts/SystemPrompt_Inference.txt`.
+Stored in `Resources/Prompts/SystemPrompt_Inference.txt`. Current version: **v3.0** (updated FB-002, FB-003, FB-005, FB-006).
 
-**Key rules:**
+**Output contract:**
 1. Return ONLY `{"set_prescription": { ... }}` — no prose
-2. Safety flags override all other logic
-3. Pain/joint notes → reduce weight + increase rest + flag `pain_reported`
-4. HRV delta < -15% → apply -5% to -10% conservative loading
-5. `coaching_cue` ≤ 100 chars; `reasoning` ≤ 200 chars
-6. `confidence`: 0.0–1.0 (optional)
-7. Tempo regex: `^\d-\d-\d-\d$`
-8. `rest_seconds` range: 30–600
-9. `reps` range: 1–30
+2. `coaching_cue` ≤ 100 chars; `reasoning` ≤ 200 chars
+3. `confidence`: 0.0–1.0 (optional)
+4. Tempo regex: `^\d-\d-\d-\d$`
+5. `rest_seconds` range: 30–600
+6. `reps` range: 1–30
+
+**Safety rules (override all loading logic):**
+- Safety flags override all other logic
+- Pain/joint notes → reduce weight + increase rest + flag `pain_reported`
+- HRV delta < -15% → apply -5% to -10% conservative loading
+
+**Equipment-aware weight increment rules (FB-002):**
+- Barbell: minimum 5 kg increments (2.5 kg only at natural plate-change boundaries)
+- Dumbbell / Kettlebell: minimum 2.5 kg increments
+- Cable / Machine: minimum 2.5 kg increments
+
+**Rep-completion bands — replaces percentage formula (FB-002):**
+- NEAR MISS (≥ 80% of target reps completed): hold weight, reduce reps by 1
+- MODERATE MISS (60–79%): drop one standard increment for equipment type
+- SIGNIFICANT MISS (< 60%): drop to estimated full-rep weight; flag for recalibration
+
+**Anti-oscillation rule (FB-002):**
+- Do not reverse weight direction within a single exercise unless `user_corrected_weight: true` is present on the most recent set
+
+**Progressive overload / ambition directive (FB-002):**
+- Completed all reps at ≥ 2 RIR → increase by one standard increment next set
+- Do not be conservative when the athlete is clearly under-loaded
+
+**First-session calibration (FB-005):**
+- When `is_first_session: true` (i.e. `total_session_count == 0`), prescribe ~60% estimated 1RM labelled as a calibration set
+- Use `user_profile.bodyweight_kg` and `user_profile.training_age` to anchor first-session weights
+- `session_count` is persisted in `UserDefaults` via `UserProfileConstants.sessionCountKey`; incremented at session completion (non-early-exit only)
+- `PreWorkoutView` shows a "First session — we'll calibrate your starting weights today" banner when `session_count == 0`
+
+**User profile context (FB-003):**
+- `bodyweight_kg` — calibrate relative loading for bodyweight-leveraged movements
+- `training_age` — scale starting weights ("Beginner" → conservative; "Advanced" → aggressive)
+- `age` — extend rest targets for users 45+
+- `height_cm` — leverage-based adjustments (deadlift, squat bar path)
+
+**Within-session performance (FB-006):**
+- `within_session_performance` field in `WorkoutContext`: all prior `CompletedSet` records for the current exercise in this session
+- On SIGNIFICANT MISS (< 60% reps), AI uses this data to triangulate true working weight and anchors all remaining sets to the recalibrated estimate — not a fixed decrement formula
+- Coaching cue must acknowledge the miss directly; generic cues are not acceptable
+
+**Session outcome anchor — cross-session learning (FB-006):**
+- At session end, `WorkoutSessionManager.emitExerciseOutcomeEvents()` writes one structured RAG memory event per completed exercise:
+  - `outcome: "on_target"` (avg reps ≥ 90% of target)
+  - `outcome: "overloaded"` (avg reps < 70% of target)
+  - `outcome: "underloaded"` (avg reps ≥ 110% of target)
+  - Tags: `["exercise_outcome", outcome, primaryMuscle]`
+- On subsequent sessions, if RAG returns an `exercise_outcome` event: `overloaded` → open 5–10% below; `on_target` / `underloaded` → open at or above
 
 ### 8.4 Model Selection
 
@@ -998,6 +1079,7 @@ Before each set prescription:
 | Personal record | "PR on \(exercise): \(weight)kg × \(reps)" | `["pr_achieved", "<muscle>"]` |
 | Session terminated early | "Early session exit: \(reason)" | `["session_incomplete"]` |
 | 3+ sessions avg RPE > 8 | "Accumulated fatigue signal: avg RPE \(avgRpe) over 3 sessions" | `["accumulated_fatigue"]` |
+| Session end (per exercise) | "Exercise outcome — \(exercise): avg X/Y reps (Z%), avg weight Nkg, avg RPE R, outcome: on_target\|overloaded\|underloaded" | `["exercise_outcome", outcome, primaryMuscle]` |
 
 **Pain keywords (client-side detection):**
 ```swift

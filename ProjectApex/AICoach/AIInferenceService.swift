@@ -27,9 +27,17 @@ nonisolated struct WorkoutContext: Codable, Sendable {
     let sessionMetadata: SessionMetadata
     let biometrics: Biometrics?
     let streakResult: StreakResult?   // Training consistency — modulates AI intensity ceiling
+    /// User biometric and training profile — used for first-session calibration (FB-003).
+    let userProfile: UserProfileContext?
+    /// True when this is the user's very first session (session_count == 0).
+    /// Signals the AI to prescribe conservative calibration weights (FB-005).
+    let isFirstSession: Bool
     let currentExercise: CurrentExercise
     let sessionHistoryToday: [ExerciseHistoryItem]
     let currentExerciseSetsToday: [CompletedSet]
+    /// All prior set logs for the current exercise in this session.
+    /// Enables the AI to recalibrate weight on significant rep misses (FB-006).
+    let withinSessionPerformance: [CompletedSet]
     let historicalPerformance: HistoricalPerformance?
     let qualitativeNotesToday: [QualitativeNote]
     let ragRetrievedMemory: [RAGMemoryItem]
@@ -39,12 +47,37 @@ nonisolated struct WorkoutContext: Codable, Sendable {
         case sessionMetadata            = "session_metadata"
         case biometrics
         case streakResult               = "streak_result"
+        case userProfile                = "user_profile"
+        case isFirstSession             = "is_first_session"
         case currentExercise            = "current_exercise"
         case sessionHistoryToday        = "session_history_today"
         case currentExerciseSetsToday   = "current_exercise_sets_today"
+        case withinSessionPerformance   = "within_session_performance"
         case historicalPerformance      = "historical_performance"
         case qualitativeNotesToday      = "qualitative_notes_today"
         case ragRetrievedMemory         = "rag_retrieved_memory"
+    }
+}
+
+// MARK: UserProfileContext (FB-003)
+
+/// User biometric and training profile included in every WorkoutContext payload.
+/// Populated from UserDefaults (written during onboarding) and editable from Settings.
+nonisolated struct UserProfileContext: Codable, Sendable {
+    /// Bodyweight in kilograms. Optional — calibrates relative loading estimates.
+    let bodyweightKg: Double?
+    /// Height in centimetres. Used for leverage-based adjustments.
+    let heightCm: Double?
+    /// Age in years. Informs rest duration and conservative RIR targets for older users.
+    let age: Int?
+    /// Training age label: "Beginner (< 1 yr)", "Intermediate (1–3 yrs)", "Advanced (3+ yrs)".
+    let trainingAge: String?
+
+    enum CodingKeys: String, CodingKey {
+        case bodyweightKg  = "bodyweight_kg"
+        case heightCm      = "height_cm"
+        case age
+        case trainingAge   = "training_age"
     }
 }
 
@@ -166,16 +199,19 @@ nonisolated struct CompletedSet: Codable, Sendable {
     let restTakenSeconds: Int?
     /// ISO 8601 timestamp the set was logged.
     let completedAt: Date?
+    /// True when the user manually overrode the AI-suggested weight for this set.
+    let userCorrectedWeight: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case setNumber          = "set_number"
-        case weightKg           = "weight_kg"
+        case setNumber              = "set_number"
+        case weightKg               = "weight_kg"
         case reps
-        case rirActual          = "rir_actual"
+        case rirActual              = "rir_actual"
         case rpe
         case tempo
-        case restTakenSeconds   = "rest_taken_seconds"
-        case completedAt        = "completed_at"
+        case restTakenSeconds       = "rest_taken_seconds"
+        case completedAt            = "completed_at"
+        case userCorrectedWeight    = "user_corrected_weight"
     }
 }
 
@@ -255,17 +291,21 @@ nonisolated struct SetPrescription: Codable, Sendable {
     var reasoning: String
     var safetyFlags: [SafetyFlag]
     var confidence: Double?
+    /// True when the user has manually overridden the AI-suggested weight inline.
+    /// Propagated into WorkoutContext so the AI knows the weight was user-corrected.
+    var userCorrectedWeight: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case weightKg      = "weight_kg"
+        case weightKg            = "weight_kg"
         case reps
         case tempo
-        case rirTarget     = "rir_target"
-        case restSeconds   = "rest_seconds"
-        case coachingCue   = "coaching_cue"
+        case rirTarget           = "rir_target"
+        case restSeconds         = "rest_seconds"
+        case coachingCue         = "coaching_cue"
         case reasoning
-        case safetyFlags   = "safety_flags"
+        case safetyFlags         = "safety_flags"
         case confidence
+        case userCorrectedWeight = "user_corrected_weight"
     }
 }
 
@@ -372,7 +412,8 @@ extension WorkoutContext {
             rpe: 7.5,
             tempo: "3-1-1-0",
             restTakenSeconds: 120,
-            completedAt: setDate
+            completedAt: setDate,
+            userCorrectedWeight: nil
         )
 
         return WorkoutContext(
@@ -392,6 +433,13 @@ extension WorkoutContext {
                 sleepHours: 7.5
             ),
             streakResult: StreakResult.compute(currentStreakDays: 7, longestStreak: 10),
+            userProfile: UserProfileContext(
+                bodyweightKg: 80.0,
+                heightCm: 178.0,
+                age: 28,
+                trainingAge: "Intermediate (1–3 yrs)"
+            ),
+            isFirstSession: false,
             currentExercise: CurrentExercise(
                 name: "Barbell Bench Press",
                 equipmentTypeKey: "barbell",
@@ -413,6 +461,7 @@ extension WorkoutContext {
                 )
             ],
             currentExerciseSetsToday: [completedSet],
+            withinSessionPerformance: [completedSet],
             historicalPerformance: HistoricalPerformance(
                 personalBest: CompletedSet(
                     setNumber: 1,
@@ -422,7 +471,8 @@ extension WorkoutContext {
                     rpe: 9.5,
                     tempo: "2-0-1-0",
                     restTakenSeconds: 180,
-                    completedAt: setDate
+                    completedAt: setDate,
+                    userCorrectedWeight: nil
                 ),
                 recentAverage: RecentAverage(
                     sessionCount: 5,

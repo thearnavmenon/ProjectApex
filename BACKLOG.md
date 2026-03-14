@@ -66,14 +66,24 @@
 
 - [ ] P4-T01: HealthKitService — permissions, biometrics fetch, ReadinessScore
 - [ ] P4-T02: ReadinessScore — edge case handling matrix (TDD 11.4)
-- [ ] P4-T03: SpeechService — on-device STT + Whisper fallback
-- [ ] P4-T04: MemoryService — embedding pipeline write path
-- [ ] P4-T05: MemoryService — RAG retrieval read path + integration
-- [ ] P4-T06: Voice note UI — mic button, live transcript modal
-- [ ] P4-T07: Memory event taxonomy — auto-generated structured events
+- [x] P4-T03: SpeechService — on-device STT + Whisper fallback
+- [x] P4-T04: MemoryService — embedding pipeline write path
+- [x] P4-T05: MemoryService — RAG retrieval read path + integration
+- [x] P4-T06: Voice note UI — mic button, live transcript modal
+- [x] P4-T07: Memory event taxonomy — auto-generated structured events
 - ~~[ ] P4-T08: HRV 30-day baseline computation~~ **REMOVED** — Apple Watch support dropped from MVP
-- [ ] P4-T09: App launch flow — onboarding → scan → generate → workout (Step 3: notification permissions prompt, not HealthKit)
+- [x] P4-T09: App launch flow — onboarding → scan → generate → workout (Step 3: notification permissions prompt, not HealthKit)
 - [ ] P4-T10: 5-session stability run — manual QA pass
+
+---
+
+## Feedback Issues (FB)
+
+- [x] FB-001: Inline weight override on prescription card — tappable weight value opens `WeightOverrideView` (.medium detent); +/− stepper snaps to `DefaultWeightIncrements` for equipment type; confirm saves to `GymFactStore`; "Adjusted" badge shown when overridden; `user_corrected_weight` flag propagated in `CompletedSet` and `WorkoutContext` for AI; "Weight not available" button retained
+- [x] FB-002: Equipment-aware weight increments in AI prompt — `SystemPrompt_Inference.txt` v2.0: barbell min 5 kg increments, dumbbell/cable min 2.5 kg; rep-completion bands replace percentage formula (NEAR MISS ≥80%, MODERATE MISS 60–79%, SIGNIFICANT MISS <60%); anti-oscillation rule added; prompt version-bumped with change log header
+- [x] FB-003: Onboarding biometrics collection — `OnboardingProfile` extended with `bodyweightKg`, `heightCm`, `age`, `bodyweightInKg`; Step 2 UI extended with all four fields (bodyweight with kg/lbs toggle, height, age); fields persisted to `UserDefaults` via `UserProfileConstants` and to Supabase `users` table; `UserProfileContext` struct added to `WorkoutContext` payload; `WorkoutSessionManager` reads from `UserDefaults` at session start; all four fields editable post-onboarding from Settings → Training Profile section; system prompt updated with first-session calibration block and user profile guidance
+- [x] FB-005: First-session cold-start calibration — `WorkoutContext` gains `is_first_session: Bool` field (true when `session_count == 0`); `totalSessionCount` now read from `UserDefaults.sessionCountKey` (incremented at session completion, non-early-exit only); `PreWorkoutView` shows "First session — we'll calibrate your starting weights today" banner when `is_first_session`; `SystemPrompt_Inference.txt` v3.0 references explicit `is_first_session` flag; `WorkoutContextAssemblyTests` updated with new field assertions
+- [x] FB-006: Contextual AI coaching — `WorkoutContext` gains `within_session_performance: [CompletedSet]` (all prior sets this session for current exercise); system prompt v3.0: SIGNIFICANT MISS (<60% reps) now uses `within_session_performance` to triangulate true working weight, anchors all remaining sets, requires direct coaching cue acknowledging the miss; `WorkoutSessionManager.emitExerciseOutcomeEvents()` emits one RAG memory event per completed exercise at session end (`outcome: "on_target" | "overloaded" | "underloaded"`); new SESSION OUTCOME ANCHOR prompt section instructs AI to open 5–10% below previous weight if `overloaded`, at/above if `on_target`/`underloaded`; `SystemPrompt_Inference.txt` version-bumped to v3.0 with change log
 
 ---
 

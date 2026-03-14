@@ -106,6 +106,8 @@ actor WorkoutSessionManager {
     private var qualitativeNotesToday: [QualitativeNote] = []
     /// Exercises completed so far today, for the sessionHistoryToday field.
     private var sessionHistoryToday: [ExerciseHistoryItem] = []
+    /// User biometric profile read from UserDefaults at session start (FB-003).
+    private var cachedUserProfile: UserProfileContext? = nil
 
     // MARK: - Dependencies
 
@@ -164,6 +166,9 @@ actor WorkoutSessionManager {
         self.cachedRAGMemory = []
         self.inflightRequestCount = 0
         self.inferenceGeneration = 0
+
+        // FB-003: Read user biometrics from UserDefaults for WorkoutContext assembly.
+        self.cachedUserProfile = Self.loadUserProfileFromDefaults()
 
         sessionState = .preflight
 
@@ -234,6 +239,15 @@ actor WorkoutSessionManager {
             loggedAt: Date()
         )
         completedSets.append(setLog)
+
+        // P4-T07: Auto-generate memory events (non-blocking)
+        emitPRMemoryEventIfNeeded(for: setLog, exercise: exercise)
+        let targetReps = currentPrescription?.reps ?? exercise.repRange.max
+        emitPerformanceDropEventIfNeeded(
+            actualReps: actualReps,
+            targetReps: targetReps,
+            exercise: exercise
+        )
 
         // 1. Write to local queue first, then async POST to Supabase (P3-T06)
         let setPayload = SetLogPayload(from: setLog)
@@ -331,15 +345,21 @@ actor WorkoutSessionManager {
         let notePayload = SessionNotePayload(from: note)
         try? await writeAheadQueue.enqueue(notePayload, table: "session_notes")
 
-        // Non-blocking: embed for RAG memory (TDD §7.3)
-        Task.detached { [memoryService, note, sessionId = session.id] in
+        // Non-blocking: embed for RAG memory (TDD §7.3 / P4-T04)
+        // Capture the exercise's muscle groups so MemoryService can store them.
+        let muscleGroups: [String]
+        if let currentExercise = trainingDay?.exercises.first(where: { $0.exerciseId == exerciseId }) {
+            muscleGroups = [currentExercise.primaryMuscle] + currentExercise.synergists
+        } else {
+            muscleGroups = []
+        }
+        Task.detached { [memoryService, note, sessionId = session.id, userId = session.userId] in
             await memoryService.embed(
                 text: note.rawTranscript,
-                metadata: [
-                    "session_id": sessionId.uuidString,
-                    "exercise_id": exerciseId,
-                    "tags": note.tags.joined(separator: ",")
-                ]
+                sessionId: sessionId.uuidString,
+                exerciseId: exerciseId,
+                muscleGroups: muscleGroups,
+                userId: userId.uuidString
             )
         }
     }
@@ -363,6 +383,7 @@ actor WorkoutSessionManager {
         guard var prescription = currentPrescription else { return }
         let unavailableWeight = prescription.weightKg
         prescription.weightKg = confirmedWeight
+        prescription.userCorrectedWeight = true
         currentPrescription = prescription
 
         await gymFactStore.recordCorrection(
@@ -387,6 +408,7 @@ actor WorkoutSessionManager {
         cachedBiometrics = nil
         cachedStreakResult = nil
         cachedRAGMemory = []
+        cachedUserProfile = nil
         inflightRequestCount = 0
         inferenceGeneration = 0
         currentPrescription = nil
@@ -424,13 +446,16 @@ actor WorkoutSessionManager {
             completed: false, setLogs: [], sessionNotes: [], summary: nil
         )
 
+        // Read persisted session count from UserDefaults (FB-005).
+        // Written at session completion; 0 until the first session is fully completed.
+        let totalSessionCount = UserDefaults.standard.integer(forKey: UserProfileConstants.sessionCountKey)
         let metadata = SessionMetadata(
             sessionId: sess.id.uuidString,
             startedAt: sess.sessionDate,
             programName: nil,                               // Populated by WorkoutViewModel in future
             dayLabel: sess.dayType.isEmpty ? nil : sess.dayType,
             weekNumber: sess.weekNumber > 0 ? sess.weekNumber : nil,
-            totalSessionCount: 1                            // Stub — fetched from Supabase in P4
+            totalSessionCount: totalSessionCount
         )
 
         let currentEx = CurrentExercise(
@@ -459,7 +484,25 @@ actor WorkoutSessionManager {
                     rpe: log.rpeFelt.map(Double.init),
                     tempo: log.aiPrescribed?.tempo,
                     restTakenSeconds: nil,
-                    completedAt: log.loggedAt
+                    completedAt: log.loggedAt,
+                    userCorrectedWeight: log.aiPrescribed?.userCorrectedWeight
+                )
+            }
+
+        // within_session_performance: all prior sets for this exercise (FB-006)
+        let withinSessionSets = completedSets
+            .filter { $0.exerciseId == exercise.exerciseId }
+            .map { log in
+                CompletedSet(
+                    setNumber: log.setNumber,
+                    weightKg: log.weightKg,
+                    reps: log.repsCompleted,
+                    rirActual: log.rirEstimated,
+                    rpe: log.rpeFelt.map(Double.init),
+                    tempo: log.aiPrescribed?.tempo,
+                    restTakenSeconds: nil,
+                    completedAt: log.loggedAt,
+                    userCorrectedWeight: log.aiPrescribed?.userCorrectedWeight
                 )
             }
 
@@ -468,9 +511,12 @@ actor WorkoutSessionManager {
             sessionMetadata: metadata,
             biometrics: cachedBiometrics,
             streakResult: cachedStreakResult,
+            userProfile: cachedUserProfile,
+            isFirstSession: totalSessionCount == 0,
             currentExercise: currentEx,
             sessionHistoryToday: sessionHistoryToday,
             currentExerciseSetsToday: currentExSets,
+            withinSessionPerformance: withinSessionSets,
             historicalPerformance: nil,     // Supabase query deferred to P4
             qualitativeNotesToday: qualitativeNotesToday,
             ragRetrievedMemory: cachedRAGMemory
@@ -628,15 +674,22 @@ actor WorkoutSessionManager {
                     rpe: log.rpeFelt.map(Double.init),
                     tempo: log.aiPrescribed?.tempo,
                     restTakenSeconds: nil,
-                    completedAt: log.loggedAt
+                    completedAt: log.loggedAt,
+                    userCorrectedWeight: log.aiPrescribed?.userCorrectedWeight
                 )
             }
         return ExerciseHistoryItem(exerciseName: exercise.name, sets: sets)
     }
 
-    /// Stub — full RAG retrieval is a P4 deliverable.
+    /// Fetches the top-K most relevant memory items for `exercise` via the
+    /// MemoryService RAG read path (TDD §9.2).
     private func fetchRAGMemory(for exercise: PlannedExercise) async -> [RAGMemoryItem] {
-        return []
+        guard let sess = session else { return [] }
+        let queryText = ([exercise.name, exercise.primaryMuscle] + exercise.synergists).joined(separator: " ")
+        return await memoryService.retrieveMemory(
+            queryText: queryText,
+            userId: sess.userId.uuidString
+        )
     }
 
     // MARK: - Session Termination
@@ -686,24 +739,162 @@ actor WorkoutSessionManager {
             try? await writeAheadQueue.enqueue(patch, table: "workout_sessions")
         }
 
-        // Queue early-exit memory event (TDD §9.3)
-        if let reason = earlyExitReason {
-            let text = "Early session exit: \(reason)"
+        // Queue early-exit memory event (TDD §9.3 / P4-T07)
+        // Format: "Early exit: {partial_exercises_completed}" per ARCHITECTURE.md §9.3
+        if earlyExitReason != nil {
+            let completedExerciseNames = sessionHistoryToday.map(\.exerciseName).joined(separator: ", ")
+            let partialDescription = completedExerciseNames.isEmpty ? "no exercises completed" : completedExerciseNames
+            let text = "Early exit: \(partialDescription)"
             let metaSessionId = finalSession.id.uuidString
-            Task.detached { [memoryService, text, metaSessionId] in
+            let userId = finalSession.userId.uuidString
+            Task.detached { [memoryService, text, metaSessionId, userId] in
                 await memoryService.embed(
                     text: text,
-                    metadata: ["session_id": metaSessionId, "tags": "session_incomplete"]
+                    sessionId: metaSessionId,
+                    tags: ["session_incomplete"],
+                    userId: userId
                 )
             }
         }
 
+        // Emit per-exercise outcome memory events (FB-006)
+        emitExerciseOutcomeEvents(session: finalSession)
+
         sessionState = .sessionComplete(summary: summary)
+
+        // Increment persistent session count (FB-005) so subsequent sessions are
+        // not treated as calibration sessions. Must run on actor; UserDefaults is
+        // thread-safe for reads/writes so this is safe to call here.
+        if earlyExitReason == nil {
+            let currentCount = UserDefaults.standard.integer(forKey: UserProfileConstants.sessionCountKey)
+            UserDefaults.standard.set(currentCount + 1, forKey: UserProfileConstants.sessionCountKey)
+        }
 
         // Invalidate streak cache so the next session start re-fetches fresh data
         let sessionUserId = finalSession.userId
         Task.detached(priority: .utility) { [gymStreakService, sessionUserId] in
             await gymStreakService.invalidate(userId: sessionUserId)
+        }
+    }
+
+    // MARK: - Memory Event Taxonomy (P4-T07 / FB-006)
+
+    /// Emits one structured outcome memory event per exercise completed in the session.
+    ///
+    /// Outcome classification:
+    ///   • on_target  — avg reps ≥ 90% of target
+    ///   • overloaded — avg reps < 70% of target (weight was too heavy)
+    ///   • underloaded — avg reps ≥ 110% of target (weight was too light)
+    ///
+    /// These events are retrieved via RAG before the same exercise next session,
+    /// enabling the AI to open above/below the previous weight as appropriate (FB-006).
+    private func emitExerciseOutcomeEvents(session: WorkoutSession) {
+        guard let day = trainingDay else { return }
+        let userId = session.userId.uuidString
+        let sessionId = session.id.uuidString
+
+        for exercise in day.exercises {
+            let sets = completedSets.filter { $0.exerciseId == exercise.exerciseId }
+            guard !sets.isEmpty else { continue }
+
+            let targetReps = Double(exercise.repRange.max)
+            let avgRepsCompleted = Double(sets.map(\.repsCompleted).reduce(0, +)) / Double(sets.count)
+            let avgRpe = sets.compactMap(\.rpeFelt).map(Double.init).reduce(0, +)
+                / Double(max(1, sets.compactMap(\.rpeFelt).count))
+            let avgWeight = sets.map(\.weightKg).reduce(0, +) / Double(sets.count)
+
+            let repCompletionPct = targetReps > 0 ? (avgRepsCompleted / targetReps) * 100.0 : 100.0
+            let outcome: String
+            if repCompletionPct < 70 {
+                outcome = "overloaded"
+            } else if repCompletionPct >= 110 {
+                outcome = "underloaded"
+            } else {
+                outcome = "on_target"
+            }
+
+            let rpeStr = sets.compactMap(\.rpeFelt).isEmpty ? "n/a" : String(format: "%.1f", avgRpe)
+            let text = """
+                Exercise outcome — \(exercise.name): \
+                avg \(String(format: "%.0f", avgRepsCompleted))/\(exercise.repRange.max) reps \
+                (\(String(format: "%.0f", repCompletionPct))%), \
+                avg weight \(formatWeight(avgWeight))kg, \
+                avg RPE \(rpeStr), \
+                outcome: \(outcome)
+                """
+            let tags = ["exercise_outcome", outcome, exercise.primaryMuscle]
+            let muscleGroups = [exercise.primaryMuscle] + exercise.synergists
+
+            Task.detached { [memoryService, text, tags, sessionId, exerciseId = exercise.exerciseId, userId, muscleGroups] in
+                await memoryService.embed(
+                    text: text,
+                    sessionId: sessionId,
+                    exerciseId: exerciseId,
+                    tags: tags,
+                    muscleGroups: muscleGroups,
+                    userId: userId
+                )
+            }
+        }
+    }
+
+    /// Checks for a PR and emits a memory event if one is detected.
+    ///
+    /// A PR is detected when the set's estimated 1RM (`weight × (1 + reps/30)`) exceeds
+    /// the best previous estimated 1RM for the same exercise in this session.
+    /// (Cross-session PR detection is a P4 deliverable; this covers within-session PRs.)
+    private func emitPRMemoryEventIfNeeded(for log: SetLog, exercise: PlannedExercise) {
+        guard let sess = session else { return }
+        let currentEstimated1RM = log.weightKg * (1.0 + Double(log.repsCompleted) / 30.0)
+        let priorBest = completedSets
+            .filter { $0.exerciseId == exercise.exerciseId && $0.id != log.id }
+            .map { $0.weightKg * (1.0 + Double($0.repsCompleted) / 30.0) }
+            .max() ?? 0
+
+        guard currentEstimated1RM > priorBest else { return }
+
+        let text = "PR on \(exercise.name): \(formatWeight(log.weightKg))kg x \(log.repsCompleted)"
+        let tags = ["pr_achieved", exercise.primaryMuscle]
+        let sessionId = sess.id.uuidString
+        let userId = sess.userId.uuidString
+        let muscleGroups = [exercise.primaryMuscle] + exercise.synergists
+
+        Task.detached { [memoryService, text, tags, sessionId, userId, muscleGroups] in
+            await memoryService.embed(
+                text: text,
+                sessionId: sessionId,
+                exerciseId: exercise.exerciseId,
+                tags: tags,
+                muscleGroups: muscleGroups,
+                userId: userId
+            )
+        }
+    }
+
+    /// Emits a performance-drop memory event when actual reps fall > 2 below target.
+    private func emitPerformanceDropEventIfNeeded(
+        actualReps: Int,
+        targetReps: Int,
+        exercise: PlannedExercise
+    ) {
+        guard actualReps <= targetReps - 2 else { return }
+        guard let sess = session else { return }
+
+        let text = "Performance drop on \(exercise.name): \(actualReps)/\(targetReps) reps"
+        let tags = ["performance_drop", "fatigue"]
+        let sessionId = sess.id.uuidString
+        let userId = sess.userId.uuidString
+        let muscleGroups = [exercise.primaryMuscle] + exercise.synergists
+
+        Task.detached { [memoryService, text, tags, sessionId, userId, muscleGroups] in
+            await memoryService.embed(
+                text: text,
+                sessionId: sessionId,
+                exerciseId: exercise.exerciseId,
+                tags: tags,
+                muscleGroups: muscleGroups,
+                userId: userId
+            )
         }
     }
 
@@ -724,6 +915,36 @@ actor WorkoutSessionManager {
         if lower.contains("fatigue") || lower.contains("tired") { tags.append("fatigue") }
         if lower.contains("strong") || lower.contains("energy") { tags.append("energy") }
         return tags
+    }
+
+    private func formatWeight(_ kg: Double) -> String {
+        kg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", kg)
+            : String(format: "%.1f", kg)
+    }
+
+    // MARK: - UserProfile Helpers (FB-003)
+
+    /// Reads the user's biometric profile from UserDefaults.
+    /// Written during onboarding and editable from Settings.
+    nonisolated private static func loadUserProfileFromDefaults() -> UserProfileContext? {
+        let defaults = UserDefaults.standard
+        let bodyweight = defaults.object(forKey: UserProfileConstants.bodyweightKgKey) as? Double
+        let height     = defaults.object(forKey: UserProfileConstants.heightCmKey) as? Double
+        let age        = defaults.object(forKey: UserProfileConstants.ageKey) as? Int
+        let trainingAge = defaults.string(forKey: UserProfileConstants.trainingAgeKey)
+
+        // Only return a profile if we have at least one meaningful field.
+        guard bodyweight != nil || height != nil || age != nil || trainingAge != nil else {
+            return nil
+        }
+
+        return UserProfileContext(
+            bodyweightKg: bodyweight,
+            heightCm: height,
+            age: age,
+            trainingAge: trainingAge
+        )
     }
 }
 

@@ -29,6 +29,10 @@ struct PreWorkoutView: View {
     /// Streak result from GymStreakService (fetched by WorkoutView).
     let streak: StreakResult
 
+    /// True when the user has never completed a session before (FB-005).
+    /// Shows the first-session calibration banner.
+    var isFirstSession: Bool = false
+
     // MARK: - Body
 
     var body: some View {
@@ -42,6 +46,9 @@ struct PreWorkoutView: View {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 32) {
                         streakSection
+                        if isFirstSession {
+                            firstSessionBanner
+                        }
                         sessionInfoCard
                         startButton
                     }
@@ -217,6 +224,35 @@ struct PreWorkoutView: View {
         )
     }
 
+    // MARK: - First Session Banner (FB-005)
+
+    private var firstSessionBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "chart.bar.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.20))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("First session")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.white)
+                Text("We'll calibrate your starting weights today.")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.65))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            Color(red: 1.0, green: 0.75, blue: 0.20).opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color(red: 1.0, green: 0.75, blue: 0.20).opacity(0.25), lineWidth: 0.5)
+        )
+    }
+
     // MARK: - Start Button
 
     private var startButton: some View {
@@ -341,6 +377,20 @@ private struct ExerciseRowPreview: View {
             trainingDay: day,
             programId: UUID(),
             streak: .neutral
+        )
+    }
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Pre-Workout — First Session") {
+    let day = Mesocycle.mockMesocycle().weeks[0].trainingDays[0]
+    NavigationStack {
+        PreWorkoutView(
+            viewModel: WorkoutViewModel.mockPreflight(),
+            trainingDay: day,
+            programId: UUID(),
+            streak: .neutral,
+            isFirstSession: true
         )
     }
     .preferredColorScheme(.dark)

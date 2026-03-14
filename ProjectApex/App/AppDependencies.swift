@@ -35,11 +35,23 @@ final class AppDependencies {
     /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
     let workoutSessionManager: WorkoutSessionManager
 
-    // MARK: - Placeholder Auth (MVP)
+    // MARK: - Auth (MVP)
 
     /// Fixed placeholder user ID used throughout the MVP until real auth is wired.
     /// Matches the hardcoded UUID used in WorkoutSessionManager for session creation.
     static let placeholderUserId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+
+    /// Returns the user UUID stored in Keychain if available, falling back to
+    /// the MVP placeholder. Use this for all Supabase writes and AI calls so
+    /// that real user IDs flow through automatically once onboarding has run.
+    var resolvedUserId: UUID {
+        if let stored = try? keychainService.retrieve(.userId),
+           !stored.isEmpty,
+           let uuid = UUID(uuidString: stored) {
+            return uuid
+        }
+        return Self.placeholderUserId
+    }
 
     // MARK: Private: Stored Anthropic key for re-init
 
@@ -59,12 +71,20 @@ final class AppDependencies {
         // 3. HealthKit — no dependencies
         self.healthKitService = HealthKitService()
 
-        // 4. Memory — needs Supabase + OpenAI embedding key
+        // 4. Memory — needs Supabase + OpenAI embedding key + Anthropic key for Haiku tag classification
         let openAIKey = (try? keychain.retrieve(.openAIAPIKey)) ?? ""
-        self.memoryService = MemoryService(supabase: supabaseClient, embeddingAPIKey: openAIKey)
+        // Read Anthropic key early so MemoryService can use Haiku for tag classification.
+        let anthropicKey = (try? keychain.retrieve(.anthropicAPIKey)) ?? ""
+        self.memoryService = MemoryService(
+            supabase: supabaseClient,
+            embeddingAPIKey: openAIKey,
+            anthropicAPIKey: anthropicKey.isEmpty ? nil : anthropicKey
+        )
 
-        // 5. Speech — no dependencies
-        self.speechService = SpeechService()
+        // 5. Speech — uses OpenAI Whisper API as low-confidence fallback
+        self.speechService = SpeechService(
+            whisperAPIKey: openAIKey.isEmpty ? nil : openAIKey
+        )
 
         // 6. GymFactStore — persists user weight corrections
         self.gymFactStore = GymFactStore()
@@ -73,7 +93,6 @@ final class AppDependencies {
         self.gymStreakService = GymStreakService(supabase: supabaseClient)
 
         // 7. AI Inference — needs Anthropic key (sonnet model, 8-second timeout)
-        let anthropicKey = (try? keychain.retrieve(.anthropicAPIKey)) ?? ""
         self.anthropicKey = anthropicKey
         let inferenceService = AIInferenceService(
             provider: AnthropicProvider(apiKey: anthropicKey)

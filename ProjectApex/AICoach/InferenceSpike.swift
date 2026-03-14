@@ -172,6 +172,13 @@ enum InferenceSpike {
                 sleepHours: 7.5
             ),
             streakResult: nil,
+            userProfile: UserProfileContext(
+                bodyweightKg: 82.0,
+                heightCm: 180.0,
+                age: 30,
+                trainingAge: "Intermediate (1–3 yrs)"
+            ),
+            isFirstSession: false,
             currentExercise: CurrentExercise(
                 name: "Barbell Bench Press",
                 equipmentTypeKey: "barbell",
@@ -196,7 +203,21 @@ enum InferenceSpike {
                     rpe: 8.0,
                     tempo: "3-1-1-0",
                     restTakenSeconds: 150,
-                    completedAt: now
+                    completedAt: now,
+                    userCorrectedWeight: nil
+                )
+            ],
+            withinSessionPerformance: [
+                CompletedSet(
+                    setNumber: 1,
+                    weightKg: 85.0,
+                    reps: 7,
+                    rirActual: 2,
+                    rpe: 8.0,
+                    tempo: "3-1-1-0",
+                    restTakenSeconds: 150,
+                    completedAt: now,
+                    userCorrectedWeight: nil
                 )
             ],
             historicalPerformance: HistoricalPerformance(
@@ -208,7 +229,8 @@ enum InferenceSpike {
                     rpe: 9.0,
                     tempo: "3-0-1-0",
                     restTakenSeconds: 180,
-                    completedAt: nil
+                    completedAt: nil,
+                    userCorrectedWeight: nil
                 ),
                 recentAverage: RecentAverage(
                     sessionCount: 4,

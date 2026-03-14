@@ -6,8 +6,10 @@
 //   • Tab 1 — Workout   — Active workout loop (placeholder until Phase 3)
 //   • Tab 2 — Settings  — API keys, gym scanner, developer tools
 //
-// The gym scanner flow lives inside Settings tab so the Program tab can be
-// the app's primary entry point once a profile is confirmed.
+// Onboarding gate (P4-T09):
+//   On first launch (UserDefaults flag absent), OnboardingView is presented as
+//   a full-screen cover. It is dismissed permanently once the user completes or
+//   skips through all steps. Subsequent launches skip directly to the Program tab.
 
 import SwiftUI
 
@@ -30,6 +32,10 @@ struct ContentView: View {
 
     /// Non-nil when a regeneration error should be shown in SettingsView.
     @State private var regenerateErrorMessage: String?
+
+    /// True until onboarding has been completed at least once.
+    /// Evaluated once at launch from UserDefaults; does not re-read during runtime.
+    @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: OnboardingConstants.onboardingCompletedKey)
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -67,6 +73,22 @@ struct ContentView: View {
             .tag(2)
         }
         .preferredColorScheme(.dark)
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView { completedProfile in
+                // Persist the scanned profile so Settings / Program tabs see it immediately.
+                if let p = completedProfile {
+                    confirmedProfile = p
+                }
+                // Switch to Program tab so the newly generated program is visible.
+                selectedTab = 0
+                showOnboarding = false
+                // Reload the program view model so it picks up the freshly generated program.
+                Task {
+                    await programViewModel?.loadProgram()
+                }
+            }
+            .environment(deps)
+        }
         .sheet(isPresented: $isRescanning) {
             NavigationStack {
                 ScannerView { newProfile in
