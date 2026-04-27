@@ -26,8 +26,22 @@ struct PostWorkoutSummaryView: View {
     let summary: SessionSummary
     let streak: StreakResult
     let onDone: () -> Void
+    /// Raw set logs from the completed session — used to generate AI insights.
+    var completedSets: [SetLog] = []
+
+    @Environment(AppDependencies.self) private var deps
 
     @State private var showCopiedBanner: Bool = false
+
+    // MARK: - AI Insights State
+
+    enum InsightsState {
+        case loading
+        case loaded([String])
+        case failed([String]) // fallback deterministic insights
+    }
+
+    @State private var insightsState: InsightsState = .loading
 
     // MARK: - Body
 
@@ -71,12 +85,24 @@ struct PostWorkoutSummaryView: View {
                             .padding(.horizontal, 24)
                     }
 
+                    // Exercise swaps (P3-T10)
+                    if let swaps = summary.swappedExercises, !swaps.isEmpty {
+                        exerciseSwapsSection(swaps)
+                            .padding(.top, 24)
+                            .padding(.horizontal, 24)
+                    }
+
                     // Voice notes
                     if !summary.notableNotes.isEmpty {
                         voiceNotesSection
                             .padding(.top, 24)
                             .padding(.horizontal, 24)
                     }
+
+                    // AI Insights
+                    insightsSection
+                        .padding(.top, 28)
+                        .padding(.horizontal, 24)
 
                     // Action buttons
                     actionButtons
@@ -95,6 +121,9 @@ struct PostWorkoutSummaryView: View {
                     Spacer()
                 }
             }
+        }
+        .task {
+            await loadInsights()
         }
     }
 
@@ -259,6 +288,48 @@ struct PostWorkoutSummaryView: View {
         }
     }
 
+    // MARK: - Exercise Swaps (P3-T10)
+
+    private func exerciseSwapsSection(_ swaps: [SwapRecord]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color(red: 1.00, green: 0.60, blue: 0.20))
+                Text("Exercise Swaps")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.80))
+            }
+
+            ForEach(swaps, id: \.newExerciseId) { swap in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(swap.originalExerciseName)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.55))
+                            .strikethrough(true, color: .white.opacity(0.30))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Color(red: 1.00, green: 0.60, blue: 0.20))
+                        Text(swap.newExerciseName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    if !swap.reason.isEmpty {
+                        Text(swap.reason)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.38))
+                            .italic()
+                    }
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
     // MARK: - AI Adjustments
 
     private var aiAdjustmentsSection: some View {
@@ -307,6 +378,153 @@ struct PostWorkoutSummaryView: View {
                 .padding(.vertical, 6)
             }
         }
+    }
+
+    // MARK: - AI Insights
+
+    private var insightsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(streak.tintColor)
+                Text("Session Insights")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.80))
+            }
+
+            switch insightsState {
+            case .loading:
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(streak.tintColor)
+                        .scaleEffect(0.8)
+                    Text("Analysing your session…")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            case .loaded(let insights), .failed(let insights):
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(insights.enumerated()), id: \.offset) { _, insight in
+                        HStack(alignment: .top, spacing: 10) {
+                            Circle()
+                                .fill(streak.tintColor)
+                                .frame(width: 5, height: 5)
+                                .padding(.top, 6)
+                            Text(insight)
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(.white.opacity(0.75))
+                                .lineLimit(4)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    // MARK: - Insights Loading
+
+    private func loadInsights() async {
+        // Build context payload from completedSets and summary
+        let setsByExercise = Dictionary(grouping: completedSets, by: \.exerciseId)
+        var exerciseSummaries: [String] = []
+        for (exerciseId, sets) in setsByExercise {
+            let displayName = sets.first.map { _ in
+                ExerciseLibrary.lookup(exerciseId)?.name ?? exerciseId
+                    .split(separator: "_")
+                    .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+                    .joined(separator: " ")
+            } ?? exerciseId
+            let setDescriptions = sets.map { s in
+                "\(s.setNumber): \(String(format: "%.1f", s.weightKg))kg × \(s.repsCompleted) reps" +
+                (s.rpeFelt.map { " RPE \($0)" } ?? "")
+            }
+            exerciseSummaries.append("\(displayName): \(setDescriptions.joined(separator: ", "))")
+        }
+
+        var prDescriptions: [String] = []
+        for pr in summary.personalRecords {
+            prDescriptions.append("\(pr.exerciseName): \(String(format: "%.1f", pr.previousBest))kg → \(String(format: "%.1f", pr.newBest))kg (\(prMetricLabel(pr.metric)))")
+        }
+
+        let userPayload = """
+        Today's session:
+        \(exerciseSummaries.joined(separator: "\n"))
+
+        Total volume: \(String(format: "%.0f", summary.totalVolumeKg))kg
+        Sets completed: \(summary.setsCompleted)/\(summary.setsPlanned)
+        Duration: \(summary.durationSeconds / 60) minutes
+        \(prDescriptions.isEmpty ? "" : "\nPersonal records:\n" + prDescriptions.joined(separator: "\n"))
+        """
+
+        let systemPrompt = """
+        You are summarising a strength training session. Given today's performance and historical comparison data, generate 3–4 concise insights that are genuinely useful to the athlete. Each insight should be specific and data-driven — never generic. Good examples:
+        — 'Bench Press up 5kg from last Push A — strongest set this mesocycle'
+        — 'Total session volume: 4,200kg — 12% above your Push A average'
+        — 'Barbell Row stalled at 22.5kg for 3 sessions — your coach will adjust intensity next time'
+        — 'New estimated 1RM on Overhead Press: 32kg — up from 28kg last month'
+        Avoid: 'Great session!', 'Keep it up!', 'You worked hard today.' — these are not insights. Every insight must reference a specific number.
+        Return a JSON array of strings only. No preamble, no markdown.
+        """
+
+        // Get the Anthropic key and make a Haiku call
+        guard let apiKey = try? deps.keychainService.retrieve(.anthropicAPIKey), !apiKey.isEmpty else {
+            withAnimation { insightsState = .failed(deterministicInsights()) }
+            return
+        }
+
+        let haikuProvider = AnthropicProvider(
+            apiKey: apiKey,
+            model: "claude-haiku-4-5",
+            maxTokens: 512,
+            requestTimeout: 15
+        )
+
+        do {
+            let raw = try await haikuProvider.complete(systemPrompt: systemPrompt, userPayload: userPayload)
+            // Strip markdown fences if present
+            let cleaned = raw
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let data = cleaned.data(using: .utf8),
+               let insights = try? JSONDecoder().decode([String].self, from: data),
+               !insights.isEmpty {
+                withAnimation { insightsState = .loaded(insights) }
+            } else {
+                withAnimation { insightsState = .failed(deterministicInsights()) }
+            }
+        } catch {
+            withAnimation { insightsState = .failed(deterministicInsights()) }
+        }
+    }
+
+    /// Fallback insights computed client-side when the AI call fails.
+    private func deterministicInsights() -> [String] {
+        var insights: [String] = []
+
+        // Volume summary
+        let volumeStr = String(format: "%.0f", summary.totalVolumeKg)
+        insights.append("Total session volume: \(volumeStr)kg across \(summary.setsCompleted) sets.")
+
+        // PR insight
+        if let pr = summary.personalRecords.first {
+            insights.append("\(pr.exerciseName): new \(prMetricLabel(pr.metric).lowercased()) of \(String(format: "%.1f", pr.newBest))kg (up from \(String(format: "%.1f", pr.previousBest))kg).")
+        }
+
+        return insights
     }
 
     // MARK: - Action Buttons
@@ -432,6 +650,13 @@ struct PostWorkoutSummaryView: View {
             }
         }
 
+        if let swaps = summary.swappedExercises, !swaps.isEmpty {
+            text += "\nExercise Swaps:\n"
+            for swap in swaps {
+                text += "  • \(swap.originalExerciseName) → \(swap.newExerciseName) (\(swap.reason))\n"
+            }
+        }
+
         if !summary.notableNotes.isEmpty {
             text += "\nNotes:\n"
             for note in summary.notableNotes {
@@ -481,6 +706,7 @@ struct PostWorkoutSummaryView: View {
         streak: StreakResult.compute(currentStreakDays: 7, longestStreak: 10),
         onDone: {}
     )
+    .environment(AppDependencies())
     .preferredColorScheme(.dark)
 }
 
@@ -499,5 +725,6 @@ struct PostWorkoutSummaryView: View {
         streak: StreakResult.neutral,
         onDone: {}
     )
+    .environment(AppDependencies())
     .preferredColorScheme(.dark)
 }

@@ -20,9 +20,18 @@ import SwiftUI
 
 struct ProgramOverviewView: View {
 
+    @Environment(AppDependencies.self) private var deps
+
     @Bindable var viewModel: ProgramViewModel
     /// The confirmed gym profile passed in from ContentView.
     let gymProfile: GymProfile?
+
+    /// Controls the collapsed/expanded state of the pattern progress section.
+    @State private var isPatternProgressExpanded = false
+    /// The training day ID that has an active live session, nil when idle.
+    @State private var liveTrainingDayId: UUID? = nil
+    /// Aggregated set progress for the live session, updated every poll cycle.
+    @State private var liveSetSummary: LiveSetSummary? = nil
 
     var body: some View {
         ZStack {
@@ -39,6 +48,15 @@ struct ProgramOverviewView: View {
             case .generating:
                 generatingView
 
+            case .generatingSession:
+                // FB-008: A day session is being generated — keep showing the calendar
+                // The individual ProgramDayDetailView shows its own loading screen.
+                if let mesocycle = viewModel.currentMesocycle {
+                    loadedView(mesocycle: mesocycle)
+                } else {
+                    generatingView
+                }
+
             case .loaded(let mesocycle):
                 loadedView(mesocycle: mesocycle)
 
@@ -52,6 +70,32 @@ struct ProgramOverviewView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task {
             await viewModel.loadProgram()
+        }
+        .task {
+            // Poll the actor every 2 seconds so the live-session card highlight
+            // and set-progress numbers update without requiring view navigation.
+            while !Task.isCancelled {
+                let activeId = await deps.workoutSessionManager.currentTrainingDayId
+                let state    = await deps.workoutSessionManager.sessionState
+                let isLive: Bool
+                switch state {
+                case .idle, .sessionComplete, .error: isLive = false
+                default: isLive = true
+                }
+                liveTrainingDayId = isLive ? activeId : nil
+                if isLive {
+                    let sets = await deps.workoutSessionManager.completedSets
+                    let last = sets.max(by: { $0.loggedAt < $1.loggedAt })
+                    liveSetSummary = LiveSetSummary(
+                        setsCompleted: sets.count,
+                        lastWeightKg: last?.weightKg,
+                        lastRepsCompleted: last?.repsCompleted
+                    )
+                } else {
+                    liveSetSummary = nil
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
         }
     }
 
@@ -187,28 +231,175 @@ struct ProgramOverviewView: View {
 
     private func loadedView(mesocycle: Mesocycle) -> some View {
         let currentWeekIndex = viewModel.currentWeekIndex(in: mesocycle)
-        return ScrollView {
-            LazyVStack(spacing: 2) {
-                // Phase progress bar header
-                phaseProgressBar(mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-                    .padding(.bottom, 8)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    // Phase progress bar header
+                    phaseProgressBar(mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 8)
+                        .id("header")
 
-                // Week rows
-                ForEach(Array(mesocycle.weeks.enumerated()), id: \.element.id) { index, week in
-                    WeekRowView(
-                        week: week,
-                        isCurrent: index == currentWeekIndex,
-                        weekIndex: index,
-                        mesocycleCreatedAt: mesocycle.createdAt
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
+                    // Per-pattern phase tracking — collapsed by default
+                    patternProgressSection
+
+                    // Phase ranges (0-based week indices), matching phaseProgressBar above.
+                    let phaseRanges: [(phase: MesocyclePhase, range: ClosedRange<Int>)] = [
+                        (.accumulation,    0...3),
+                        (.intensification, 4...7),
+                        (.peaking,         8...10),
+                        (.deload,          11...11)
+                    ]
+
+                    // Week rows
+                    ForEach(Array(mesocycle.weeks.enumerated()), id: \.element.id) { index, week in
+                        // Compute phase-relative week position for the row label
+                        let phaseInfo = phaseRanges.first { $0.range.contains(index) }
+                        let phaseStart     = phaseInfo?.range.lowerBound ?? 0
+                        let phaseEnd       = phaseInfo?.range.upperBound ?? 0
+                        let phaseWeekNum   = index - phaseStart + 1
+                        let phaseWeekTot   = phaseEnd - phaseStart + 1
+
+                        WeekRowView(
+                            week: week,
+                            isCurrent: index == currentWeekIndex,
+                            weekIndex: index,
+                            mesocycleCreatedAt: mesocycle.createdAt,
+                            mesocycleId: mesocycle.id,
+                            viewModel: viewModel,
+                            gymProfile: gymProfile,
+                            phaseWeekNumber: phaseWeekNum,
+                            phaseWeekTotal: phaseWeekTot,
+                            liveTrainingDayId: liveTrainingDayId,
+                            liveSetSummary: liveSetSummary
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .id(week.id)
+                    }
+                }
+                .padding(.bottom, 32)
+            }
+            .onAppear {
+                scrollToCurrentWeek(proxy: proxy, mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
+            }
+            .onChange(of: viewModel.scrollToCurrentWeekTrigger) { _, _ in
+                withAnimation(.easeInOut(duration: 0.5)) {
+                    scrollToCurrentWeek(proxy: proxy, mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
                 }
             }
-            .padding(.bottom, 32)
         }
+    }
+
+    private func scrollToCurrentWeek(proxy: ScrollViewProxy, mesocycle: Mesocycle, currentWeekIndex: Int) {
+        guard currentWeekIndex < mesocycle.weeks.count else { return }
+        let targetWeek = mesocycle.weeks[currentWeekIndex]
+        proxy.scrollTo(targetWeek.id, anchor: .top)
+    }
+
+    // MARK: - Pattern Progress Section
+
+    /// Collapsible section showing per-movement-pattern phase state.
+    /// Only renders when PatternPhaseService has tracked data.
+    @ViewBuilder
+    private var patternProgressSection: some View {
+        let states = PatternPhaseService.load()
+        if !states.isEmpty {
+            VStack(spacing: 0) {
+                // Collapse/expand header
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        isPatternProgressExpanded.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text("PATTERN PROGRESS")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.40))
+                            .kerning(0.6)
+                        Spacer()
+                        Image(systemName: isPatternProgressExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.30))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.plain)
+
+                if isPatternProgressExpanded {
+                    VStack(spacing: 6) {
+                        ForEach(states) { state in
+                            patternPhaseRow(state)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .background(Color.white.opacity(0.03),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
+            )
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private func patternPhaseRow(_ state: MovementPatternPhaseState) -> some View {
+        let progress: Double = state.sessionsRequiredForPhase > 0
+            ? min(Double(state.sessionsCompletedInPhase) / Double(state.sessionsRequiredForPhase), 1.0)
+            : 1.0
+        return HStack(spacing: 10) {
+            // Human-readable pattern name (e.g. "Horizontal Push")
+            Text(formatPatternName(state.pattern))
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white.opacity(0.75))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Phase badge
+            Text(shortPhaseName(state.phase))
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(state.phase.accentColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(state.phase.accentColor.opacity(0.15), in: Capsule())
+
+            // Session counter: N/M
+            Text("\(state.sessionsCompletedInPhase)/\(state.sessionsRequiredForPhase)")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.40))
+                .frame(width: 36, alignment: .trailing)
+
+            // Mini progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.10))
+                    Capsule()
+                        .fill(state.phase.accentColor.opacity(0.70))
+                        .frame(width: geo.size.width * progress)
+                }
+            }
+            .frame(width: 48, height: 4)
+        }
+    }
+
+    private func shortPhaseName(_ phase: MesocyclePhase) -> String {
+        switch phase {
+        case .accumulation:    return "ACCUM"
+        case .intensification: return "INTENS"
+        case .peaking:         return "PEAK"
+        case .deload:          return "DELOAD"
+        }
+    }
+
+    private func formatPatternName(_ pattern: String) -> String {
+        pattern.split(separator: "_").map { $0.capitalized }.joined(separator: " ")
     }
 
     // MARK: - Phase Progress Bar
@@ -220,14 +411,20 @@ struct ProgramOverviewView: View {
             (.peaking, 8...10),
             (.deload, 11...11)
         ]
-        let progress = Double(currentWeekIndex + 1) / Double(max(mesocycle.weeks.count, 1))
+
+        // Count completed+skipped sessions across all days for the progress label.
+        // Skipped sessions advance the programme pointer, so they count toward progress.
+        let allDays = mesocycle.weeks.flatMap { $0.trainingDays }
+        let completedCount = allDays.filter { $0.status == .completed || $0.status == .skipped }.count
+        let totalDays = allDays.count
+        // Session-based completion fraction — updates immediately when a day is marked done.
+        let sessionProgress = totalDays > 0 ? Double(completedCount) / Double(totalDays) : 0.0
 
         return VStack(alignment: .leading, spacing: 8) {
             // Phase segments
             HStack(spacing: 3) {
                 ForEach(phases, id: \.phase) { item in
                     let isActive = item.weeks.contains(currentWeekIndex)
-                    let fraction = Double(item.weeks.count) / 12.0
                     Rectangle()
                         .fill(isActive ? item.phase.accentColor : item.phase.accentColor.opacity(0.25))
                         .frame(height: 4)
@@ -256,7 +453,8 @@ struct ProgramOverviewView: View {
                     .font(.footnote.bold())
                     .foregroundStyle(.white.opacity(0.70))
                 Spacer()
-                Text("\(Int(progress * 100))% complete")
+                // Show sessions completed / total; percentage updates live as days complete.
+                Text("\(completedCount) of \(totalDays) sessions · \(Int(sessionProgress * 100))%")
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.40))
             }
@@ -272,6 +470,17 @@ private struct WeekRowView: View {
     let isCurrent: Bool
     let weekIndex: Int
     let mesocycleCreatedAt: Date
+    let mesocycleId: UUID
+    let viewModel: ProgramViewModel
+    let gymProfile: GymProfile?
+    /// 1-based position of this week within its phase (e.g. 2 for the 2nd accumulation week).
+    let phaseWeekNumber: Int
+    /// Total weeks in this week's phase (e.g. 4 for accumulation).
+    let phaseWeekTotal: Int
+    /// The training day ID that currently has a live session, nil when idle.
+    var liveTrainingDayId: UUID? = nil
+    /// Aggregated set progress for the live session (nil when no session active).
+    var liveSetSummary: LiveSetSummary? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -282,10 +491,12 @@ private struct WeekRowView: View {
                     .foregroundStyle(isCurrent ? week.phase.accentColor : .white.opacity(0.45))
                     .frame(width: 28, alignment: .leading)
 
-                Text(week.phase.displayTitle.uppercased())
+                // FB-008: Show weekLabel if available, else fall back to phase title
+                Text((week.weekLabel ?? week.phase.displayTitle).uppercased())
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(week.phase.accentColor.opacity(isCurrent ? 1.0 : 0.55))
                     .kerning(0.8)
+                    .lineLimit(1)
 
                 if isCurrent {
                     Text("CURRENT")
@@ -298,7 +509,8 @@ private struct WeekRowView: View {
 
                 Spacer()
 
-                Text("\(week.trainingDays.count) days")
+                // Phase-relative progress: "Week 2 of 4"
+                Text("Week \(phaseWeekNumber) of \(phaseWeekTotal)")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.30))
             }
@@ -310,9 +522,22 @@ private struct WeekRowView: View {
                 HStack(spacing: 8) {
                     ForEach(week.trainingDays) { day in
                         NavigationLink {
-                            ProgramDayDetailView(day: day, week: week, mesocycleCreatedAt: mesocycleCreatedAt)
+                            ProgramDayDetailView(
+                                day: day,
+                                week: week,
+                                mesocycleCreatedAt: mesocycleCreatedAt,
+                                programId: mesocycleId,
+                                viewModel: viewModel,
+                                gymProfile: gymProfile
+                            )
                         } label: {
-                            DayCardView(day: day, week: week, isCurrentWeek: isCurrent)
+                            DayCardView(
+                                day: day,
+                                week: week,
+                                isCurrentWeek: isCurrent,
+                                isLive: day.id == liveTrainingDayId,
+                                liveSetSummary: day.id == liveTrainingDayId ? liveSetSummary : nil
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -356,6 +581,15 @@ private struct WeekRowView: View {
     }
 }
 
+// MARK: - LiveSetSummary
+
+/// Snapshot of live session progress passed from ProgramOverviewView down to DayCardView.
+struct LiveSetSummary: Equatable, Sendable {
+    let setsCompleted: Int
+    let lastWeightKg: Double?
+    let lastRepsCompleted: Int?
+}
+
 // MARK: - DayCardView
 
 private struct DayCardView: View {
@@ -363,46 +597,154 @@ private struct DayCardView: View {
     let day: TrainingDay
     let week: TrainingWeek
     let isCurrentWeek: Bool
+    var isLive: Bool = false
+    /// Aggregated progress for the current live session. Non-nil only when isLive == true.
+    var liveSetSummary: LiveSetSummary? = nil
+
+    @State private var livePulse: Bool = false
+
+    private var isPending: Bool   { day.status == .pending }
+    private var isCompleted: Bool { day.status == .completed }
+    private var isPaused: Bool    { day.status == .paused }
+    private var isSkipped: Bool   { day.status == .skipped }
+
+    // Green used for completed day styling
+    private let completedGreen = Color(red: 0.24, green: 0.82, blue: 0.46)
+    private let pausedAmber    = Color(red: 1.00, green: 0.70, blue: 0.10)
+    private let skippedGrey    = Color(red: 0.55, green: 0.58, blue: 0.63)
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Weekday + day label
-            VStack(alignment: .leading, spacing: 2) {
-                Text(weekdayLabel(dayOfWeek: day.dayOfWeek))
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .kerning(0.5)
+            // Weekday + day label row
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(weekdayLabel(dayOfWeek: day.dayOfWeek))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isCompleted ? completedGreen.opacity(0.6) : .white.opacity(0.35))
+                        .kerning(0.5)
 
-                Text(day.dayLabel.replacingOccurrences(of: "_", with: " "))
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-            }
-
-            // Primary muscles chips (top 2)
-            let muscles = uniqueTopMuscles(from: day.exercises)
-            VStack(alignment: .leading, spacing: 3) {
-                ForEach(muscles.prefix(2), id: \.self) { muscle in
-                    Text(muscle)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(muscleColor(for: muscle))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(muscleColor(for: muscle).opacity(0.14), in: Capsule())
+                    Text(day.dayLabel.replacingOccurrences(of: "_", with: " "))
+                        .font(.system(size: 14, weight: .bold, design: .rounded))
+                        .foregroundStyle(isPending ? .white.opacity(0.55) : isCompleted ? completedGreen : isPaused ? pausedAmber : isSkipped ? skippedGrey : .white)
                         .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                // Status icon — record for live, checkmark for completed, pause for paused, xmark for skipped
+                if isLive {
+                    Image(systemName: "record.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(week.phase.accentColor)
+                        .opacity(livePulse ? 1.0 : 0.4)
+                } else if isCompleted {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(completedGreen)
+                } else if isPaused {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(pausedAmber)
+                } else if isSkipped {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundStyle(skippedGrey)
                 }
             }
 
-            Spacer(minLength: 0)
+            if isLive {
+                // Live session — set progress (if any sets logged) then pulsing LIVE badge
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 4) {
+                    if let s = liveSetSummary, s.setsCompleted > 0 {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\(s.setsCompleted) set\(s.setsCompleted == 1 ? "" : "s") done")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.70))
+                            if let kg = s.lastWeightKg, let reps = s.lastRepsCompleted {
+                                Text("\(formatWeight(kg))kg · \(reps) reps")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.white.opacity(0.45))
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(week.phase.accentColor)
+                            .frame(width: 5, height: 5)
+                            .opacity(livePulse ? 1.0 : 0.2)
+                        Text("LIVE")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(week.phase.accentColor)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(week.phase.accentColor.opacity(0.14), in: Capsule())
+                }
+            } else if isPending {
+                // FB-008: Session pending indicator
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 3) {
+                    Image(systemName: "clock.badge.questionmark")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.white.opacity(0.35))
+                    Text("Session\npending")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.35))
+                        .lineLimit(2)
+                }
+            } else if isCompleted {
+                // Completed: show "Done" label in green
+                Spacer(minLength: 0)
+                Text("DONE")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(completedGreen)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(completedGreen.opacity(0.14), in: Capsule())
+            } else if isPaused {
+                // Paused: show "PAUSED" capsule in amber
+                Spacer(minLength: 0)
+                Text("PAUSED")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(pausedAmber)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(pausedAmber.opacity(0.14), in: Capsule())
+            } else if isSkipped {
+                // Skipped: show "SKIPPED" capsule in grey
+                Spacer(minLength: 0)
+                Text("SKIPPED")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(skippedGrey)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(skippedGrey.opacity(0.14), in: Capsule())
+            } else {
+                // Primary muscles chips (top 2)
+                let muscles = uniqueTopMuscles(from: day.exercises)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(muscles.prefix(2), id: \.self) { muscle in
+                        Text(muscle)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(muscleColor(for: muscle))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(muscleColor(for: muscle).opacity(0.14), in: Capsule())
+                            .lineLimit(1)
+                    }
+                }
 
-            // Exercise count indicator
-            HStack(spacing: 4) {
-                Image(systemName: "dumbbell.fill")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.35))
-                Text("\(day.exercises.count) ex")
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.40))
+                Spacer(minLength: 0)
+
+                // Exercise count indicator
+                HStack(spacing: 4) {
+                    Image(systemName: "dumbbell.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.35))
+                    Text("\(day.exercises.count) ex")
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.40))
+                }
             }
         }
         .padding(.horizontal, 12)
@@ -411,11 +753,42 @@ private struct DayCardView: View {
         .background(cardBackground)
         .overlay(cardBorder)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onAppear {
+            guard isLive else { return }
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                livePulse = true
+            }
+        }
+        .onChange(of: isLive) { _, live in
+            if live {
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    livePulse = true
+                }
+            } else {
+                livePulse = false
+            }
+        }
     }
 
     @ViewBuilder
     private var cardBackground: some View {
-        if week.isDeload {
+        if isLive {
+            // Live session — brighter phase-tinted background
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(week.phase.accentColor.opacity(0.15))
+        } else if isCompleted {
+            // Completed days get a subtle green tint
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(completedGreen.opacity(0.08))
+        } else if isPaused {
+            // Paused days get a subtle amber tint
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(pausedAmber.opacity(0.08))
+        } else if isSkipped {
+            // Skipped days get a muted grey tint
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(skippedGrey.opacity(0.07))
+        } else if week.isDeload {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color(red: 0.54, green: 0.60, blue: 0.69).opacity(0.10))
         } else {
@@ -426,7 +799,19 @@ private struct DayCardView: View {
 
     @ViewBuilder
     private var cardBorder: some View {
-        if isCurrentWeek {
+        if isLive {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(week.phase.accentColor.opacity(0.65), lineWidth: 1.5)
+        } else if isCompleted {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(completedGreen.opacity(0.30), lineWidth: 1)
+        } else if isPaused {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(pausedAmber.opacity(0.30), lineWidth: 1)
+        } else if isSkipped {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(skippedGrey.opacity(0.25), lineWidth: 1)
+        } else if isCurrentWeek {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(week.phase.accentColor.opacity(0.35), lineWidth: 1)
         } else {
@@ -436,6 +821,12 @@ private struct DayCardView: View {
     }
 
     // MARK: Helpers
+
+    private func formatWeight(_ kg: Double) -> String {
+        kg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", kg)
+            : String(format: "%.1f", kg)
+    }
 
     private func weekdayLabel(dayOfWeek: Int) -> String {
         let days = ["", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
@@ -493,11 +884,20 @@ private extension String {
 // MARK: - Preview
 
 #Preview {
+    let supabase = SupabaseClient(supabaseURL: URL(string: "https://example.supabase.co")!, anonKey: "")
+    let provider = AnthropicProvider(apiKey: "")
     NavigationStack {
         ProgramOverviewView(
             viewModel: ProgramViewModel(
-                supabaseClient: SupabaseClient(supabaseURL: URL(string: "https://example.supabase.co")!, anonKey: ""),
-                programGenerationService: ProgramGenerationService(provider: AnthropicProvider(apiKey: ""))
+                supabaseClient: supabase,
+                programGenerationService: ProgramGenerationService(provider: provider),
+                macroPlanService: MacroPlanService(provider: provider),
+                sessionPlanService: SessionPlanService(
+                    provider: provider,
+                    memoryService: MemoryService(supabase: supabase, embeddingAPIKey: ""),
+                    supabaseClient: supabase
+                ),
+                userId: AppDependencies.placeholderUserId
             ),
             gymProfile: nil
         )

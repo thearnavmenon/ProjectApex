@@ -49,6 +49,33 @@ private struct DelayedLLMProvider: LLMProvider {
     }
 }
 
+// MARK: - Mock URLProtocol (always returns HTTP 201 — prevents real network calls and WAQ retry loops)
+
+private final class WSMAlwaysSucceedURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 201,
+            httpVersion: nil, headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("[]".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private func makeTestSupabase() -> SupabaseClient {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [WSMAlwaysSucceedURLProtocol.self]
+    return SupabaseClient(
+        supabaseURL: URL(string: "https://test.supabase.co")!,
+        anonKey: "test-key",
+        urlSession: URLSession(configuration: config)
+    )
+}
+
 // MARK: - JSON Fixture Builders
 
 /// Builds a valid set_prescription JSON response string.
@@ -108,17 +135,21 @@ private func makeManager(
     gymProfile: GymProfile? = nil
 ) -> WorkoutSessionManager {
     let inferenceService = AIInferenceService(provider: provider, gymProfile: gymProfile, maxRetries: 0)
-    let supabase = SupabaseClient(
-        supabaseURL: URL(string: "https://test.supabase.co")!,
-        anonKey: "test-key"
-    )
+    let supabase = makeTestSupabase()
     let memoryService = MemoryService(supabase: supabase, embeddingAPIKey: "")
+    // Use an isolated UserDefaults suite so GymFactStore and WriteAheadQueue
+    // never touch UserDefaults.standard or load stale items from prior runs.
+    let suiteName = "com.test.wsm.\(UUID().uuidString)"
+    let testDefaults = UserDefaults(suiteName: suiteName)!
+    let gymFactStore = GymFactStore(userDefaults: testDefaults)
+    let waq = WriteAheadQueue(supabase: supabase, userDefaults: testDefaults)
     return WorkoutSessionManager(
         aiInference: inferenceService,
         healthKit: HealthKitService(),
         memoryService: memoryService,
         supabase: supabase,
-        gymFactStore: GymFactStore()
+        gymFactStore: gymFactStore,
+        writeAheadQueue: waq
     )
 }
 
@@ -187,7 +218,7 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertEqual(logs[0].exerciseId, day.exercises[0].exerciseId)
     }
 
-    // MARK: Test 3: Fallback path
+    // MARK: Test 3: Fallback path (smart retry — no silent fallback)
 
     func testCompleteSet_fallbackPath_setsFallbackReason() async throws {
         // Use a failing provider so prescribe() always returns .fallback
@@ -197,20 +228,24 @@ final class WorkoutSessionManagerTests: XCTestCase {
         await manager.startSession(trainingDay: day, programId: UUID())
         try await Task.sleep(nanoseconds: 300_000_000)
 
-        // After startSession with a failing provider, we expect fallback
+        // After startSession with a failing provider, inference fails →
+        // state stays in .preflight (no silent fallback), retry is needed.
         let fallbackReason = await manager.currentFallbackReason
         XCTAssertNotNil(fallbackReason, "Fallback reason should be set when AI fails")
 
-        // The state should still become .active via the fallback prescription
+        let retryNeeded = await manager.inferenceRetryNeeded
+        XCTAssertTrue(retryNeeded, "inferenceRetryNeeded should be true when inference fails during preflight")
+
+        // No silent fallback prescription — user must choose retry or pause
+        let prescription = await manager.currentPrescription
+        XCTAssertNil(prescription, "No silent fallback: prescription should be nil when inference fails")
+
+        // State should stay in .preflight (not advance to .active without a prescription)
         let state = await manager.sessionState
-        guard case .active = state else {
-            XCTFail("Expected .active even on fallback, got \(state)")
+        guard case .preflight = state else {
+            XCTFail("Expected .preflight (retry needed) when AI fails, got \(state)")
             return
         }
-
-        let prescription = await manager.currentPrescription
-        XCTAssertNotNil(prescription, "Fallback prescription should be non-nil")
-        XCTAssertEqual(prescription?.coachingCue, "AI unavailable — use last known weight")
     }
 
     // MARK: Test 4: Safety gate — painReported flag extends rest to ≥ 180 s

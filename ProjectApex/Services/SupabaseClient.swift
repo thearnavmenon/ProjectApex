@@ -98,6 +98,10 @@ actor SupabaseClient {
     /// request instead of (not in addition to) the anon key.
     var authToken: String?
 
+    /// Supabase service role key. When set, used as the bearer token on all
+    /// requests, bypassing RLS. For MVP use only — remove once real auth lands.
+    var serviceKey: String?
+
     // MARK: - Private helpers
 
     private let session: URLSession
@@ -118,6 +122,12 @@ actor SupabaseClient {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         self.decoder = dec
+    }
+
+    // MARK: - Setters (actor-isolated for external callers)
+
+    func set(serviceKey: String?) {
+        self.serviceKey = serviceKey
     }
 
     // MARK: - Public API
@@ -161,20 +171,40 @@ actor SupabaseClient {
     /// Fetches rows from `table`, optionally filtered by `filters`.
     ///
     /// Each `Filter` in `filters` is appended as a URL query parameter using
-    /// PostgREST syntax: `column=op.value`.
+    /// PostgREST syntax: `column=op.value`. Optional `order` and `limit`
+    /// parameters map to PostgREST `order` and `limit` query items respectively.
     ///
     /// - Parameters:
     ///   - type: The `Decodable` type each row should be decoded into.
     ///   - table: The PostgREST table name.
     ///   - filters: Zero or more column filters to narrow the result set.
+    ///   - order: Optional PostgREST order expression, e.g. `"logged_at.desc"`.
+    ///   - limit: Optional maximum number of rows to return.
     /// - Returns: An array of decoded rows (empty array if none match).
     /// - Throws: `SupabaseError` on HTTP or decoding failure.
-    func fetch<T: Decodable>(_ type: T.Type, table: String, filters: [Filter] = []) async throws -> [T] {
+    func fetch<T: Decodable>(
+        _ type: T.Type,
+        table: String,
+        filters: [Filter] = [],
+        order: String? = nil,
+        limit: Int? = nil,
+        select: String? = nil
+    ) async throws -> [T] {
         var components = URLComponents(url: try tableURL(table: table), resolvingAgainstBaseURL: false)
-        if !filters.isEmpty {
-            components?.queryItems = filters.map { filter in
-                URLQueryItem(name: filter.column, value: "\(filter.op.rawValue).\(filter.value)")
-            }
+        var queryItems: [URLQueryItem] = filters.map { filter in
+            URLQueryItem(name: filter.column, value: "\(filter.op.rawValue).\(filter.value)")
+        }
+        if let select {
+            queryItems.append(URLQueryItem(name: "select", value: select))
+        }
+        if let order {
+            queryItems.append(URLQueryItem(name: "order", value: order))
+        }
+        if let limit {
+            queryItems.append(URLQueryItem(name: "limit", value: "\(limit)"))
+        }
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
         }
         guard let url = components?.url else { throw SupabaseError.invalidURL }
         let request = baseRequest(url: url, method: "GET")
@@ -199,6 +229,26 @@ actor SupabaseClient {
         var request = baseRequest(url: url, method: "PATCH")
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
         request.httpBody = try encoder.encode(item)
+        try await perform(request)
+    }
+
+    // MARK: - Delete
+
+    /// Deletes all rows in `table` that match the given `filters`.
+    ///
+    /// - Parameters:
+    ///   - table: The PostgREST table name (e.g. `"memory_embeddings"`).
+    ///   - filters: One or more column filters that identify the rows to remove.
+    /// - Throws: `SupabaseError` on HTTP failure.
+    func delete(table: String, filters: [Filter]) async throws {
+        var components = URLComponents(url: try tableURL(table: table), resolvingAgainstBaseURL: false)
+        if !filters.isEmpty {
+            components?.queryItems = filters.map {
+                URLQueryItem(name: $0.column, value: "\($0.op.rawValue).\($0.value)")
+            }
+        }
+        guard let url = components?.url else { throw SupabaseError.invalidURL }
+        let request = baseRequest(url: url, method: "DELETE")
         try await perform(request)
     }
 
@@ -367,8 +417,10 @@ actor SupabaseClient {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        // Use the user auth token when available; fall back to the anon key.
-        if let token = authToken {
+        // Bearer priority: service key > user auth token > anon key.
+        if let key = serviceKey, !key.isEmpty {
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        } else if let token = authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else {
             request.setValue("Bearer \(anonKey)", forHTTPHeaderField: "Authorization")

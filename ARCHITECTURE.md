@@ -1,6 +1,6 @@
 # Project Apex — Architecture Reference
 ### Combines: Technical Design Document v1.0 + UI/UX Specification v1.0
-### Platform: iOS 26+ | Last Updated: 2026-03-14
+### Platform: iOS 26+ | Last Updated: 2026-03-25
 
 ---
 
@@ -15,6 +15,7 @@
 5. [Feature Module: Gym Scanner](#5-feature-module-gym-scanner)
 6. [Feature Module: Macro-Program Generation](#6-feature-module-macro-program-generation)
 7. [Feature Module: Active Workout & AI Loop](#7-feature-module-active-workout--ai-loop)
+7a. [Feature Module: Progress & Analytics](#7a-feature-module-progress--analytics)
 8. [AI & Inference Architecture](#8-ai--inference-architecture)
 9. [RAG Memory System](#9-rag-memory-system)
 10. [Backend & Database Architecture](#10-backend--database-architecture)
@@ -66,29 +67,31 @@ This document is versioned in lockstep with the codebase. Any architectural chan
 ### 2.1 High-Level Component Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        iOS Application                          │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌───────────────────────┐ │
-│  │  Scanner     │  │  Program     │  │  Workout Session      │ │
-│  │  Feature     │  │  Feature     │  │  Feature              │ │
-│  │  Module      │  │  Module      │  │  Module               │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬────────────┘ │
-│         │                 │                      │              │
-│  ┌──────▼─────────────────▼──────────────────────▼────────────┐ │
-│  │                    Service Layer                            │ │
-│  │  AIInferenceService │ HealthKitService │ MemoryService      │ │
-│  │  SupabaseClient     │ GymFactStore     │ SpeechService      │ │
-│  └──────┬──────────────┬──────────────────┬────────────────────┘ │
-│         │              │                  │                      │
-└─────────┼──────────────┼──────────────────┼──────────────────────┘
-          │              │                  │
-          ▼              ▼                  ▼
-   ┌─────────────┐ ┌──────────┐    ┌───────────────────┐
-   │  OpenAI /   │ │ Apple    │    │  Supabase          │
-   │  Anthropic  │ │ HealthKit│    │  PostgreSQL        │
-   │  APIs       │ │          │    │  + pgvector        │
-   └─────────────┘ └──────────┘    └───────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                            iOS Application                               │
+│                                                                          │
+│  ┌──────────┐  ┌──────────┐  ┌─────────────────┐  ┌──────────────────┐ │
+│  │ Scanner  │  │ Program  │  │ Workout Session  │  │ Progress &       │ │
+│  │ Feature  │  │ Feature  │  │ Feature          │  │ Analytics        │ │
+│  │ Module   │  │ Module   │  │ Module           │  │ Feature Module   │ │
+│  └────┬─────┘  └────┬─────┘  └────────┬─────────┘  └────────┬─────────┘ │
+│       │             │                 │                      │           │
+│  ┌────▼─────────────▼─────────────────▼──────────────────────▼─────────┐ │
+│  │                          Service Layer                               │ │
+│  │  AIInferenceService │ HealthKitService  │ MemoryService              │ │
+│  │  SupabaseClient     │ GymFactStore      │ SpeechService              │ │
+│  │  GymStreakService   │ StagnationService │ VolumeValidationService    │ │
+│  │  SessionPlanService │ MacroPlanService  │ WriteAheadQueue            │ │
+│  └────┬────────────────┬─────────────────────────────────────┬──────────┘ │
+│       │                │                                     │            │
+└───────┼────────────────┼─────────────────────────────────────┼────────────┘
+        │                │                                     │
+        ▼                ▼                                     ▼
+ ┌─────────────┐  ┌──────────┐                    ┌───────────────────┐
+ │  OpenAI /   │  │ Apple    │                    │  Supabase          │
+ │  Anthropic  │  │ HealthKit│                    │  PostgreSQL        │
+ │  APIs       │  │          │                    │  + pgvector        │
+ └─────────────┘  └──────────┘                    └───────────────────┘
 ```
 
 ### 2.2 Architectural Principles
@@ -141,14 +144,19 @@ ProjectApex/
 │   │   ├── ScannerView.swift         # Guided per-equipment capture UI
 │   │   └── ScannerViewModel.swift    # State machine: idle→previewing→analyzing→reviewed→confirming
 │   ├── Program/
-│   │   ├── ProgramOverviewView.swift
+│   │   ├── ProgramOverviewView.swift # 12-week calendar grid; "Week N of M" phase label per week
 │   │   ├── ProgramDayDetailView.swift
 │   │   └── ProgramViewModel.swift
+│   ├── Progress/
+│   │   ├── ProgressView.swift        # 4-section tab: stagnation banners, key lifts, trend chart, volume, heatmap
+│   │   ├── ProgressViewModel.swift   # @Observable; two-query pattern (sessions → set_logs); all aggregation client-side
+│   │   └── MuscleColorUtility.swift  # nonisolated enum MuscleColor — shared muscle→Color mapping
 │   └── Workout/
 │       ├── WorkoutView.swift         # ZStack state-machine router (idle/active/resting/complete)
 │       ├── PreWorkoutView.swift      # Readiness ring, session info card, Start button
-│       ├── ActiveSetView.swift       # P3-T04: Prescription card (weight tappable FB-001), Set Complete, rep/RPE sheet, end-early menu, weight correction (P1-T11)
-│       ├── RestTimerView.swift       # P3-T05: Circular ring, haptics, audio tone, skip button, end-early menu
+│       ├── ActiveSetView.swift       # P3-T04: Prescription card (weight tappable FB-001), Set Complete, rep/RPE sheet, end-early + pause menus, weight correction (P1-T11)
+│       ├── RestTimerView.swift       # P3-T05: Circular ring, haptics, audio tone, skip button, end-early + pause menus
+│       ├── InferenceRetrySheet.swift # P3-T07: Modal sheet when AI fails — Retry or Pause Session (no silent fallback)
 │       ├── PostWorkoutSummaryView.swift  # P3-T08: Volume, sets ring, PRs, AI adjustments, share, done
 │       ├── WeightCorrectionView.swift    # "Weight not available" substitution sheet (P1-T10)
 │       ├── WeightOverrideView.swift      # Inline weight override sheet — tappable weight hero (FB-001)
@@ -161,12 +169,16 @@ ProjectApex/
 │   #       DefaultWeightIncrements (defaults) + GymFactStore (corrections)
 │
 ├── Services/
-│   ├── SupabaseClient.swift
+│   ├── SupabaseClient.swift          # select: String? param added for narrow-column fetches
 │   ├── HealthKitService.swift
 │   ├── MemoryService.swift
 │   ├── SpeechService.swift
 │   ├── GymFactStore.swift            # actor — runtime weight correction persistence
 │   ├── GymStreakService.swift        # actor — consecutive training day streak + StreakResult (P4-E1)
+│   ├── StagnationService.swift       # nonisolated enum — Epley e1RM trend analysis; plateaued/declining/progressing verdict
+│   ├── VolumeValidationService.swift # nonisolated enum — actual vs target sets per muscle; deficit flags
+│   ├── SessionPlanService.swift      # includes stagnation_signals + volume_deficits in request payload
+│   ├── MacroPlanService.swift
 │   ├── WriteAheadQueue.swift         # actor — local FIFO queue for reliable Supabase writes (P3-T06)
 │   └── KeychainService.swift
 │
@@ -179,7 +191,10 @@ ProjectApex/
     └── Prompts/
         ├── SystemPrompt_Inference.txt
         ├── SystemPrompt_GymScan.txt
-        └── SystemPrompt_MacroGeneration.txt
+        ├── SystemPrompt_MacroGeneration.txt
+        ├── SystemPrompt_MacroPlan.txt       # FB-008 two-stage generation
+        ├── SystemPrompt_SessionPlan.txt     # includes STAGNATION SIGNALS + VOLUME DEFICIT SIGNALS sections
+        └── SystemPrompt_ExerciseSwap.txt
 ```
 
 ### 3.2 Dependency Injection
@@ -239,19 +254,55 @@ TabView
 ├── Tab 1: Program (NavigationStack)
 │   ├── ProgramOverviewView           # 12-week calendar
 │   └── ProgramDayDetailView          # Drill-in to any day
+│       └── WorkoutView               # Pushed via NavigationLink (tab bar + back button visible)
+│           ├── PreWorkoutView
+│           ├── ActiveSetView
+│           ├── RestTimerView
+│           └── PostWorkoutSummaryView
 ├── Tab 2: Workout (NavigationStack)
-│   ├── PreWorkoutView
-│   ├── WorkoutView                   # Active workout loop (state machine, not NavigationStack)
-│   │   ├── ActiveSetView
-│   │   └── RestTimerView
-│   └── PostWorkoutSummaryView
+│   └── WorkoutView                   # Root of stack; session started here or continued from Program tab
+│       ├── PreWorkoutView
+│       ├── ActiveSetView
+│       ├── RestTimerView
+│       └── PostWorkoutSummaryView
 └── Tab 3: Settings (NavigationStack)
     ├── SettingsView
     ├── GymScannerView
     └── DeveloperSettingsView
 ```
 
-The active workout flow uses a `SessionState` machine rendered via `ZStack` — not `NavigationStack` — to prevent back-gesture interruptions during a set.
+The active workout flow uses a `SessionState` machine rendered via `ZStack` inside `WorkoutView`.
+The tab bar and navigation back button are always visible during an active session — navigation away
+from `WorkoutView` does not pause or interrupt the session.
+
+### Session Lifecycle & Navigation Invariants
+
+**WorkoutSessionManager is the sole source of truth for session state.**  Views are pure renderers.
+
+- `WorkoutSessionManager` is app-level — instantiated once in `AppDependencies` at launch and
+  injected via `@Environment`. Its actor isolation guarantees session state survives any view
+  lifecycle event (navigation push/pop, tab switch, backgrounding).
+- `WorkoutView` owns `WorkoutViewModel` as `@State`. If the view is popped from the navigation
+  stack and re-created, a new viewModel is created. On `.task`, it calls `vm.pullState()` then
+  `vm.beginStatePolling()` if the session is live — the session is restored transparently.
+- The rest timer is actor-owned: `WorkoutSessionManager.restTimerTask` runs inside the actor,
+  anchored to `restExpiresAt` (an absolute `Date`). Navigation events have no effect on it.
+- `WorkoutSessionManager.currentTrainingDayId` is exposed so `ProgramDayDetailView` can detect
+  an active session for its day without crossing actor boundaries in the render path.
+
+### ProgramDayDetailView — Plan-only vs. Live Session Rendering
+
+When no session is active for a day, `ProgramDayDetailView` renders the planned prescription
+(exercise name, sets × reps, tempo, rest, RIR).
+
+When `WorkoutSessionManager.currentTrainingDayId == day.id` and session state is `.active`,
+`.resting`, or `.preflight`, `ProgramDayDetailView` enters **live session mode**:
+- Each `ExerciseDetailCard` receives the `liveSetLogs` for that exercise (sourced from
+  `WorkoutSessionManager.completedSets`).
+- Completed sets show weight × reps × RPE. Upcoming sets show the planned prescription.
+- The bottom action button changes from "Start Workout" to "Continue Workout".
+- Tapping "Continue Workout" pushes `WorkoutView` via NavigationLink, which syncs from the
+  actor and renders the live session state immediately.
 
 ---
 
@@ -337,6 +388,10 @@ nonisolated struct StreakResult: Codable, Sendable {
 }
 
 actor GymStreakService {
+    // Path B (retained — not deleted): used for workout UI tinting (PreWorkoutView gradient,
+    // progress ring, start button colour) via streak.tintColor. Also injected into WorkoutContext
+    // for AI intensity modulation. Skipped sessions (TrainingDayStatus.skipped) are automatically
+    // excluded because they produce no workout_sessions row (Supabase query filters completed=true).
     init(supabase: SupabaseClient, lookbackDays: Int = 90)
     func computeStreak(userId: UUID) async -> StreakResult
     func invalidate(userId: UUID) async
@@ -380,12 +435,28 @@ enum MesocyclePhase: String, Codable, Sendable {
     case deload          // Week 12
 }
 
+nonisolated enum TrainingDayStatus: String, Codable, Sendable {
+    case pending    // Skeleton generated but session not yet planned
+    case generated  // Session exercises planned (ready to start)
+    case completed  // Session completed by user
+    case paused     // Session started and paused mid-workout (P3-T11)
+    case skipped    // Explicitly skipped by user (Phase-1-Skip); advances programme_day_index
+}
+
+// Training-time progression rule (Phase-1-Skip):
+//   programme_day_index advances ONLY when status transitions to .completed or .skipped.
+//   Calendar time NEVER advances the index. ProgramViewModel.currentWeekIndex(in:) scans
+//   weeks in order and returns the index of the first week that still contains a non-terminal
+//   day (i.e. not .completed and not .skipped).
+
 struct TrainingDay: Codable, Identifiable, Sendable {
     let id: UUID
     let dayOfWeek: Int
     let dayLabel: String         // e.g. "Upper_A", "Lower_B"
     var exercises: [PlannedExercise]
     let sessionNotes: String?
+    var status: TrainingDayStatus  // defaults to .generated for legacy data (custom decoder)
+    var skippedAt: Date?           // Phase-1-Skip: non-nil when status == .skipped
 }
 
 struct PlannedExercise: Codable, Identifiable, Sendable {
@@ -420,9 +491,29 @@ struct WorkoutSession: Codable, Identifiable, Sendable {
     let weekNumber: Int
     let dayType: String
     var completed: Bool
+    var status: String?        // "active" | "paused" | "completed" | nil (legacy rows) (P3-T11)
     var setLogs: [SetLog]
     var sessionNotes: [SessionNote]
     var summary: SessionSummary?
+}
+
+// Lightweight snapshot saved to UserDefaults on pause (P3-T11).
+// Not stored in Supabase — only used for local resume handoff.
+nonisolated struct PausedSessionState: Codable, Sendable {
+    let sessionId: UUID          // Same ID reused on resume
+    let trainingDayId: UUID
+    let weekId: UUID
+    let exerciseIndex: Int       // Which exercise was in progress
+    let currentSetNumber: Int    // Which set was next
+    let dayType: String
+    let programId: UUID
+    let userId: UUID
+    let pausedAt: Date
+
+    static let persistenceKey = "com.projectapex.pausedSessionState"
+    func save()                          // JSONEncoder → UserDefaults
+    static func load() -> PausedSessionState?  // JSONDecoder from UserDefaults
+    static func clear()                  // removeObject
 }
 
 struct SetLog: Codable, Identifiable, Sendable {
@@ -520,8 +611,11 @@ CREATE TABLE IF NOT EXISTS public.workout_sessions (
   week_number  INTEGER NOT NULL,
   day_type     TEXT NOT NULL,
   completed    BOOLEAN DEFAULT FALSE,
+  status       TEXT DEFAULT NULL,   -- "active" | "paused" | "completed" | NULL (legacy) (P3-T11)
   summary      JSONB
 );
+-- Migration (run once):
+-- ALTER TABLE workout_sessions ADD COLUMN IF NOT EXISTS status TEXT DEFAULT NULL;
 CREATE INDEX IF NOT EXISTS sessions_user_date_idx
   ON public.workout_sessions(user_id, session_date DESC);
 
@@ -536,9 +630,15 @@ CREATE TABLE IF NOT EXISTS public.set_logs (
   rpe_felt       INTEGER,
   rir_estimated  INTEGER,
   ai_prescribed  JSONB,
-  logged_at      TIMESTAMPTZ DEFAULT NOW()
+  logged_at      TIMESTAMPTZ DEFAULT NOW(),
+  primary_muscle TEXT          -- Coarse muscle group: chest|back|shoulders|quads|hamstrings|glutes|biceps|triceps|calves|core
+                               -- Populated from ExerciseLibrary canonical lookup at write time.
+                               -- NULL for rows pre-dating this column or with non-canonical exercise_ids.
+                               -- Migration: scripts/migrations/add_primary_muscle_column.sql
+                               -- Backfill: scripts/backfill_primary_muscle.mjs
 );
 CREATE INDEX IF NOT EXISTS set_logs_session_idx ON public.set_logs(session_id);
+CREATE INDEX IF NOT EXISTS set_logs_primary_muscle_idx ON public.set_logs(primary_muscle) WHERE primary_muscle IS NOT NULL;
 
 -- Session Notes
 CREATE TABLE IF NOT EXISTS public.session_notes (
@@ -844,10 +944,15 @@ actor WorkoutSessionManager {
     private(set) var restSecondsRemaining: Int = 0
     private(set) var completedSets: [SetLog] = []
 
-    // Dependencies: AIInferenceService, HealthKitService, MemoryService,
-    //               SupabaseClient, GymFactStore, WriteAheadQueue
+    // Smart retry state (P3-T07 — replaces silent fallback)
+    private(set) var inferenceRetryNeeded: Bool = false
+    private(set) var inferenceRetryReason: FallbackReason?
 
-    func startSession(trainingDay: TrainingDay, programId: UUID) async
+    // Dependencies: AIInferenceService, HealthKitService, MemoryService,
+    //               SupabaseClient, GymFactStore, WriteAheadQueue, GymStreakService
+
+    func startSession(trainingDay: TrainingDay, programId: UUID,
+                      userId: UUID = UUID(), weekId: UUID = UUID()) async
     func completeSet(actualReps: Int, rpeFelt: Int?) async
     func addVoiceNote(transcript: String, exerciseId: String) async
     func endSessionEarly() async     // Partial session → .sessionComplete (P3-T09)
@@ -856,6 +961,29 @@ actor WorkoutSessionManager {
     func skipRest()                  // Advances past rest timer immediately
     func applyWeightCorrection(confirmedWeight: Double, equipmentType: EquipmentType) async
         // Updates current prescription weight + records in GymFactStore (P1-T11)
+
+    // Smart retry — called from InferenceRetrySheet (P3-T07)
+    func retryInference() async -> Bool
+        // Clears failed state, re-assembles context, calls prescribe().
+        // Returns true on success (state → .active), false if failed again.
+
+    // Pause & resume (P3-T11)
+    func pauseSession() async
+        // 1. Cancel rest timer
+        // 2. Flush WAQ
+        // 3. PATCH workout_sessions.status = "paused" (blocking)
+        // 4. Save PausedSessionState to UserDefaults
+        // 5. resetToIdle()
+
+    func resumeSession(pausedState: PausedSessionState,
+                       trainingDay: TrainingDay,
+                       completedSetLogs: [SetLog]) async
+        // 1. Restore all actor state from pausedState
+        // 2. Reconstruct WorkoutSession in-memory (same session_id)
+        // 3. PATCH status back to "active" (blocking)
+        // 4. PausedSessionState.clear()
+        // 5. Fetch streak/RAG/fatigue in parallel
+        // 6. triggerInference() for current exercise
 }
 
 enum SessionState: Sendable {
@@ -919,6 +1047,280 @@ STT fallback: if on-device `SFSpeechRecognizer` confidence < 0.8 → OpenAI Whis
 - Starts immediately on set completion using plan default rest duration
 - Updates target if AI prescription arrives with different `rest_seconds` (only extends, never shortens)
 - Survives app backgrounding via `BackgroundTaskIdentifier` (30s extension)
+
+### 7.5 Mid-Session Resilience (Phase 3 — 2026-04-23)
+
+Implemented in response to the 22 Apr 2026 Anthropic 529 outage incident (FB-012).
+
+#### 7.5.1 TransientRetryPolicy
+
+Location: `ProjectApex/AICoach/TransientRetryPolicy.swift`
+
+All LLM `provider.complete()` calls in the mid-session flow are wrapped with `TransientRetryPolicy.execute { }`. Non-transient errors are re-thrown immediately.
+
+| Property | Value |
+|---|---|
+| Retriable codes | 429, 502, 503, 504, 529 |
+| Max retries | 3 (4 total attempts) |
+| Backoff schedule | 1 s → 2 s → 4 s → 8 s + up to 0.5 s jitter |
+| Retry-After | Encoded in error body by `AnthropicProvider` as `[retry-after:N]` prefix |
+| Anthropic request-id | Encoded in error body as `[request-id:xxx]` prefix (for fallback logging) |
+
+The 8-second product timeout in `AIInferenceService` remains the outer boundary — retries happen inside it. For fast-failing 529s (< 1 s), up to 3 retries fit within the window.
+
+The retry sheet (`InferenceRetrySheet`) is only shown after ALL backoff retries are exhausted AND the rest timer has expired.
+
+Applied to:
+- `AIInferenceService.prescribe()` — set inference
+- `AIInferenceService.prescribeAdaptation()` — weight adaptation
+- `SessionPlanService.callAndDecodeSession()` — session plan generation
+- `ExerciseSwapService.sendMessage()` — swap chat
+- `MemoryService.classifyTags()` — Haiku tag classification (1 retry, fits within 5 s racing timeout)
+
+#### 7.5.2 Resume Routing (Fix 2)
+
+The crash recovery path in `WorkoutView.task` previously failed silently when `saved.trainingDayId != trainingDay.id`. The new 3-case routing:
+
+1. **Match**: `saved.trainingDayId == nextIncompleteDay.id` → ContentView passes `crashResumeToPass` as explicit `resumeState` (Path A, reliable)
+2. **Found elsewhere**: `ProgramViewModel.findTrainingDay(byId:in:)` locates the day → ContentView passes explicit `resumeState`, WorkoutView uses Path A
+3. **Not found**: Day UUID not in any mesocycle week → ContentView shows "Save to History / Discard" alert; WorkoutView.task shows "Session Mismatch" alert as safety net
+
+`ProgramViewModel.findTrainingDay(byId:in:)` is a pure linear search across all weeks and days in a mesocycle.
+
+#### 7.5.3 WAQ + Supabase Merge on Resume (Fix 3)
+
+`WorkoutViewModel.resumeSession()` now performs a 3-step merge:
+
+1. Flush WAQ (best-effort — items may remain if offline)
+2. Fetch Supabase set_logs for the session
+3. Read WAQ `pendingSetLogs(forSession:)` — unflushed items
+4. Merge: WAQ wins on same `SetLog.id` → sorts by `setNumber`
+
+`WriteAheadQueue.pendingSetLogs(forSession:)` decodes the raw `QueuedWrite.payload` Data as `SetLog` and filters by `session_id`.
+
+#### 7.5.4 RAG Fetch Latency Instrumentation (Fix 4)
+
+`WorkoutSessionManager.completeSet()` instruments the `fetchRAGMemory(for:)` call when moving to a new exercise using:
+- `OSSignposter` (`com.projectapex` / `RAGFetch`) — visible in Instruments
+- `Logger` (`com.projectapex` / `RAGFetch`) — grep-able in Console
+
+**Decision point:** If p95 latency from production data exceeds 150 ms, the call should be promoted to an async prefetch running during rest time (background Task, not blocking completeSet). See `// MARK: - Fix 4 Decision Point` in WorkoutSessionManager.swift.
+
+#### 7.5.5 FallbackLogRecord (Fix 5)
+
+Location: `ProjectApex/Services/FallbackLogRecord.swift`
+
+Emitted on every LLM fallback. Fields: `callSite`, `httpStatus`, `anthropicRequestId`, `reason`, `sessionId`, `timestamp`.
+
+Emission: `os.Logger` (subsystem: `com.projectapex`, category: `Fallback`). TODO: Supabase `fallback_logs` table via WAQ once services are injected with WAQ.
+
+#### 7.5.6 Swap Chat Error Classification (Fix 6)
+
+`ExerciseSwapService.sendMessage()` now distinguishes:
+- `URLError.notConnectedToInternet / .networkConnectionLost` → "You appear to be offline…"
+- `LLMProviderError.httpError(status in transientCodes)` → "The AI service is temporarily busy…"
+- All others → "Something went wrong…"
+
+---
+
+## 7a. Feature Module: Progress & Analytics
+
+### 7a.1 Overview
+
+The Progress tab is the fourth tab in the main tab bar (`chart.line.uptrend.xyaxis`). It provides four sections of performance analytics computed entirely client-side from historical set_logs, plus stagnation detection and volume validation services that feed back into the AI session planner.
+
+**Tab order:** Program (0) → Workout (1) → Progress (2) → Settings (3)
+
+### 7a.2 Data Loading Strategy
+
+`ProgressViewModel` uses a two-query pattern (set_logs has no user_id column):
+
+```
+Step 1: fetch workout_sessions
+  → table: workout_sessions
+  → filters: user_id=eq.<userId>, completed=is.true, session_date=gte.<90daysAgo>
+  → select: "id,session_date"       ← narrow select avoids JSONB columns
+  → decode as: ProgressSessionRow   ← session_date as String (DATE column → "yyyy-MM-dd")
+
+Step 2: fetch set_logs
+  → table: set_logs
+  → filter: session_id=in.(<ids from step 1>)
+  → select: "id,session_id,exercise_id,set_number,weight_kg,reps_completed,
+             rpe_felt,rir_estimated,logged_at,primary_muscle"
+
+Step 3: all aggregation (key lifts, trend, volume, heatmap) client-side
+```
+
+**Critical date-parsing note**: `session_date` is a Postgres `DATE` column. Supabase returns it as a bare string `"2026-03-20"` (not ISO8601). `ProgressSessionRow.date` uses `DateFormatter("yyyy-MM-dd")` as primary parse path, with ISO8601 variants as fallback. Standard `JSONDecoder.dateDecodingStrategy = .iso8601` cannot handle this format.
+
+### 7a.3 ProgressView Sections
+
+| Section | Implementation | Data source |
+|---------|---------------|-------------|
+| Stagnation banners | Amber (plateaued) / Red (declining) banners at top | UserDefaults via `StagnationService.load()` |
+| Key Lifts Summary | Horizontal scroll of cards; exercise name, e1RM, delta badge, trend arrow | Best e1RM per muscle group (chest/back/shoulders/quads/hamstrings) in last 2 weeks vs 4–6 weeks ago |
+| Strength Trend Chart | Swift Charts `LineMark`; exercise picker; `RuleMark` for all-time best | Per-session best e1RM per exercise, sorted by date |
+| Weekly Volume | Grouped `BarMark` by muscle; 8 most recent ISO calendar weeks | set_logs grouped by `primary_muscle` + `loggedAt` week |
+| Consistency Heatmap | 7×12 `RoundedRectangle` grid; green for sessions, accent for PR days | session dates from `ProgressSessionRow` |
+
+**Key Lifts selection**: muscle-group based, not hardcoded exercise IDs. For each target muscle, picks the exercise with the highest recent e1RM (last 2 weeks). Falls back to all-time best if no recent data. This accommodates AI-generated exercise IDs which vary per user and programme.
+
+**e1RM formula**: Epley — `weight × (1 + reps / 30)`
+
+### 7a.4 StagnationService
+
+`nonisolated enum StagnationService` — pure computation, no network calls.
+
+```swift
+nonisolated enum StagnationVerdict: String, Codable, Sendable {
+    case progressing, plateaued, declining
+}
+
+nonisolated struct StagnationSignal: Codable, Sendable, Identifiable {
+    let exerciseId: String
+    let exerciseName: String
+    let sessionsWithoutProgress: Int
+    let lastPRDate: Date?
+    let avgRPELast3Sessions: Double?
+    let verdict: StagnationVerdict
+}
+```
+
+**Classification rules** (requires 3+ sessions; otherwise always `.progressing`):
+- **Declining**: last 3 session e1RMs drop ≥5% total AND inter-session gap < 5 days
+- **Plateaued**: max e1RM across last 3 sessions within 2% of min AND avg RPE < 8.0
+- **Progressing**: all other cases
+
+**Lifecycle**: computed in a `Task.detached(priority: .utility)` block at the end of `WorkoutSessionManager.finishSession()`. Results persisted to UserDefaults. `SessionPlanService` loads them before each `generateSession()` call and includes them in the `SessionPlanRequest` payload as `stagnation_signals`.
+
+### 7a.5 VolumeValidationService
+
+`nonisolated enum VolumeValidationService` — pure computation.
+
+```swift
+nonisolated struct VolumeDeficit: Codable, Sendable, Identifiable {
+    let muscleGroup: String
+    let targetSets: Int
+    let actualSets: Int
+    let deficitPercent: Double    // e.g. 0.25 = 25% below target
+}
+```
+
+**Algorithm**: builds target set counts from the current week's `TrainingDay.exercises` grouped by primary muscle, compares against actual `set_logs` counts for the current calendar week. Emits a deficit for any muscle where `(target - actual) / target > 0.20`.
+
+**Lifecycle**: computed in `ProgressViewModel.loadAll()` when `plannedWeekDays` are provided. Results persisted to UserDefaults. `SessionPlanService` loads them alongside stagnation signals.
+
+### 7a.6 AI Integration — SessionPlanRequest Extensions
+
+`SessionPlanRequest` includes two new fields injected from UserDefaults before each session generation:
+
+```swift
+let stagnationSignals: [StagnationSignal]   // CodingKey: "stagnation_signals"
+let volumeDeficits:    [VolumeDeficit]       // CodingKey: "volume_deficits"
+```
+
+`SystemPrompt_SessionPlan.txt` contains two corresponding directive sections:
+- **STAGNATION SIGNALS**: plateaued → vary rep range / swap variation / add intensity techniques; declining → −10% weight, +1 set, form cue
+- **VOLUME DEFICIT SIGNALS**: add 1–2 extra sets for flagged muscle groups; cap at +3 sets total above normal day volume
+
+### 7a.7 TemporalContext — Gap-Aware Session Planning (Phase-1-Skip)
+
+`SessionPlanRequest` includes a third field assembled by `ProgramViewModel.generateDaySession()` immediately before each on-demand session generation:
+
+```swift
+nonisolated struct TemporalContext: Codable, Sendable {
+    let daysSinceLastSession: Int?           // nil = first-ever session
+    let daysSinceLastTrainedByPattern: [String: Int]  // e.g. {"horizontal_push": 5, "squat": 12}
+    let skippedSessionCountLast30Days: Int
+}
+```
+
+**Assembly**: computed inside `ProgramViewModel.generateDaySession()` using:
+- `recentSessions` (already fetched for the week) to derive `daysSinceLastSession`
+- `deepLiftHistory` set logs + `ExerciseLibrary.lookup(exerciseId)?.movementPattern` to derive per-pattern gaps
+- `currentMesocycle.weeks.flatMap(\.trainingDays).filter { $0.status == .skipped && skippedAt >= 30d ago }` for the skip count
+
+**Prompt guidance** (`SystemPrompt_SessionPlan.txt` — TEMPORAL CONTEXT section):
+- 7-day gap → neutral/deload; raise RIR by 1 on first working set
+- 3+ week pattern gap → lighter reintroduction; note in session_notes
+- null daysSinceLastSession or > 14 days → conservative on all patterns
+- Prompt explicitly forbids hardcoded load reduction percentages
+
+### 7a.8 Mesocycle Phase Label
+
+`ProgramOverviewView.WeekRowView` shows `"Week N of M"` (e.g. `"Week 2 of 4"`) in the week header using hardcoded phase ranges:
+
+| Phase | Week indices (0-based) | Display weeks |
+|-------|----------------------|---------------|
+| Accumulation | 0–3 | Weeks 1–4 (4 total) |
+| Intensification | 4–7 | Weeks 5–8 (4 total) |
+| Peaking | 8–10 | Weeks 9–11 (3 total) |
+| Deload | 11 | Week 12 (1 total) |
+
+### 7a.9 Per-Pattern Phase Tracking (Phase 2b)
+
+#### Why Global Phase Is Insufficient
+
+The programme's periodization phase (`MesocyclePhase`) was previously global — every session inherited the phase from the programme-level week count via `MacroPlanService.buildPendingMesocycle()`. This is incorrect when a muscle group's training history diverges from the programme as a whole. Example: programme in Week 5 (intensification) but legs trained only twice — intensification prescriptions for legs assume volume tolerance that doesn't exist.
+
+#### `MovementPatternPhaseState` Model
+
+A new per-pattern phase state is persisted to UserDefaults (key `apex.pattern_phase_states`) alongside the global phase. Each entry tracks:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `pattern` | `String` | Movement pattern key, e.g. `"horizontal_push"`, `"squat"` |
+| `phase` | `MesocyclePhase` | The pattern's own phase (independent of global) |
+| `sessionsCompletedInPhase` | `Int` | Sessions completed since last transition |
+| `sessionsRequiredForPhase` | `Int` | Threshold to advance; derived at creation |
+
+`PatternPhaseInfo` is a lightweight LLM DTO (snake_case CodingKeys: `current_phase`, `sessions_completed`, `sessions_required`) sent inside `TemporalContext.pattern_phases`.
+
+#### Option B Transition Threshold
+
+`max(3, phaseWeeks × max(1, daysPerWeek / 2))`
+
+| Phase | phaseWeeks | 3 days/week | 4 days/week |
+|-------|------------|-------------|-------------|
+| Accumulation | 4 | 4 | 8 |
+| Intensification | 4 | 4 | 8 |
+| Peaking | 3 | 3 | 6 |
+| Deload | 1 | 3 (min) | 3 (min) |
+
+The `max(1, daysPerWeek / 2)` inner term estimates how many days per week a given movement pattern is trained (roughly half the training days in a typical push/pull/legs split). The outer `max(3, ...)` floor ensures a minimum of 3 sessions before any transition — this matches `StagnationService`'s 3-session data minimum, prevents zero-session transitions for low-frequency schedules (e.g. 1 day/week), and ensures baseline volume tolerance is established before intensity ramps.
+
+Deload is **terminal** — there is no phase beyond it. `advancePhases()` makes no change when a pattern is already at deload. **Design assumption:** this is valid under the current 12-week periodisation model where deload only appears at Week 12. If intra-programme deload weeks were added (e.g., a dedicated Week 4 deload in a periodised block), this design would need revisiting — those patterns would get permanently stuck at deload after the mid-cycle recovery week.
+
+#### No Phase Regression on Absence
+
+When a pattern hasn't been trained for weeks, the phase **does not regress**. LLM handles reintroduction conservatively via `temporal_context.days_since_last_trained_by_pattern`. Phase state stays at its current level to avoid losing earned adaptation progress. This is a deliberate design choice.
+
+#### Migration Strategy
+
+On the first `generateDaySession()` call after feature deployment:
+1. `PatternPhaseService.load()` returns empty (first run).
+2. If `deepLiftHistory` is non-empty, `computeInitialPhases(from:daysPerWeek:)` runs once:
+   - Groups set_logs by movement pattern via `ExerciseLibrary.lookup(exerciseId)?.movementPattern`.
+   - Counts distinct `sessionId` values per pattern.
+   - Walks phase thresholds in order, consuming sessions, to derive the current phase.
+   - Remaining sessions become `sessionsCompletedInPhase`.
+3. Result is persisted; subsequent calls load from UserDefaults (the `load().isEmpty` gate prevents re-running).
+
+**Test coverage note:** The `computeInitialPhases()` function and the migration idempotency invariant are covered by `PatternPhaseServiceTests`. The gate itself (`if load().isEmpty && !deepLiftHistory.isEmpty` in `ProgramViewModel.generateDaySession()`) is not separately unit tested — it's a trivial guard on a tested predicate. The `clear()`-on-new-programme and preserve-on-`regenerateProgram()` behaviors are also at `ProgramViewModel` level and are verified by code review rather than automated tests in the current suite.
+
+#### Service
+
+`nonisolated enum PatternPhaseService` — mirrors `StagnationService`/`VolumeValidationService`. Stateless pure computation functions + UserDefaults persistence. Key functions:
+- `sessionsRequired(for:daysPerWeek:) -> Int`
+- `advancePhases(current:trainedPatterns:daysPerWeek:) -> [MovementPatternPhaseState]`
+- `computeInitialPhases(from:daysPerWeek:) -> [MovementPatternPhaseState]`
+- `persist(_:)` / `load()` / `clear()`
+
+#### Lifecycle
+
+- **Per-session (post-finish)**: `WorkoutSessionManager.finishSession()` fires `Task.detached(priority: .utility)` after the stagnation hook. Extracts movement patterns from completed exercises, calls `advancePhases`, persists.
+- **New programme**: `PatternPhaseService.clear()` called in `generateProgram()` and `generateMacroSkeleton()`. Not in `regenerateProgram()` — regeneration preserves completed days and their accumulated phases.
+- **Session assembly**: `ProgramViewModel.generateDaySession()` loads states, runs migration if needed, maps to `[String: PatternPhaseInfo]`, passes into `TemporalContext` with `globalProgrammePhase` and `globalProgrammeWeek`.
 
 ---
 
@@ -1262,33 +1664,49 @@ AppError
 
 ```
 Attempt 1 (8s timeout) → Attempt 2 (modified prompt) → Attempt 3 → FALLBACK:
-    weight_kg   = plannedExercise.planTarget.weightKg
-    reps        = plannedExercise.repRange.max (conservative)
-    tempo/rest  = from exercise definition
-    coaching_cue = first cue from exercise definition
-    reasoning   = "AI coach offline — using program defaults"
-UI: Non-blocking "Coach offline" banner, 3 seconds
+
+    If failure occurs during rest timer (timer still running):
+        → Silent — inferenceRetryReason recorded, no UI change
+        → When timer expires → inferenceRetryNeeded = true → InferenceRetrySheet appears
+
+    If failure occurs during preflight (no rest timer):
+        → inferenceRetryNeeded = true immediately → InferenceRetrySheet appears
+
+InferenceRetrySheet (P3-T07):
+    → User taps Retry: retryInference() called — single fresh attempt
+      ├── Success: sheet dismissed, prescription set, state → .active
+      └── Failure: sheet stays, updated error reason shown
+
+    → User taps Pause Session: pauseSession() called → session safely persisted
 ```
+
+**Note:** `makeFallbackPrescription()` has been removed. There is NO silent auto-fallback.
+The user always gets to choose between retrying or pausing.
 
 ### 13.3 UI Error Presentation Policy
 
 | Error | Presentation | User Action |
 |---|---|---|
-| AI inference fallback | Non-blocking banner (3s) | None |
+| AI inference failure | `InferenceRetrySheet` (modal, dismiss disabled) | Retry or Pause Session |
 | HealthKit unavailable | Subtle readiness card indicator | None |
 | Network unavailable during workout | Persistent banner; writes queued | None |
 | Program generation failed | Full-screen error + Retry | Retry required |
 | API key missing | Full-screen setup prompt | Must enter keys |
+| Paused session exists on new start | Alert with Discard / Cancel | User choice required |
 
 ### 13.4 Retry Policies
 
-| Operation | Max Retries | Backoff | Timeout |
-|---|---|---|---|
-| LLM set inference | 2 (3 total) | None (prompt-modified) | 8s per attempt |
-| Supabase set log write | 5 | Exponential (1s→16s) | 10s |
-| Memory embedding upsert | 3 | Linear (2s) | 5s |
-| Program generation | 1 corrective re-prompt | None | None |
-| HRV baseline fetch | 2 | Linear (1s) | 5s |
+| Operation | Max Retries | Backoff | Timeout | Notes |
+|---|---|---|---|---|
+| LLM set inference (HTTP 429/529/502–504) | 3 (4 total) | Exponential 1s→8s + 0.5s jitter | 8s outer (product) | `TransientRetryPolicy`; non-transient HTTP fails immediately |
+| LLM JSON decode / validation failure | 2 (3 total) | None (prompt-modified) | 8s outer | Separate from HTTP retry |
+| Session plan generation (HTTP transient) | 3 | Exponential 1s→8s + 0.5s jitter | 120s session (URL) | `TransientRetryPolicy` |
+| Exercise swap chat (HTTP transient) | 3 | Exponential 1s→8s + 0.5s jitter | 15s session (URL) | `TransientRetryPolicy` |
+| Memory Haiku classification (HTTP transient) | 1 (2 total) | 1s flat | 5s racing timeout | Inline retry in `MemoryService.classifyTags()` |
+| Supabase set log write | 5 | Exponential (1s→16s) | 10s | `WriteAheadQueue` |
+| Memory embedding upsert | 3 | Linear (2s) | 5s | |
+| Program generation | 1 corrective re-prompt | None | None | |
+| HRV baseline fetch | 2 | Linear (1s) | 5s | |
 
 ---
 
@@ -1316,7 +1734,7 @@ UI: Non-blocking "Coach offline" banner, 3 seconds
 | `SupabaseClientTests.swift` | ✅ Green | CRUD + RPC |
 | `EquipmentConstraintValidationTests.swift` | ✅ Green | Post-generation equipment constraint violations |
 | `ProgramPersistenceTests.swift` | ✅ Green | UserDefaults cache round-trip, clearUserDefaults |
-| `WorkoutSessionManagerTests.swift` | ✅ Green | Start→active, completeSet→resting, fallback path, safety gate, endSessionEarly, reentrancy guard, context assembly |
+| `WorkoutSessionManagerTests.swift` | ✅ Green | Start→active, completeSet→resting, inference failure → `inferenceRetryNeeded=true` (no silent prescription), safety gate, endSessionEarly, reentrancy guard, context assembly |
 | `WriteAheadQueueTests.swift` | ✅ Green | FIFO ordering, flush on success, retry with backoff, clearAll, QueuedWrite Codable round-trip |
 | `GymStreakServiceTests.swift` | ✅ Green | All 4 tier boundaries, score formula, no sessions, 1-day gap, 2+ day gap, duplicate dates, stale cache, neutral fallback (P4-E1) |
 

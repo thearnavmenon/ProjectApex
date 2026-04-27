@@ -108,6 +108,19 @@ struct WorkoutContextAssemblyTests {
         let mem = ctx.ragRetrievedMemory[0]
         #expect(mem.relevanceScore > 0)
         #expect(!mem.summary.isEmpty)
+
+        // SessionLog (FB-009)
+        #expect(!ctx.sessionLog.isEmpty)
+        let logEntry = ctx.sessionLog[0]
+        #expect(!logEntry.exercise.isEmpty)
+        #expect(logEntry.prescribedWeightKg > 0)
+        #expect(logEntry.prescribedReps > 0)
+        #expect(!logEntry.outcomeNote.isEmpty)
+
+        // WeeklyFatigueSummary (FB-009)
+        let fatigue = try! #require(ctx.weeklyFatigueSummary)
+        #expect(fatigue.sessionsThisWeek >= 0)
+        #expect(fatigue.totalSetsThisWeek >= 0)
     }
 
     // MARK: Top-level snake_case CodingKeys
@@ -130,7 +143,9 @@ struct WorkoutContextAssemblyTests {
             "within_session_performance",
             "historical_performance",
             "qualitative_notes_today",
-            "rag_retrieved_memory"
+            "rag_retrieved_memory",
+            "session_log",
+            "weekly_fatigue_summary"
         ]
         let actualKeys = Set(json.keys)
         #expect(expectedKeys.isSubset(of: actualKeys))
@@ -288,6 +303,24 @@ struct WorkoutContextAssemblyTests {
         let decMem  = decoded.ragRetrievedMemory[0]
         #expect(decMem.relevanceScore == origMem.relevanceScore)
         #expect(decMem.summary == origMem.summary)
+
+        // SessionLog (FB-009)
+        #expect(decoded.sessionLog.count == original.sessionLog.count)
+        if !original.sessionLog.isEmpty {
+            let origEntry = original.sessionLog[0]
+            let decEntry  = decoded.sessionLog[0]
+            #expect(decEntry.exercise == origEntry.exercise)
+            #expect(decEntry.prescribedWeightKg == origEntry.prescribedWeightKg)
+            #expect(decEntry.actualReps == origEntry.actualReps)
+            #expect(decEntry.outcomeNote == origEntry.outcomeNote)
+        }
+
+        // WeeklyFatigueSummary (FB-009)
+        let origFatigue = try! #require(original.weeklyFatigueSummary)
+        let decFatigue  = try! #require(decoded.weeklyFatigueSummary)
+        #expect(decFatigue.sessionsThisWeek == origFatigue.sessionsThisWeek)
+        #expect(decFatigue.totalSetsThisWeek == origFatigue.totalSetsThisWeek)
+        #expect(decFatigue.avgRpeThisWeek == origFatigue.avgRpeThisWeek)
     }
 
     // MARK: nil biometrics
@@ -308,7 +341,10 @@ struct WorkoutContextAssemblyTests {
             withinSessionPerformance: [],
             historicalPerformance: nil,
             qualitativeNotesToday: [],
-            ragRetrievedMemory: []
+            ragRetrievedMemory: [],
+            sessionLog: [],
+            weeklyFatigueSummary: nil,
+            gymWeightFacts: nil
         )
 
         let encoder = makeEncoder()
@@ -334,7 +370,10 @@ struct WorkoutContextAssemblyTests {
             withinSessionPerformance: [],
             historicalPerformance: nil,
             qualitativeNotesToday: [],
-            ragRetrievedMemory: []
+            ragRetrievedMemory: [],
+            sessionLog: [],
+            weeklyFatigueSummary: nil,
+            gymWeightFacts: nil
         )
 
         let data = try makeEncoder().encode(ctx)

@@ -41,6 +41,16 @@ nonisolated struct WorkoutContext: Codable, Sendable {
     let historicalPerformance: HistoricalPerformance?
     let qualitativeNotesToday: [QualitativeNote]
     let ragRetrievedMemory: [RAGMemoryItem]
+    /// Append-only log of every set completed so far this session, across all exercises.
+    /// The AI's primary working memory for free-reasoning about weight/rep adjustments (FB-009).
+    let sessionLog: [SessionLogEntry]
+    /// Rolling 7-day fatigue picture. The AI reads this and decides voluntarily whether
+    /// to reduce volume/intensity — no hardcoded threshold triggers it (FB-009).
+    let weeklyFatigueSummary: WeeklyFatigueSummary?
+    /// Confirmed unavailable weights for the current equipment type, sourced from
+    /// GymFactStore. E.g. ["16.0kg not available — use 15.0kg instead"].
+    /// The AI treats these as hard constraints — never prescribe the unavailable weight.
+    let gymWeightFacts: [String]?
 
     enum CodingKeys: String, CodingKey {
         case requestType                = "request_type"
@@ -56,6 +66,9 @@ nonisolated struct WorkoutContext: Codable, Sendable {
         case historicalPerformance      = "historical_performance"
         case qualitativeNotesToday      = "qualitative_notes_today"
         case ragRetrievedMemory         = "rag_retrieved_memory"
+        case sessionLog                 = "session_log"
+        case weeklyFatigueSummary       = "weekly_fatigue_summary"
+        case gymWeightFacts             = "gym_weight_facts"
     }
 }
 
@@ -143,6 +156,9 @@ nonisolated struct CurrentExercise: Codable, Sendable {
     let primaryMuscles: [String]
     /// Secondary muscle groups.
     let secondaryMuscles: [String]
+    /// True when this equipment is purely bodyweight (pull-up bar, dip station).
+    /// When true, the AI must prescribe weight_kg: 0 and focus coaching on reps/tempo/bands.
+    let bodyweightOnly: Bool?
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -152,6 +168,7 @@ nonisolated struct CurrentExercise: Codable, Sendable {
         case planTarget        = "plan_target"
         case primaryMuscles    = "primary_muscles"
         case secondaryMuscles  = "secondary_muscles"
+        case bodyweightOnly    = "bodyweight_only"
     }
 }
 
@@ -201,6 +218,9 @@ nonisolated struct CompletedSet: Codable, Sendable {
     let completedAt: Date?
     /// True when the user manually overrode the AI-suggested weight for this set.
     let userCorrectedWeight: Bool?
+    /// How many days ago this set was completed (0 = today, 1 = yesterday, etc.).
+    /// Used by the AI to weight recent performance more heavily than older sets.
+    let daysAgo: Int?
 
     enum CodingKeys: String, CodingKey {
         case setNumber              = "set_number"
@@ -212,6 +232,7 @@ nonisolated struct CompletedSet: Codable, Sendable {
         case restTakenSeconds       = "rest_taken_seconds"
         case completedAt            = "completed_at"
         case userCorrectedWeight    = "user_corrected_weight"
+        case daysAgo                = "days_ago"
     }
 }
 
@@ -276,6 +297,59 @@ nonisolated struct RAGMemoryItem: Codable, Sendable {
     }
 }
 
+// MARK: SessionLogEntry
+
+/// One entry in the append-only session log — every set completed so far this session,
+/// across all exercises. The AI uses this as its working memory for free reasoning.
+nonisolated struct SessionLogEntry: Codable, Sendable {
+    /// Canonical exercise name, e.g. "Barbell Bench Press".
+    let exercise: String
+    /// 1-based set number within this exercise.
+    let setNumber: Int
+    /// Weight prescribed by the AI (or fallback) for this set.
+    let prescribedWeightKg: Double
+    /// Reps prescribed.
+    let prescribedReps: Int
+    /// Reps the user actually completed.
+    let actualReps: Int
+    /// RPE reported by the user (1–10), nil if not logged.
+    let rpe: Double?
+    /// Short note: "completed", "near_miss", "moderate_miss", "significant_miss", "pr".
+    let outcomeNote: String
+
+    enum CodingKeys: String, CodingKey {
+        case exercise
+        case setNumber          = "set_number"
+        case prescribedWeightKg = "prescribed_weight_kg"
+        case prescribedReps     = "prescribed_reps"
+        case actualReps         = "actual_reps"
+        case rpe
+        case outcomeNote        = "outcome_note"
+    }
+}
+
+// MARK: WeeklyFatigueSummary
+
+/// Rolling weekly fatigue picture fed into every WorkoutContext.
+/// No thresholds are applied here — the AI reads this data and decides what to do.
+nonisolated struct WeeklyFatigueSummary: Codable, Sendable {
+    /// Number of sessions completed in the rolling 7-day window.
+    let sessionsThisWeek: Int
+    /// Average RPE across all sets in the rolling 7-day window. Nil if no data.
+    let avgRpeThisWeek: Double?
+    /// Exercise names that have had 2 or more rep misses (actual < prescribed) this week.
+    let exercisesWithMultipleMisses: [String]
+    /// Total sets logged this week across all exercises.
+    let totalSetsThisWeek: Int
+
+    enum CodingKeys: String, CodingKey {
+        case sessionsThisWeek           = "sessions_this_week"
+        case avgRpeThisWeek             = "avg_rpe_this_week"
+        case exercisesWithMultipleMisses = "exercises_with_multiple_misses"
+        case totalSetsThisWeek          = "total_sets_this_week"
+    }
+}
+
 // MARK: ─── SetPrescription ───────────────────────────────────────────────────
 
 nonisolated struct SetPrescription: Codable, Sendable {
@@ -333,7 +407,7 @@ nonisolated enum PrescriptionValidationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidWeight(let v):
-            return "weightKg \(v) is out of range (must be > 0 and ≤ 500)."
+            return "weightKg \(v) is out of range (must be >= 0 and <= 500)."
         case .invalidReps(let v):
             return "reps \(v) is out of range (must be 1–30)."
         case .invalidTempo(let v):
@@ -355,7 +429,7 @@ extension SetPrescription {
     private nonisolated static let tempoRegex = try! NSRegularExpression(pattern: #"^\d-\d-\d-\d$"#)
 
     nonisolated func validate() throws {
-        guard weightKg > 0, weightKg <= 500 else {
+        guard weightKg >= 0, weightKg <= 500 else {
             throw PrescriptionValidationError.invalidWeight(weightKg)
         }
         guard (1...30).contains(reps) else {
@@ -413,7 +487,8 @@ extension WorkoutContext {
             tempo: "3-1-1-0",
             restTakenSeconds: 120,
             completedAt: setDate,
-            userCorrectedWeight: nil
+            userCorrectedWeight: nil,
+            daysAgo: 0
         )
 
         return WorkoutContext(
@@ -452,7 +527,8 @@ extension WorkoutContext {
                     intensityPercent: 75.0
                 ),
                 primaryMuscles: ["pectoralis_major", "anterior_deltoid"],
-                secondaryMuscles: ["triceps_brachii"]
+                secondaryMuscles: ["triceps_brachii"],
+                bodyweightOnly: nil
             ),
             sessionHistoryToday: [
                 ExerciseHistoryItem(
@@ -472,7 +548,8 @@ extension WorkoutContext {
                     tempo: "2-0-1-0",
                     restTakenSeconds: 180,
                     completedAt: setDate,
-                    userCorrectedWeight: nil
+                    userCorrectedWeight: nil,
+                    daysAgo: nil
                 ),
                 recentAverage: RecentAverage(
                     sessionCount: 5,
@@ -495,7 +572,25 @@ extension WorkoutContext {
                     summary: "Last week bench felt heavy; reduced weight by 5 kg.",
                     sourceDate: setDate
                 )
-            ]
+            ],
+            sessionLog: [
+                SessionLogEntry(
+                    exercise: "Barbell Bench Press",
+                    setNumber: 1,
+                    prescribedWeightKg: 80.0,
+                    prescribedReps: 10,
+                    actualReps: 8,
+                    rpe: 8.5,
+                    outcomeNote: "moderate_miss"
+                )
+            ],
+            weeklyFatigueSummary: WeeklyFatigueSummary(
+                sessionsThisWeek: 3,
+                avgRpeThisWeek: 7.8,
+                exercisesWithMultipleMisses: [],
+                totalSetsThisWeek: 42
+            ),
+            gymWeightFacts: nil
         )
     }
 }
@@ -573,21 +668,42 @@ actor AIInferenceService {
                     """
             }
 
-            // 2. Call LLM with 8-second timeout
+            // 2. Call LLM with 8-second timeout (retries for transient HTTP errors happen
+            //    inside the timeout so the product patience threshold is always respected).
             // Snapshot `userPayload` into an immutable let so the closure
             // captures a value rather than a mutable variable (Swift 6 safety).
             let payloadSnapshot = userPayload
             let rawResponse: String
             do {
                 rawResponse = try await withTimeout(seconds: 8.0) {
-                    try await self.provider.complete(
-                        systemPrompt: systemPrompt,
-                        userPayload: payloadSnapshot
-                    )
+                    try await TransientRetryPolicy.execute {
+                        try await self.provider.complete(
+                            systemPrompt: systemPrompt,
+                            userPayload: payloadSnapshot
+                        )
+                    }
                 }
             } catch is TimeoutError {
+                FallbackLogRecord(
+                    callSite: FallbackLogRecord.prescribeCallSite,
+                    reason: "timeout (8s)",
+                    sessionId: context.sessionMetadata.sessionId
+                ).emit()
                 return .fallback(reason: .timeout)
             } catch {
+                if let llmError = error as? LLMProviderError {
+                    FallbackLogRecord.from(
+                        callSite: FallbackLogRecord.prescribeCallSite,
+                        error: llmError,
+                        sessionId: context.sessionMetadata.sessionId
+                    ).emit()
+                } else {
+                    FallbackLogRecord(
+                        callSite: FallbackLogRecord.prescribeCallSite,
+                        reason: error.localizedDescription,
+                        sessionId: context.sessionMetadata.sessionId
+                    ).emit()
+                }
                 return .fallback(reason: .llmProviderError(error.localizedDescription))
             }
 
@@ -635,7 +751,13 @@ actor AIInferenceService {
             return .success(prescription)
         }
 
-        return .fallback(reason: .maxRetriesExceeded(lastError: lastErrorDescription))
+        let fallback = PrescriptionResult.fallback(reason: .maxRetriesExceeded(lastError: lastErrorDescription))
+        FallbackLogRecord(
+            callSite: FallbackLogRecord.prescribeCallSite,
+            reason: "maxRetriesExceeded: \(lastErrorDescription.prefix(200))",
+            sessionId: context.sessionMetadata.sessionId
+        ).emit()
+        return fallback
     }
 
     // MARK: - Public API: Weight Adaptation
@@ -655,10 +777,12 @@ actor AIInferenceService {
 
         do {
             let rawResponse = try await withTimeout(seconds: 8.0) {
-                try await self.provider.complete(
-                    systemPrompt: systemPrompt,
-                    userPayload: userPayload
-                )
+                try await TransientRetryPolicy.execute {
+                    try await self.provider.complete(
+                        systemPrompt: systemPrompt,
+                        userPayload: userPayload
+                    )
+                }
             }
 
             let stripped = Self.stripMarkdownFences(rawResponse)
@@ -690,8 +814,23 @@ actor AIInferenceService {
             return .success(prescription)
 
         } catch is TimeoutError {
+            FallbackLogRecord(
+                callSite: FallbackLogRecord.prescribeAdaptationCallSite,
+                reason: "timeout (8s)"
+            ).emit()
             return .fallback(reason: .timeout)
         } catch {
+            if let llmError = error as? LLMProviderError {
+                FallbackLogRecord.from(
+                    callSite: FallbackLogRecord.prescribeAdaptationCallSite,
+                    error: llmError
+                ).emit()
+            } else {
+                FallbackLogRecord(
+                    callSite: FallbackLogRecord.prescribeAdaptationCallSite,
+                    reason: error.localizedDescription
+                ).emit()
+            }
             return .fallback(reason: .llmProviderError(error.localizedDescription))
         }
     }
@@ -744,7 +883,7 @@ actor AIInferenceService {
         RESPONSE FORMAT — you must return ONLY a JSON object with this exact structure:
         {
           "set_prescription": {
-            "weight_kg": <number, > 0, ≤ 500>,
+            "weight_kg": <number, >= 0, ≤ 500>,
             "reps": <integer, 1–30>,
             "tempo": "<eccentric>-<pause>-<concentric>-<pause>, e.g. 3-1-1-0",
             "rir_target": <integer, 0–4>,
@@ -756,12 +895,60 @@ actor AIInferenceService {
           }
         }
 
-        Rules:
+        CORE RULES:
         - No prose, no markdown fences, no explanation outside the JSON.
-        - Progressive overload: prescribe a small increase if last set was performed at ≥ 2 RIR.
-        - Conservative loading: prescribe maintenance or slight decrease if RIR ≤ 0 or RPE ≥ 9.
-        - Always consider safety flags from qualitative notes (pain = slow down, fatigue = reduce).
         - tempo must match exactly the pattern \\d-\\d-\\d-\\d.
+        - weight_kg must be achievable on the equipment described in current_exercise.equipment_type_key.
+        - coaching_cue must be ≤ 100 characters. reasoning must be ≤ 200 characters.
+        - Always consider safety flags from qualitative notes (pain → slow down, fatigue → reduce load).
+
+        EQUIPMENT-AWARE WEIGHT INCREMENTS:
+        - barbell: minimum 5 kg increment. Use 2.5 kg only near a natural plate boundary (20/60/100 kg).
+        - dumbbell / kettlebell / cable / machine: minimum 2.5 kg increment.
+
+        ANTI-OSCILLATION: Do not reverse a weight direction within an exercise unless user_corrected_weight is true.
+
+        BODYWEIGHT-ONLY EXERCISES:
+        When current_exercise.bodyweight_only is true (pull-up bar, dip station, etc.):
+        - ALWAYS prescribe weight_kg: 0.
+        - Do NOT suggest adding external weight unless the user explicitly mentions one.
+        - coaching_cue: focus on rep quality, tempo, ROM, or band-assisted progression.
+        - Struggling with reps → suggest band-assisted variation in coaching_cue.
+        - All reps easy → suggest pause at top, slower tempo, or more reps.
+
+        REASONING FROM THE SESSION LOG (primary working memory):
+        The context includes a session_log: an append-only list of every set this session across all exercises.
+        Use it to diagnose what is actually happening — not just the most recent set:
+        - Missing reps: is this a one-off, accumulating fatigue, or a calibration problem? Decide accordingly.
+        - Multiple misses at the same weight → drop the weight. How much depends on how badly they're missing.
+        - First set of exercise with a big miss → calibration problem; drop to where they can actually complete the reps.
+        - All reps complete at low RPE / high RIR → increase weight by one minimum increment.
+        - Never make mechanical percentage adjustments. Read the actual numbers and reason from them.
+
+        CROSS-SESSION MEMORY: Check rag_retrieved_memory for exercise_outcome events.
+        - overloaded → open 5–10% BELOW the prior weight_used.
+        - on_target → open at or slightly above. Continue progressive overload.
+        - underloaded → open at or above. Push harder.
+        Session log takes priority; RAG provides the cross-session baseline.
+
+        DELOAD DETECTION: Read weekly_fatigue_summary (sessions_this_week, avg_rpe_this_week,
+        exercises_with_multiple_misses, total_sets_this_week). Make a coaching judgement — no fixed
+        threshold triggers this. If the picture warrants it, reduce volume/intensity voluntarily and
+        say so in the coaching_cue. Add deload_recommended to safety_flags if appropriate.
+
+        PROGRESSIVE OVERLOAD (default when all reps completed):
+        - ≥ 2 RIR: increase weight by one minimum increment.
+        - 1–0 RIR: maintain weight, reduce RIR target.
+
+        FIRST-SESSION CALIBRATION: If is_first_session is true, prescribe ~60% estimated 1RM.
+        Use user_profile.bodyweight_kg and training_age as anchors.
+
+        USER PROFILE: Use bodyweight_kg, training_age, age, height_cm to calibrate absolute weights.
+        Beginner bench: ~50–60% BW. Intermediate: ~80–100% BW. Advanced: ~100–130%+ BW.
+
+        EXERCISE SWAPS: The session_log may contain sets tagged with exercise_swap from a previously
+        swapped exercise. These sets belong to the old exercise — do NOT use them to calibrate weight
+        for the new (current) exercise. Use RAG memory for the new exercise's first set anchor.
         """
 }
 

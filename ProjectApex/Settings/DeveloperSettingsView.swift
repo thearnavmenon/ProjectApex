@@ -24,6 +24,7 @@ import SwiftUI
 
 // MARK: - DeveloperSettingsView
 
+#if DEBUG
 struct DeveloperSettingsView: View {
 
     // MARK: - Dependencies (optional — injected when available)
@@ -32,25 +33,58 @@ struct DeveloperSettingsView: View {
     /// Nil when no workout session is active.
     var workoutViewModel: WorkoutViewModel?
 
+    /// Called after "Reset All App Data" completes so ContentView can return to onboarding.
+    var onResetAll: (() -> Void)?
+
+    // MARK: - Environment
+
+    @Environment(AppDependencies.self) private var deps
+
     // MARK: - State
 
-    @State private var anthropicKey: String = ""
-    @State private var openAIKey: String    = ""
-    @State private var supabaseKey: String  = ""
+    @State private var anthropicKey: String    = ""
+    @State private var openAIKey: String       = ""
+    @State private var supabaseKey: String     = ""
+    @State private var supabaseServiceKey: String = ""
 
     /// Tracks which fields are revealing plain text.
-    @State private var showAnthropic: Bool  = false
-    @State private var showOpenAI: Bool     = false
-    @State private var showSupabase: Bool   = false
+    @State private var showAnthropic: Bool     = false
+    @State private var showOpenAI: Bool        = false
+    @State private var showSupabase: Bool      = false
+    @State private var showServiceKey: Bool    = false
 
     /// Keychain presence status loaded on appear / after save.
-    @State private var anthropicStored: Bool = false
-    @State private var openAIStored: Bool    = false
-    @State private var supabaseStored: Bool  = false
+    @State private var anthropicStored: Bool      = false
+    @State private var openAIStored: Bool         = false
+    @State private var supabaseStored: Bool       = false
+    @State private var supabaseServiceStored: Bool = false
 
     /// Banner shown after a save attempt.
     @State private var bannerMessage: String?
     @State private var bannerIsError: Bool  = false
+
+    // MARK: - Reset confirmation alerts
+
+    /// Controls the "Reset All App Data" confirmation alert.
+    @State private var showResetAllConfirmation: Bool = false
+    /// Controls the "Reset Onboarding Only" confirmation alert.
+    @State private var showResetOnboardingConfirmation: Bool = false
+    /// Controls the "Clear RAG Memory" confirmation alert.
+    @State private var showClearMemoryConfirmation: Bool = false
+
+    /// Gym weight correction facts loaded from GymFactStore for display and deletion.
+    @State private var gymFacts: [GymFactStore.WeightFact] = []
+
+    // MARK: - Start Any Day mode
+
+    /// When true, all generated programme days are immediately startable regardless
+    /// of their scheduled date. Does not affect the programme sequence — off-schedule
+    /// sessions are logged as standalone workouts. DEBUG builds only.
+    @State private var startAnyDayMode: Bool = UserDefaults.standard.bool(forKey: "dev_start_any_day_mode")
+
+    // MARK: - Session count override
+
+    @State private var sessionCount: Int = UserDefaults.standard.integer(forKey: UserProfileConstants.sessionCountKey)
 
     private let keychain = KeychainService.shared
 
@@ -60,14 +94,20 @@ struct DeveloperSettingsView: View {
         Form {
             keychainStatusSection
             aiCoachDiagnosticsSection
+            gymWeightCorrectionsSection
             anthropicSection
             openAISection
             supabaseSection
+            supabaseServiceSection
             saveSection
+            developerToolsSection
         }
         .navigationTitle("Developer Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { refreshStoredStatus() }
+        .onAppear {
+            refreshStoredStatus()
+            Task { gymFacts = await deps.gymFactStore.facts }
+        }
         // Banner overlay at the bottom of the screen.
         .overlay(alignment: .bottom) {
             if let message = bannerMessage {
@@ -77,6 +117,33 @@ struct DeveloperSettingsView: View {
             }
         }
         .animation(.easeInOut(duration: 0.3), value: bannerMessage)
+        // Reset All confirmation
+        .alert("Reset All App Data?", isPresented: $showResetAllConfirmation) {
+            Button("Reset Everything", role: .destructive) {
+                Task { await performResetAll() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will delete all local data and return to onboarding. This cannot be undone.")
+        }
+        // Reset Onboarding Only confirmation
+        .alert("Reset Onboarding?", isPresented: $showResetOnboardingConfirmation) {
+            Button("Reset Onboarding", role: .destructive) {
+                performResetOnboarding()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Clears only the onboarding completion flag. Your GymProfile and program will remain intact.")
+        }
+        // Clear RAG Memory confirmation
+        .alert("Clear RAG Memory?", isPresented: $showClearMemoryConfirmation) {
+            Button("Clear Memory", role: .destructive) {
+                Task { await performClearRAGMemory() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Deletes all AI memory embeddings for this user from Supabase. Useful for testing cold-start AI behaviour.")
+        }
     }
 
     // MARK: - Sections
@@ -119,10 +186,61 @@ struct DeveloperSettingsView: View {
     /// Quick-glance summary of which keys are present in the Keychain.
     private var keychainStatusSection: some View {
         Section("Keychain Status") {
-            statusRow(label: "Anthropic API Key", isPresent: anthropicStored)
-            statusRow(label: "OpenAI API Key",    isPresent: openAIStored)
-            statusRow(label: "Supabase Anon Key", isPresent: supabaseStored)
+            statusRow(label: "Anthropic API Key",      isPresent: anthropicStored)
+            statusRow(label: "OpenAI API Key",         isPresent: openAIStored)
+            statusRow(label: "Supabase Anon Key",      isPresent: supabaseStored)
+            statusRow(label: "Supabase Service Key",   isPresent: supabaseServiceStored)
         }
+    }
+
+    /// Lists all recorded GymFactStore weight corrections. Each row can be deleted
+    /// to fix incorrectly captured corrections (e.g. 35kg blocked on all cable machines
+    /// due to a correction made on a different exercise).
+    private var gymWeightCorrectionsSection: some View {
+        Section {
+            if gymFacts.isEmpty {
+                Text("No weight corrections recorded")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(gymFacts) { fact in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(fact.equipmentType.displayName)
+                                .font(.subheadline.weight(.medium))
+                            Text("\(formatFactWeight(fact.unavailableWeight)) → \(formatFactWeight(fact.availableWeight))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            Task {
+                                await deps.gymFactStore.removeFact(
+                                    for: fact.equipmentType,
+                                    unavailableWeight: fact.unavailableWeight
+                                )
+                                gymFacts = await deps.gymFactStore.facts
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        } header: {
+            Text("Gym Weight Corrections")
+        } footer: {
+            Text("Weight corrections are equipment-wide, not exercise-specific. Delete an incorrect correction to restore the blocked weight for all exercises on that equipment type.")
+                .font(.caption)
+        }
+    }
+
+    private func formatFactWeight(_ kg: Double) -> String {
+        kg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0fkg", kg)
+            : String(format: "%.1fkg", kg)
     }
 
     private var anthropicSection: some View {
@@ -176,6 +294,23 @@ struct DeveloperSettingsView: View {
         }
     }
 
+    private var supabaseServiceSection: some View {
+        Section {
+            apiKeyField(
+                label: "Supabase Service Key",
+                hint: "eyJ...",
+                text: $supabaseServiceKey,
+                showPlainText: $showServiceKey
+            )
+            formatHint("JWT — begins with \"eyJ\". Bypasses RLS for MVP writes.")
+        } header: {
+            Text("Supabase Service Role (MVP)")
+        } footer: {
+            Text("Required until Supabase Auth is wired. Allows the app to write embeddings and session data. Keep secret — never share publicly.")
+                .font(.caption)
+        }
+    }
+
     private var saveSection: some View {
         Section {
             Button(action: saveKeys) {
@@ -188,6 +323,60 @@ struct DeveloperSettingsView: View {
             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
         } footer: {
             Text("Only non-empty fields are saved. Existing keys are not overwritten by blank input.")
+                .font(.caption)
+        }
+    }
+
+    /// Developer Tools — reset actions for iterating on onboarding and AI flows.
+    private var developerToolsSection: some View {
+        Section {
+            // Start Any Day mode — unlocks all generated days for immediate training.
+            Toggle(isOn: $startAnyDayMode) {
+                Label("Start Any Day Mode", systemImage: "calendar.badge.checkmark")
+            }
+            .onChange(of: startAnyDayMode) { _, newValue in
+                UserDefaults.standard.set(newValue, forKey: "dev_start_any_day_mode")
+            }
+
+            // Offline fallback session count — only used if Supabase is unreachable at session start.
+            // The live count is fetched from workout_sessions on every session start.
+            Stepper(value: $sessionCount, in: 0...999) {
+                HStack {
+                    Label("Offline Session Count", systemImage: "number.circle")
+                    Spacer()
+                    Text("\(sessionCount)")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(sessionCount == 0 ? .orange : .secondary)
+                }
+            }
+            .onChange(of: sessionCount) { _, newValue in
+                UserDefaults.standard.set(newValue, forKey: UserProfileConstants.sessionCountKey)
+            }
+
+            // Wipes all persisted state: UserDefaults, Keychain, GymFactStore, returns to onboarding.
+            Button(role: .destructive) {
+                showResetAllConfirmation = true
+            } label: {
+                Label("Reset All App Data", systemImage: "trash.fill")
+            }
+
+            // Clears only the onboarding completion flag — leaves GymProfile and program intact.
+            Button(role: .destructive) {
+                showResetOnboardingConfirmation = true
+            } label: {
+                Label("Reset Onboarding Only", systemImage: "arrow.counterclockwise")
+            }
+
+            // Removes all memory_embeddings rows for this user — tests cold-start AI coaching.
+            Button(role: .destructive) {
+                showClearMemoryConfirmation = true
+            } label: {
+                Label("Clear RAG Memory", systemImage: "brain.filled.head.profile")
+            }
+        } header: {
+            Text("Developer Tools")
+        } footer: {
+            Text("Start Any Day Mode unlocks all generated days for immediate training without affecting programme sequence. Offline Session Count is a fallback used only when Supabase is unreachable — the live count is always fetched from the database at session start. Other reset actions are irreversible. For development use only.")
                 .font(.caption)
         }
     }
@@ -318,12 +507,30 @@ struct DeveloperSettingsView: View {
             }
         }
 
+        // Supabase service role key (JWT)
+        if !supabaseServiceKey.isEmpty {
+            if !supabaseServiceKey.hasPrefix("eyJ") {
+                errors.append("Supabase service key must start with \"eyJ\" (JWT)")
+            } else {
+                do {
+                    try keychain.store(supabaseServiceKey, for: .supabaseServiceKey)
+                    savedCount += 1
+                    // Apply immediately to the live SupabaseClient so current session benefits.
+                    let key = supabaseServiceKey
+                    Task { await deps.supabaseClient.set(serviceKey: key) }
+                } catch {
+                    errors.append("Supabase Service: \(error.localizedDescription)")
+                }
+            }
+        }
+
         // Refresh stored-status indicators.
         refreshStoredStatus()
         // Clear text fields so the saved values are no longer visible.
-        anthropicKey = ""
-        openAIKey    = ""
-        supabaseKey  = ""
+        anthropicKey      = ""
+        openAIKey         = ""
+        supabaseKey       = ""
+        supabaseServiceKey = ""
 
         // Show banner.
         if errors.isEmpty {
@@ -339,9 +546,10 @@ struct DeveloperSettingsView: View {
 
     /// Reads each key's presence from the Keychain and updates the status flags.
     private func refreshStoredStatus() {
-        anthropicStored = (try? keychain.retrieve(.anthropicAPIKey)) != nil
-        openAIStored    = (try? keychain.retrieve(.openAIAPIKey))    != nil
-        supabaseStored  = (try? keychain.retrieve(.supabaseAnonKey)) != nil
+        anthropicStored      = (try? keychain.retrieve(.anthropicAPIKey))    != nil
+        openAIStored         = (try? keychain.retrieve(.openAIAPIKey))       != nil
+        supabaseStored       = (try? keychain.retrieve(.supabaseAnonKey))    != nil
+        supabaseServiceStored = (try? keychain.retrieve(.supabaseServiceKey)) != nil
     }
 
     /// Displays the banner for 3 seconds then hides it.
@@ -353,6 +561,66 @@ struct DeveloperSettingsView: View {
             bannerMessage = nil
         }
     }
+
+    // MARK: - Reset Actions
+
+    /// Wipes all persisted app state except API keys in the Keychain, then returns to onboarding.
+    ///
+    /// Clears in order:
+    ///   1. All UserDefaults for this app's bundle domain (onboarding flags, scan-skipped flag, etc.)
+    ///   2. GymFactStore weight-correction facts (UserDefaults-backed)
+    ///   3. The userId Keychain entry so onboarding generates a fresh identity
+    ///   (API keys — anthropicAPIKey, openAIAPIKey, supabaseAnonKey — are intentionally preserved)
+    @MainActor
+    private func performResetAll() async {
+        // 1. Wipe all UserDefaults for this bundle (onboarding flags, scan-skipped, gym facts, etc.)
+        if let bundleID = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: bundleID)
+        }
+
+        // 2. Clear GymFactStore weight corrections (belt-and-suspenders after UserDefaults wipe)
+        await deps.gymFactStore.clearAll()
+
+        // 3. Remove the persisted userId so onboarding creates a fresh identity
+        try? keychain.delete(.userId)
+
+        // Navigate to onboarding without a relaunch
+        onResetAll?()
+        showBanner("All app data cleared.", isError: false)
+    }
+
+    /// Clears onboarding flags and the cached program so re-running onboarding
+    /// generates a fresh program rather than loading the old one.
+    ///
+    /// Clears:
+    ///   - onboardingCompletedKey (UserDefaults)
+    ///   - scanSkippedKey (UserDefaults)
+    ///   - daysPerWeekKey (UserDefaults) — forces re-read from new onboarding selection
+    ///   - activeProgram cache (UserDefaults) — old program must not shadow new one
+    private func performResetOnboarding() {
+        UserDefaults.standard.removeObject(forKey: OnboardingConstants.onboardingCompletedKey)
+        UserDefaults.standard.removeObject(forKey: OnboardingConstants.scanSkippedKey)
+        UserDefaults.standard.removeObject(forKey: UserProfileConstants.daysPerWeekKey)
+        Mesocycle.clearUserDefaults()
+
+        onResetAll?()
+        showBanner("Onboarding flags cleared.", isError: false)
+    }
+
+    /// Deletes all memory_embeddings rows for this user from Supabase.
+    ///
+    /// Clears:
+    ///   - All rows in `memory_embeddings` where user_id matches the resolved userId
+    @MainActor
+    private func performClearRAGMemory() async {
+        let userId = deps.resolvedUserId.uuidString
+        do {
+            try await deps.memoryService.deleteAllEmbeddings(userId: userId)
+            showBanner("RAG memory cleared.", isError: false)
+        } catch {
+            showBanner("Failed: \(error.localizedDescription)", isError: true)
+        }
+    }
 }
 
 // MARK: - Preview
@@ -361,5 +629,7 @@ struct DeveloperSettingsView: View {
     NavigationStack {
         DeveloperSettingsView()
     }
+    .environment(AppDependencies())
     .preferredColorScheme(.dark)
 }
+#endif

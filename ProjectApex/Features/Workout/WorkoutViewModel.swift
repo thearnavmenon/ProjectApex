@@ -40,8 +40,21 @@ final class WorkoutViewModel {
     /// Remaining seconds in the current rest period (0 when not resting).
     var restSecondsRemaining: Int = 0
 
+    /// Absolute expiry time of the current rest period.
+    /// Used by RestTimerView to snap to correct remaining time after foregrounding.
+    var restExpiresAt: Date? = nil
+
     /// All sets logged so far in this session.
     var completedSets: [SetLog] = []
+
+    /// True when inference failed and the user must choose Retry or Pause.
+    var showInferenceRetrySheet: Bool = false
+
+    /// Human-readable reason why the retry sheet is showing.
+    var retryFailureDescription: String?
+
+    /// True while a retry attempt is in progress (shows loading state in retry sheet).
+    var isRetrying: Bool = false
 
     // MARK: - UI state (view-local, not from actor)
 
@@ -53,6 +66,14 @@ final class WorkoutViewModel {
 
     /// Controls the end-session-early confirmation dialog.
     var showEndSessionEarlyConfirmation: Bool = false
+
+    /// Controls the exercise swap chat sheet (P3-T10).
+    var showExerciseSwapSheet: Bool = false
+
+    /// Available weight hint for the current exercise's equipment type.
+    /// Non-nil only when GymFactStore has at least one confirmed correction for that equipment type.
+    /// Format: "Available: 40kg · 42.5kg · 45kg · 47.5kg · 50kg"
+    var gymWeightHintText: String? = nil
 
     // MARK: - Dependencies
 
@@ -67,10 +88,10 @@ final class WorkoutViewModel {
     // MARK: - Public Actions
 
     /// Starts a new session for the given day. Manages isStartingSession flag.
-    func startSession(trainingDay: TrainingDay, programId: UUID) {
+    func startSession(trainingDay: TrainingDay, programId: UUID, userId: UUID, weekNumber: Int = 1, startingExerciseIndex: Int = 0) {
         isStartingSession = true
         Task {
-            await manager.startSession(trainingDay: trainingDay, programId: programId)
+            await manager.startSession(trainingDay: trainingDay, programId: programId, userId: userId, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
             await pullState()
             isStartingSession = false
             // Begin continuous state polling while session is live
@@ -97,15 +118,48 @@ final class WorkoutViewModel {
         }
     }
 
-    /// Called when the user confirms a weight correction from WeightCorrectionView.
-    /// Updates the current prescription weight and records the correction in GymFactStore.
-    func onWeightCorrection(confirmedWeight: Double, equipmentType: EquipmentType) {
+    /// Session-only weight override — updates the current prescription weight in-memory
+    /// but does NOT write to GymFactStore. Use this when the user wants a different weight
+    /// for this set/session without permanently flagging it as absent from the gym.
+    func onWeightOverrideSessionOnly(confirmedWeight: Double, equipmentType: EquipmentType) {
+        Task {
+            await manager.applySessionOnlyWeightOverride(confirmedWeight: confirmedWeight)
+            await pullState()
+            let hint = await manager.availableWeightHint(for: equipmentType, near: confirmedWeight)
+            gymWeightHintText = hint
+        }
+    }
+
+    /// Called when the user confirms a PERMANENT weight correction from WeightCorrectionView.
+    /// Updates the current prescription weight AND records the correction in GymFactStore so
+    /// the AI never prescribes the unavailable weight again on this equipment type.
+    ///
+    /// - Parameters:
+    ///   - unavailableWeight: The weight that was prescribed but isn't available.
+    ///                        Must be passed by the caller — cannot be read from the actor
+    ///                        reliably because currentPrescription may be nil by callback time.
+    ///   - confirmedWeight: The weight the user selected as available.
+    ///   - equipmentType: The equipment type for this exercise.
+    func onWeightCorrection(unavailableWeight: Double, confirmedWeight: Double, equipmentType: EquipmentType) {
         Task {
             await manager.applyWeightCorrection(
+                unavailableWeight: unavailableWeight,
                 confirmedWeight: confirmedWeight,
                 equipmentType: equipmentType
             )
             await pullState()
+            // Refresh hint immediately after a new correction is saved
+            let hint = await manager.availableWeightHint(for: equipmentType, near: confirmedWeight)
+            gymWeightHintText = hint
+        }
+    }
+
+    /// Refreshes the available-weight hint for the current exercise's equipment type.
+    /// Called from ActiveSetView whenever the prescription or exercise changes.
+    func refreshGymWeightHint(equipmentType: EquipmentType, near weight: Double) {
+        Task {
+            let hint = await manager.availableWeightHint(for: equipmentType, near: weight)
+            gymWeightHintText = hint
         }
     }
 
@@ -140,20 +194,26 @@ final class WorkoutViewModel {
         let prescription = await manager.currentPrescription
         let fallbackReason = await manager.currentFallbackReason
         let restRemaining = await manager.restSecondsRemaining
+        let expiresAt = await manager.restExpiresAt
         let sets = await manager.completedSets
+        let retryNeeded = await manager.inferenceRetryNeeded
+        let retryReason = await manager.inferenceRetryReason
 
         sessionState = state
         currentPrescription = prescription
         restSecondsRemaining = restRemaining
+        restExpiresAt = expiresAt
         completedSets = sets
         isAIOffline = fallbackReason != nil
         fallbackDescription = fallbackReason.map { Self.fallbackDescription(for: $0) }
         developerFallbackDescription = fallbackReason.map { Self.developerFallbackDescription(for: $0) }
+        showInferenceRetrySheet = retryNeeded
+        retryFailureDescription = retryReason.map { Self.retryDescription(for: $0) }
     }
 
     /// Starts a Task that polls actor state on every rest-timer tick and on
     /// state transitions. Stops automatically when the session completes or errors.
-    private func beginStatePolling() {
+    func beginStatePolling() {
         Task { [weak self] in
             while let self, await self.sessionIsLive() {
                 await self.pullState()
@@ -164,7 +224,115 @@ final class WorkoutViewModel {
         }
     }
 
-    private func sessionIsLive() async -> Bool {
+    /// Syncs state from the actor and restarts polling if a session is live.
+    /// Call this on WorkoutView appear to recover from navigation-away events
+    /// where the viewModel was kept alive but polling had stopped.
+    func syncFromLiveSession() {
+        Task { [weak self] in
+            guard let self else { return }
+            await pullState()
+            if await sessionIsLive() {
+                beginStatePolling()
+            }
+        }
+    }
+
+    // MARK: - Retry actions
+
+    /// Called when the user taps "Retry" on InferenceRetrySheet.
+    func onRetryInference() {
+        guard !isRetrying else { return }
+        isRetrying = true
+        Task {
+            let success = await manager.retryInference()
+            await pullState()
+            isRetrying = false
+            if success { showInferenceRetrySheet = false }
+        }
+    }
+
+    /// Called when the user taps "Pause Session" on InferenceRetrySheet.
+    func onPauseFromRetrySheet() {
+        showInferenceRetrySheet = false
+        Task { await manager.pauseSession(); await pullState() }
+    }
+
+    // MARK: - Pause action
+
+    /// Called when user taps "Pause Session" from the ellipsis menu during active/resting state.
+    func onPauseSession() {
+        Task { await manager.pauseSession(); await pullState() }
+    }
+
+    // MARK: - Exercise swap (P3-T10)
+
+    /// Opens the exercise swap chat sheet.
+    func requestExerciseSwap() {
+        showExerciseSwapSheet = true
+    }
+
+    /// Builds a SwapContext snapshot from the current session for ExerciseSwapService.
+    func buildSwapContext() async -> ExerciseSwapService.SwapContext? {
+        await manager.buildSwapContext()
+    }
+
+    /// Called when the user confirms a swap suggestion in ExerciseSwapView.
+    func onExerciseSwapConfirmed(suggestion: ExerciseSwapService.ExerciseSuggestion, reason: String) {
+        showExerciseSwapSheet = false
+        Task {
+            await manager.swapExercise(suggestion: suggestion, reason: reason)
+            await pullState()
+        }
+    }
+
+    // MARK: - Resume action
+
+    /// Resumes a paused session. Flushes the write-ahead queue first so all
+    /// set_log writes from the prior session are in Supabase before fetching.
+    func resumeSession(pausedState: PausedSessionState, trainingDay: TrainingDay, supabase: SupabaseClient) {
+        isStartingSession = true
+        Task {
+            // 1. Attempt to flush WAQ so pending set_logs land in Supabase before the fetch.
+            //    If offline, flush is best-effort — unflushed items stay in the WAQ.
+            await manager.flushWriteAheadQueue()
+
+            // 2. Fetch whatever Supabase has (successful flushes + previously persisted rows).
+            let remoteLogs: [SetLog] = (try? await supabase.fetch(
+                SetLog.self,
+                table: "set_logs",
+                filters: [Filter(column: "session_id", op: .eq, value: pausedState.sessionId.uuidString)],
+                order: "set_number.asc"
+            )) ?? []
+
+            // 3. Read any set_logs still queued locally (flush may have failed for these).
+            let waqLogs = await manager.pendingSetLogs(forSession: pausedState.sessionId)
+
+            // 4. Merge: WAQ wins on conflict (same SetLog.id → WAQ version is authoritative
+            //    because it is the most recently written copy and may not yet be in Supabase).
+            var mergedById: [UUID: SetLog] = Dictionary(
+                uniqueKeysWithValues: remoteLogs.map { ($0.id, $0) }
+            )
+            for waqLog in waqLogs {
+                mergedById[waqLog.id] = waqLog  // WAQ overwrites remote on same id
+            }
+            let setLogs = mergedById.values.sorted {
+                $0.setNumber < $1.setNumber
+            }
+
+            print("[WorkoutViewModel] resumeSession — remote:\(remoteLogs.count) waq:\(waqLogs.count) merged:\(setLogs.count) for session \(pausedState.sessionId)")
+
+            await manager.resumeSession(
+                pausedState: pausedState,
+                trainingDay: trainingDay,
+                completedSetLogs: setLogs
+            )
+            await pullState()
+            isStartingSession = false
+            beginStatePolling()
+        }
+    }
+
+    func sessionIsLive() async -> Bool {
         let state = await manager.sessionState
         switch state {
         case .idle, .sessionComplete, .error: return false
@@ -204,6 +372,20 @@ final class WorkoutViewModel {
         }
     }
 
+    /// Short subtitle shown on the InferenceRetrySheet explaining what went wrong.
+    static func retryDescription(for reason: FallbackReason) -> String {
+        switch reason {
+        case .timeout:
+            return "The AI coach took too long to respond."
+        case .maxRetriesExceeded(let e):
+            return "Invalid response: \(String(e.prefix(80)))"
+        case .llmProviderError(let m):
+            return "Network error: \(String(m.prefix(80)))"
+        case .encodingFailed(let d):
+            return "Internal error: \(String(d.prefix(80)))"
+        }
+    }
+
     // MARK: - Convenience Computed Properties
 
     /// The exercise currently being performed, if in .active state.
@@ -225,6 +407,10 @@ final class WorkoutViewModel {
         if case .sessionComplete(let summary) = sessionState { return summary }
         return nil
     }
+
+    /// True when at least one set has been logged in the current session.
+    /// Used to gate session completion and show the correct end-early dialog.
+    var hasLoggedAnySets: Bool { !completedSets.isEmpty }
 
     /// True while the preflight async fetch is in progress.
     var isPreflight: Bool {

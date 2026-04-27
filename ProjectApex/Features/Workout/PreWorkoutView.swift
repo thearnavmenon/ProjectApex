@@ -17,6 +17,8 @@ import SwiftUI
 
 struct PreWorkoutView: View {
 
+    @Environment(AppDependencies.self) private var deps
+
     /// The WorkoutViewModel owned by the parent WorkoutView.
     @Bindable var viewModel: WorkoutViewModel
 
@@ -29,9 +31,25 @@ struct PreWorkoutView: View {
     /// Streak result from GymStreakService (fetched by WorkoutView).
     let streak: StreakResult
 
+    /// 1-based week number within the mesocycle, written to workout_sessions.week_number.
+    var weekNumber: Int = 1
+    /// 0-based exercise index to start from (0 = first exercise, N = continue from exercise N+1).
+    var startingExerciseIndex: Int = 0
     /// True when the user has never completed a session before (FB-005).
     /// Shows the first-session calibration banner.
     var isFirstSession: Bool = false
+    /// Number of completed training days in the current mesocycle (for Day X of Y display).
+    var completedDayCount: Int = 0
+    /// Total training days in the current mesocycle (for Day X of Y display).
+    var totalDayCount: Int = 0
+    /// Called when the user taps "Skip this session". Defers this day without recording
+    /// any session data — the next pending non-skipped day becomes the active session.
+    var onSkipSession: (() -> Void)? = nil
+    /// Called when the user taps the back button or swipes from the left edge.
+    var onBack: (() -> Void)? = nil
+
+    // MARK: - Private state
+    @State private var showSkipConfirmation: Bool = false
 
     // MARK: - Body
 
@@ -45,12 +63,15 @@ struct PreWorkoutView: View {
             } else {
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 32) {
-                        streakSection
+                        programProgressSection
                         if isFirstSession {
                             firstSessionBanner
                         }
                         sessionInfoCard
                         startButton
+                        if onSkipSession != nil {
+                            skipButton
+                        }
                     }
                     .padding(.horizontal, 24)
                     .padding(.top, 32)
@@ -58,8 +79,22 @@ struct PreWorkoutView: View {
                 }
             }
         }
+        .gesture(
+            DragGesture().onEnded { value in
+                if value.translation.width > 80 { onBack?() }
+            }
+        )
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                if onBack != nil {
+                    Button(action: { onBack?() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.80))
+                    }
+                }
+            }
             ToolbarItem(placement: .principal) {
                 Text("Today's Session")
                     .font(.system(size: 15, weight: .semibold))
@@ -101,20 +136,22 @@ struct PreWorkoutView: View {
         }
     }
 
-    // MARK: - Streak Ring
+    // MARK: - Programme Progress Section
 
-    private var streakSection: some View {
-        VStack(spacing: 20) {
-            // Ring + streak count
+    private var programProgressSection: some View {
+        let progress: CGFloat = totalDayCount > 0 ? CGFloat(completedDayCount) / CGFloat(totalDayCount) : 0
+
+        return VStack(spacing: 20) {
+            // Progress ring with Day X of Y inside
             ZStack {
                 // Track ring
                 Circle()
-                    .stroke(streak.tintColor.opacity(0.15), lineWidth: 12)
+                    .stroke(streak.tintColor.opacity(0.12), lineWidth: 12)
                     .frame(width: 160, height: 160)
 
-                // Progress arc (maps score 0-100 to 0-1)
+                // Progress arc
                 Circle()
-                    .trim(from: 0, to: CGFloat(streak.streakScore) / 100.0)
+                    .trim(from: 0, to: progress)
                     .stroke(
                         AngularGradient(
                             colors: [streak.tintColor.opacity(0.5), streak.tintColor],
@@ -124,34 +161,40 @@ struct PreWorkoutView: View {
                     )
                     .frame(width: 160, height: 160)
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeOut(duration: 0.8), value: streak.streakScore)
+                    .animation(.easeOut(duration: 0.8), value: completedDayCount)
 
-                // Streak count + tier icon inside ring
-                VStack(spacing: 4) {
-                    HStack(spacing: 5) {
-                        Text("\(streak.currentStreakDays)")
-                            .font(.system(size: 44, weight: .black, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white)
-                        Image(systemName: streak.tierIcon)
-                            .font(.system(size: 22, weight: .bold))
+                // Day count inside ring — hidden until totalDayCount is known
+                if totalDayCount > 0 {
+                    VStack(spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            Text("Day")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.55))
+                            Text("\(completedDayCount + 1)")
+                                .font(.system(size: 44, weight: .black, design: .rounded).monospacedDigit())
+                                .foregroundStyle(.white)
+                        }
+                        Text("of \(totalDayCount)")
+                            .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(streak.tintColor)
-                            .symbolEffect(.bounce, value: streak.currentStreakDays)
+                            .tracking(0.5)
                     }
-                    Text(streak.streakTier.rawValue.uppercased())
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(streak.tintColor)
-                        .tracking(1.5)
                 }
             }
             .padding(.top, 8)
 
-            Text(streak.currentStreakDays == 1
-                 ? "1 Day Streak"
-                 : "\(streak.currentStreakDays) Day Streak")
+            // Subtitle label
+            Text(progressSubtitle)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.45))
                 .tracking(0.5)
         }
+    }
+
+    private var progressSubtitle: String {
+        guard totalDayCount > 0 else { return "Programme in progress" }
+        let percent = Int(round(Double(completedDayCount) / Double(totalDayCount) * 100))
+        return "\(percent)% of programme complete"
     }
 
     // MARK: - Session Info Card
@@ -257,7 +300,7 @@ struct PreWorkoutView: View {
 
     private var startButton: some View {
         Button {
-            viewModel.startSession(trainingDay: trainingDay, programId: programId)
+            viewModel.startSession(trainingDay: trainingDay, programId: programId, userId: deps.resolvedUserId, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
         } label: {
             HStack(spacing: 10) {
                 if viewModel.isStartingSession {
@@ -287,6 +330,27 @@ struct PreWorkoutView: View {
         }
         .disabled(viewModel.isStartingSession)
         .padding(.top, 8)
+    }
+
+    // MARK: - Skip Button
+
+    private var skipButton: some View {
+        Button {
+            showSkipConfirmation = true
+        } label: {
+            Text("Skip this session")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.white.opacity(0.40))
+        }
+        .disabled(viewModel.isStartingSession)
+        .alert("Skip this session?", isPresented: $showSkipConfirmation) {
+            Button("Skip Session", role: .destructive) {
+                onSkipSession?()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This session won't be logged and the programme will advance to the next session.")
+        }
     }
 
     // MARK: - Computed helpers

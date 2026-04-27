@@ -10,13 +10,17 @@
 //   ✓ Haptic feedback at 10 seconds remaining and at 0 seconds
 //   ✓ Audio tone at 0 seconds (if app in foreground)
 //   ✓ Manual skip: user taps "NEXT SET" to advance early at any time
-//   ✓ Background task keeps timer counting for up to 30 seconds if app backgrounded
+//   ✓ Rest timer anchored to absolute expiry time — survives app backgrounding
+//   ✓ On foreground: snaps display to correct remaining time immediately
+//   ✓ If expiry already passed when foregrounding: fires haptic/tone, skips to next set
+//   ✓ Local notification fires when rest expires while app is in background
 //
 // DEPENDS ON: P3-T02 (WorkoutViewModel, WorkoutSessionManager)
 
 import SwiftUI
 import UIKit
 import AVFoundation
+import UserNotifications
 
 // MARK: - RestTimerView
 
@@ -60,11 +64,17 @@ struct RestTimerView: View {
                 HStack {
                     Spacer()
                     Menu {
+                        Button {
+                            viewModel.onPauseSession()
+                        } label: {
+                            Label("Pause Session", systemImage: "pause.circle")
+                        }
                         Button(role: .destructive) {
                             viewModel.requestEndSessionEarly()
                         } label: {
                             Label("End Workout Early", systemImage: "xmark.circle")
                         }
+                        .disabled(!viewModel.hasLoggedAnySets)
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.system(size: 18, weight: .medium))
@@ -121,7 +131,23 @@ struct RestTimerView: View {
             handleScenePhaseChange(phase)
         }
         // End session early confirmation (P3-T09)
-        .alert("End Workout Early?", isPresented: $viewModel.showEndSessionEarlyConfirmation) {
+        // Two variants: zero-sets → discard; with-sets → partial save.
+        .alert("No Sets Logged", isPresented: Binding(
+            get: { viewModel.showEndSessionEarlyConfirmation && !viewModel.hasLoggedAnySets },
+            set: { if !$0 { viewModel.showEndSessionEarlyConfirmation = false } }
+        )) {
+            Button("Exit Without Saving", role: .destructive) {
+                viewModel.showEndSessionEarlyConfirmation = false
+                viewModel.resetSession()
+            }
+            Button("Stay", role: .cancel) {}
+        } message: {
+            Text("No sets logged — this session will not be saved. Exit anyway?")
+        }
+        .alert("End Workout Early?", isPresented: Binding(
+            get: { viewModel.showEndSessionEarlyConfirmation && viewModel.hasLoggedAnySets },
+            set: { if !$0 { viewModel.showEndSessionEarlyConfirmation = false } }
+        )) {
             Button("End Workout", role: .destructive) {
                 viewModel.onEndSessionEarly()
             }
@@ -146,6 +172,7 @@ struct RestTimerView: View {
         }
         .onDisappear {
             endBackgroundTask()
+            cancelRestExpiryNotification()
         }
     }
 
@@ -369,9 +396,12 @@ struct RestTimerView: View {
             UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         }
 
-        // Haptic + audio at 0 seconds
+        // Haptic + audio at 0 seconds.
+        // Also cancel the pending notification — the timer fired in-app so the
+        // background notification would fire redundantly if left scheduled.
         if remaining == 0 && !hapticsAt0Fired {
             hapticsAt0Fired = true
+            cancelRestExpiryNotification()
             UINotificationFeedbackGenerator().notificationOccurred(.warning)
             playCompletionTone()
             endBackgroundTask()
@@ -391,6 +421,11 @@ struct RestTimerView: View {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 prescriptionJustArrived = false
             }
+            // Cancel and reschedule the notification so it fires at the new (later) expiry
+            // time rather than the original default. Only relevant while backgrounded, but
+            // calling cancel+reschedule in the foreground is a no-op cost.
+            cancelRestExpiryNotification()
+            scheduleRestExpiryNotification()
         }
     }
 
@@ -399,16 +434,40 @@ struct RestTimerView: View {
     private func handleScenePhaseChange(_ phase: ScenePhase) {
         switch phase {
         case .background:
-            // Request up to 30s background execution so the timer keeps ticking
-            guard backgroundTaskID == .invalid else { return }
-            backgroundTaskID = UIApplication.shared.beginBackgroundTask(
-                withName: "RestTimer",
-                expirationHandler: { [self] in endBackgroundTask() }
-            )
+            // Request up to 30s background execution so the actor timer keeps ticking briefly.
+            if backgroundTaskID == .invalid {
+                backgroundTaskID = UIApplication.shared.beginBackgroundTask(
+                    withName: "RestTimer",
+                    expirationHandler: { endBackgroundTask() }
+                )
+            }
+            // Schedule a local notification so the user knows rest is over even if the
+            // app is suspended before the background task expires.
+            scheduleRestExpiryNotification()
         case .active:
             endBackgroundTask()
+            cancelRestExpiryNotification()
+            // Snap the display immediately using the absolute expiry time.
+            snapTimerToCurrentRemaining()
         default:
             break
+        }
+    }
+
+    /// Reads the absolute expiry time from the view model and updates the display.
+    /// If the timer has already expired, fires the completion haptic/tone and skips rest.
+    private func snapTimerToCurrentRemaining() {
+        guard let expiresAt = viewModel.restExpiresAt else { return }
+        let remaining = max(0, Int(expiresAt.timeIntervalSinceNow.rounded(.up)))
+        if remaining <= 0 && !hapticsAt0Fired {
+            hapticsAt0Fired = true
+            UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            playCompletionTone()
+            endBackgroundTask()
+            // Advance to next set — same behaviour as timer reaching zero normally.
+            viewModel.skipRest()
+        } else {
+            handleTimerTick(remaining: remaining)
         }
     }
 
@@ -416,6 +475,41 @@ struct RestTimerView: View {
         guard backgroundTaskID != .invalid else { return }
         UIApplication.shared.endBackgroundTask(backgroundTaskID)
         backgroundTaskID = .invalid
+    }
+
+    // MARK: - Local Notification (rest-complete when backgrounded)
+
+    private static let restNotificationID = "rest_timer_complete"
+
+    /// Schedules a local notification to fire when the rest period expires.
+    /// Cancelled when the app returns to foreground.
+    private func scheduleRestExpiryNotification() {
+        guard let expiresAt = viewModel.restExpiresAt else { return }
+        let remaining = expiresAt.timeIntervalSinceNow
+        guard remaining > 0 else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Rest complete"
+        content.body = "Rest complete — time for your next set."
+        content.sound = .default
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: remaining, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: Self.restNotificationID,
+            content: content,
+            trigger: trigger
+        )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                print("[RestTimerView] Failed to schedule rest notification: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func cancelRestExpiryNotification() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.restNotificationID]
+        )
     }
 
     // MARK: - Audio Tone

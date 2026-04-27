@@ -276,6 +276,59 @@ actor MemoryService {
         }
     }
 
+    // MARK: - Reset / Clear
+
+    /// Deletes `memory_embeddings` rows tagged `set_log_correction` for a specific
+    /// session + exercise + user combination.
+    ///
+    /// Called before writing a corrected set embedding so the AI never retrieves
+    /// a stale version alongside the corrected one. Only rows carrying the
+    /// `set_log_correction` tag are removed; original PR / performance-drop
+    /// embeddings for the same exercise are left intact.
+    ///
+    /// - Parameters:
+    ///   - sessionId: The UUID string of the completed workout session.
+    ///   - exerciseId: The canonical exercise identifier (e.g. "barbell_bench_press").
+    ///   - userId: The UUID string of the authenticated user.
+    func deleteSetCorrectionEmbeddings(
+        sessionId: String,
+        exerciseId: String,
+        userId: String
+    ) async {
+        do {
+            try await supabase.delete(
+                table: "memory_embeddings",
+                filters: [
+                    Filter(column: "session_id",   op: .eq, value: sessionId),
+                    Filter(column: "exercise_id",  op: .eq, value: exerciseId),
+                    Filter(column: "user_id",      op: .eq, value: userId)
+                ]
+            )
+        } catch {
+#if DEBUG
+            print("[MemoryService] deleteSetCorrectionEmbeddings failed: \(error.localizedDescription)")
+#endif
+        }
+    }
+
+    /// Deletes all `memory_embeddings` rows for `userId` from Supabase.
+    ///
+    /// Used by the developer reset flow (FB-007) to simulate a cold-start AI
+    /// state without having to recreate the Supabase user record.
+    ///
+    /// - Parameter userId: The UUID string identifying the user whose rows to remove.
+    /// - Throws: `MemoryServiceError.supabaseWriteError` if the delete fails.
+    func deleteAllEmbeddings(userId: String) async throws {
+        do {
+            try await supabase.delete(
+                table: "memory_embeddings",
+                filters: [Filter(column: "user_id", op: .eq, value: userId)]
+            )
+        } catch {
+            throw MemoryServiceError.supabaseWriteError(error.localizedDescription)
+        }
+    }
+
     // MARK: - RAG Read Path
 
     /// Retrieves the top-K memory items most semantically relevant to `queryText`
@@ -359,38 +412,62 @@ actor MemoryService {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let bodyStr = String(data: data, encoding: .utf8) ?? "<binary>"
-            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
-            throw MemoryServiceError.tagClassificationError("HTTP \(code): \(bodyStr.prefix(200))")
+        // Retry once on transient HTTP errors (fits within the 5 s racing timeout
+        // in classifyTagsWithTimeout — a fast 529 + 1 s sleep = ~1.2 s total).
+        let transientCodes: Set<Int> = TransientRetryPolicy.transientCodes
+        for attempt in 0..<2 {
+            let (data, response) = try await urlSession.data(for: request)
+
+            guard let http = response as? HTTPURLResponse else {
+                throw MemoryServiceError.tagClassificationError("Non-HTTP response from Anthropic.")
+            }
+
+            if !(200..<300).contains(http.statusCode) {
+                let bodyStr = String(data: data, encoding: .utf8) ?? "<binary>"
+                if transientCodes.contains(http.statusCode) && attempt == 0 {
+                    FallbackLogRecord(
+                        callSite: FallbackLogRecord.memoryClassifyCallSite,
+                        httpStatus: http.statusCode,
+                        reason: "transient — will retry"
+                    ).emit()
+                    try await Task.sleep(nanoseconds: 1_000_000_000)  // 1 s backoff
+                    try Task.checkCancellation()
+                    continue
+                }
+                throw MemoryServiceError.tagClassificationError(
+                    "HTTP \(http.statusCode): \(String(bodyStr.prefix(200)))"
+                )
+            }
+
+            // Extract text content from Anthropic envelope
+            guard
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let contentArray = json["content"] as? [[String: Any]],
+                let firstBlock = contentArray.first(where: { $0["type"] as? String == "text" }),
+                let rawText = firstBlock["text"] as? String
+            else {
+                throw MemoryServiceError.tagClassificationError("Unexpected Anthropic response format.")
+            }
+
+            // Strip markdown fences
+            let stripped = stripMarkdownFences(rawText)
+
+            guard
+                let responseData = stripped.data(using: .utf8),
+                let parsed = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
+            else {
+                throw MemoryServiceError.tagClassificationError("Could not parse tag classification JSON.")
+            }
+
+            let muscles   = (parsed["muscle_groups"] as? [String]) ?? []
+            let tags      = (parsed["tags"]           as? [String]) ?? []
+            let sentiment = (parsed["sentiment"]      as? String)   ?? "neutral"
+
+            return TagClassificationResult(muscleGroups: muscles, tags: tags, sentiment: sentiment)
         }
 
-        // Extract text content from Anthropic envelope
-        guard
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let contentArray = json["content"] as? [[String: Any]],
-            let firstBlock = contentArray.first(where: { $0["type"] as? String == "text" }),
-            let rawText = firstBlock["text"] as? String
-        else {
-            throw MemoryServiceError.tagClassificationError("Unexpected Anthropic response format.")
-        }
-
-        // Strip markdown fences
-        let stripped = stripMarkdownFences(rawText)
-
-        guard
-            let responseData = stripped.data(using: .utf8),
-            let parsed = try? JSONSerialization.jsonObject(with: responseData) as? [String: Any]
-        else {
-            throw MemoryServiceError.tagClassificationError("Could not parse tag classification JSON.")
-        }
-
-        let muscles = (parsed["muscle_groups"] as? [String]) ?? []
-        let tags = (parsed["tags"] as? [String]) ?? []
-        let sentiment = (parsed["sentiment"] as? String) ?? "neutral"
-
-        return TagClassificationResult(muscleGroups: muscles, tags: tags, sentiment: sentiment)
+        // Unreachable: the loop always returns or throws.
+        throw MemoryServiceError.tagClassificationError("Classification failed after retries.")
     }
 
     // MARK: - Private: OpenAI Embeddings

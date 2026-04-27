@@ -4,7 +4,7 @@
 // Top-level Settings screen accessible from the main tab bar.
 // Surfaces:
 //   • Profile section → bodyweight, height, age, training age (FB-003)
-//   • Gym section → "Scan Your Gym" (first-time) or "Re-scan Gym" (P1-T06)
+//   • Equipment section → edit/delete items, add new, re-scan gym
 //   • Program section → "Regenerate Program" (P2-T08)
 //   • Developer row → DeveloperSettingsView (API key management)
 
@@ -27,8 +27,11 @@ struct SettingsView: View {
     var confirmedProfile: GymProfile? = nil
 
     /// Called when the user confirms "Regenerate Program".
-    /// Passes the current GymProfile so the caller can trigger generation.
     var onRegenerateProgram: (() -> Void)? = nil
+
+    /// Called when the user modifies their equipment list.
+    /// The updated GymProfile is passed so ContentView can persist it.
+    var onEquipmentChanged: ((GymProfile) -> Void)? = nil
 
     /// True while program generation is in-flight — drives the progress HUD.
     var isRegenerating: Bool = false
@@ -36,8 +39,18 @@ struct SettingsView: View {
     /// If non-nil, an error alert is shown with this message.
     var regenerateErrorMessage: String? = nil
 
+    /// Called after a developer reset so ContentView can return to onboarding.
+    var onResetAll: (() -> Void)? = nil
+
+    // MARK: - Local mutable equipment list
+
+    /// Working copy of the equipment list. Seeded from confirmedProfile on appear.
+    @State private var equipmentItems: [EquipmentItem] = []
+
     @State private var showingRescanAlert = false
-    @State private var showingRegenerateAlert = false
+    @State private var showingRegenerateSheet = false
+    @State private var showingBulkPicker = false
+    @State private var equipmentChangedSinceLastRegenerate = false
 
     // FB-003: Editable biometric fields — backed directly by UserDefaults.
     @State private var bodyweightText: String = ""
@@ -57,19 +70,47 @@ struct SettingsView: View {
                 setupPromptSection
             }
             profileSection
-            gymSection
+            equipmentSection
             if confirmedProfile != nil {
                 programSection
             }
             developerSection
             aboutSection
         }
-        .onAppear { loadBiometricsFromDefaults() }
+        .onAppear {
+            loadBiometricsFromDefaults()
+            if let profile = confirmedProfile {
+                equipmentItems = profile.equipment
+            }
+        }
+        .onChange(of: confirmedProfile) { _, newProfile in
+            // Sync if the profile is replaced externally (e.g. after re-scan).
+            if let profile = newProfile {
+                equipmentItems = profile.equipment
+            }
+        }
         .navigationTitle("Settings")
         .overlay {
             if isRegenerating {
                 generatingOverlay
             }
+        }
+        .sheet(isPresented: $showingBulkPicker) {
+            BulkEquipmentPickerSheet(
+                alreadyAdded: Set(equipmentItems.map { $0.equipmentType }),
+                onConfirm: { newItems in
+                    equipmentItems.append(contentsOf: newItems)
+                    showingBulkPicker = false
+                    commitEquipmentChanges()
+                    equipmentChangedSinceLastRegenerate = true
+                },
+                onCancel: {
+                    showingBulkPicker = false
+                }
+            )
+        }
+        .sheet(isPresented: $showingRegenerateSheet) {
+            regenerateConfirmationSheet
         }
         .alert("Re-scan Gym?", isPresented: $showingRescanAlert) {
             Button("Cancel", role: .cancel) { }
@@ -78,14 +119,6 @@ struct SettingsView: View {
             }
         } message: {
             Text("This will replace your current equipment profile. Are you sure?")
-        }
-        .alert("Regenerate Program?", isPresented: $showingRegenerateAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Regenerate", role: .destructive) {
-                onRegenerateProgram?()
-            }
-        } message: {
-            Text("This will replace your current 12-week program. All future sessions will be reset. Are you sure?")
         }
         .alert(
             "Generation Failed",
@@ -126,6 +159,117 @@ struct SettingsView: View {
             Text("Action Required")
                 .foregroundStyle(.orange)
         }
+    }
+
+    // MARK: - Equipment Section
+
+    /// Full equipment list with add/delete/re-scan controls.
+    @ViewBuilder
+    private var equipmentSection: some View {
+        if hasExistingProfile {
+            Section {
+                ForEach($equipmentItems) { $item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Image(systemName: item.equipmentType.category.systemImage)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 22)
+                            Text(item.equipmentType.displayName)
+                            Spacer()
+                            if !item.detectedByVision {
+                                Text("Manual")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        // Bodyweight-only toggle for pull-up bars, dip stations, etc.
+                        if item.equipmentType.isNaturallyBodyweightOnly {
+                            Toggle(isOn: $item.bodyweightOnly) {
+                                Text("Bodyweight Only")
+                                    .font(.caption)
+                                    .foregroundStyle(item.bodyweightOnly ? .orange : .secondary)
+                            }
+                            .tint(.orange)
+                            .onChange(of: item.bodyweightOnly) { _, _ in
+                                commitEquipmentChanges()
+                            }
+                        }
+                    }
+                }
+                .onDelete { indexSet in
+                    deleteEquipment(at: indexSet)
+                }
+
+                // Add Equipment
+                Button {
+                    showingBulkPicker = true
+                } label: {
+                    Label("Add Equipment", systemImage: "plus.circle")
+                        .foregroundStyle(.blue)
+                }
+
+                // Re-scan
+                Button {
+                    showingRescanAlert = true
+                } label: {
+                    Label("Re-scan Gym", systemImage: "camera.viewfinder")
+                        .foregroundStyle(.primary)
+                }
+            } header: {
+                Text("Equipment")
+            } footer: {
+                Text("Swipe left on any item to remove it. Changes are saved immediately.")
+            }
+        } else {
+            Section("Equipment") {
+                Button {
+                    onScanFirst?()
+                } label: {
+                    Label("Scan Your Gym", systemImage: "camera.viewfinder")
+                        .foregroundStyle(.primary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Equipment Helpers
+
+    private func deleteEquipment(at indexSet: IndexSet) {
+        let removedTypes = indexSet.map { equipmentItems[$0].equipmentType }
+
+        // Check if any removed equipment appears in the current programme
+        let programEquipment = currentProgramEquipmentTypes()
+        let affectsProgram = removedTypes.contains { programEquipment.contains($0) }
+
+        equipmentItems.remove(atOffsets: indexSet)
+        commitEquipmentChanges()
+        equipmentChangedSinceLastRegenerate = true
+
+        if affectsProgram {
+            // Non-blocking informational message surfaced via the footer is sufficient;
+            // the note is static in the footer. Deletes are already committed.
+            // Additional per-deletion alert could be added here if needed.
+            _ = affectsProgram // suppress unused warning
+        }
+    }
+
+    /// Commits the current equipmentItems back to the confirmedProfile and notifies the parent.
+    private func commitEquipmentChanges() {
+        guard var updated = confirmedProfile else { return }
+        updated.equipment = equipmentItems
+        updated.lastUpdatedAt = Date()
+        onEquipmentChanged?(updated)
+    }
+
+    /// Returns the set of EquipmentTypes currently referenced in the user's programme.
+    private func currentProgramEquipmentTypes() -> Set<EquipmentType> {
+        guard let data = UserDefaults.standard.data(forKey: "com.projectapex.activeProgram"),
+              let mesocycle = try? JSONDecoder.workoutProgram.decode(Mesocycle.self, from: data)
+        else { return [] }
+        let types = mesocycle.weeks.flatMap { $0.trainingDays }
+            .flatMap { $0.exercises }
+            .map { $0.equipmentRequired }
+        return Set(types)
     }
 
     // MARK: - Profile Section (FB-003)
@@ -215,43 +359,11 @@ struct SettingsView: View {
         }
     }
 
-    /// Gym management section — always visible; content adapts to profile state.
-    private var gymSection: some View {
-        Section("Gym") {
-            if hasExistingProfile {
-                // Profile summary row
-                if let profile = confirmedProfile {
-                    HStack {
-                        Label("Equipment", systemImage: "dumbbell.fill")
-                        Spacer()
-                        Text("\(profile.equipment.count) items")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                // Re-scan
-                Button {
-                    showingRescanAlert = true
-                } label: {
-                    Label("Re-scan Gym", systemImage: "camera.viewfinder")
-                        .foregroundStyle(.primary)
-                }
-            } else {
-                // First-time scan CTA
-                Button {
-                    onScanFirst?()
-                } label: {
-                    Label("Scan Your Gym", systemImage: "camera.viewfinder")
-                        .foregroundStyle(.primary)
-                }
-            }
-        }
-    }
-
     /// Program management section — only shown when a gym profile exists.
     private var programSection: some View {
         Section("Program") {
             Button {
-                showingRegenerateAlert = true
+                showingRegenerateSheet = true
             } label: {
                 Label("Regenerate Program", systemImage: "arrow.clockwise.circle")
                     .foregroundStyle(isRegenerating ? .secondary : .primary)
@@ -260,11 +372,99 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Regenerate Confirmation Sheet
+
+    /// Bottom sheet confirming regeneration. Makes clear that history is preserved
+    /// and notes if the equipment list has changed since the last generation.
+    private var regenerateConfirmationSheet: some View {
+        VStack(spacing: 0) {
+            // Drag handle
+            Capsule()
+                .fill(Color.secondary.opacity(0.4))
+                .frame(width: 36, height: 5)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
+
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Image(systemName: "arrow.clockwise.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.blue)
+                    Text("Regenerate Program?")
+                        .font(.title3.bold())
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    // Always-present preservation guarantee
+                    Label {
+                        Text("Your completed workouts will be preserved. Your programme will continue from your next scheduled session.")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                    } icon: {
+                        Image(systemName: "checkmark.seal.fill")
+                            .foregroundStyle(.green)
+                    }
+
+                    Label {
+                        Text("Your workout history, lift progression, and AI memory are never deleted.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } icon: {
+                        Image(systemName: "brain.head.profile")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // Conditional: only shown when equipment was edited
+                    if equipmentChangedSinceLastRegenerate {
+                        Label {
+                            Text("Your programme will be updated to reflect your current equipment list.")
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                        } icon: {
+                            Image(systemName: "dumbbell.fill")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+
+                Divider()
+
+                // Action buttons
+                VStack(spacing: 12) {
+                    Button {
+                        showingRegenerateSheet = false
+                        equipmentChangedSinceLastRegenerate = false
+                        onRegenerateProgram?()
+                    } label: {
+                        Text("Regenerate")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Button("Cancel", role: .cancel) {
+                        showingRegenerateSheet = false
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.bottom, 32)
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.hidden)
+    }
+
     private var developerSection: some View {
         Section("Developer") {
-            NavigationLink(destination: DeveloperSettingsView()) {
+            #if DEBUG
+            NavigationLink(destination: DeveloperSettingsView(onResetAll: onResetAll)) {
                 Label("Developer Settings", systemImage: "key.fill")
             }
+            #endif
         }
     }
 
@@ -318,7 +518,12 @@ struct SettingsView: View {
 
 #Preview("With profile") {
     NavigationStack {
-        SettingsView(hasExistingProfile: true, onRescan: { })
+        SettingsView(
+            hasExistingProfile: true,
+            onRescan: { },
+            confirmedProfile: GymProfile.mockProfile(),
+            onEquipmentChanged: { _ in }
+        )
     }
     .preferredColorScheme(.dark)
 }

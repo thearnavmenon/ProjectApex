@@ -1,0 +1,122 @@
+// FallbackLogRecord.swift
+// ProjectApex — Services
+//
+// Structured diagnostic record emitted whenever an LLM service returns a fallback
+// (non-AI) result, either due to a transient error, timeout, or encoding failure.
+//
+// Emission target: os.Logger (subsystem: "com.projectapex", category: "Fallback").
+// TODO: Also enqueue to Supabase `fallback_logs` table via WriteAheadQueue once
+//       WAQ is injected into the relevant services.
+//
+// ISOLATION NOTE: nonisolated struct — callable from any actor context.
+
+import Foundation
+import OSLog
+
+nonisolated struct FallbackLogRecord: Codable, Sendable {
+
+    // MARK: - Fields
+
+    /// String constant identifying the service method that fell back (see statics below).
+    let callSite: String
+    /// HTTP status code, if the fallback was caused by an HTTP error response.
+    let httpStatus: Int?
+    /// Anthropic's `request-id` response header, if captured from the error body.
+    let anthropicRequestId: String?
+    /// Human-readable description of the fallback cause.
+    let reason: String
+    /// Active workout session UUID at the time of the fallback, if available.
+    let sessionId: String?
+    /// Wall-clock time of the fallback event.
+    let timestamp: Date
+
+    // MARK: - Call site constants
+
+    static let prescribeCallSite           = "AIInferenceService.prescribe"
+    static let prescribeAdaptationCallSite = "AIInferenceService.prescribeAdaptation"
+    static let sessionPlanCallSite         = "SessionPlanService.generateSession"
+    static let exerciseSwapCallSite        = "ExerciseSwapService.sendMessage"
+    static let memoryClassifyCallSite      = "MemoryService.classifyTags"
+
+    // MARK: - Init
+
+    init(
+        callSite: String,
+        httpStatus: Int? = nil,
+        anthropicRequestId: String? = nil,
+        reason: String,
+        sessionId: String? = nil,
+        timestamp: Date = Date()
+    ) {
+        self.callSite = callSite
+        self.httpStatus = httpStatus
+        self.anthropicRequestId = anthropicRequestId
+        self.reason = reason
+        self.sessionId = sessionId
+        self.timestamp = timestamp
+    }
+
+    // MARK: - Logger
+
+    private static let logger = Logger(subsystem: "com.projectapex", category: "Fallback")
+
+    // MARK: - Emission
+
+    /// Emits this record to os.Logger. Best-effort — never throws.
+    func emit() {
+        let status = httpStatus.map { String($0) } ?? "nil"
+        let reqId  = anthropicRequestId ?? "nil"
+        let sid    = sessionId ?? "nil"
+        Self.logger.warning(
+            "[\(self.callSite, privacy: .public)] fallback — status=\(status, privacy: .public) requestId=\(reqId, privacy: .public) sessionId=\(sid, privacy: .public) reason=\(self.reason, privacy: .public)"
+        )
+    }
+
+    // MARK: - Convenience factories
+
+    /// Creates a record from a `LLMProviderError`, extracting http status and
+    /// the Anthropic request-id if encoded in the error body by `AnthropicProvider`.
+    static func from(
+        callSite: String,
+        error: LLMProviderError,
+        sessionId: String? = nil
+    ) -> FallbackLogRecord {
+        var httpStatus: Int?
+        var requestId: String?
+        if case .httpError(let status, _) = error {
+            httpStatus = status
+            requestId  = TransientRetryPolicy.extractAnthropicRequestId(from: error)
+        }
+        return FallbackLogRecord(
+            callSite: callSite,
+            httpStatus: httpStatus,
+            anthropicRequestId: requestId,
+            reason: error.localizedDescription,
+            sessionId: sessionId
+        )
+    }
+
+    /// Creates a record from a `FallbackReason` (used by `AIInferenceService`).
+    static func from(
+        callSite: String,
+        fallbackReason: FallbackReason,
+        sessionId: String? = nil
+    ) -> FallbackLogRecord {
+        let reason: String
+        switch fallbackReason {
+        case .timeout:
+            reason = "timeout (8s)"
+        case .maxRetriesExceeded(let lastError):
+            reason = "maxRetriesExceeded: \(lastError.prefix(200))"
+        case .llmProviderError(let msg):
+            reason = "llmProviderError: \(msg.prefix(200))"
+        case .encodingFailed(let msg):
+            reason = "encodingFailed: \(msg)"
+        }
+        return FallbackLogRecord(
+            callSite: callSite,
+            reason: reason,
+            sessionId: sessionId
+        )
+    }
+}

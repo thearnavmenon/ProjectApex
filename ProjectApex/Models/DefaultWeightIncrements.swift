@@ -10,7 +10,7 @@ import Foundation
 
 // MARK: - DefaultWeightIncrements
 
-enum DefaultWeightIncrements {
+nonisolated enum DefaultWeightIncrements {
 
     static let dumbbells: [Double] = [
         2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20,
@@ -28,6 +28,14 @@ enum DefaultWeightIncrements {
         55, 60, 65, 70, 75, 80, 90, 100
     ]
 
+    /// Weight stack machines (leg press, hack squat, chest press, shoulder press, etc.).
+    /// Stacks go up in 5 kg steps — 2.5 kg plates do not exist on most commercial machines.
+    static let machineStack: [Double] = [
+        5, 10, 15, 20, 25, 30, 35, 40, 45, 50,
+        55, 60, 65, 70, 75, 80, 90, 100, 110, 120,
+        130, 140, 150, 160, 180, 200
+    ]
+
     static let kettlebells: [Double] = [
         4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40
     ]
@@ -38,12 +46,21 @@ enum DefaultWeightIncrements {
     static func defaults(for type: EquipmentType) -> [Double] {
         switch type {
         case .dumbbellSet:              return dumbbells
-        case .barbell:                  return barbellLoadings
+        case .barbell, .ezCurlBar:      return barbellLoadings
         case .cableMachine,
              .cableMachineDual,
              .latPulldown,
              .seatedRow,
              .cableCrossover:           return cableStack
+        case .smithMachine,
+             .legPress,
+             .hackSquat,
+             .chestPressMachine,
+             .shoulderPressMachine,
+             .legExtension,
+             .legCurl,
+             .pecDeck,
+             .preacherCurl:             return machineStack
         case .kettlebellSet:            return kettlebells
         default:                        return []
         }

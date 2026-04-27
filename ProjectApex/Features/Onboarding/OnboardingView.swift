@@ -857,6 +857,10 @@ struct OnboardingView: View {
         // Persist user record (and userId in Keychain) before generation.
         await persistUserIfNeeded()
 
+        // Persist daysPerWeek before the gymProfile guard so it is always
+        // written regardless of whether the user skipped the gym scan.
+        UserDefaults.standard.set(profile.daysPerWeek, forKey: UserProfileConstants.daysPerWeekKey)
+
         guard let gymProf = gymProfile else {
             // No gym profile — can't generate a valid program. Advance directly to ready.
             isGenerating = false
@@ -873,10 +877,14 @@ struct OnboardingView: View {
                 bodyweightKg: profile.bodyweightKg,
                 ageYears: profile.age
             )
-            _ = try await deps.programGenerationService.generate(
+            print("[OnboardingView] runProgramGeneration — training_days_per_week: \(profile.daysPerWeek)")
+            let mesocycle = try await deps.programGenerationService.generate(
                 userProfile: userProfile,
-                gymProfile: gymProf
+                gymProfile: gymProf,
+                trainingDaysPerWeek: profile.daysPerWeek
             )
+            // Cache immediately so ProgramViewModel.loadProgram() finds it on the fast path.
+            mesocycle.saveToUserDefaults()
             isGenerating = false
             withAnimation(.spring(response: 0.38, dampingFraction: 0.80)) { step = 6 }
         } catch {
@@ -951,6 +959,8 @@ enum UserProfileConstants {
     static let heightCmKey      = "com.projectapex.user.heightCm"
     static let ageKey           = "com.projectapex.user.age"
     static let trainingAgeKey   = "com.projectapex.user.trainingAge"
+    /// Number of training days per week selected during onboarding. Default 4 if absent.
+    static let daysPerWeekKey   = "com.projectapex.user.daysPerWeek"
     /// Incremented after each completed workout session. 0 = no sessions ever completed.
     /// Used to show the first-session calibration banner (FB-005).
     static let sessionCountKey  = "com.projectapex.user.sessionCount"

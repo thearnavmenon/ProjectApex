@@ -84,13 +84,15 @@ actor WriteAheadQueue {
     // MARK: - Dependencies
 
     private let supabase: SupabaseClient
+    private let userDefaults: UserDefaults
 
     // MARK: - Init
 
-    init(supabase: SupabaseClient) {
+    init(supabase: SupabaseClient, userDefaults: UserDefaults = .standard) {
         self.supabase = supabase
+        self.userDefaults = userDefaults
         // Restore any persisted queue items from a previous session
-        self.queue = Self.loadPersistedQueue()
+        self.queue = Self.loadPersistedQueue(userDefaults: userDefaults)
     }
 
     // MARK: - Public API
@@ -166,10 +168,27 @@ actor WriteAheadQueue {
     /// Returns the number of items currently in the queue.
     var pendingCount: Int { queue.count }
 
+    /// Returns all pending `set_log` entries for the given session that have not
+    /// yet been flushed to Supabase.
+    ///
+    /// Used by `WorkoutViewModel.resumeSession()` to merge local unflushed set_logs
+    /// with the remote Supabase view, ensuring crash-recovered sets are never lost.
+    /// WAQ entries win over remote entries on conflict (same `SetLog.id`).
+    func pendingSetLogs(forSession sessionId: UUID) -> [SetLog] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return queue
+            .filter { $0.table == "set_logs" }
+            .compactMap { entry in
+                guard let log = try? decoder.decode(SetLog.self, from: entry.payload) else { return nil }
+                return log.sessionId == sessionId ? log : nil
+            }
+    }
+
     /// Clears all queued items (for testing / reset).
     func clearAll() {
         queue.removeAll()
-        persistQueue()
+        userDefaults.removeObject(forKey: Self.persistenceKey)
     }
 
     // MARK: - Blocking Write (for session summary)
@@ -203,8 +222,10 @@ actor WriteAheadQueue {
         do {
             // Build a raw insert using the pre-encoded JSON data
             try await supabase.insertRawJSON(item.payload, table: item.table)
+            print("[WriteAheadQueue] Flushed item \(item.id) → table: \(item.table)")
             return true
         } catch {
+            print("[WriteAheadQueue] Flush failed for item \(item.id), table: \(item.table), retry \(item.retryCount)/\(Self.maxRetries): \(error.localizedDescription)")
             return false
         }
     }
@@ -214,12 +235,12 @@ actor WriteAheadQueue {
     /// Persists the current queue to UserDefaults.
     private func persistQueue() {
         guard let data = try? JSONEncoder().encode(queue) else { return }
-        UserDefaults.standard.set(data, forKey: Self.persistenceKey)
+        userDefaults.set(data, forKey: Self.persistenceKey)
     }
 
     /// Loads any previously persisted queue from UserDefaults.
-    private nonisolated static func loadPersistedQueue() -> [QueuedWrite] {
-        guard let data = UserDefaults.standard.data(forKey: persistenceKey),
+    private nonisolated static func loadPersistedQueue(userDefaults: UserDefaults) -> [QueuedWrite] {
+        guard let data = userDefaults.data(forKey: persistenceKey),
               let items = try? JSONDecoder().decode([QueuedWrite].self, from: data)
         else { return [] }
         return items

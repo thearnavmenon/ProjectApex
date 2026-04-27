@@ -191,7 +191,8 @@ enum InferenceSpike {
                     intensityPercent: nil
                 ),
                 primaryMuscles: ["pectoralis_major", "anterior_deltoid"],
-                secondaryMuscles: ["triceps_brachii"]
+                secondaryMuscles: ["triceps_brachii"],
+                bodyweightOnly: nil
             ),
             sessionHistoryToday: [],
             currentExerciseSetsToday: [
@@ -204,7 +205,8 @@ enum InferenceSpike {
                     tempo: "3-1-1-0",
                     restTakenSeconds: 150,
                     completedAt: now,
-                    userCorrectedWeight: nil
+                    userCorrectedWeight: nil,
+                    daysAgo: 0
                 )
             ],
             withinSessionPerformance: [
@@ -217,7 +219,8 @@ enum InferenceSpike {
                     tempo: "3-1-1-0",
                     restTakenSeconds: 150,
                     completedAt: now,
-                    userCorrectedWeight: nil
+                    userCorrectedWeight: nil,
+                    daysAgo: 0
                 )
             ],
             historicalPerformance: HistoricalPerformance(
@@ -230,7 +233,8 @@ enum InferenceSpike {
                     tempo: "3-0-1-0",
                     restTakenSeconds: 180,
                     completedAt: nil,
-                    userCorrectedWeight: nil
+                    userCorrectedWeight: nil,
+                    daysAgo: nil
                 ),
                 recentAverage: RecentAverage(
                     sessionCount: 4,
@@ -241,7 +245,20 @@ enum InferenceSpike {
                 trend: "improving"
             ),
             qualitativeNotesToday: [],
-            ragRetrievedMemory: []
+            ragRetrievedMemory: [],
+            sessionLog: [
+                SessionLogEntry(
+                    exercise: "Barbell Bench Press",
+                    setNumber: 1,
+                    prescribedWeightKg: 85.0,
+                    prescribedReps: 8,
+                    actualReps: 7,
+                    rpe: 8.0,
+                    outcomeNote: "near_miss"
+                )
+            ],
+            weeklyFatigueSummary: nil,
+            gymWeightFacts: nil
         )
     }
 }

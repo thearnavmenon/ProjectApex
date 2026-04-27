@@ -28,8 +28,22 @@ private final class ProgramStubURLProtocol: URLProtocol {
 
     override func startLoading() {
         ProgramStubURLProtocol.lastRequest = request
+        // httpBody is set directly on the request; URLSession may move it to
+        // httpBodyStream for the protocol handler, so check both.
         if let body = request.httpBody {
             ProgramStubURLProtocol.requestBodies.append(body)
+        } else if let stream = request.httpBodyStream {
+            stream.open()
+            var data = Data()
+            let bufferSize = 1024
+            let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+            while stream.hasBytesAvailable {
+                let read = stream.read(buffer, maxLength: bufferSize)
+                if read > 0 { data.append(buffer, count: read) }
+            }
+            buffer.deallocate()
+            stream.close()
+            if !data.isEmpty { ProgramStubURLProtocol.requestBodies.append(data) }
         }
         let response = HTTPURLResponse(
             url: request.url!,

@@ -19,15 +19,21 @@ import XCTest
 final class GymFactStoreTests: XCTestCase {
 
     private var store: GymFactStore!
+    private var testDefaults: UserDefaults!
+    private var testSuiteName: String!
 
     override func setUp() async throws {
         try await super.setUp()
-        store = GymFactStore()
+        testSuiteName = "com.test.gymfactstore.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: testSuiteName)
+        store = GymFactStore(userDefaults: testDefaults!)
         await store.clearAll()
     }
 
     override func tearDown() async throws {
         await store.clearAll()
+        testDefaults.removePersistentDomain(forName: testSuiteName)
+        testDefaults = nil
         try await super.tearDown()
     }
 
@@ -100,7 +106,7 @@ final class GymFactStoreTests: XCTestCase {
             for: .cableMachine,
             prescribedWeight: 35.0
         )
-        XCTAssertEqual(result, 30.0, accuracy: 0.001)
+        XCTAssertEqual(result ?? -1, 30.0, accuracy: 0.001)
     }
 
     func test_knownSubstitution_toleratesSmallFloatingPointDifference() async {
@@ -114,7 +120,7 @@ final class GymFactStoreTests: XCTestCase {
             for: .dumbbellSet,
             prescribedWeight: 22.499
         )
-        XCTAssertEqual(result, 20.0, accuracy: 0.001)
+        XCTAssertEqual(result ?? -1, 20.0, accuracy: 0.001)
     }
 
     func test_knownSubstitution_differentEquipment_returnsNil() async {
@@ -203,8 +209,8 @@ final class GymFactStoreTests: XCTestCase {
             unavailableWeight: 100.0,
             availableWeight: 97.5
         )
-        // Create a new store instance — it should load the persisted fact
-        let store2 = GymFactStore()
+        // Create a new store instance backed by the same test suite — it should load the persisted fact
+        let store2 = GymFactStore(userDefaults: testDefaults)
         let facts = await store2.facts
         XCTAssertEqual(facts.count, 1,
             "Facts must be persisted to UserDefaults and reloaded by a new instance")

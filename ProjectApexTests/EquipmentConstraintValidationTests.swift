@@ -109,42 +109,109 @@ private final class CallCountingProvider: LLMProvider, @unchecked Sendable {
     }
 }
 
-/// Builds a minimal valid MesocycleWrapper JSON for a mesocycle that uses only barbell.
+/// Builds a minimal valid MesocycleTemplateWrapper JSON for a program that uses only barbell.
+/// This matches the format ProgramGenerationService.generate() decodes from the LLM (Stage 1).
 private func barbellOnlyMesocycleJSON(userId: String = "AAAAAAAA-0000-0000-0000-000000000001") -> String {
     """
     {
-      "mesocycle": {
-        "id": "DDDDDDDD-0000-0000-0000-000000000099",
-        "user_id": "\(userId)",
-        "created_at": "2026-03-15T00:00:00Z",
-        "is_active": true,
-        "total_weeks": 12,
+      "mesocycle_template": {
         "periodization_model": "linear_periodization",
-        "weeks": [
+        "phase_templates": [
           {
-            "id": "AAAAAAAA-1111-0000-0000-000000000099",
-            "week_number": 1,
             "phase": "accumulation",
             "training_days": [
               {
-                "id": "BBBBBBBB-0000-0000-0000-000000000099",
                 "day_of_week": 1,
                 "day_label": "Push_A",
                 "session_notes": null,
                 "exercises": [
                   {
-                    "id": "CCCCCCCC-0000-0000-0000-000000000099",
                     "exercise_id": "barbell_bench_press",
                     "name": "Barbell Bench Press",
                     "primary_muscle": "pectoralis_major",
                     "synergists": ["anterior_deltoid"],
-                    "equipment_required": { "type": "barbell" },
+                    "equipment_required": "barbell",
                     "sets": 4,
                     "rep_range": { "min": 8, "max": 12 },
                     "tempo": "3-1-1-0",
                     "rest_seconds": 150,
                     "rir_target": 3,
                     "coaching_cues": ["Retract scapula"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "intensification",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "barbell_bench_press",
+                    "name": "Barbell Bench Press",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": ["anterior_deltoid"],
+                    "equipment_required": "barbell",
+                    "sets": 4,
+                    "rep_range": { "min": 6, "max": 8 },
+                    "tempo": "3-1-1-0",
+                    "rest_seconds": 180,
+                    "rir_target": 2,
+                    "coaching_cues": ["Retract scapula"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "peaking",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "barbell_bench_press",
+                    "name": "Barbell Bench Press",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": ["anterior_deltoid"],
+                    "equipment_required": "barbell",
+                    "sets": 3,
+                    "rep_range": { "min": 3, "max": 5 },
+                    "tempo": "3-1-1-0",
+                    "rest_seconds": 240,
+                    "rir_target": 1,
+                    "coaching_cues": ["Retract scapula"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "deload",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "barbell_bench_press",
+                    "name": "Barbell Bench Press",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": ["anterior_deltoid"],
+                    "equipment_required": "barbell",
+                    "sets": 2,
+                    "rep_range": { "min": 8, "max": 12 },
+                    "tempo": "3-1-1-0",
+                    "rest_seconds": 120,
+                    "rir_target": 4,
+                    "coaching_cues": ["Easy pace"]
                   }
                 ]
               }
@@ -156,41 +223,107 @@ private func barbellOnlyMesocycleJSON(userId: String = "AAAAAAAA-0000-0000-0000-
     """
 }
 
-/// Builds a mesocycle JSON that contains a cable machine exercise (not in limitedGymProfile).
+/// Builds a MesocycleTemplateWrapper JSON that contains a cable machine exercise (not in limitedGymProfile).
 private func cableMachineViolationJSON() -> String {
     """
     {
-      "mesocycle": {
-        "id": "DDDDDDDD-0000-0000-0000-000000000077",
-        "user_id": "AAAAAAAA-0000-0000-0000-000000000001",
-        "created_at": "2026-03-15T00:00:00Z",
-        "is_active": true,
-        "total_weeks": 12,
+      "mesocycle_template": {
         "periodization_model": "linear_periodization",
-        "weeks": [
+        "phase_templates": [
           {
-            "id": "AAAAAAAA-1111-0000-0000-000000000077",
-            "week_number": 1,
             "phase": "accumulation",
             "training_days": [
               {
-                "id": "BBBBBBBB-0000-0000-0000-000000000077",
                 "day_of_week": 1,
                 "day_label": "Push_A",
                 "session_notes": null,
                 "exercises": [
                   {
-                    "id": "CCCCCCCC-0000-0000-0000-000000000077",
                     "exercise_id": "cable_fly",
                     "name": "Cable Fly",
                     "primary_muscle": "pectoralis_major",
                     "synergists": [],
-                    "equipment_required": { "type": "cable_machine_single" },
+                    "equipment_required": "cable_machine_single",
                     "sets": 3,
                     "rep_range": { "min": 12, "max": 15 },
                     "tempo": "2-1-1-0",
                     "rest_seconds": 90,
                     "rir_target": 3,
+                    "coaching_cues": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "intensification",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "cable_fly",
+                    "name": "Cable Fly",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": [],
+                    "equipment_required": "cable_machine_single",
+                    "sets": 3,
+                    "rep_range": { "min": 10, "max": 12 },
+                    "tempo": "2-1-1-0",
+                    "rest_seconds": 90,
+                    "rir_target": 2,
+                    "coaching_cues": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "peaking",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "cable_fly",
+                    "name": "Cable Fly",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": [],
+                    "equipment_required": "cable_machine_single",
+                    "sets": 3,
+                    "rep_range": { "min": 8, "max": 10 },
+                    "tempo": "2-1-1-0",
+                    "rest_seconds": 90,
+                    "rir_target": 1,
+                    "coaching_cues": []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "deload",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "cable_fly",
+                    "name": "Cable Fly",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": [],
+                    "equipment_required": "cable_machine_single",
+                    "sets": 2,
+                    "rep_range": { "min": 12, "max": 15 },
+                    "tempo": "2-1-1-0",
+                    "rest_seconds": 90,
+                    "rir_target": 4,
                     "coaching_cues": []
                   }
                 ]

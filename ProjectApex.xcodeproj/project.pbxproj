@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */; };
+		474B848D2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */; };
+		478DD9F12F9928C6001D3636 /* SkipFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */; };
+		478DD9F52F993A1E001D3636 /* PatternPhaseServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478DD9F42F993A1E001D3636 /* PatternPhaseServiceTests.swift */; };
 		47BB8E5A2F626C900082C53F /* WorkoutProgramTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */; };
 		47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */; };
 		47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */; };
@@ -22,6 +25,9 @@
 		47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CB22F61A8CB007B3B34 /* GymProfileTests.swift */; };
 		47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */; };
 		47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */; };
+		47DFECFD2F72C1FC006F4B62 /* ExerciseLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DFECFC2F72C1FC006F4B62 /* ExerciseLibraryTests.swift */; };
+		47DFED052F73D858006F4B62 /* StagnationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DFED042F73D858006F4B62 /* StagnationServiceTests.swift */; };
+		47DFED072F73D887006F4B62 /* VolumeValidationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DFED062F73D887006F4B62 /* VolumeValidationServiceTests.swift */; };
 		47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */; };
 		47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */; };
 		47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */; };
@@ -40,6 +46,9 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroPlanServiceDayCountTests.swift; sourceTree = "<group>"; };
+		478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkipFeatureTests.swift; sourceTree = "<group>"; };
+		478DD9F42F993A1E001D3636 /* PatternPhaseServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatternPhaseServiceTests.swift; sourceTree = "<group>"; };
 		47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgramTests.swift; sourceTree = "<group>"; };
 		47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGenerationServiceTests.swift; sourceTree = "<group>"; };
 		47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentConstraintValidationTests.swift; sourceTree = "<group>"; };
@@ -55,6 +64,12 @@
 		47D91CB22F61A8CB007B3B34 /* GymProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymProfileTests.swift; sourceTree = "<group>"; };
 		47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutContextAssemblyTests.swift; sourceTree = "<group>"; };
 		47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIInferenceServiceTests.swift; sourceTree = "<group>"; };
+		47DFECED2F723975006F4B62 /* InferenceRetrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InferenceRetrySheet.swift; sourceTree = "<group>"; };
+		47DFECF42F7261C1006F4B62 /* ExerciseSwapViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapViewModel.swift; sourceTree = "<group>"; };
+		47DFECF52F7261EE006F4B62 /* ExerciseSwapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapView.swift; sourceTree = "<group>"; };
+		47DFECFC2F72C1FC006F4B62 /* ExerciseLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseLibraryTests.swift; sourceTree = "<group>"; };
+		47DFED042F73D858006F4B62 /* StagnationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StagnationServiceTests.swift; sourceTree = "<group>"; };
+		47DFED062F73D887006F4B62 /* VolumeValidationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeValidationServiceTests.swift; sourceTree = "<group>"; };
 		47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClientTests.swift; sourceTree = "<group>"; };
 		47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentMergerTests.swift; sourceTree = "<group>"; };
 		47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultWeightIncrementsTests.swift; sourceTree = "<group>"; };
@@ -130,6 +145,9 @@
 		47E356D52F61CE4100C69CD6 /* Workout */ = {
 			isa = PBXGroup;
 			children = (
+				47DFECED2F723975006F4B62 /* InferenceRetrySheet.swift */,
+				47DFECF42F7261C1006F4B62 /* ExerciseSwapViewModel.swift */,
+				47DFECF52F7261EE006F4B62 /* ExerciseSwapView.swift */,
 			);
 			path = Workout;
 			sourceTree = "<group>";
@@ -164,6 +182,12 @@
 				47C5C1B72F62BB3D0005F99E /* GymStreakServiceTests.swift */,
 				47C5C1B92F62C0550005F99E /* SpeechServiceTests.swift */,
 				47C5C1BB2F62C08E0005F99E /* MemoryServiceTests.swift */,
+				474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */,
+				47DFECFC2F72C1FC006F4B62 /* ExerciseLibraryTests.swift */,
+				47DFED042F73D858006F4B62 /* StagnationServiceTests.swift */,
+				47DFED062F73D887006F4B62 /* VolumeValidationServiceTests.swift */,
+				478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */,
+				478DD9F42F993A1E001D3636 /* PatternPhaseServiceTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -269,21 +293,27 @@
 				47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */,
 				47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */,
 				47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */,
+				47DFED052F73D858006F4B62 /* StagnationServiceTests.swift in Sources */,
 				47BB8E752F6294B00082C53F /* WorkoutSessionManagerTests.swift in Sources */,
 				47C5C1BC2F62C08E0005F99E /* MemoryServiceTests.swift in Sources */,
 				47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */,
 				47BB8E5A2F626C900082C53F /* WorkoutProgramTests.swift in Sources */,
 				47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */,
 				47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */,
+				47DFECFD2F72C1FC006F4B62 /* ExerciseLibraryTests.swift in Sources */,
 				47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */,
+				47DFED072F73D887006F4B62 /* VolumeValidationServiceTests.swift in Sources */,
 				47C5C1B82F62BB3D0005F99E /* GymStreakServiceTests.swift in Sources */,
 				47BB8E662F6273F30082C53F /* ProgramPersistenceTests.swift in Sources */,
+				478DD9F12F9928C6001D3636 /* SkipFeatureTests.swift in Sources */,
 				32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */,
 				47C5C1AF2F62A64E0005F99E /* WriteAheadQueueTests.swift in Sources */,
+				474B848D2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift in Sources */,
 				47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */,
 				47D91CA42F619741007B3B34 /* KeychainServiceTests.swift in Sources */,
 				47C5C1BA2F62C0550005F99E /* SpeechServiceTests.swift in Sources */,
 				47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */,
+				478DD9F52F993A1E001D3636 /* PatternPhaseServiceTests.swift in Sources */,
 				47E356DC2F61D07B00C69CD6 /* GymFactStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

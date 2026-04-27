@@ -39,8 +39,13 @@ struct ActiveSetView: View {
     let streak: StreakResult
     /// Injected SpeechService for live voice notes (P4-T06).
     let speechService: SpeechService
+    /// Injected ExerciseSwapService for mid-session swap chat (P3-T10).
+    let exerciseSwapService: ExerciseSwapService
 
     // MARK: - Local UI state
+
+    /// ViewModel driving the exercise swap chat sheet (P3-T10).
+    @State private var swapViewModel: ExerciseSwapViewModel?
 
     /// True after "Set Complete" tap — shows rep/RPE confirmation sheet
     @State private var showRepConfirmation: Bool = false
@@ -66,10 +71,6 @@ struct ActiveSetView: View {
 
     /// Controls the inline weight override sheet (FB-001 — tapping the weight value)
     @State private var showWeightOverride: Bool = false
-
-    /// Controls the "Coach offline" non-blocking banner visibility
-    @State private var showOfflineBanner: Bool = false
-    @State private var offlineBannerTask: Task<Void, Never>?
 
     // MARK: - Voice note state (P4-T06)
 
@@ -124,15 +125,6 @@ struct ActiveSetView: View {
                 }
             }
 
-            // "Coach offline" non-blocking banner
-            if showOfflineBanner, let desc = viewModel.fallbackDescription {
-                VStack {
-                    offlineBanner(description: desc)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .padding(.top, 8)
-                    Spacer()
-                }
-            }
         }
         .sheet(isPresented: $showRepConfirmation) {
             repRPEConfirmationSheet
@@ -156,8 +148,48 @@ struct ActiveSetView: View {
                 .presentationDetents([.medium, .large])
                 .presentationCornerRadius(24)
         }
+        // Exercise swap chat sheet (P3-T10)
+        .sheet(isPresented: $viewModel.showExerciseSwapSheet, onDismiss: {
+            swapViewModel = nil
+        }) {
+            if let vm = swapViewModel {
+                ExerciseSwapView(viewModel: vm)
+            }
+        }
+        .onChange(of: viewModel.showExerciseSwapSheet) { _, isShowing in
+            guard isShowing else { return }
+            let vm = ExerciseSwapViewModel(service: exerciseSwapService)
+            vm.onConfirmSwap = { suggestion, reason in
+                viewModel.onExerciseSwapConfirmed(suggestion: suggestion, reason: reason)
+            }
+            vm.onDismiss = {
+                viewModel.showExerciseSwapSheet = false
+            }
+            swapViewModel = vm
+            Task {
+                if let context = await viewModel.buildSwapContext() {
+                    await vm.startConversation(context: context)
+                }
+            }
+        }
         // End session early confirmation (P3-T09)
-        .alert("End Workout Early?", isPresented: $viewModel.showEndSessionEarlyConfirmation) {
+        // Two variants: zero-sets → discard; with-sets → partial save.
+        .alert("No Sets Logged", isPresented: Binding(
+            get: { viewModel.showEndSessionEarlyConfirmation && !viewModel.hasLoggedAnySets },
+            set: { if !$0 { viewModel.showEndSessionEarlyConfirmation = false } }
+        )) {
+            Button("Exit Without Saving", role: .destructive) {
+                viewModel.showEndSessionEarlyConfirmation = false
+                viewModel.resetSession()
+            }
+            Button("Stay", role: .cancel) {}
+        } message: {
+            Text("No sets logged — this session will not be saved. Exit anyway?")
+        }
+        .alert("End Workout Early?", isPresented: Binding(
+            get: { viewModel.showEndSessionEarlyConfirmation && viewModel.hasLoggedAnySets },
+            set: { if !$0 { viewModel.showEndSessionEarlyConfirmation = false } }
+        )) {
             Button("End Workout", role: .destructive) {
                 viewModel.onEndSessionEarly()
             }
@@ -169,40 +201,52 @@ struct ActiveSetView: View {
         .onChange(of: viewModel.currentPrescription?.reps) { _, newReps in
             if let r = newReps { actualReps = r }
         }
-        // Show/hide offline banner reactively
-        .onChange(of: viewModel.isAIOffline) { _, offline in
-            if offline {
-                triggerOfflineBanner()
-            }
-        }
         .onAppear {
             if let r = viewModel.currentPrescription?.reps { actualReps = r }
-            if viewModel.isAIOffline { triggerOfflineBanner() }
         }
     }
 
     // MARK: - Session Header (ghost)
 
     private var sessionHeader: some View {
-        HStack {
-            Text("\(exercise.name.uppercased()) · SET \(setNumber) OF \(exercise.sets)")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.38))
-                .tracking(0.8)
-                .lineLimit(1)
-            Spacer()
-            Menu {
-                Button(role: .destructive) {
-                    viewModel.requestEndSessionEarly()
-                } label: {
-                    Label("End Workout Early", systemImage: "xmark.circle")
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 18, weight: .medium))
+        VStack(spacing: 4) {
+            HStack {
+                Text("\(exercise.name.uppercased()) · SET \(setNumber) OF \(exercise.sets)")
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.38))
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
+                    .tracking(0.8)
+                    .lineLimit(1)
+                Spacer()
+                Menu {
+                    Button {
+                        viewModel.requestExerciseSwap()
+                    } label: {
+                        Label("Swap Exercise", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    Button {
+                        viewModel.onPauseSession()
+                    } label: {
+                        Label("Pause Session", systemImage: "pause.circle")
+                    }
+                    Button(role: .destructive) {
+                        viewModel.requestEndSessionEarly()
+                    } label: {
+                        Label("End Workout Early", systemImage: "xmark.circle")
+                    }
+                    .disabled(!viewModel.hasLoggedAnySets)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+            }
+            if !viewModel.hasLoggedAnySets {
+                Text("Complete at least one set to end the session")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.25))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
     }
@@ -274,31 +318,39 @@ struct ActiveSetView: View {
 
             // Weight / Reps hero numbers
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                // Tappable weight value — opens inline override sheet (FB-001)
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    showWeightOverride = true
-                } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(weightString(prescription.weightKg))
-                            .font(.system(size: 72, weight: .black, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white)
-                            .contentTransition(.numericText())
-                            .id("weight_\(prescription.weightKg)")
-                            .underline(true, color: .white.opacity(0.28))
-                        Text("kg")
-                            .font(.system(size: 24, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.55))
-                            .baselineOffset(6)
-                        Image(systemName: "pencil")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.35))
-                            .baselineOffset(8)
+                if prescription.weightKg == 0 {
+                    // Bodyweight exercise — show non-interactive "BW" label
+                    Text("BW")
+                        .font(.system(size: 72, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .accessibilityLabel("Bodyweight exercise")
+                } else {
+                    // Tappable weight value — opens inline override sheet (FB-001)
+                    Button {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        showWeightOverride = true
+                    } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text(weightString(prescription.weightKg))
+                                .font(.system(size: 72, weight: .black, design: .rounded).monospacedDigit())
+                                .foregroundStyle(.white)
+                                .contentTransition(.numericText())
+                                .id("weight_\(prescription.weightKg)")
+                                .underline(true, color: .white.opacity(0.28))
+                            Text("kg")
+                                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.55))
+                                .baselineOffset(6)
+                            Image(systemName: "pencil")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.35))
+                                .baselineOffset(8)
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Adjust weight: \(weightString(prescription.weightKg)) kilograms")
+                    .accessibilityHint("Double tap to change the weight")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Adjust weight: \(weightString(prescription.weightKg)) kilograms")
-                .accessibilityHint("Double tap to change the weight")
 
                 Spacer()
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -338,20 +390,31 @@ struct ActiveSetView: View {
                     .padding(.bottom, 6)
             }
 
-            // "Weight not available?" button (P1-T11)
-            Button {
-                showWeightCorrection = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "scalemass")
-                        .font(.system(size: 10, weight: .medium))
-                    Text("Weight not available?")
-                        .font(.system(size: 12, weight: .medium))
+            // "My gym doesn't have this weight" button — hidden for bodyweight exercises
+            if prescription.weightKg != 0 {
+                Button {
+                    showWeightCorrection = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "scalemass")
+                            .font(.system(size: 10, weight: .medium))
+                        Text("My gym doesn't have this weight")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.35))
                 }
-                .foregroundStyle(.white.opacity(0.35))
+                .padding(.horizontal, 24)
+                .padding(.bottom, viewModel.gymWeightHintText != nil ? 4 : 8)
+
+                // Available weight range hint — shown when GymFactStore has corrections for this equipment
+                if let hint = viewModel.gymWeightHintText {
+                    Text(hint)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.25))
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 8)
+                }
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 8)
 
             glassRowDivider
 
@@ -449,6 +512,15 @@ struct ActiveSetView: View {
         .accessibilityHint("Double tap to mark set as complete")
         .onAppear {
             withAnimation(.apexCrystalise) {}
+            // Load gym weight hint on first appearance
+            viewModel.refreshGymWeightHint(
+                equipmentType: exercise.equipmentRequired,
+                near: prescription.weightKg
+            )
+        }
+        .onChange(of: prescription.weightKg) { _, newWeight in
+            // Refresh hint when weight changes (e.g. after a correction)
+            viewModel.refreshGymWeightHint(equipmentType: exercise.equipmentRequired, near: newWeight)
         }
     }
 
@@ -784,6 +856,8 @@ struct ActiveSetView: View {
     }
 
     // MARK: - Weight Override Sheet (FB-001 — tapping the weight value)
+    // Session-only: adjusts the weight for this set without writing to GymFactStore.
+    // Use "My gym doesn't have this weight" for a permanent equipment inventory correction.
 
     @ViewBuilder
     private var weightOverrideSheet: some View {
@@ -792,7 +866,7 @@ struct ActiveSetView: View {
             currentWeight: weight,
             equipmentType: exercise.equipmentRequired,
             onConfirmed: { confirmedWeight in
-                viewModel.onWeightCorrection(
+                viewModel.onWeightOverrideSessionOnly(
                     confirmedWeight: confirmedWeight,
                     equipmentType: exercise.equipmentRequired
                 )
@@ -809,34 +883,21 @@ struct ActiveSetView: View {
             prescribedWeight: weight,
             equipmentType: exercise.equipmentRequired,
             onConfirmed: { confirmedWeight in
+                // Permanent path — saves to GymFactStore
                 viewModel.onWeightCorrection(
+                    unavailableWeight: weight,
+                    confirmedWeight: confirmedWeight,
+                    equipmentType: exercise.equipmentRequired
+                )
+            },
+            onSessionOnly: { confirmedWeight in
+                // Session-only path — does NOT save to GymFactStore
+                viewModel.onWeightOverrideSessionOnly(
                     confirmedWeight: confirmedWeight,
                     equipmentType: exercise.equipmentRequired
                 )
             }
         )
-    }
-
-    // MARK: - Offline Banner (P3-T07)
-
-    private func offlineBanner(description: String) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "brain.head.profile.slash")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
-            Text("Coach offline — using program defaults")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.70))
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.white.opacity(0.07), in: Capsule())
-        .overlay(
-            Capsule()
-                .stroke(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.35), lineWidth: 0.5)
-        )
-        .padding(.horizontal, 24)
     }
 
     // MARK: - Shared Sub-components
@@ -953,20 +1014,6 @@ struct ActiveSetView: View {
         startDismissCountdown()
     }
 
-    private func triggerOfflineBanner() {
-        offlineBannerTask?.cancel()
-        withAnimation(.spring(response: 0.45, dampingFraction: 0.70)) {
-            showOfflineBanner = true
-        }
-        UINotificationFeedbackGenerator().notificationOccurred(.error)
-        offlineBannerTask = Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3 seconds
-            if Task.isCancelled { return }
-            withAnimation(.easeOut(duration: 0.40)) {
-                showOfflineBanner = false
-            }
-        }
-    }
 }
 
 // MARK: - LiquidWaveModifier
@@ -1080,7 +1127,8 @@ private extension AnyTransition {
         ),
         setNumber: 2,
         streak: StreakResult.compute(currentStreakDays: 7, longestStreak: 10),
-        speechService: SpeechService()
+        speechService: SpeechService(),
+        exerciseSwapService: ExerciseSwapService(provider: AnthropicProvider(apiKey: ""))
     )
     .preferredColorScheme(.dark)
 }
@@ -1116,7 +1164,8 @@ private extension AnyTransition {
         ),
         setNumber: 3,
         streak: StreakResult.compute(currentStreakDays: 2, longestStreak: 7),
-        speechService: SpeechService()
+        speechService: SpeechService(),
+        exerciseSwapService: ExerciseSwapService(provider: AnthropicProvider(apiKey: ""))
     )
     .preferredColorScheme(.dark)
 }

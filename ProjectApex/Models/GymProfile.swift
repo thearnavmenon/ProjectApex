@@ -15,6 +15,30 @@
 
 import Foundation
 
+// MARK: - EquipmentCategory
+
+/// High-level groupings used to section the bulk equipment picker.
+/// Mirrors how a real commercial gym is physically laid out.
+nonisolated enum EquipmentCategory: String, CaseIterable, Identifiable, Sendable {
+    case barbell          = "Barbell"
+    case dumbbell         = "Dumbbell & Kettlebell"
+    case cable            = "Cable"
+    case machine          = "Machine"
+    case bodyweightAndRig = "Bodyweight & Rig"
+
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .barbell:          return "minus.rectangle.portrait.fill"
+        case .dumbbell:         return "dumbbell.fill"
+        case .cable:            return "cable.connector"
+        case .machine:          return "gearshape.2.fill"
+        case .bodyweightAndRig: return "figure.mixed.cardio"
+        }
+    }
+}
+
 // MARK: - EquipmentType
 
 /// The category of a piece of gym equipment.
@@ -124,6 +148,36 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
     // MARK: Init from String
     // ---------------------------------------------------------------------------
 
+    /// The high-level category this equipment type belongs to, used to
+    /// group items in the bulk equipment picker.
+    var category: EquipmentCategory {
+        switch self {
+        case .barbell, .ezCurlBar, .powerRack, .sqatRack, .smithMachine:
+            return .barbell
+        case .dumbbellSet, .kettlebellSet:
+            return .dumbbell
+        case .cableMachine, .cableMachineDual, .cableCrossover, .latPulldown, .seatedRow:
+            return .cable
+        case .legPress, .hackSquat, .chestPressMachine, .shoulderPressMachine,
+             .legExtension, .legCurl, .pecDeck, .preacherCurl:
+            return .machine
+        case .adjustableBench, .flatBench, .inclineBench, .pullUpBar,
+             .dipStation, .resistanceBands:
+            return .bodyweightAndRig
+        case .unknown:
+            return .machine
+        }
+    }
+
+    /// True when this equipment type is purely bodyweight — no external weight
+    /// is ever prescribed by the AI for this equipment.
+    var isNaturallyBodyweightOnly: Bool {
+        switch self {
+        case .pullUpBar, .dipStation: return true
+        default: return false
+        }
+    }
+
     /// All known (non-unknown) equipment types, for use in pickers.
     static let knownCases: [EquipmentType] = [
         .dumbbellSet, .barbell, .ezCurlBar, .cableMachine, .cableMachineDual,
@@ -219,18 +273,26 @@ nonisolated struct EquipmentItem: Codable, Identifiable, Equatable, Hashable, Se
     /// Whether this item was detected by the Vision API (vs. manually added).
     var detectedByVision: Bool
 
+    /// True when this is a free-standing bodyweight station (e.g. pull-up bar, dip station)
+    /// where no external weight should ever be prescribed by the AI.
+    /// Defaults to true for naturally bodyweight-only types; can be toggled in Settings.
+    var bodyweightOnly: Bool
+
     init(
         id: UUID = UUID(),
         equipmentType: EquipmentType,
         count: Int = 1,
         notes: String? = nil,
-        detectedByVision: Bool
+        detectedByVision: Bool,
+        bodyweightOnly: Bool? = nil
     ) {
         self.id = id
         self.equipmentType = equipmentType
         self.count = count
         self.notes = notes
         self.detectedByVision = detectedByVision
+        // Default to the type's natural bodyweight-only status if not explicitly provided.
+        self.bodyweightOnly = bodyweightOnly ?? equipmentType.isNaturallyBodyweightOnly
     }
 
     enum CodingKeys: String, CodingKey {
@@ -239,6 +301,23 @@ nonisolated struct EquipmentItem: Codable, Identifiable, Equatable, Hashable, Se
         case count
         case notes
         case detectedByVision = "detected_by_vision"
+        case bodyweightOnly   = "bodyweight_only"
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id              = try c.decode(UUID.self, forKey: .id)
+        equipmentType   = try c.decode(EquipmentType.self, forKey: .equipmentType)
+        count           = try c.decode(Int.self, forKey: .count)
+        notes           = try c.decodeIfPresent(String.self, forKey: .notes)
+        detectedByVision = try c.decode(Bool.self, forKey: .detectedByVision)
+        // Backward-compat: old JSON without this key defaults to type's natural value.
+        if let stored = try c.decodeIfPresent(Bool.self, forKey: .bodyweightOnly) {
+            bodyweightOnly = stored
+        } else {
+            let et = equipmentType
+            bodyweightOnly = et.isNaturallyBodyweightOnly
+        }
     }
 }
 

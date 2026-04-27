@@ -100,13 +100,54 @@ DELOAD (week 12 — active recovery)
   • Sets: 2–3 | Reps: 10–15 | RIR: 4–5 | Rest: 60–90s
 
 ═══════════════════════════════════════════════════════════════
+⚠️  CRITICAL CONSTRAINT — READ FIRST
+═══════════════════════════════════════════════════════════════
+The user's training_days_per_week value is provided in programming_constraints.training_days_per_week.
+
+**YOU MUST generate EXACTLY that many training_days in every phase.**
+
+Do NOT default to 4 days. Do NOT use a standard PPL or Push/Pull/Legs/Upper template
+unless that template's day count exactly matches training_days_per_week.
+Count the training_days array in your response before finalising — it MUST equal
+programming_constraints.training_days_per_week. This is a hard constraint, not a suggestion.
+
+═══════════════════════════════════════════════════════════════
 PROGRAM STRUCTURE
 ═══════════════════════════════════════════════════════════════
-• 4 training days per week (respect programming_constraints.training_days_per_week if set).
+• Number of training days per week: EXACTLY programming_constraints.training_days_per_week.
 • Each session: 4–6 exercises. Compounds first, accessories after.
 • Use consistent day_labels across all phases (e.g. Push_A must appear in all four templates on the same day_of_week).
 • Balance push/pull/legs volume across the week.
 • Deload uses the same day_labels but reduces sets by ~50% and raises RIR to 4–5.
+
+═══════════════════════════════════════════════════════════════
+EXERCISE VARIATION ACROSS PHASES
+═══════════════════════════════════════════════════════════════
+Exercises MUST rotate across the four phases — do NOT repeat the same exercise selection
+in every phase. Use the phase goals below to drive variation:
+
+ACCUMULATION (weeks 1–4):
+  • Higher rep ranges (8–15), moderate load. Prioritise exercise variety.
+  • Use a wider range of movements — e.g. DB Incline Press, Cable Flyes, Hack Squat,
+    Romanian Deadlift. Build movement patterns and muscle familiarity.
+  • Include one higher-rep accessory per session (12–15 reps).
+
+INTENSIFICATION (weeks 5–8):
+  • Heavier compounds, reduced variety. Shift toward barbell-dominant movements
+    where available — e.g. Barbell Bench, Barbell Row, Back Squat, Overhead Press.
+  • Drop or replace the higher-rep accessories with a second compound variation.
+  • Rep ranges narrow (5–10). Progressive overload is the priority.
+
+PEAKING (weeks 9–11):
+  • Minimum exercise selection — 4 per session maximum. Primary compound movements only.
+  • e.g. Bench Press, Squat, Deadlift, Overhead Press, Pull-Up. No accessories.
+  • Volume drops sharply; intensity peaks. RIR 1–2.
+
+DELOAD (week 12):
+  • Full exercise rotation reset — return to accumulation-style variety, lighter loads.
+  • Technique focus. Use exercises that differ from both the peaking phase AND the
+    original accumulation phase where possible (novel movements are fine here).
+  • RIR 4–5, sets ~50% of peak week.
 
 ═══════════════════════════════════════════════════════════════
 EQUIPMENT CONSTRAINTS

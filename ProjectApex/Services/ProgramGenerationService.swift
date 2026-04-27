@@ -226,16 +226,27 @@ actor ProgramGenerationService {
 
     // MARK: Public API
 
-    func generate(userProfile: UserProfile, gymProfile: GymProfile) async throws -> Mesocycle {
+    func generate(
+        userProfile: UserProfile,
+        gymProfile: GymProfile,
+        trainingDaysPerWeek: Int = 4
+    ) async throws -> Mesocycle {
         isGenerating = true
         defer { isGenerating = false }
 
         let systemPrompt = try Self.loadSystemPrompt()
 
+        print("[ProgramGenerationService] Generating programme — training_days_per_week: \(trainingDaysPerWeek)")
+
+        let constraints = ProgrammingConstraints(
+            trainingDaysPerWeek: trainingDaysPerWeek,
+            totalWeeks: 12,
+            periodizationModel: "linear_periodization"
+        )
         let request = MacroProgramRequest(
             userProfile: userProfile,
             gymProfile: GymProfilePayload(from: gymProfile),
-            programmingConstraints: .default
+            programmingConstraints: constraints
         )
 
         let encoder = JSONEncoder()
@@ -412,6 +423,13 @@ actor ProgramGenerationService {
         phase: MesocyclePhase,
         weekInPhase: Int
     ) -> TrainingDay {
+        // Validate exercise IDs against canonical library — log warnings for non-canonical IDs.
+        for ex in template.exercises {
+            if ExerciseLibrary.lookup(ex.exerciseId) == nil {
+                print("[ProgramGenerationService] ⚠️ Non-canonical exercise_id: '\(ex.exerciseId)' — not in ExerciseLibrary.")
+            }
+        }
+
         let exercises = template.exercises.map { ex in
             applyProgressiveOverload(to: ex, phase: phase, weekInPhase: weekInPhase)
         }
@@ -512,7 +530,8 @@ actor ProgramGenerationService {
             forResource: "SystemPrompt_MacroGeneration",
             withExtension: "txt"
         ) {
-            return try String(contentsOf: url, encoding: .utf8)
+            let base = try String(contentsOf: url, encoding: .utf8)
+            return base + ExerciseLibrary.promptReferenceBlock()
         }
         throw ProgramGenerationError.systemPromptNotFound
     }

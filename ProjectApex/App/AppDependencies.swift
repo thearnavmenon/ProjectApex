@@ -30,6 +30,12 @@ final class AppDependencies {
     private(set) var aiInferenceService: AIInferenceService
     /// Generates 12-week periodized programs on demand using claude-opus-4.
     private(set) var programGenerationService: ProgramGenerationService
+    /// FB-008: Generates 12-week macro skeleton (phase structure, no exercises).
+    private(set) var macroPlanService: MacroPlanService
+    /// FB-008: Generates individual session content on-demand before each workout.
+    private(set) var sessionPlanService: SessionPlanService
+    /// P3-T10: Multi-turn exercise swap chat service.
+    let exerciseSwapService: ExerciseSwapService
     /// Local write-ahead queue for reliable Supabase writes during workouts.
     let writeAheadQueue: WriteAheadQueue
     /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
@@ -66,7 +72,12 @@ final class AppDependencies {
 
         // 2. Supabase — needs its anon key from Keychain; URL comes from Config
         let supabaseAnonKey = (try? keychain.retrieve(.supabaseAnonKey)) ?? ""
-        self.supabaseClient = SupabaseClient(supabaseURL: Config.supabaseURL, anonKey: supabaseAnonKey)
+        let supabaseServiceKey = (try? keychain.retrieve(.supabaseServiceKey)) ?? ""
+        let client = SupabaseClient(supabaseURL: Config.supabaseURL, anonKey: supabaseAnonKey)
+        if !supabaseServiceKey.isEmpty {
+            Task { await client.set(serviceKey: supabaseServiceKey) }
+        }
+        self.supabaseClient = client
 
         // 3. HealthKit — no dependencies
         self.healthKitService = HealthKitService()
@@ -104,6 +115,23 @@ final class AppDependencies {
             provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
         )
 
+        // 8b. MacroPlanService — Sonnet skeleton generation (one-shot at programme start)
+        self.macroPlanService = MacroPlanService(
+            provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
+        )
+
+        // 8c. SessionPlanService — Sonnet per-session generation (called on "Start Workout")
+        self.sessionPlanService = SessionPlanService(
+            provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 8000, requestTimeout: 120),
+            memoryService: memoryService,
+            supabaseClient: supabaseClient
+        )
+
+        // 8d. ExerciseSwapService — mid-session exercise swap chat (P3-T10)
+        self.exerciseSwapService = ExerciseSwapService(
+            provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 1024, requestTimeout: 15)
+        )
+
         // 9. WriteAheadQueue — reliable Supabase write queue (P3-T06)
         let waq = WriteAheadQueue(supabase: supabaseClient)
         self.writeAheadQueue = waq
@@ -130,6 +158,14 @@ final class AppDependencies {
         )
         programGenerationService = ProgramGenerationService(
             provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
+        )
+        macroPlanService = MacroPlanService(
+            provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
+        )
+        sessionPlanService = SessionPlanService(
+            provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 8000, requestTimeout: 120),
+            memoryService: memoryService,
+            supabaseClient: supabaseClient
         )
     }
 }

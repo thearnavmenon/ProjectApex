@@ -26,6 +26,9 @@ nonisolated struct WorkoutSession: Codable, Identifiable, Sendable {
     /// E.g. "Push A", "Pull B" — maps to TrainingDay.label.
     let dayType: String
     var completed: Bool
+    /// Lifecycle status string: "active", "paused", or "completed".
+    /// Nil for rows created before this field was added (backward-compatible).
+    var status: String?
     var setLogs: [SetLog]
     var sessionNotes: [SessionNote]
     var summary: SessionSummary?
@@ -38,9 +41,56 @@ nonisolated struct WorkoutSession: Codable, Identifiable, Sendable {
         case weekNumber      = "week_number"
         case dayType         = "day_type"
         case completed
+        case status
         case setLogs         = "set_logs"
         case sessionNotes    = "session_notes"
         case summary
+    }
+
+    // Explicit memberwise initialiser — required because defining init(from:) below
+    // suppresses the compiler-synthesized one.
+    nonisolated init(
+        id: UUID,
+        userId: UUID,
+        programId: UUID,
+        sessionDate: Date,
+        weekNumber: Int,
+        dayType: String,
+        completed: Bool,
+        status: String? = nil,
+        setLogs: [SetLog] = [],
+        sessionNotes: [SessionNote] = [],
+        summary: SessionSummary? = nil
+    ) {
+        self.id           = id
+        self.userId       = userId
+        self.programId    = programId
+        self.sessionDate  = sessionDate
+        self.weekNumber   = weekNumber
+        self.dayType      = dayType
+        self.completed    = completed
+        self.status       = status
+        self.setLogs      = setLogs
+        self.sessionNotes = sessionNotes
+        self.summary      = summary
+    }
+
+    // Custom decoder so that set_logs, session_notes, and summary are treated as
+    // optional when fetching with a narrow select column list (e.g. in ProgressViewModel
+    // and the stagnation hook, where we omit nested arrays to reduce payload size).
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id           = try c.decode(UUID.self,    forKey: .id)
+        userId       = try c.decode(UUID.self,    forKey: .userId)
+        programId    = try c.decode(UUID.self,    forKey: .programId)
+        sessionDate  = try c.decode(Date.self,    forKey: .sessionDate)
+        weekNumber   = try c.decode(Int.self,     forKey: .weekNumber)
+        dayType      = try c.decode(String.self,  forKey: .dayType)
+        completed    = try c.decode(Bool.self,    forKey: .completed)
+        status       = try c.decodeIfPresent(String.self,         forKey: .status)
+        setLogs      = try c.decodeIfPresent([SetLog].self,       forKey: .setLogs)       ?? []
+        sessionNotes = try c.decodeIfPresent([SessionNote].self,  forKey: .sessionNotes)  ?? []
+        summary      = try c.decodeIfPresent(SessionSummary.self, forKey: .summary)
     }
 }
 
@@ -58,8 +108,13 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
     let rpeFelt: Int?
     let rirEstimated: Int?
     /// The AI prescription that was shown when this set was initiated.
+    /// Optional and absent from older rows — decoded with decodeIfPresent.
     let aiPrescribed: SetPrescription?
     let loggedAt: Date
+    /// Coarse primary muscle group for this set (e.g. "chest", "back").
+    /// Populated from ExerciseLibrary at write time. Nullable for rows that
+    /// pre-date the column or use non-canonical exercise IDs.
+    let primaryMuscle: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -72,6 +127,51 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         case rirEstimated    = "rir_estimated"
         case aiPrescribed    = "ai_prescribed"
         case loggedAt        = "logged_at"
+        case primaryMuscle   = "primary_muscle"
+    }
+
+    // Memberwise initialiser — used by WorkoutSessionManager, ManualSessionLogView, etc.
+    nonisolated init(
+        id: UUID,
+        sessionId: UUID,
+        exerciseId: String,
+        setNumber: Int,
+        weightKg: Double,
+        repsCompleted: Int,
+        rpeFelt: Int?,
+        rirEstimated: Int?,
+        aiPrescribed: SetPrescription?,
+        loggedAt: Date,
+        primaryMuscle: String? = nil
+    ) {
+        self.id            = id
+        self.sessionId     = sessionId
+        self.exerciseId    = exerciseId
+        self.setNumber     = setNumber
+        self.weightKg      = weightKg
+        self.repsCompleted = repsCompleted
+        self.rpeFelt       = rpeFelt
+        self.rirEstimated  = rirEstimated
+        self.aiPrescribed  = aiPrescribed
+        self.loggedAt      = loggedAt
+        self.primaryMuscle = primaryMuscle
+    }
+
+    // Custom decoder so that optional columns (absent from older rows) decode
+    // to nil rather than throwing keyNotFound.
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id             = try c.decode(UUID.self,   forKey: .id)
+        sessionId      = try c.decode(UUID.self,   forKey: .sessionId)
+        exerciseId     = try c.decode(String.self, forKey: .exerciseId)
+        setNumber      = try c.decode(Int.self,    forKey: .setNumber)
+        weightKg       = try c.decode(Double.self, forKey: .weightKg)
+        repsCompleted  = try c.decode(Int.self,    forKey: .repsCompleted)
+        rpeFelt        = try c.decodeIfPresent(Int.self,             forKey: .rpeFelt)
+        rirEstimated   = try c.decodeIfPresent(Int.self,             forKey: .rirEstimated)
+        aiPrescribed   = try c.decodeIfPresent(SetPrescription.self, forKey: .aiPrescribed)
+        loggedAt       = try c.decode(Date.self,   forKey: .loggedAt)
+        primaryMuscle  = try c.decodeIfPresent(String.self,          forKey: .primaryMuscle)
     }
 }
 
@@ -97,6 +197,29 @@ nonisolated struct SessionNote: Codable, Identifiable, Sendable {
     }
 }
 
+// MARK: - SwapRecord
+
+/// Records a single mid-session exercise substitution (P3-T10).
+nonisolated struct SwapRecord: Codable, Sendable {
+    let originalExerciseId: String
+    let originalExerciseName: String
+    let newExerciseId: String
+    let newExerciseName: String
+    let reason: String
+    let setsCompletedBeforeSwap: Int
+    let swappedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case originalExerciseId   = "original_exercise_id"
+        case originalExerciseName = "original_exercise_name"
+        case newExerciseId        = "new_exercise_id"
+        case newExerciseName      = "new_exercise_name"
+        case reason
+        case setsCompletedBeforeSwap = "sets_completed_before_swap"
+        case swappedAt            = "swapped_at"
+    }
+}
+
 // MARK: - SessionSummary
 
 /// Post-session aggregate written to `workout_sessions.summary` as JSONB.
@@ -112,6 +235,8 @@ nonisolated struct SessionSummary: Codable, Sendable {
     let earlyExitReason: String?
     /// Duration of the session in seconds.
     let durationSeconds: Int
+    /// Exercises swapped during this session. Nil when no swaps occurred.
+    let swappedExercises: [SwapRecord]?
 
     enum CodingKeys: String, CodingKey {
         case totalVolumeKg       = "total_volume_kg"
@@ -122,6 +247,42 @@ nonisolated struct SessionSummary: Codable, Sendable {
         case notableNotes        = "notable_notes"
         case earlyExitReason     = "early_exit_reason"
         case durationSeconds     = "duration_seconds"
+        case swappedExercises    = "swapped_exercises"
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        totalVolumeKg     = try c.decode(Double.self, forKey: .totalVolumeKg)
+        setsCompleted     = try c.decode(Int.self, forKey: .setsCompleted)
+        setsPlanned       = try c.decode(Int.self, forKey: .setsPlanned)
+        personalRecords   = try c.decode([PersonalRecord].self, forKey: .personalRecords)
+        aiAdjustmentCount = try c.decode(Int.self, forKey: .aiAdjustmentCount)
+        notableNotes      = try c.decode([String].self, forKey: .notableNotes)
+        earlyExitReason   = try c.decodeIfPresent(String.self, forKey: .earlyExitReason)
+        durationSeconds   = try c.decode(Int.self, forKey: .durationSeconds)
+        swappedExercises  = try c.decodeIfPresent([SwapRecord].self, forKey: .swappedExercises)
+    }
+
+    nonisolated init(
+        totalVolumeKg: Double,
+        setsCompleted: Int,
+        setsPlanned: Int,
+        personalRecords: [PersonalRecord],
+        aiAdjustmentCount: Int,
+        notableNotes: [String],
+        earlyExitReason: String?,
+        durationSeconds: Int,
+        swappedExercises: [SwapRecord]? = nil
+    ) {
+        self.totalVolumeKg     = totalVolumeKg
+        self.setsCompleted     = setsCompleted
+        self.setsPlanned       = setsPlanned
+        self.personalRecords   = personalRecords
+        self.aiAdjustmentCount = aiAdjustmentCount
+        self.notableNotes      = notableNotes
+        self.earlyExitReason   = earlyExitReason
+        self.durationSeconds   = durationSeconds
+        self.swappedExercises  = swappedExercises
     }
 }
 
@@ -149,4 +310,80 @@ nonisolated enum PRMetric: String, Codable, Sendable {
     case estimatedOneRM  = "estimated_one_rm"
     case topSetWeight    = "top_set_weight"
     case totalVolume     = "total_volume"
+}
+
+// MARK: - PausedSessionState
+
+/// Minimal snapshot of a paused session saved to UserDefaults.
+/// Written by `WorkoutSessionManager.pauseSession()` and read by the resume
+/// path to restore the session without re-starting it from scratch.
+nonisolated struct PausedSessionState: Codable, Sendable {
+    let sessionId: UUID
+    let trainingDayId: UUID
+    let weekId: UUID
+    let weekNumber: Int
+    let exerciseIndex: Int
+    let currentSetNumber: Int
+    let dayType: String
+    let programId: UUID
+    let userId: UUID
+    let pausedAt: Date
+
+    // Custom decoder: weekNumber was added after initial release, so old UserDefaults
+    // snapshots won't have it. Fall back to 1 rather than failing to decode entirely.
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sessionId      = try c.decode(UUID.self,   forKey: .sessionId)
+        trainingDayId  = try c.decode(UUID.self,   forKey: .trainingDayId)
+        weekId         = try c.decode(UUID.self,   forKey: .weekId)
+        weekNumber     = try c.decodeIfPresent(Int.self, forKey: .weekNumber) ?? 1
+        exerciseIndex  = try c.decode(Int.self,    forKey: .exerciseIndex)
+        currentSetNumber = try c.decode(Int.self,  forKey: .currentSetNumber)
+        dayType        = try c.decode(String.self, forKey: .dayType)
+        programId      = try c.decode(UUID.self,   forKey: .programId)
+        userId         = try c.decode(UUID.self,   forKey: .userId)
+        pausedAt       = try c.decode(Date.self,   forKey: .pausedAt)
+    }
+
+    nonisolated init(
+        sessionId: UUID,
+        trainingDayId: UUID,
+        weekId: UUID,
+        weekNumber: Int,
+        exerciseIndex: Int,
+        currentSetNumber: Int,
+        dayType: String,
+        programId: UUID,
+        userId: UUID,
+        pausedAt: Date
+    ) {
+        self.sessionId       = sessionId
+        self.trainingDayId   = trainingDayId
+        self.weekId          = weekId
+        self.weekNumber      = weekNumber
+        self.exerciseIndex   = exerciseIndex
+        self.currentSetNumber = currentSetNumber
+        self.dayType         = dayType
+        self.programId       = programId
+        self.userId          = userId
+        self.pausedAt        = pausedAt
+    }
+
+    static let persistenceKey = "com.projectapex.pausedSessionState"
+
+    func save() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: PausedSessionState.persistenceKey)
+    }
+
+    static func load() -> PausedSessionState? {
+        guard let data = UserDefaults.standard.data(forKey: persistenceKey),
+              let state = try? JSONDecoder().decode(PausedSessionState.self, from: data)
+        else { return nil }
+        return state
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: persistenceKey)
+    }
 }

@@ -134,6 +134,13 @@ nonisolated struct TrainingDay: Codable, Identifiable, Sendable {
     let dayLabel: String
     var exercises: [PlannedExercise]
     let sessionNotes: String?
+    /// FB-008: generation status for on-demand SessionPlanService sessions.
+    /// Defaults to `.generated` for backward-compatible static plans (ProgramGenerationService).
+    /// Set to `.pending` for skeleton-based plans awaiting SessionPlanService.
+    var status: TrainingDayStatus
+    /// Phase-1-Skip: timestamp recorded when the user explicitly skipped this session.
+    /// Nil for all other statuses. Programme position advances when this is set.
+    var skippedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -141,6 +148,38 @@ nonisolated struct TrainingDay: Codable, Identifiable, Sendable {
         case dayLabel     = "day_label"
         case exercises
         case sessionNotes = "session_notes"
+        case status
+        case skippedAt    = "skipped_at"
+    }
+
+    // Backward-compatible init — status defaults to .generated so existing decoded data still works.
+    nonisolated init(
+        id: UUID,
+        dayOfWeek: Int,
+        dayLabel: String,
+        exercises: [PlannedExercise],
+        sessionNotes: String?,
+        status: TrainingDayStatus = .generated,
+        skippedAt: Date? = nil
+    ) {
+        self.id = id
+        self.dayOfWeek = dayOfWeek
+        self.dayLabel = dayLabel
+        self.exercises = exercises
+        self.sessionNotes = sessionNotes
+        self.status = status
+        self.skippedAt = skippedAt
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id           = try c.decode(UUID.self, forKey: .id)
+        dayOfWeek    = try c.decode(Int.self, forKey: .dayOfWeek)
+        dayLabel     = try c.decode(String.self, forKey: .dayLabel)
+        exercises    = try c.decode([PlannedExercise].self, forKey: .exercises)
+        sessionNotes = try c.decodeIfPresent(String.self, forKey: .sessionNotes)
+        status       = (try? c.decode(TrainingDayStatus.self, forKey: .status)) ?? .generated
+        skippedAt    = try c.decodeIfPresent(Date.self, forKey: .skippedAt)
     }
 }
 
@@ -153,6 +192,9 @@ nonisolated struct TrainingWeek: Codable, Identifiable, Sendable {
     let weekNumber: Int
     let phase: MesocyclePhase
     var trainingDays: [TrainingDay]
+    /// Optional human-readable intent label from the skeleton, e.g. "High Volume Accumulation".
+    /// Populated when the Mesocycle is generated via MacroPlanService (FB-008).
+    var weekLabel: String?
 
     /// Derived: true when the phase is `.deload`.
     var isDeload: Bool { phase == .deload }
@@ -162,6 +204,31 @@ nonisolated struct TrainingWeek: Codable, Identifiable, Sendable {
         case weekNumber  = "week_number"
         case phase
         case trainingDays = "training_days"
+        case weekLabel    = "week_label"
+    }
+
+    // Backward-compatible init — weekLabel defaults to nil.
+    nonisolated init(
+        id: UUID,
+        weekNumber: Int,
+        phase: MesocyclePhase,
+        trainingDays: [TrainingDay],
+        weekLabel: String? = nil
+    ) {
+        self.id = id
+        self.weekNumber = weekNumber
+        self.phase = phase
+        self.trainingDays = trainingDays
+        self.weekLabel = weekLabel
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id           = try c.decode(UUID.self, forKey: .id)
+        weekNumber   = try c.decode(Int.self, forKey: .weekNumber)
+        phase        = try c.decode(MesocyclePhase.self, forKey: .phase)
+        trainingDays = try c.decode([TrainingDay].self, forKey: .trainingDays)
+        weekLabel    = try? c.decodeIfPresent(String.self, forKey: .weekLabel) ?? nil
     }
 }
 
@@ -188,6 +255,75 @@ nonisolated struct Mesocycle: Codable, Identifiable, Sendable {
         case totalWeeks        = "total_weeks"
         case periodizationModel = "periodization_model"
     }
+}
+
+// MARK: - FB-008: MesocycleSkeleton — loose structural framework (no exercises/weights)
+
+/// The intended training intent for a single week in the skeleton.
+nonisolated struct WeekIntent: Codable, Sendable {
+    /// e.g. "High Volume Accumulation", "Deload — Active Recovery"
+    let weekLabel: String
+    /// Muscle group emphasis for each training day, in day order.
+    /// e.g. ["Upper Push", "Lower", "Upper Pull", "Full Body"]
+    let dayFocus: [String]
+    /// Relative volume landmark (0.0 = lowest, 1.0 = peak week).
+    let volumeLandmark: Double
+
+    enum CodingKeys: String, CodingKey {
+        case weekLabel       = "week_label"
+        case dayFocus        = "day_focus"
+        case volumeLandmark  = "volume_landmark"
+    }
+}
+
+/// A 12-week macro skeleton produced by MacroPlanService.
+/// Contains phase names, weekly intent, and day-focus strings — no exercises or weights.
+nonisolated struct MesocycleSkeleton: Codable, Sendable {
+    let id: UUID
+    let userId: UUID
+    let createdAt: Date
+    var isActive: Bool
+    let trainingDaysPerWeek: Int
+    let periodizationModel: String
+    /// Ordered list of 12 week intents (index 0 = week 1).
+    let weekIntents: [WeekIntent]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId              = "user_id"
+        case createdAt           = "created_at"
+        case isActive            = "is_active"
+        case trainingDaysPerWeek = "training_days_per_week"
+        case periodizationModel  = "periodization_model"
+        case weekIntents         = "week_intents"
+    }
+}
+
+// MARK: - TrainingDayStatus — FB-008 / Phase-1-Skip: session generation state per training day
+
+/// Describes whether a training day's session has been generated or resolved by the user.
+///
+/// State machine (training-time progression):
+///   pending → generated → active → completed  (normal path)
+///   pending → skipped                           (user taps Skip)
+///   generated → skipped                         (user taps Skip before starting)
+///   pending/generated → paused                  (mid-session pause)
+///   paused → active → completed                 (resume path)
+///
+/// NOTE: programme_day_index advances ONLY on transitions to .completed or .skipped.
+/// Calendar logic must never advance this state.
+nonisolated enum TrainingDayStatus: String, Codable, Sendable {
+    /// No session generated yet — shows "Session pending" in the calendar.
+    case pending
+    /// Session exercises have been generated and are ready to start.
+    case generated
+    /// Session was completed by the user.
+    case completed
+    /// Session was started but paused mid-workout. Resumable from the calendar.
+    case paused
+    /// Session was explicitly skipped by the user. Advances programme position.
+    /// No set logs are created; skippedAt timestamp records when the skip occurred.
+    case skipped
 }
 
 // MARK: - Mesocycle Mock Data

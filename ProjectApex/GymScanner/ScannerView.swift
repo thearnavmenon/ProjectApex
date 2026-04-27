@@ -35,7 +35,7 @@ struct ScannerView: View {
     var onProfileConfirmed: ((GymProfile) -> Void)?
 
     // For the confirmation sheet presentations
-    @State private var showingAddEquipmentSheet = false
+    @State private var showingBulkPickerSheet = false
     @State private var itemBeingEdited: EquipmentItem?
 
     // For editing the reviewed item before confirming
@@ -391,7 +391,7 @@ struct ScannerView: View {
                 .listRowBackground(Color(.secondarySystemGroupedBackground))
 
                 Section {
-                    Button(action: { showingAddEquipmentSheet = true }) {
+                    Button(action: { showingBulkPickerSheet = true }) {
                         Label("Add Equipment Manually", systemImage: "plus.circle")
                     }
                 }
@@ -422,14 +422,14 @@ struct ScannerView: View {
                 }
             }
         }
-        .sheet(isPresented: $showingAddEquipmentSheet) {
-            EquipmentEditSheet(
-                existingItem: nil,
-                onSave: { item in
-                    viewModel.addEquipment(item)
-                    showingAddEquipmentSheet = false
+        .sheet(isPresented: $showingBulkPickerSheet) {
+            BulkEquipmentPickerSheet(
+                alreadyAdded: Set(viewModel.detectedEquipment.map(\.equipmentType)),
+                onConfirm: { items in
+                    items.forEach { viewModel.addEquipment($0) }
+                    showingBulkPickerSheet = false
                 },
-                onCancel: { showingAddEquipmentSheet = false }
+                onCancel: { showingBulkPickerSheet = false }
             )
         }
         .sheet(item: $itemBeingEdited) { item in

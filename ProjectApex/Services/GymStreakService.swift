@@ -5,6 +5,19 @@
 // The result is included in every AI inference call so the coach can
 // modulate intensity and motivation based on training consistency.
 //
+// PATH B (kept — not deleted):
+//   GymStreakService was evaluated for removal when training-time programme
+//   progression was introduced (Phase 1 refactor). It was retained because:
+//   1. PreWorkoutView uses streak.tintColor for the background gradient,
+//      progress ring, and start button colours — deleting the service would
+//      break the workout UI.
+//   2. StreakResult is embedded in WorkoutContext for every AI inference call,
+//      allowing the coach to modulate motivation and intensity cues.
+//   Skipped sessions (TrainingDayStatus.skipped) are automatically excluded
+//   from the streak because they produce no workout_sessions row in Supabase.
+//   The Supabase query already filters completed = true, so only sessions that
+//   were actually performed count toward the streak.
+//
 // CACHING:
 //   StreakResult is cached after each fetch. isStale returns true when
 //   the cached value is > 6 hours old or a new session has completed

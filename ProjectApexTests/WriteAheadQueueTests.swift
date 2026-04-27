@@ -50,7 +50,7 @@ nonisolated private struct TestSetLogPayload: Encodable, Sendable {
 
 // MARK: - Mock URLProtocol for controlling HTTP responses
 
-private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
+private final class WAQMockURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
     nonisolated(unsafe) static var requestCount: Int = 0
 
@@ -58,8 +58,8 @@ private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        MockURLProtocol.requestCount += 1
-        guard let handler = MockURLProtocol.requestHandler else {
+        WAQMockURLProtocol.requestCount += 1
+        guard let handler = WAQMockURLProtocol.requestHandler else {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
@@ -80,7 +80,7 @@ private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
 
 private func makeMockSupabase() -> SupabaseClient {
     let config = URLSessionConfiguration.ephemeral
-    config.protocolClasses = [MockURLProtocol.self]
+    config.protocolClasses = [WAQMockURLProtocol.self]
     let mockSession = URLSession(configuration: config)
     return SupabaseClient(
         supabaseURL: URL(string: "https://test.supabase.co")!,
@@ -95,8 +95,8 @@ final class WriteAheadQueueTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.requestCount = 0
-        MockURLProtocol.requestHandler = nil
+        WAQMockURLProtocol.requestCount = 0
+        WAQMockURLProtocol.requestHandler = nil
         // Clear persisted queue
         UserDefaults.standard.removeObject(forKey: "com.projectapex.writeAheadQueue")
     }
@@ -110,7 +110,7 @@ final class WriteAheadQueueTests: XCTestCase {
 
     func testEnqueue_addsItemsInFIFOOrder() async throws {
         // Always succeed so items flush immediately
-        MockURLProtocol.requestHandler = { request in
+        WAQMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 201,
                 httpVersion: nil, headerFields: nil
@@ -139,7 +139,7 @@ final class WriteAheadQueueTests: XCTestCase {
     // MARK: Test 2: Flush removes items on success
 
     func testFlush_removesItemOnSuccess() async throws {
-        MockURLProtocol.requestHandler = { request in
+        WAQMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 201,
                 httpVersion: nil, headerFields: nil
@@ -155,14 +155,14 @@ final class WriteAheadQueueTests: XCTestCase {
 
         let count = await queue.pendingCount
         XCTAssertEqual(count, 0, "Queue should be empty after successful flush")
-        XCTAssertGreaterThan(MockURLProtocol.requestCount, 0, "At least one HTTP request should have been made")
+        XCTAssertGreaterThan(WAQMockURLProtocol.requestCount, 0, "At least one HTTP request should have been made")
     }
 
     // MARK: Test 3: Retry — mock returns 503 twice then 201
 
     func testFlush_retriesOnFailureThenSucceeds() async throws {
         var callCount = 0
-        MockURLProtocol.requestHandler = { request in
+        WAQMockURLProtocol.requestHandler = { request in
             callCount += 1
             let statusCode = callCount <= 2 ? 503 : 201
             let response = HTTPURLResponse(
@@ -190,7 +190,7 @@ final class WriteAheadQueueTests: XCTestCase {
     func testFlush_processesInFIFOOrder() async throws {
         var receivedSetNumbers: [Int] = []
 
-        MockURLProtocol.requestHandler = { request in
+        WAQMockURLProtocol.requestHandler = { request in
             if let body = request.httpBody,
                let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
                let setNum = json["set_number"] as? Int {
@@ -223,7 +223,7 @@ final class WriteAheadQueueTests: XCTestCase {
 
     func testClearAll_emptiesQueue() async throws {
         // Make all requests fail so items stay in queue
-        MockURLProtocol.requestHandler = { request in
+        WAQMockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
                 url: request.url!, statusCode: 503,
                 httpVersion: nil, headerFields: nil

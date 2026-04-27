@@ -102,7 +102,18 @@ nonisolated struct AnthropicProvider: LLMProvider {
             throw LLMProviderError.malformedResponse(detail: "Non-HTTP response")
         }
         guard (200..<300).contains(http.statusCode) else {
-            let bodyString = String(data: data, encoding: .utf8) ?? "<binary>"
+            var bodyString = String(data: data, encoding: .utf8) ?? "<binary>"
+            // Encode optional Anthropic response headers as bracket-prefixes so
+            // TransientRetryPolicy and FallbackLogRecord can parse them without
+            // requiring changes to the LLMProvider protocol.
+            var metadataPrefix = ""
+            if let rid = http.value(forHTTPHeaderField: "request-id") {
+                metadataPrefix += "[request-id:\(rid)]"
+            }
+            if let retryAfter = http.value(forHTTPHeaderField: "retry-after") {
+                metadataPrefix += "[retry-after:\(retryAfter)]"
+            }
+            if !metadataPrefix.isEmpty { bodyString = metadataPrefix + " " + bodyString }
             throw LLMProviderError.httpError(statusCode: http.statusCode, body: bodyString)
         }
 
