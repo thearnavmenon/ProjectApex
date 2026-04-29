@@ -381,6 +381,20 @@ struct ActiveSetView: View {
                 .padding(.bottom, 4)
             }
 
+            // "Using last session weights" badge — AI was unavailable, user chose manual fallback
+            if prescription.isManualFallback == true {
+                HStack(spacing: 5) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Using last session weights")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(0.3)
+                }
+                .foregroundStyle(Color(red: 1.0, green: 0.65, blue: 0.0))
+                .padding(.horizontal, 24)
+                .padding(.bottom, 4)
+            }
+
             // Adjusted weight annotation (equipment snap note from AI)
             if let adjustedNote = viewModel.weightAdjustmentNote {
                 Text(adjustedNote)

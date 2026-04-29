@@ -315,8 +315,16 @@ nonisolated enum PRMetric: String, Codable, Sendable {
 // MARK: - PausedSessionState
 
 /// Minimal snapshot of a paused session saved to UserDefaults.
-/// Written by `WorkoutSessionManager.pauseSession()` and read by the resume
-/// path to restore the session without re-starting it from scratch.
+/// Written by `WorkoutSessionManager.pauseSession()` and updated after every set.
+/// Read by the resume path to restore the session without re-starting from scratch.
+///
+/// Key versioning:
+///   v2 key (current):   "com.projectapex.pausedSessionState_v2"
+///   legacy key (< 3.1): "com.projectapex.pausedSessionState"
+///
+/// On load, the v2 key is tried first. If absent, the legacy key is tried and
+/// migrated on success. If both keys hold corrupt/undecodable data, `repairPending`
+/// is set to true so the caller can trigger `attemptSupabaseRepair(userId:supabase:)`.
 nonisolated struct PausedSessionState: Codable, Sendable {
     let sessionId: UUID
     let trainingDayId: UUID
@@ -369,21 +377,105 @@ nonisolated struct PausedSessionState: Codable, Sendable {
         self.pausedAt        = pausedAt
     }
 
-    static let persistenceKey = "com.projectapex.pausedSessionState"
+    static let legacyPersistenceKey = "com.projectapex.pausedSessionState"
+    static let v2PersistenceKey     = "com.projectapex.pausedSessionState_v2"
+
+    /// True when both the v2 and legacy UserDefaults entries held data that could not
+    /// be decoded. ContentView's startup task should call `attemptSupabaseRepair` when
+    /// this is true.
+    static private(set) var repairPending: Bool = false
 
     func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: PausedSessionState.persistenceKey)
+        UserDefaults.standard.set(data, forKey: PausedSessionState.v2PersistenceKey)
     }
 
     static func load() -> PausedSessionState? {
-        guard let data = UserDefaults.standard.data(forKey: persistenceKey),
-              let state = try? JSONDecoder().decode(PausedSessionState.self, from: data)
-        else { return nil }
-        return state
+        let ud = UserDefaults.standard
+
+        // Try the current v2 key first.
+        if let data = ud.data(forKey: v2PersistenceKey) {
+            if let state = try? JSONDecoder().decode(PausedSessionState.self, from: data) {
+                repairPending = false
+                return state
+            }
+            // Data present but undecodable — flag for Supabase repair.
+            repairPending = true
+            return nil
+        }
+
+        // Fall back to the legacy key — migrate on success.
+        if let data = ud.data(forKey: legacyPersistenceKey) {
+            if let state = try? JSONDecoder().decode(PausedSessionState.self, from: data) {
+                if let v2Data = try? JSONEncoder().encode(state) {
+                    ud.set(v2Data, forKey: v2PersistenceKey)
+                }
+                ud.removeObject(forKey: legacyPersistenceKey)
+                repairPending = false
+                return state
+            }
+            // Legacy data present but undecodable — flag for Supabase repair.
+            repairPending = true
+            return nil
+        }
+
+        // Both keys absent — no paused session exists, normal state.
+        return nil
     }
 
     static func clear() {
-        UserDefaults.standard.removeObject(forKey: persistenceKey)
+        let ud = UserDefaults.standard
+        ud.removeObject(forKey: v2PersistenceKey)
+        ud.removeObject(forKey: legacyPersistenceKey)
+        repairPending = false
+    }
+
+    /// Queries Supabase for a paused session row when local UserDefaults data is
+    /// corrupt (i.e. `repairPending == true`). Reconstructs a best-effort
+    /// `PausedSessionState` — runtime fields (`trainingDayId`, `weekId`,
+    /// `exerciseIndex`) are zeroed, so ContentView's mismatch path fires and
+    /// offers the user an Abandon option. Clears `repairPending` on exit.
+    static func attemptSupabaseRepair(userId: UUID, supabase: SupabaseClient) async {
+        defer { repairPending = false }
+
+        struct PausedRow: Decodable {
+            let id: UUID
+            let programId: UUID
+            let weekNumber: Int
+            let dayType: String
+            enum CodingKeys: String, CodingKey {
+                case id
+                case programId  = "program_id"
+                case weekNumber = "week_number"
+                case dayType    = "day_type"
+            }
+        }
+
+        guard let row = try? await supabase.fetch(
+            PausedRow.self,
+            table: "workout_sessions",
+            filters: [
+                Filter(column: "user_id", op: .eq, value: userId.uuidString),
+                Filter(column: "status",  op: .eq, value: "paused")
+            ],
+            order: "session_date.desc",
+            limit: 1
+        ).first else { return }
+
+        // Use a random trainingDayId so the ContentView mismatch path fires,
+        // giving the user the option to Abandon the orphaned session cleanly.
+        let state = PausedSessionState(
+            sessionId:        row.id,
+            trainingDayId:    UUID(),
+            weekId:           UUID(),
+            weekNumber:       row.weekNumber,
+            exerciseIndex:    0,
+            currentSetNumber: 1,
+            dayType:          row.dayType,
+            programId:        row.programId,
+            userId:           userId,
+            pausedAt:         Date()
+        )
+        state.save()
     }
 }

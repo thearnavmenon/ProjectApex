@@ -73,6 +73,28 @@ struct InferenceRetrySheet: View {
                     }
                     .disabled(viewModel.isRetrying)
 
+                    // Continue with last weights — only during rest (not preflight)
+                    if viewModel.isResting {
+                        Button(action: { viewModel.onUseLastWeights() }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "clock.arrow.circlepath")
+                                    .font(.system(size: 16, weight: .medium))
+                                Text("Continue with last weights")
+                                    .font(.system(size: 17, weight: .medium))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 18)
+                            .background(Color.white.opacity(0.08),
+                                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                            )
+                            .foregroundStyle(.white.opacity(0.70))
+                        }
+                        .disabled(viewModel.isRetrying)
+                    }
+
                     // Pause Session button
                     Button(action: { viewModel.onPauseFromRetrySheet() }) {
                         HStack(spacing: 8) {

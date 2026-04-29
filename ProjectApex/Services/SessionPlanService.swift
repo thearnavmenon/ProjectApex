@@ -191,14 +191,19 @@ nonisolated struct TemporalContext: Codable, Sendable {
     /// Per-movement-pattern phase state. Keys are movement pattern strings.
     /// Nil when PatternPhaseService has not yet been initialised for this user.
     let patternPhases: [String: PatternPhaseInfo]?
+    /// True when daysSinceLastSession >= 28 — signals a significant return-to-training gap.
+    /// When true the LLM ignores the pattern phase label and generates a reduced-volume
+    /// accumulation baseline session instead.
+    let requiresReturnPhaseOverride: Bool
 
     enum CodingKeys: String, CodingKey {
-        case daysSinceLastSession           = "days_since_last_session"
-        case daysSinceLastTrainedByPattern  = "days_since_last_trained_by_pattern"
-        case skippedSessionCountLast30Days  = "skipped_session_count_last_30_days"
-        case globalProgrammePhase           = "global_programme_phase"
-        case globalProgrammeWeek            = "global_programme_week"
-        case patternPhases                  = "pattern_phases"
+        case daysSinceLastSession             = "days_since_last_session"
+        case daysSinceLastTrainedByPattern    = "days_since_last_trained_by_pattern"
+        case skippedSessionCountLast30Days    = "skipped_session_count_last_30_days"
+        case globalProgrammePhase             = "global_programme_phase"
+        case globalProgrammeWeek              = "global_programme_week"
+        case patternPhases                    = "pattern_phases"
+        case requiresReturnPhaseOverride      = "requires_return_phase_override"
     }
 
     /// Custom encoder:
@@ -215,6 +220,7 @@ nonisolated struct TemporalContext: Codable, Sendable {
         try container.encode(globalProgrammePhase, forKey: .globalProgrammePhase)
         try container.encode(globalProgrammeWeek, forKey: .globalProgrammeWeek)
         try container.encodeIfPresent(patternPhases, forKey: .patternPhases)
+        try container.encode(requiresReturnPhaseOverride, forKey: .requiresReturnPhaseOverride)
     }
 
     /// Custom decoder: uses decodeIfPresent for all Phase 2 fields so pre-Phase-2
@@ -227,6 +233,7 @@ nonisolated struct TemporalContext: Codable, Sendable {
         globalProgrammePhase          = try c.decodeIfPresent(String.self, forKey: .globalProgrammePhase)
         globalProgrammeWeek           = try c.decodeIfPresent(Int.self, forKey: .globalProgrammeWeek)
         patternPhases                 = try c.decodeIfPresent([String: PatternPhaseInfo].self, forKey: .patternPhases)
+        requiresReturnPhaseOverride   = try c.decodeIfPresent(Bool.self, forKey: .requiresReturnPhaseOverride) ?? false
     }
 
     /// Memberwise init (required because we define init(from:) above).
@@ -236,7 +243,8 @@ nonisolated struct TemporalContext: Codable, Sendable {
         skippedSessionCountLast30Days: Int,
         globalProgrammePhase: String? = nil,
         globalProgrammeWeek: Int? = nil,
-        patternPhases: [String: PatternPhaseInfo]? = nil
+        patternPhases: [String: PatternPhaseInfo]? = nil,
+        requiresReturnPhaseOverride: Bool = false
     ) {
         self.daysSinceLastSession           = daysSinceLastSession
         self.daysSinceLastTrainedByPattern  = daysSinceLastTrainedByPattern
@@ -244,6 +252,7 @@ nonisolated struct TemporalContext: Codable, Sendable {
         self.globalProgrammePhase           = globalProgrammePhase
         self.globalProgrammeWeek            = globalProgrammeWeek
         self.patternPhases                  = patternPhases
+        self.requiresReturnPhaseOverride    = requiresReturnPhaseOverride
     }
 }
 

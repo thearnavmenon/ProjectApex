@@ -602,6 +602,7 @@ private struct DayCardView: View {
     var liveSetSummary: LiveSetSummary? = nil
 
     @State private var livePulse: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isPending: Bool   { day.status == .pending }
     private var isCompleted: Bool { day.status == .completed }
@@ -634,19 +635,23 @@ private struct DayCardView: View {
                     Image(systemName: "record.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(week.phase.accentColor)
-                        .opacity(livePulse ? 1.0 : 0.4)
+                        .opacity(reduceMotion ? 0.6 : (livePulse ? 1.0 : 0.4))
+                        .accessibilityLabel("Session in progress")
                 } else if isCompleted {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(completedGreen)
+                        .accessibilityLabel("Session completed")
                 } else if isPaused {
                     Image(systemName: "pause.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(pausedAmber)
+                        .accessibilityLabel("Session paused")
                 } else if isSkipped {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(skippedGrey)
+                        .accessibilityLabel("Session skipped")
                 }
             }
 
@@ -671,7 +676,7 @@ private struct DayCardView: View {
                         Circle()
                             .fill(week.phase.accentColor)
                             .frame(width: 5, height: 5)
-                            .opacity(livePulse ? 1.0 : 0.2)
+                            .opacity(reduceMotion ? 0.6 : (livePulse ? 1.0 : 0.2))
                         Text("LIVE")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundStyle(week.phase.accentColor)
@@ -754,19 +759,23 @@ private struct DayCardView: View {
         .overlay(cardBorder)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onAppear {
-            guard isLive else { return }
+            guard isLive, !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                 livePulse = true
             }
         }
         .onChange(of: isLive) { _, live in
             if live {
+                guard !reduceMotion else { return }
                 withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                     livePulse = true
                 }
             } else {
                 livePulse = false
             }
+        }
+        .onChange(of: reduceMotion) { _, nowReduced in
+            if nowReduced { livePulse = false }
         }
     }
 

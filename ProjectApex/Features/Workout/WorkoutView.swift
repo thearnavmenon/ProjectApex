@@ -31,10 +31,14 @@ import SwiftUI
 struct WorkoutView: View {
 
     @Environment(AppDependencies.self) private var deps
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // ViewModel is owned here and passed down to child views.
     @State private var viewModel: WorkoutViewModel?
     @State private var streak: StreakResult = .neutral
+    /// Days since the user's last completed session — nil on first-ever session.
+    /// Used by PreWorkoutView to show the welcome-back banner after a long gap.
+    @State private var daysSinceLastSession: Int? = nil
     /// True when a crash-recovered PausedSessionState exists but its trainingDayId
     /// does not match the current day (and ContentView hasn't handled it via Path A).
     /// Shows a recovery dialog so the user can choose how to proceed.
@@ -73,6 +77,9 @@ struct WorkoutView: View {
     var onSkipSession: (() -> Void)? = nil
     /// Called when the user taps the back button or swipes on the pre-workout screen.
     var onBack: (() -> Void)? = nil
+    /// Called when the user taps the × close button on the Tab 1 entry path (idle only).
+    /// Switches the tab bar to Tab 0 without touching actor state.
+    var onCloseToTab0: (() -> Void)? = nil
 
     // MARK: - Body
 
@@ -100,6 +107,30 @@ struct WorkoutView: View {
             // userId is a placeholder for MVP; auth is wired in a future phase.
             streak = await deps.gymStreakService.computeStreak(userId: AppDependencies.placeholderUserId)
 
+            // Fetch days-since-last-session for the welcome-back banner in PreWorkoutView.
+            // One-row query: most recent completed session ordered desc. Nil = first-ever session.
+            struct LastSessionDateRow: Decodable {
+                let sessionDate: String
+                enum CodingKeys: String, CodingKey { case sessionDate = "session_date" }
+            }
+            if let row = try? await deps.supabaseClient.fetch(
+                LastSessionDateRow.self,
+                table: "workout_sessions",
+                filters: [
+                    Filter(column: "user_id", op: .eq, value: deps.resolvedUserId.uuidString),
+                    Filter(column: "completed", op: .eq, value: "true")
+                ],
+                order: "session_date.desc",
+                limit: 1
+            ).first {
+                let formatter = DateFormatter()
+                formatter.dateFormat = "yyyy-MM-dd"
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                if let date = formatter.date(from: row.sessionDate) {
+                    daysSinceLastSession = Calendar.current.dateComponents([.day], from: date, to: Date()).day
+                }
+            }
+
             guard let vm = viewModel else { return }
 
             // Always sync actor state on view entry.
@@ -115,7 +146,15 @@ struct WorkoutView: View {
             }
 
             if let resume = resumeState {
-                // Explicit resume path — caller (ProgramDayDetailView) already confirmed the intent.
+                // Explicit resume path — guard against a stale resumeState whose trainingDayId
+                // no longer matches the training day ContentView passed in (e.g. programme
+                // regenerated between crash and relaunch, or "found elsewhere" race).
+                guard resume.trainingDayId == trainingDay.id else {
+                    await deps.workoutSessionManager.flushWriteAheadQueue()
+                    await deps.workoutSessionManager.abandonSession(sessionId: resume.sessionId)
+                    vm.sessionState = .error("We couldn't find your previous session — it may have been reset. Your logged sets have been saved.")
+                    return
+                }
                 vm.resumeSession(
                     pausedState: resume,
                     trainingDay: trainingDay,
@@ -159,6 +198,33 @@ struct WorkoutView: View {
                 if PausedSessionState.load() != nil {
                     onSessionPaused?()
                 }
+            }
+        }
+        .safeAreaInset(edge: .top) {
+            if let vm = viewModel, let notice = vm.resumeRepairNotice {
+                HStack(spacing: 10) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(red: 0.25, green: 0.72, blue: 1.0))
+                    Text(notice)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.85))
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(
+                    Color(red: 0.25, green: 0.72, blue: 1.0).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color(red: 0.25, green: 0.72, blue: 1.0).opacity(0.25), lineWidth: 0.5)
+                )
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .animation(.easeInOut(duration: 0.3), value: vm.resumeRepairNotice)
             }
         }
         .sheet(isPresented: Binding(
@@ -207,8 +273,10 @@ struct WorkoutView: View {
                 isFirstSession: isFirstSession,
                 completedDayCount: completedDayCount,
                 totalDayCount: totalDayCount,
+                daysSinceLastSession: daysSinceLastSession,
                 onSkipSession: onSkipSession,
-                onBack: onBack
+                onBack: onBack,
+                onCloseToTab0: onCloseToTab0
             )
 
         case .active(let exercise, let setNumber):
@@ -220,7 +288,7 @@ struct WorkoutView: View {
                 speechService: deps.speechService,
                 exerciseSwapService: deps.exerciseSwapService
             )
-            .transition(.apexSetComplete)
+            .transition(setCompleteTransition)
 
         case .resting(let nextExercise, let setNumber):
             RestTimerView(
@@ -229,11 +297,10 @@ struct WorkoutView: View {
                 setNumber: setNumber,
                 streak: streak
             )
-            .transition(.apexSetComplete)
+            .transition(setCompleteTransition)
 
-        case .exerciseComplete:
-            // Transient state — briefly shown while transitioning to next exercise
-            exerciseCompletePlaceholder(vm: vm)
+        case .exerciseComplete(let completedExercise, _):
+            exerciseCompletePlaceholder(exerciseName: completedExercise.name, vm: vm)
 
         case .sessionComplete(let summary):
             PostWorkoutSummaryView(
@@ -257,14 +324,14 @@ struct WorkoutView: View {
 
     // MARK: - Exercise Complete (transient flash state)
 
-    private func exerciseCompletePlaceholder(vm: WorkoutViewModel) -> some View {
+    private func exerciseCompletePlaceholder(exerciseName: String, vm: WorkoutViewModel) -> some View {
         ZStack {
             apexBackground(tint: streak.tintColor)
             VStack(spacing: 16) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 64))
                     .foregroundStyle(streak.tintColor)
-                Text("Exercise Complete")
+                Text("\(exerciseName) — done.")
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(.white)
             }
@@ -288,6 +355,32 @@ struct WorkoutView: View {
                     .foregroundStyle(.white.opacity(0.55))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
+
+                Button {
+                    vm.resetSession()
+                    onSessionDismissed?()
+                } label: {
+                    Text("Return to Programme")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 60)
+                        .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .stroke(.white.opacity(0.25), lineWidth: 0.5)
+                        )
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 8)
+                .accessibilityLabel("Return to Programme")
+                .accessibilityHint("Returns to the Programme tab")
+
+                if !vm.completedSets.isEmpty {
+                    Text("Your completed sets have been saved.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
             }
         }
     }
@@ -306,6 +399,12 @@ struct WorkoutView: View {
             .ignoresSafeArea()
             .blendMode(.plusLighter)
         }
+    }
+
+    // MARK: - Reduce Motion
+
+    private var setCompleteTransition: AnyTransition {
+        reduceMotion ? .opacity : .apexSetComplete
     }
 
     // MARK: - State identity for animation transitions

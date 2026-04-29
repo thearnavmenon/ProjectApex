@@ -57,8 +57,23 @@ struct ContentView: View {
     /// When non-nil, WorkoutView should use this as an explicit resumeState (Path A),
     /// bypassing the brittle trainingDayId == trainingDay.id guard in Path B.
     @State private var crashResumeToPass: PausedSessionState? = nil
+    /// When the paused session's trainingDayId resolves to a mesocycle day that is NOT
+    /// nextIncompleteDay, this holds the correct matching day so WorkoutView uses the
+    /// right exercise list for the resume rather than nextIncompleteDay's list.
+    @State private var crashResumeDay: TrainingDay? = nil
     /// True when crash recovery's paused day cannot be found anywhere in the mesocycle.
     @State private var showOrphanedRecoveryAlert: Bool = false
+
+    // MARK: - Tab badge state
+
+    @State private var sessionIsLive: Bool = false
+    @State private var pausedSessionExists: Bool = false
+
+    // MARK: - Paused-session banner navigation
+
+    /// True when the user taps "Resume" on PausedSessionBannerView — pushes
+    /// ProgramDayDetailView for the paused day within the workout tab's NavigationStack.
+    @State private var navigateToPausedDayDetail: Bool = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -85,6 +100,7 @@ struct ContentView: View {
                 Label("Workout", systemImage: "figure.strengthtraining.traditional")
             }
             .tag(1)
+            .badge(workoutTabBadge)
 
             // ── Tab 2: Progress ────────────────────────────────────────────
             ProgressTabView(
@@ -163,9 +179,38 @@ struct ContentView: View {
             // PausedSessionState is written at session start and updated every set, so
             // if it's present here the session was never properly ended or explicitly paused.
             // Skip during onboarding (no session has ever run).
-            if !showOnboarding, let saved = PausedSessionState.load() {
-                crashRecoveryState = saved
-                showCrashRecoveryAlert = true
+            if !showOnboarding {
+                if let saved = PausedSessionState.load() {
+                    crashRecoveryState = saved
+                    showCrashRecoveryAlert = true
+                } else if PausedSessionState.repairPending {
+                    // UserDefaults data was present but corrupt (key migration failure or
+                    // incompatible struct change). Query Supabase for a paused row so the
+                    // mismatch-recovery path can offer the user an Abandon option.
+                    await PausedSessionState.attemptSupabaseRepair(
+                        userId: deps.resolvedUserId,
+                        supabase: deps.supabaseClient
+                    )
+                    if let repaired = PausedSessionState.load() {
+                        crashRecoveryState = repaired
+                        showCrashRecoveryAlert = true
+                    }
+                }
+            }
+        }
+        // Badge polling — drives the Tab 1 live/paused indicator.
+        // Runs as a separate .task so it is never short-circuited by the main setup task's
+        // early returns (isLive guard, onboarding skip, etc.).
+        .task {
+            while true {
+                let state = await deps.workoutSessionManager.sessionState
+                switch state {
+                case .idle, .sessionComplete, .error: sessionIsLive = false
+                default: sessionIsLive = true
+                }
+                pausedSessionExists = UserDefaults.standard.data(forKey: PausedSessionState.v2PersistenceKey) != nil
+                    || UserDefaults.standard.data(forKey: PausedSessionState.legacyPersistenceKey) != nil
+                try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
         .alert("Unfinished Workout", isPresented: $showCrashRecoveryAlert) {
@@ -182,12 +227,11 @@ struct ContentView: View {
                     // Normal case: pass as explicit resumeState so Path A fires reliably
                     crashResumeToPass = saved
                     selectedTab = 1
-                } else if vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) != nil {
-                    // Paused day found elsewhere in the mesocycle — pass explicit resumeState
-                    // so WorkoutView uses Path A with the correct session data. WorkoutView
-                    // uses trainingDay = nextIncompleteDay for the exercise list; the set_logs
-                    // are loaded from Supabase/WAQ by session ID, so this is safe.
+                } else if let foundResult = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {
+                    // Paused day found elsewhere in the mesocycle — pass both the correct
+                    // training day and the resume state so WorkoutView uses the right exercise list.
                     crashResumeToPass = saved
+                    crashResumeDay = foundResult.day
                     selectedTab = 1
                 } else {
                     // Paused day not found anywhere — can't properly resume.
@@ -203,6 +247,7 @@ struct ContentView: View {
                 }
                 crashRecoveryState = nil
                 crashResumeToPass = nil
+                crashResumeDay = nil
             }
         } message: {
             Text(crashRecoveryMessage)
@@ -245,6 +290,21 @@ struct ContentView: View {
             .ignoresSafeArea()
     }
 
+    // MARK: - Tab Badge
+
+    /// Returns a coloured dot badge for Tab 1 when a session is live or paused.
+    /// Live sessions use the phase-accent blue; paused-only sessions use amber.
+    /// Returns nil (no badge) when idle. SwiftUI renders foregroundStyle on Text badges
+    /// on iOS 16+; if the tint does not render the badge defaults to the system colour.
+    private var workoutTabBadge: Text? {
+        if sessionIsLive {
+            return Text("●").foregroundStyle(Color(red: 0.25, green: 0.72, blue: 1.0))
+        } else if pausedSessionExists {
+            return Text("●").foregroundStyle(Color(red: 1.0, green: 0.65, blue: 0.0))
+        }
+        return nil
+    }
+
     // MARK: - Workout Tab
 
     /// The Workout tab. Routes to `WorkoutView` with the first non-completed day
@@ -263,25 +323,80 @@ struct ContentView: View {
                 // inner NavigationStack.
                 NavigationStack {
                     WorkoutView(
-                        trainingDay: day,
+                        trainingDay: crashResumeDay ?? day,
                         programId: mesocycle.id,
                         weekNumber: week.weekNumber,
                         completedDayCount: completedCount,
                         totalDayCount: allDays.count,
+                        onSessionCompleted: {
+                            // Crash-resume path: the resumed day may differ from `day` —
+                            // find its week via the mesocycle rather than assuming `week`.
+                            if let resumeDay = crashResumeDay,
+                               let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                                programViewModel?.markDayCompleted(dayId: found.day.id, weekId: found.week.id)
+                            } else {
+                                programViewModel?.markDayCompleted(dayId: day.id, weekId: week.id)
+                            }
+                        },
+                        onSessionPaused: {
+                            if let resumeDay = crashResumeDay,
+                               let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                                programViewModel?.markDayPaused(dayId: found.day.id, weekId: found.week.id)
+                            } else {
+                                programViewModel?.markDayPaused(dayId: day.id, weekId: week.id)
+                            }
+                        },
                         onSessionDismissed: {
-                            // Navigate to the Programme tab after session dismissal so
-                            // the user lands on the calendar with the completed day visible.
-                            selectedTab = 0
-                            crashResumeToPass = nil
-                            // Signal ProgramOverviewView to scroll to the current week.
-                            programViewModel?.scrollToCurrentWeekTrigger += 1
+                            // Sequence: markDayCompleted (from onSessionCompleted above) has
+                            // already written its state — loadProgram() now fetches the updated
+                            // mesocycle before switching tabs so the calendar shows correctly.
+                            Task { @MainActor in
+                                await programViewModel?.loadProgram()
+                                selectedTab = 0
+                                crashResumeToPass = nil
+                                crashResumeDay = nil
+                                programViewModel?.scrollToCurrentWeekTrigger += 1
+                            }
                         },
                         resumeState: crashResumeToPass,
                         onSkipSession: {
                             // Persistent skip — advances programme_day_index, records skippedAt.
                             programViewModel?.markDaySkipped(dayId: day.id, weekId: week.id)
-                        }
+                        },
+                        onCloseToTab0: { selectedTab = 0 }
                     )
+                    // Paused-session banner — shown when a different day is paused and no
+                    // session is currently live (i.e. user is on the PreWorkoutView screen).
+                    .safeAreaInset(edge: .top) {
+                        if !sessionIsLive,
+                           let saved = PausedSessionState.load(),
+                           saved.trainingDayId != day.id,
+                           let found = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {
+                            PausedSessionBannerView(
+                                dayLabel: found.day.dayLabel,
+                                weekNumber: found.week.weekNumber,
+                                onResume: { navigateToPausedDayDetail = true }
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.top, 8)
+                            .padding(.bottom, 4)
+                        }
+                    }
+                    // Navigation destination for the paused day's detail view
+                    .navigationDestination(isPresented: $navigateToPausedDayDetail) {
+                        if let saved = PausedSessionState.load(),
+                           let found = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {
+                            ProgramDayDetailView(
+                                day: found.day,
+                                week: found.week,
+                                mesocycleCreatedAt: mesocycle.createdAt,
+                                programId: mesocycle.id,
+                                viewModel: vm,
+                                gymProfile: confirmedProfile
+                            )
+                            .environment(deps)
+                        }
+                    }
                 }
             } else {
                 programCompleteView

@@ -50,6 +50,10 @@ final class WorkoutViewModel {
     /// True when inference failed and the user must choose Retry or Pause.
     var showInferenceRetrySheet: Bool = false
 
+    /// Non-nil when a resume detected a missing session row in Supabase and re-created
+    /// it. Auto-dismisses after 5 seconds. Shown as a non-blocking banner in WorkoutView.
+    var resumeRepairNotice: String? = nil
+
     /// Human-readable reason why the retry sheet is showing.
     var retryFailureDescription: String?
 
@@ -251,6 +255,17 @@ final class WorkoutViewModel {
         }
     }
 
+    /// Called when the user taps "Continue with last weights" on InferenceRetrySheet.
+    /// Only valid during .resting state where currentExercise is the pending next set's exercise.
+    func onUseLastWeights() {
+        guard let exercise = currentExercise else { return }
+        Task {
+            await manager.applyManualFallbackPrescription(for: exercise)
+            await pullState()
+            showInferenceRetrySheet = false
+        }
+    }
+
     /// Called when the user taps "Pause Session" on InferenceRetrySheet.
     func onPauseFromRetrySheet() {
         showInferenceRetrySheet = false
@@ -296,7 +311,56 @@ final class WorkoutViewModel {
             //    If offline, flush is best-effort — unflushed items stay in the WAQ.
             await manager.flushWriteAheadQueue()
 
-            // 2. Fetch whatever Supabase has (successful flushes + previously persisted rows).
+            // 2. Verify the session row exists in Supabase. If it's missing (e.g. after an
+            //    uninstall/reinstall or cross-device session start), re-create it so the
+            //    set_logs fetch in step 3 has a valid foreign key parent row.
+            struct SessionIdRow: Decodable { let id: UUID }
+            let sessionExists = (try? await supabase.fetch(
+                SessionIdRow.self,
+                table: "workout_sessions",
+                filters: [Filter(column: "id", op: .eq, value: pausedState.sessionId.uuidString)],
+                limit: 1
+            ).first) != nil
+
+            if !sessionExists {
+                struct SessionInsertRow: Encodable {
+                    let id: UUID
+                    let userId: UUID
+                    let programId: UUID
+                    let sessionDate: Date
+                    let weekNumber: Int
+                    let dayType: String
+                    let completed: Bool
+                    let status: String
+                    enum CodingKeys: String, CodingKey {
+                        case id
+                        case userId      = "user_id"
+                        case programId   = "program_id"
+                        case sessionDate = "session_date"
+                        case weekNumber  = "week_number"
+                        case dayType     = "day_type"
+                        case completed, status
+                    }
+                }
+                let row = SessionInsertRow(
+                    id: pausedState.sessionId,
+                    userId: pausedState.userId,
+                    programId: pausedState.programId,
+                    sessionDate: pausedState.pausedAt,
+                    weekNumber: pausedState.weekNumber,
+                    dayType: pausedState.dayType,
+                    completed: false,
+                    status: "paused"
+                )
+                try? await supabase.insert(row, table: "workout_sessions")
+                resumeRepairNotice = "Session data was restored from your device."
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    self?.resumeRepairNotice = nil
+                }
+            }
+
+            // 3. Fetch whatever Supabase has (successful flushes + previously persisted rows).
             let remoteLogs: [SetLog] = (try? await supabase.fetch(
                 SetLog.self,
                 table: "set_logs",
@@ -304,10 +368,10 @@ final class WorkoutViewModel {
                 order: "set_number.asc"
             )) ?? []
 
-            // 3. Read any set_logs still queued locally (flush may have failed for these).
+            // 4. Read any set_logs still queued locally (flush may have failed for these).
             let waqLogs = await manager.pendingSetLogs(forSession: pausedState.sessionId)
 
-            // 4. Merge: WAQ wins on conflict (same SetLog.id → WAQ version is authoritative
+            // 5. Merge: WAQ wins on conflict (same SetLog.id → WAQ version is authoritative
             //    because it is the most recently written copy and may not yet be in Supabase).
             var mergedById: [UUID: SetLog] = Dictionary(
                 uniqueKeysWithValues: remoteLogs.map { ($0.id, $0) }

@@ -97,6 +97,21 @@ volume_landmark in week_intent tells you where this week sits (0.0–1.0).
 Adjust total sets proportionally — higher landmark = upper end of set range.
 
 ═══════════════════════════════════════════════════════════════
+RETURN-TO-TRAINING OVERRIDE
+═══════════════════════════════════════════════════════════════
+If temporal_context.requires_return_phase_override is true, the user has been away for
+28 or more days. IGNORE the global_programme_phase and pattern phase labels above.
+
+Generate today's session as a return-to-training ACCUMULATION BASELINE:
+• Use Accumulation phase parameters (Sets 3–4 | Reps 10–15 | RIR 3–4 | Rest 90–120s).
+• Reduce total volume by 30–40% relative to the user's last logged session for this day type.
+• Prioritise low-fatigue, high-confidence compound movements the user has a strong history with.
+• Avoid novel exercises or techniques that require high neuromuscular readiness.
+• Set session_notes to acknowledge the return gap (max 20 words, e.g. "Return session after extended break — reduced volume to ease back in safely.").
+
+If requires_return_phase_override is false, proceed with normal phase parameters above.
+
+═══════════════════════════════════════════════════════════════
 SESSION STRUCTURE
 ═══════════════════════════════════════════════════════════════
 • 4–6 exercises. Compounds first, accessories after.

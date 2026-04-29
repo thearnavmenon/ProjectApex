@@ -38,7 +38,7 @@ nonisolated enum SessionState: Sendable, Equatable {
     /// Rest period between sets or exercises.
     case resting(nextExercise: PlannedExercise, setNumber: Int)
     /// All sets for an exercise are done; about to move to next (or finish).
-    case exerciseComplete(nextExercise: PlannedExercise?)
+    case exerciseComplete(completedExercise: PlannedExercise, nextExercise: PlannedExercise?)
     /// All exercises done; session summary generated.
     case sessionComplete(summary: SessionSummary)
     /// Unrecoverable error.
@@ -50,8 +50,8 @@ nonisolated enum SessionState: Sendable, Equatable {
         case (.preflight, .preflight):                          return true
         case (.active(let a, let n), .active(let b, let m)):   return a.id == b.id && n == m
         case (.resting(let a, let n), .resting(let b, let m)): return a.id == b.id && n == m
-        case (.exerciseComplete(let a), .exerciseComplete(let b)):
-            return a?.id == b?.id
+        case (.exerciseComplete(let ac, let an), .exerciseComplete(let bc, let bn)):
+            return ac.id == bc.id && an?.id == bn?.id
         case (.sessionComplete, .sessionComplete):              return true
         case (.error(let a), .error(let b)):                    return a == b
         default:                                                return false
@@ -379,14 +379,12 @@ actor WorkoutSessionManager {
             return
         }
 
-        sessionState = .resting(nextExercise: nextExercise!, setNumber: nextSetNumber)
+        if isLastSetForExercise {
+            // Flash .exerciseComplete for 1.2 s before entering rest.
+            // Inference fires immediately on entry so it overlaps the celebration window.
+            sessionState = .exerciseComplete(completedExercise: exercise, nextExercise: nextExercise)
 
-        // Start countdown timer
-        startRestTimer(duration: planRestSeconds, isSessionEnd: false)
-
-        // 3 & 4. Fire inference for the next set concurrently
-        if let next = nextExercise {
-            if isLastSetForExercise {
+            if let next = nextExercise {
                 // Moving to a new exercise — refresh RAG memory.
                 // MARK: Fix 4 — RAG latency measurement
                 let signpostID = ragSignposter.makeSignpostID()
@@ -397,24 +395,50 @@ actor WorkoutSessionManager {
                 let ragElapsed = ragStart.duration(to: .now)
                 ragSignposter.endInterval("RAGFetch", signpostState)
                 ragLogger.info("RAG fetch latency: \(ragElapsed, privacy: .public) exercise=\(next.name, privacy: .public)")
+
+                let context = await assembleWorkoutContext(exercise: next, setNumber: nextSetNumber)
+                Task { [weak self] in
+                    guard let self else { return }
+                    let result = await self.aiInference.prescribe(context: context)
+                    await self.handleInferenceResult(
+                        result,
+                        generation: capturedGeneration,
+                        targetExercise: next,
+                        targetSetNumber: nextSetNumber
+                    )
+                    await self.decrementInflight()
+                }
+            } else {
+                inflightRequestCount -= 1
             }
 
-            let context = await assembleWorkoutContext(exercise: next, setNumber: nextSetNumber)
-
-            Task { [weak self] in
-                guard let self else { return }
-                let result = await self.aiInference.prescribe(context: context)
-                await self.handleInferenceResult(
-                    result,
-                    generation: capturedGeneration,
-                    targetExercise: next,
-                    targetSetNumber: nextSetNumber
-                )
-                await self.decrementInflight()
-            }
+            // Wait 1.2 s, then enter rest. If pause fires during the window,
+            // sessionState is reset to .idle by resetToIdle() — guard catches that.
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard case .exerciseComplete = sessionState else { return }
+            sessionState = .resting(nextExercise: nextExercise!, setNumber: nextSetNumber)
+            startRestTimer(duration: planRestSeconds, isSessionEnd: false)
         } else {
-            // No more exercises — no inference needed
-            inflightRequestCount -= 1
+            // Same exercise, next set — go directly to resting.
+            sessionState = .resting(nextExercise: nextExercise!, setNumber: nextSetNumber)
+            startRestTimer(duration: planRestSeconds, isSessionEnd: false)
+
+            if let next = nextExercise {
+                let context = await assembleWorkoutContext(exercise: next, setNumber: nextSetNumber)
+                Task { [weak self] in
+                    guard let self else { return }
+                    let result = await self.aiInference.prescribe(context: context)
+                    await self.handleInferenceResult(
+                        result,
+                        generation: capturedGeneration,
+                        targetExercise: next,
+                        targetSetNumber: nextSetNumber
+                    )
+                    await self.decrementInflight()
+                }
+            } else {
+                inflightRequestCount -= 1
+            }
         }
     }
 
@@ -649,6 +673,33 @@ actor WorkoutSessionManager {
         prescription.userCorrectedWeight = true
         currentPrescription = prescription
         print("[WorkoutSessionManager] Session-only weight override — \(confirmedWeight)kg (GymFactStore NOT updated)")
+    }
+
+    /// Called when the user taps "Continue with last weights" on InferenceRetrySheet.
+    /// Builds a prescription from the most recently logged set for this exercise in the
+    /// current session, falling back to program defaults if no prior set exists.
+    func applyManualFallbackPrescription(for exercise: PlannedExercise) {
+        let lastSet = completedSets
+            .filter { $0.exerciseId == exercise.exerciseId }
+            .max(by: { $0.setNumber < $1.setNumber })
+
+        let prescription = SetPrescription(
+            weightKg:          lastSet?.weightKg ?? 0.0,
+            reps:              lastSet?.repsCompleted ?? exercise.repRange.min,
+            tempo:             exercise.tempo,
+            rirTarget:         exercise.rirTarget,
+            restSeconds:       exercise.restSeconds,
+            coachingCue:       "Using last session weights",
+            reasoning:         "Manual fallback — AI unavailable.",
+            safetyFlags:       [],
+            confidence:        nil,
+            userCorrectedWeight: nil,
+            isManualFallback:  true
+        )
+        currentPrescription = prescription
+        inferenceRetryNeeded = false
+        inferenceRetryReason = nil
+        pendingRetryExercise = nil
     }
 
     /// Resumes a previously paused session.
@@ -1357,6 +1408,10 @@ actor WorkoutSessionManager {
 
         restTimerTask?.cancel()
         restTimerTask = nil
+
+        // Flush WAQ before PATCH so all set_logs are in Supabase before the session row
+        // is marked completed. Mirrors pauseSession() and abandonSession() exactly.
+        await writeAheadQueue.flush()
 
         guard var finalSession = session else {
             sessionState = .error("No active session to end.")

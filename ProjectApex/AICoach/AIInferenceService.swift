@@ -368,6 +368,9 @@ nonisolated struct SetPrescription: Codable, Sendable {
     /// True when the user has manually overridden the AI-suggested weight inline.
     /// Propagated into WorkoutContext so the AI knows the weight was user-corrected.
     var userCorrectedWeight: Bool?
+    /// True when the user tapped "Continue with last weights" on InferenceRetrySheet
+    /// because AI inference was unavailable. Stored in the ai_prescribed JSONB blob.
+    var isManualFallback: Bool?
 
     enum CodingKeys: String, CodingKey {
         case weightKg            = "weight_kg"
@@ -380,6 +383,7 @@ nonisolated struct SetPrescription: Codable, Sendable {
         case safetyFlags         = "safety_flags"
         case confidence
         case userCorrectedWeight = "user_corrected_weight"
+        case isManualFallback    = "is_manual_fallback"
     }
 }
 

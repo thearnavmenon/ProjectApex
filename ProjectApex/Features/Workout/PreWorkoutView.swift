@@ -42,14 +42,20 @@ struct PreWorkoutView: View {
     var completedDayCount: Int = 0
     /// Total training days in the current mesocycle (for Day X of Y display).
     var totalDayCount: Int = 0
+    /// Days since the user's last completed session — nil means first-ever session.
+    /// Drives the welcome-back banner when the gap is ≥ 14 days (2.4A).
+    var daysSinceLastSession: Int? = nil
     /// Called when the user taps "Skip this session". Defers this day without recording
     /// any session data — the next pending non-skipped day becomes the active session.
     var onSkipSession: (() -> Void)? = nil
     /// Called when the user taps the back button or swipes from the left edge.
     var onBack: (() -> Void)? = nil
+    /// Called when the user taps the × close button on the Tab 1 entry path (idle only).
+    var onCloseToTab0: (() -> Void)? = nil
 
     // MARK: - Private state
     @State private var showSkipConfirmation: Bool = false
+    @State private var welcomeBackBannerDismissed: Bool = false
 
     // MARK: - Body
 
@@ -67,6 +73,9 @@ struct PreWorkoutView: View {
                         if isFirstSession {
                             firstSessionBanner
                         }
+                        if let days = daysSinceLastSession, days >= 14, !welcomeBackBannerDismissed {
+                            welcomeBackBanner(days: days)
+                        }
                         sessionInfoCard
                         startButton
                         if onSkipSession != nil {
@@ -81,17 +90,29 @@ struct PreWorkoutView: View {
         }
         .gesture(
             DragGesture().onEnded { value in
-                if value.translation.width > 80 { onBack?() }
+                guard !viewModel.isPreflight else { return }
+                if value.translation.width > 80 {
+                    if onBack != nil { onBack?() }
+                    else { onCloseToTab0?() }
+                }
             }
         )
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                if onBack != nil {
-                    Button(action: { onBack?() }) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.80))
+                if !viewModel.isPreflight {
+                    if onBack != nil {
+                        Button(action: { onBack?() }) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.80))
+                        }
+                    } else if onCloseToTab0 != nil {
+                        Button(action: { onCloseToTab0?() }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.80))
+                        }
                     }
                 }
             }
@@ -296,6 +317,44 @@ struct PreWorkoutView: View {
         )
     }
 
+    // MARK: - Welcome Back Banner (2.4A)
+
+    private func welcomeBackBanner(days: Int) -> some View {
+        let isReturnSession = days >= 28
+        let amberColor = Color(red: 1.0, green: 0.65, blue: 0.0)
+        let message = isReturnSession
+            ? "Welcome back — it's been \(days) days. Today is a recovery session with reduced volume to get you back on track."
+            : "Welcome back — it's been \(days) days. We've adjusted today's session to ease back in."
+        return HStack(spacing: 12) {
+            Image(systemName: isReturnSession ? "arrow.counterclockwise.circle.fill" : "hand.wave.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(amberColor)
+            Text(message)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(.white.opacity(0.80))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                welcomeBackBannerDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.40))
+                    .padding(6)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            amberColor.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(amberColor.opacity(0.25), lineWidth: 0.5)
+        )
+    }
+
     // MARK: - Start Button
 
     private var startButton: some View {
@@ -356,9 +415,7 @@ struct PreWorkoutView: View {
     // MARK: - Computed helpers
 
     private var weekLabel: String {
-        // Week number is stored on TrainingWeek, not TrainingDay directly.
-        // The caller supplies the day; we display a generic label for now.
-        return "1"
+        return "\(weekNumber)"
     }
 
     private var estimatedDurationMinutes: Int {

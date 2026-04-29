@@ -535,7 +535,8 @@ final class ProgramViewModel {
                 skippedSessionCountLast30Days: skippedCount,
                 globalProgrammePhase: week.phase.rawValue,
                 globalProgrammeWeek: week.weekNumber,
-                patternPhases: patternPhases
+                patternPhases: patternPhases,
+                requiresReturnPhaseOverride: (daysSinceLastSession ?? 0) >= 28
             )
         }()
 
