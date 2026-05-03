@@ -19,7 +19,7 @@ import Foundation
 
 /// The required field on every set; gates which sets contribute to e1RM,
 /// volume aggregation, and RPE calibration.
-public enum SetIntent: String, Codable, Sendable, Hashable, CaseIterable {
+enum SetIntent: String, Codable, Sendable, Hashable, CaseIterable {
     case warmup
     case top
     case backoff
@@ -33,7 +33,7 @@ public enum SetIntent: String, Codable, Sendable, Hashable, CaseIterable {
 /// Replaces the prior global confidence that lied when half the patterns
 /// had no data. Calibration review fires when ≥4 of 6 major patterns
 /// reach .established.
-public enum AxisConfidence: String, Codable, Sendable, Hashable, CaseIterable {
+enum AxisConfidence: String, Codable, Sendable, Hashable, CaseIterable {
     case bootstrapping
     case calibrating
     case established
@@ -44,7 +44,7 @@ public enum AxisConfidence: String, Codable, Sendable, Hashable, CaseIterable {
 
 /// Per-set training stimulus classification; drives two-dimensional recovery.
 /// Warmup and technique sets classify as nil at the call site (Optional).
-public enum StimulusDimension: String, Codable, Sendable, Hashable, CaseIterable {
+enum StimulusDimension: String, Codable, Sendable, Hashable, CaseIterable {
     case neuromuscular
     case metabolic
     case both
@@ -54,7 +54,7 @@ public enum StimulusDimension: String, Codable, Sendable, Hashable, CaseIterable
 
 /// Severity of an active limitation. AI-inferred limitations cap at .mild
 /// until the user confirms (per ADR-0005 — corroboration thresholds).
-public enum Severity: String, Codable, Sendable, Hashable, CaseIterable {
+enum Severity: String, Codable, Sendable, Hashable, CaseIterable {
     case mild
     case moderate
     case severe
@@ -64,7 +64,7 @@ public enum Severity: String, Codable, Sendable, Hashable, CaseIterable {
 
 /// Anatomical joints tracked by ActiveLimitation when the limitation
 /// is joint-scoped rather than pattern- or muscle-scoped.
-public enum BodyJoint: String, Codable, Sendable, Hashable, CaseIterable {
+enum BodyJoint: String, Codable, Sendable, Hashable, CaseIterable {
     case shoulder
     case elbow
     case wrist
@@ -78,11 +78,22 @@ public enum BodyJoint: String, Codable, Sendable, Hashable, CaseIterable {
 // MARK: - ProjectionProgress (per-pattern projection state)
 
 /// State of progression toward a PatternProjection's floor/stretch targets.
-public enum ProjectionProgress: String, Codable, Sendable, Hashable, CaseIterable {
+enum ProjectionProgress: String, Codable, Sendable, Hashable, CaseIterable {
     case behind
     case onTrack  = "on_track"
     case ahead
     case achieved
+}
+
+// MARK: - ProgressionTrend (PatternProfile.trend, MuscleProfile.stagnationStatus)
+
+/// Capability trajectory used by both pattern-level trend (replacing
+/// StagnationService output) and muscle-level stagnation status per
+/// ADR-0005's service-supersession notes.
+enum ProgressionTrend: String, Codable, Sendable, Hashable, CaseIterable {
+    case progressing
+    case plateaued
+    case declining
 }
 
 // MARK: - LimitationSubject (sum type — pattern | muscle | joint)
@@ -91,7 +102,7 @@ public enum ProjectionProgress: String, Codable, Sendable, Hashable, CaseIterabl
 /// limitations are scoped per pattern, per muscle, or per joint.
 ///
 /// Codable shape: `{"kind": "pattern", "value": "horizontal_push"}` etc.
-public enum LimitationSubject: Sendable, Hashable {
+enum LimitationSubject: Sendable, Hashable {
     case pattern(MovementPattern)
     case muscle(MuscleGroup)
     case joint(BodyJoint)
@@ -101,7 +112,7 @@ extension LimitationSubject: Codable {
     private enum CodingKeys: String, CodingKey { case kind, value }
     private enum Kind: String, Codable { case pattern, muscle, joint }
 
-    public init(from decoder: Decoder) throws {
+    init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(Kind.self, forKey: .kind) {
         case .pattern:
@@ -113,7 +124,7 @@ extension LimitationSubject: Codable {
         }
     }
 
-    public func encode(to encoder: Encoder) throws {
+    func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .pattern(let p):

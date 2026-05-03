@@ -11,15 +11,15 @@ import Foundation
 /// A currently flagged injury / pain state per pattern, muscle, or joint.
 /// AI-inferred limitations require ≥2 corroborating evidence and cap at
 /// .mild severity until user-confirmed (per ADR-0005).
-public struct ActiveLimitation: Codable, Sendable, Hashable {
-    public var subject: LimitationSubject
-    public var severity: Severity
-    public var onsetDate: Date
-    public var evidenceCount: Int
-    public var userConfirmed: Bool
-    public var notes: String?
+struct ActiveLimitation: Codable, Sendable, Hashable {
+    var subject: LimitationSubject
+    var severity: Severity
+    var onsetDate: Date
+    var evidenceCount: Int
+    var userConfirmed: Bool
+    var notes: String?
 
-    public init(
+    init(
         subject: LimitationSubject,
         severity: Severity,
         onsetDate: Date,
@@ -41,14 +41,14 @@ public struct ActiveLimitation: Codable, Sendable, Hashable {
 /// An archived limitation resolved through clean training. Retention is
 /// capped at 50 entries / 12 months (enforced at write-side, not in
 /// this value type) per ADR-0005.
-public struct ClearedLimitation: Codable, Sendable, Hashable {
-    public var subject: LimitationSubject
-    public var severity: Severity
-    public var onsetDate: Date
-    public var clearedDate: Date
-    public var notes: String?
+struct ClearedLimitation: Codable, Sendable, Hashable {
+    var subject: LimitationSubject
+    var severity: Severity
+    var onsetDate: Date
+    var clearedDate: Date
+    var notes: String?
 
-    public init(
+    init(
         subject: LimitationSubject,
         severity: Severity,
         onsetDate: Date,
@@ -74,16 +74,16 @@ public struct ClearedLimitation: Codable, Sendable, Hashable {
 ///  - countFactor caps confidence at 0.5 below 15 observations; full
 ///    weight at 15+.
 ///  - confidence = consistencyFactor × countFactor.
-public struct FatigueInteraction: Codable, Sendable, Hashable {
-    public var fromPattern: MovementPattern
-    public var toPattern: MovementPattern
+struct FatigueInteraction: Codable, Sendable, Hashable {
+    var fromPattern: MovementPattern
+    var toPattern: MovementPattern
     /// Delta-percent observations (e.g. -0.05 = 5% performance dip).
     /// Newest at the end. Window of last 10 feeds consistencyFactor.
-    public var observations: [Double]
+    var observations: [Double]
     /// Total paired observations seen across history (for the hard-cap rule).
-    public var totalCount: Int
+    var totalCount: Int
 
-    public init(
+    init(
         fromPattern: MovementPattern,
         toPattern: MovementPattern,
         observations: [Double],
@@ -95,7 +95,7 @@ public struct FatigueInteraction: Codable, Sendable, Hashable {
         self.totalCount = totalCount
     }
 
-    public var consistencyFactor: Double {
+    var consistencyFactor: Double {
         let recent = Array(observations.suffix(10))
         guard recent.count >= 2 else { return 0 }
         let mean = recent.reduce(0, +) / Double(recent.count)
@@ -108,11 +108,11 @@ public struct FatigueInteraction: Codable, Sendable, Hashable {
         return clamped
     }
 
-    public var countFactor: Double {
+    var countFactor: Double {
         totalCount >= 15 ? 1.0 : 0.5
     }
 
-    public var confidence: Double {
+    var confidence: Double {
         consistencyFactor * countFactor
     }
 }
@@ -121,14 +121,14 @@ public struct FatigueInteraction: Codable, Sendable, Hashable {
 
 /// Per (pattern, intent) bias and RMSE — meta-coaching about the AI's
 /// own miscalibration, distinct from a single intent mismatch at log time.
-public struct PrescriptionAccuracy: Codable, Sendable, Hashable {
-    public var pattern: MovementPattern
-    public var intent: SetIntent
-    public var bias: Double
-    public var rmse: Double
-    public var sampleCount: Int
+struct PrescriptionAccuracy: Codable, Sendable, Hashable {
+    var pattern: MovementPattern
+    var intent: SetIntent
+    var bias: Double
+    var rmse: Double
+    var sampleCount: Int
 
-    public init(pattern: MovementPattern, intent: SetIntent, bias: Double, rmse: Double, sampleCount: Int) {
+    init(pattern: MovementPattern, intent: SetIntent, bias: Double, rmse: Double, sampleCount: Int) {
         self.pattern = pattern
         self.intent = intent
         self.bias = bias
@@ -142,14 +142,14 @@ public struct PrescriptionAccuracy: Codable, Sendable, Hashable {
 /// Diagnostic log for set-intent mismatches at log time. Inspection-only,
 /// capped at 50 entries (cap enforced at write-side); not used for rate
 /// analytics per ADR-0005.
-public struct PrescriptionIntentMismatch: Codable, Sendable, Hashable {
-    public var timestamp: Date
-    public var exerciseId: String
-    public var pattern: MovementPattern
-    public var prescribedIntent: SetIntent
-    public var loggedIntent: SetIntent
+struct PrescriptionIntentMismatch: Codable, Sendable, Hashable {
+    var timestamp: Date
+    var exerciseId: String
+    var pattern: MovementPattern
+    var prescribedIntent: SetIntent
+    var loggedIntent: SetIntent
 
-    public init(
+    init(
         timestamp: Date,
         exerciseId: String,
         pattern: MovementPattern,
@@ -169,14 +169,14 @@ public struct PrescriptionIntentMismatch: Codable, Sendable, Hashable {
 /// Per-user-learned cross-exercise transfer coefficient with R². Gated
 /// on ≥5 paired observations per ADR-0005; first ~30 sessions per pair
 /// give no transfer benefit (cold-start).
-public struct ExerciseTransfer: Codable, Sendable, Hashable {
-    public var fromExerciseId: String
-    public var toExerciseId: String
-    public var coefficient: Double
-    public var rSquared: Double
-    public var pairedObservations: Int
+struct ExerciseTransfer: Codable, Sendable, Hashable {
+    var fromExerciseId: String
+    var toExerciseId: String
+    var coefficient: Double
+    var rSquared: Double
+    var pairedObservations: Int
 
-    public init(
+    init(
         fromExerciseId: String,
         toExerciseId: String,
         coefficient: Double,
@@ -194,10 +194,10 @@ public struct ExerciseTransfer: Codable, Sendable, Hashable {
 // MARK: - BodyweightHistory
 
 /// Passive-log bodyweight history per ADR-0005.
-public struct BodyweightHistory: Codable, Sendable, Hashable {
-    public var entries: [BodyweightEntry]
+struct BodyweightHistory: Codable, Sendable, Hashable {
+    var entries: [BodyweightEntry]
 
-    public init(entries: [BodyweightEntry] = []) {
+    init(entries: [BodyweightEntry] = []) {
         self.entries = entries
     }
 }

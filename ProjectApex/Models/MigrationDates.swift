@@ -11,17 +11,17 @@
 
 import Foundation
 
-public enum MigrationDates {
+enum MigrationDates {
     /// Cutoff for the set-intent backfill (per ADR-0005 — three-phase
     /// migration with code validation shipping before DB migration).
     /// Reads of pre-cutoff sets must tolerate missing intent; reads of
     /// post-cutoff sets must require it.
-    public static let v2SetIntentBackfill: Date = Date(timeIntervalSince1970: 0)
+    static let v2SetIntentBackfill: Date = Date(timeIntervalSince1970: 0)
 
     /// Cutoff for the localDate-field rollout (per ADR-0005 — pre-bucketed
     /// localDate string at write time, immune to subsequent timezone
     /// changes). Reads of pre-cutoff sessions derive localDate from
     /// timestamp + active timezone; reads of post-cutoff sessions trust
     /// the stored field.
-    public static let v2LocalDateField: Date = Date(timeIntervalSince1970: 0)
+    static let v2LocalDateField: Date = Date(timeIntervalSince1970: 0)
 }

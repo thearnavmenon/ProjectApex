@@ -11,7 +11,7 @@
 
 import Foundation
 
-public enum MovementPattern: String, Codable, Sendable, Hashable, CaseIterable {
+enum MovementPattern: String, Codable, Sendable, Hashable, CaseIterable {
     case hipHinge       = "hip_hinge"
     case horizontalPull = "horizontal_pull"
     case horizontalPush = "horizontal_push"

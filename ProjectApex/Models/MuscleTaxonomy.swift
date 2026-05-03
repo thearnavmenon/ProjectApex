@@ -20,19 +20,19 @@
 
 import Foundation
 
-public enum PrimaryMuscle: String, Codable, Sendable, Hashable, CaseIterable {
+enum PrimaryMuscle: String, Codable, Sendable, Hashable, CaseIterable {
     case back, chest, biceps, shoulders, triceps
     case quads, hamstrings, glutes, calves
 }
 
-public enum MuscleGroup: String, Codable, Sendable, Hashable, CaseIterable {
+enum MuscleGroup: String, Codable, Sendable, Hashable, CaseIterable {
     case back, chest, biceps, shoulders, triceps, legs
 }
 
 extension PrimaryMuscle {
     /// Collapses leg subgroups (quads/hamstrings/glutes/calves) to .legs;
     /// upper-body muscles map 1:1.
-    public var muscleGroup: MuscleGroup {
+    var muscleGroup: MuscleGroup {
         switch self {
         case .back:      return .back
         case .chest:     return .chest
