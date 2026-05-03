@@ -61,7 +61,7 @@ Executable without rederivation. If you are reading this with no prior context, 
 
 **Prerequisite:** a recurring 90-day calendar reminder titled **"Rotate Anthropic API key"** must exist. If not already set, create it now — the cadence is worthless without a forcing function.
 
-**Concurrent-keys precondition:** the 24-hour overlap window relies on Anthropic Console permitting the new key and the old key to be active simultaneously. As of last verification, Console allows multiple concurrent API keys per organization with no hard cap documented at this scale. Verify once at console.anthropic.com → Settings → API Keys and record any per-account limit your plan enforces here — some providers cap at 2 or 5 concurrent keys, and discovering a cap mid-rotation defeats the rollback story. Per-account limit observed: _to be filled in on first verification_.
+**Concurrent-keys precondition:** the 24-hour overlap window in step 5 below requires Anthropic Console to permit at least two active API keys simultaneously (one new, one old, during the overlap). **Verified satisfied** at console.anthropic.com → Settings → API Keys — Console supports ≥2 concurrent keys, which is the minimum the playbook needs. Exact per-account upper bound not recorded; if a future rotation ever hits a cap, record the observed limit here so subsequent rotations don't bump into it again.
 
 1. console.anthropic.com → API Keys → create new key (label it with today's date, e.g., `apex-edge-2026-08-01`).
 2. `supabase secrets set ANTHROPIC_API_KEY=<new value>` (production project).
