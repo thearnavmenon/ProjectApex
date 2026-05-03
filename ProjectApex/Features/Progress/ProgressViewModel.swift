@@ -260,7 +260,7 @@ final class ProgressViewModel {
         var logsByMuscle: [String: [SetLog]] = [:]
         for log in setLogs {
             let muscle = log.primaryMuscle
-                ?? ExerciseLibrary.primaryMuscle(for: log.exerciseId)
+                ?? ExerciseLibrary.primaryMuscle(for: log.exerciseId)?.rawValue
                 ?? "other"
             logsByMuscle[muscle, default: []].append(log)
         }
@@ -391,7 +391,7 @@ final class ProgressViewModel {
             var setsByMuscle: [String: Int] = [:]
             for log in weekLogs {
                 let muscle = log.primaryMuscle
-                    ?? ExerciseLibrary.primaryMuscle(for: log.exerciseId)
+                    ?? ExerciseLibrary.primaryMuscle(for: log.exerciseId)?.rawValue
                     ?? "other"
                 setsByMuscle[muscle, default: 0] += 1
             }

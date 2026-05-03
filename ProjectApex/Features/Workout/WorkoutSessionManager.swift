@@ -303,7 +303,7 @@ actor WorkoutSessionManager {
             rirEstimated: rpeFelt.map { max(0, 10 - $0) },
             aiPrescribed: currentPrescription,
             loggedAt: Date(),
-            primaryMuscle: ExerciseLibrary.primaryMuscle(for: exercise.exerciseId) ?? exercise.primaryMuscle
+            primaryMuscle: ExerciseLibrary.primaryMuscle(for: exercise.exerciseId)?.rawValue ?? exercise.primaryMuscle
         )
         completedSets.append(setLog)
 

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */; };
+		39E16C19CFE1B1EF9BE00A32 /* TraineeModelEnumsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */; };
 		474B848D2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */; };
 		478DD9F12F9928C6001D3636 /* SkipFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */; };
 		478DD9F52F993A1E001D3636 /* PatternPhaseServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478DD9F42F993A1E001D3636 /* PatternPhaseServiceTests.swift */; };
@@ -32,7 +33,15 @@
 		47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */; };
 		47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */; };
 		47E356DC2F61D07B00C69CD6 /* GymFactStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */; };
+		51F067120CE1EA4A3EA813A6 /* MuscleTaxonomyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */; };
+		5DE94F8F1D136C65C96FCAD1 /* WeekFatigueSignalsHelperAgreementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */; };
+		6ECE420C1031E80360FF1EFE /* TraineeModelProfilesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */; };
 		6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6DC23D0A3EB460CF97B18574 /* Foundation.framework */; };
+		729D1F4ED6B5BD11AFD51058 /* MigrationDatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */; };
+		73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */; };
+		81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */; };
+		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
+		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,6 +55,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MigrationDatesTests.swift; sourceTree = "<group>"; };
+		4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WeekFatigueSignalsHelperAgreementTests.swift; sourceTree = "<group>"; };
 		474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroPlanServiceDayCountTests.swift; sourceTree = "<group>"; };
 		478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkipFeatureTests.swift; sourceTree = "<group>"; };
 		478DD9F42F993A1E001D3636 /* PatternPhaseServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PatternPhaseServiceTests.swift; sourceTree = "<group>"; };
@@ -76,12 +87,21 @@
 		47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymFactStoreTests.swift; sourceTree = "<group>"; };
 		6DC23D0A3EB460CF97B18574 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentRounderTests.swift; sourceTree = "<group>"; };
+		85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelInteractionsTests.swift; sourceTree = "<group>"; };
+		878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelProfilesTests.swift; sourceTree = "<group>"; };
+		993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelSnapshotsTests.swift; sourceTree = "<group>"; };
+		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
+		E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MuscleTaxonomyTests.swift; sourceTree = "<group>"; };
+		EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelEnumsTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MovementPatternTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		47D91BC22F60266A007B3B34 /* ProjectApex */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+			);
 			path = ProjectApex;
 			sourceTree = "<group>";
 		};
@@ -188,6 +208,15 @@
 				47DFED062F73D887006F4B62 /* VolumeValidationServiceTests.swift */,
 				478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */,
 				478DD9F42F993A1E001D3636 /* PatternPhaseServiceTests.swift */,
+				FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */,
+				E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */,
+				EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */,
+				1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */,
+				993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */,
+				85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */,
+				878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */,
+				DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */,
+				4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -315,6 +344,15 @@
 				47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */,
 				478DD9F52F993A1E001D3636 /* PatternPhaseServiceTests.swift in Sources */,
 				47E356DC2F61D07B00C69CD6 /* GymFactStoreTests.swift in Sources */,
+				89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */,
+				51F067120CE1EA4A3EA813A6 /* MuscleTaxonomyTests.swift in Sources */,
+				39E16C19CFE1B1EF9BE00A32 /* TraineeModelEnumsTests.swift in Sources */,
+				729D1F4ED6B5BD11AFD51058 /* MigrationDatesTests.swift in Sources */,
+				73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */,
+				81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */,
+				6ECE420C1031E80360FF1EFE /* TraineeModelProfilesTests.swift in Sources */,
+				B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */,
+				5DE94F8F1D136C65C96FCAD1 /* WeekFatigueSignalsHelperAgreementTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

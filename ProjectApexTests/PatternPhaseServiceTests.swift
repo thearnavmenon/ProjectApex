@@ -56,7 +56,7 @@ private func makeLogs(exerciseId: String, sessionCount: Int) -> [SetLog] {
 /// Convenience to make a state already at `sessionsCompletedInPhase` sessions
 /// with the correct threshold for 4 days/week.
 private func makeState(
-    pattern: String,
+    pattern: MovementPattern,
     phase: MesocyclePhase,
     completed: Int,
     required: Int
@@ -99,13 +99,13 @@ struct PatternPhaseServiceTests {
     @Test("Reaching accumulation threshold advances pattern to intensification")
     func accumulationAdvancesToIntensification() {
         // At threshold: 7 completed, 8 required. One more session pushes it over.
-        let current = [makeState(pattern: "horizontal_push", phase: .accumulation, completed: 7, required: 8)]
+        let current = [makeState(pattern: .horizontalPush, phase: .accumulation, completed: 7, required: 8)]
         let updated = PatternPhaseService.advancePhases(
             current: current,
-            trainedPatterns: ["horizontal_push"],
+            trainedPatterns: [.horizontalPush],
             daysPerWeek: 4
         )
-        let state = updated.first { $0.pattern == "horizontal_push" }
+        let state = updated.first { $0.pattern == .horizontalPush }
         #expect(state?.phase == .intensification)
         #expect(state?.sessionsCompletedInPhase == 0)
         #expect(state?.sessionsRequiredForPhase == 8)
@@ -115,13 +115,13 @@ struct PatternPhaseServiceTests {
 
     @Test("Reaching intensification threshold advances pattern to peaking")
     func intensificationAdvancesToPeaking() {
-        let current = [makeState(pattern: "horizontal_push", phase: .intensification, completed: 7, required: 8)]
+        let current = [makeState(pattern: .horizontalPush, phase: .intensification, completed: 7, required: 8)]
         let updated = PatternPhaseService.advancePhases(
             current: current,
-            trainedPatterns: ["horizontal_push"],
+            trainedPatterns: [.horizontalPush],
             daysPerWeek: 4
         )
-        let state = updated.first { $0.pattern == "horizontal_push" }
+        let state = updated.first { $0.pattern == .horizontalPush }
         #expect(state?.phase == .peaking)
         #expect(state?.sessionsCompletedInPhase == 0)
         #expect(state?.sessionsRequiredForPhase == 6)
@@ -131,13 +131,13 @@ struct PatternPhaseServiceTests {
 
     @Test("Reaching peaking threshold advances pattern to deload")
     func peakingAdvancesToDeload() {
-        let current = [makeState(pattern: "horizontal_push", phase: .peaking, completed: 5, required: 6)]
+        let current = [makeState(pattern: .horizontalPush, phase: .peaking, completed: 5, required: 6)]
         let updated = PatternPhaseService.advancePhases(
             current: current,
-            trainedPatterns: ["horizontal_push"],
+            trainedPatterns: [.horizontalPush],
             daysPerWeek: 4
         )
-        let state = updated.first { $0.pattern == "horizontal_push" }
+        let state = updated.first { $0.pattern == .horizontalPush }
         #expect(state?.phase == .deload)
         #expect(state?.sessionsCompletedInPhase == 0)
     }
@@ -147,13 +147,13 @@ struct PatternPhaseServiceTests {
     @Test("Deload phase is terminal — pattern does not advance further")
     func deloadIsTerminal() {
         // Put pattern at the deload threshold (2 of 3 sessions done, then one more).
-        let current = [makeState(pattern: "horizontal_push", phase: .deload, completed: 2, required: 3)]
+        let current = [makeState(pattern: .horizontalPush, phase: .deload, completed: 2, required: 3)]
         let updated = PatternPhaseService.advancePhases(
             current: current,
-            trainedPatterns: ["horizontal_push"],
+            trainedPatterns: [.horizontalPush],
             daysPerWeek: 4
         )
-        let state = updated.first { $0.pattern == "horizontal_push" }
+        let state = updated.first { $0.pattern == .horizontalPush }
         // Should remain in deload — no phase beyond it.
         #expect(state?.phase == .deload)
     }
@@ -163,17 +163,17 @@ struct PatternPhaseServiceTests {
     @Test("Untrained patterns are not advanced when session is recorded for other patterns")
     func untrainedPatternNotAdvanced() {
         let current = [
-            makeState(pattern: "horizontal_push", phase: .accumulation, completed: 3, required: 8),
-            makeState(pattern: "squat",           phase: .accumulation, completed: 3, required: 8)
+            makeState(pattern: .horizontalPush, phase: .accumulation, completed: 3, required: 8),
+            makeState(pattern: .squat,           phase: .accumulation, completed: 3, required: 8)
         ]
         // Only train horizontal_push today.
         let updated = PatternPhaseService.advancePhases(
             current: current,
-            trainedPatterns: ["horizontal_push"],
+            trainedPatterns: [.horizontalPush],
             daysPerWeek: 4
         )
-        let push = updated.first { $0.pattern == "horizontal_push" }
-        let squat = updated.first { $0.pattern == "squat" }
+        let push = updated.first { $0.pattern == .horizontalPush }
+        let squat = updated.first { $0.pattern == .squat }
 
         #expect(push?.sessionsCompletedInPhase == 4)  // incremented
         #expect(squat?.sessionsCompletedInPhase == 3) // unchanged
@@ -189,7 +189,7 @@ struct PatternPhaseServiceTests {
         let logs = makeLogs(exerciseId: "barbell_bench_press", sessionCount: 9)
         let states = PatternPhaseService.computeInitialPhases(from: logs, daysPerWeek: 4)
 
-        let push = states.first { $0.pattern == "horizontal_push" }
+        let push = states.first { $0.pattern == .horizontalPush }
         #expect(push != nil, "horizontal_push should be present in migration output")
         #expect(push?.phase == .intensification)
         #expect(push?.sessionsCompletedInPhase == 1)
@@ -209,10 +209,10 @@ struct PatternPhaseServiceTests {
     func firstTimePatternCreated() {
         let updated = PatternPhaseService.advancePhases(
             current: [],
-            trainedPatterns: ["horizontal_push"],
+            trainedPatterns: [.horizontalPush],
             daysPerWeek: 4
         )
-        let state = updated.first { $0.pattern == "horizontal_push" }
+        let state = updated.first { $0.pattern == .horizontalPush }
         #expect(state != nil, "New pattern should be inserted")
         #expect(state?.phase == .accumulation)
         #expect(state?.sessionsCompletedInPhase == 1)
@@ -228,17 +228,17 @@ struct PatternPhaseServiceTests {
         defer { UserDefaults.standard.removeObject(forKey: key) }
 
         let states = [
-            makeState(pattern: "horizontal_push", phase: .accumulation,    completed: 3, required: 8),
-            makeState(pattern: "squat",           phase: .intensification, completed: 5, required: 8)
+            makeState(pattern: .horizontalPush, phase: .accumulation,    completed: 3, required: 8),
+            makeState(pattern: .squat,           phase: .intensification, completed: 5, required: 8)
         ]
         PatternPhaseService.persist(states)
         let loaded = PatternPhaseService.load()
 
         #expect(loaded.count == states.count)
-        let push = loaded.first { $0.pattern == "horizontal_push" }
+        let push = loaded.first { $0.pattern == .horizontalPush }
         #expect(push?.phase == .accumulation)
         #expect(push?.sessionsCompletedInPhase == 3)
-        let squat = loaded.first { $0.pattern == "squat" }
+        let squat = loaded.first { $0.pattern == .squat }
         #expect(squat?.phase == .intensification)
         #expect(squat?.sessionsCompletedInPhase == 5)
     }
@@ -251,7 +251,7 @@ struct PatternPhaseServiceTests {
         UserDefaults.standard.removeObject(forKey: key)
         defer { UserDefaults.standard.removeObject(forKey: key) }
 
-        let states = [makeState(pattern: "horizontal_push", phase: .accumulation, completed: 2, required: 8)]
+        let states = [makeState(pattern: .horizontalPush, phase: .accumulation, completed: 2, required: 8)]
         PatternPhaseService.persist(states)
         // Verify data was actually written
         #expect(!PatternPhaseService.load().isEmpty)
@@ -272,8 +272,8 @@ struct PatternPhaseServiceTests {
         let second = PatternPhaseService.computeInitialPhases(from: logs, daysPerWeek: 4)
 
         #expect(first.count == second.count)
-        let push1 = first.first  { $0.pattern == "horizontal_push" }
-        let push2 = second.first { $0.pattern == "horizontal_push" }
+        let push1 = first.first  { $0.pattern == .horizontalPush }
+        let push2 = second.first { $0.pattern == .horizontalPush }
         #expect(push1?.phase == push2?.phase)
         #expect(push1?.sessionsCompletedInPhase == push2?.sessionsCompletedInPhase)
     }
@@ -283,13 +283,13 @@ struct PatternPhaseServiceTests {
         // After migration, the gate prevents re-running computeInitialPhases.
         // This test confirms that calling advancePhases on already-populated states
         // increments sessionsCompletedInPhase rather than resetting it.
-        let initial = [makeState(pattern: "horizontal_push", phase: .accumulation, completed: 5, required: 8)]
+        let initial = [makeState(pattern: .horizontalPush, phase: .accumulation, completed: 5, required: 8)]
         let after = PatternPhaseService.advancePhases(
             current: initial,
-            trainedPatterns: ["horizontal_push"],
+            trainedPatterns: [.horizontalPush],
             daysPerWeek: 4
         )
-        let state = after.first { $0.pattern == "horizontal_push" }
+        let state = after.first { $0.pattern == .horizontalPush }
         // Should be 6, not 1 (which would indicate a re-initialisation)
         #expect(state?.sessionsCompletedInPhase == 6)
         #expect(state?.phase == .accumulation)

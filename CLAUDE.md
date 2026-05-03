@@ -17,3 +17,17 @@ Default canonical vocabulary — `needs-triage`, `needs-info`, `ready-for-agent`
 ### Domain docs
 
 Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Worktree-aware git commands (mandatory in `.claude/worktrees/*` sessions)
+
+When working inside a worktree (path matches `.claude/worktrees/<name>/`), every git-mutating command MUST be `git -C <worktree-absolute-path> <subcommand>` rather than relying on the shell's current working directory. The bash agent's `cd` does not reliably persist across tool calls, and a `git commit` that runs from the parent main repo silently lands the wrong files on the wrong branch. This was a real incident during Slice 1.
+
+Required form:
+
+```bash
+git -C /Users/arnav/Desktop/ProjectApex/.claude/worktrees/<name> add <paths>
+git -C /Users/arnav/Desktop/ProjectApex/.claude/worktrees/<name> commit -m "..."
+git -C /Users/arnav/Desktop/ProjectApex/.claude/worktrees/<name> push ...
+```
+
+Same rule for `git status`, `git log`, `git diff` when you need them to reflect the worktree's state. Read tools (`Read`, `grep` on absolute paths) are unaffected — they don't depend on cwd.

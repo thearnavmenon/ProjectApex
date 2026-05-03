@@ -84,3 +84,18 @@ Sub-variants within the structured model (this is where the real grilling happen
 - The `MovementPattern` enum is cleaned to motion patterns only — calves and core are removed (calves contribute to `legs` muscle-group volume aggregation; core is not modelled as a first-class trainee axis in v2).
 - `MuscleGroup` is locked at six (back / chest / biceps / shoulders / triceps / legs) — drives both the trainee model's per-muscle storage and the Progress tab's narrative cards.
 - The trainee model is the AI's *behavioural memory*; the `MesocycleSkeleton` (ADR-0002) is the AI's *plan*. Session generation reads both: skeleton for what's queued next, trainee model for who the user is. Keeping them separate means each can evolve independently — the skeleton can be regenerated without losing trainee-model state, and the trainee model accumulates across multiple regenerated programmes.
+
+### Two-level muscle taxonomy (Slice 1 amendment, 2026-05-04)
+
+The original wording above conflated two distinct concerns: the trainee model's aggregation key and the ExerciseLibrary's exercise-classification field. Slice 1 implementation surfaced the conflict (the codebase's existing exercise data splits the legs into quads / hamstrings / glutes / calves — finer than the locked-six). Resolution: a two-level taxonomy.
+
+- **`MuscleGroup`** (locked-six: back, chest, biceps, shoulders, triceps, legs) is the **trainee model's aggregation key**. `muscles: [MuscleGroup: MuscleProfile]` uses these as keys for capability tracking, EWMA computation, recovery state, and prescription accuracy. This level is locked.
+- **`PrimaryMuscle`** (9 cases: back, chest, biceps, shoulders, triceps, quads, hamstrings, glutes, calves) is the **ExerciseLibrary's classification field**. Finer-grained, used by AI prescription reasoning at exercise-selection time so the model can reason about leg-muscle balance ("this user has been quad-light for 3 sessions") that the locked-six aggregation would erase.
+- **`PrimaryMuscle.muscleGroup`** is the canonical mapping function: leg subgroups (`quads`, `hamstrings`, `glutes`, `calves`) collapse to `MuscleGroup.legs`; upper-body muscles map 1:1.
+- **Core is excluded from both taxonomies.** Core training stimuli (planks, hanging leg raises, ab wheel rollouts, cable crunches) don't fit the EWMA-over-top-sets model that the trainee model uses to track capability — they're isometric or dynamic-but-not-load-progressing in shape. Rather than carrying a first-class core axis that the model can't update, the v2 ExerciseLibrary drops core exercises entirely; users wanting accessory core work can do it outside the AI-coached programme structure.
+
+This is one canonical representation (`PrimaryMuscle`) with a derived view (`MuscleGroup`), not two parallel string/enum systems.
+
+### MovementPattern taxonomy (Slice 1 clarification)
+
+This document originally described movement patterns as "knee-dominant, hip-dominant, elbow flexion, etc." — a generic biomechanics framing. The actual codebase taxonomy that ExerciseLibrary uses (and that the typed `MovementPattern` enum mirrors) is finer-grained and equipment-aware: `hipHinge`, `horizontalPull`, `horizontalPush`, `isolation`, `lunge`, `squat`, `verticalPull`, `verticalPush`. CONTEXT.md is the canonical place for this enumeration; the ADR defers to it.

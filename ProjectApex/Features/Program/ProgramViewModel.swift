@@ -481,8 +481,8 @@ final class ProgramViewModel {
             // daysSinceLastTrainedByPattern — aggregate deepLiftHistory by movement pattern
             var patternMostRecent: [String: Date] = [:]
             for log in deepLiftHistory {
-                guard let pattern = ExerciseLibrary.lookup(log.exerciseId)?.movementPattern,
-                      !pattern.isEmpty else { continue }
+                guard let pattern = ExerciseLibrary.lookup(log.exerciseId)?.movementPattern.rawValue
+                else { continue }
                 if let existing = patternMostRecent[pattern] {
                     if log.loggedAt > existing { patternMostRecent[pattern] = log.loggedAt }
                 } else {
@@ -522,7 +522,7 @@ final class ProgramViewModel {
 
             let patternPhases: [String: PatternPhaseInfo]? = persistedPhaseStates.isEmpty ? nil :
                 Dictionary(uniqueKeysWithValues: persistedPhaseStates.map { state in
-                    (state.pattern, PatternPhaseInfo(
+                    (state.pattern.rawValue, PatternPhaseInfo(
                         currentPhase: state.phase.rawValue,
                         sessionsCompleted: state.sessionsCompletedInPhase,
                         sessionsRequired: state.sessionsRequiredForPhase

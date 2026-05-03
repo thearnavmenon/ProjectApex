@@ -56,8 +56,14 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
     let repCompletionRate: Double?
     /// Number of significant compound lift misses this week (< 60% rep completion).
     let significantMissCount: Int
-    /// Total sets per muscle group this week, e.g. ["chest": 12, "back": 14].
-    let setsPerMuscleGroup: [String: Int]
+    /// Total sets per primary muscle this week, e.g.
+    /// [.chest: 12, .quads: 6, .hamstrings: 4]. Keyed on PrimaryMuscle so
+    /// the LLM sees fine-grained leg-subgroup balance ("user has been
+    /// quad-light for 3 sessions" reasoning); collapsing to MuscleGroup
+    /// at this stage would erase the very distinction PrimaryMuscle was
+    /// introduced to preserve. Core is excluded — the 4 core exercises
+    /// were removed from ExerciseLibrary in Slice 1.
+    let setsPerPrimaryMuscle: [PrimaryMuscle: Int]
     /// True when cumulative weekly RPE > 8.2 across 3+ sessions.
     let fatigueManagementFlagged: Bool
     /// True when deload triggers fire: ≥2 of [avg_rpe > 8.0, rep_rate < 75%, 3+ misses].
@@ -68,7 +74,7 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
         case weeklyAvgRPE              = "weekly_avg_rpe"
         case repCompletionRate         = "rep_completion_rate"
         case significantMissCount      = "significant_miss_count"
-        case setsPerMuscleGroup        = "sets_per_muscle_group"
+        case setsPerPrimaryMuscle      = "sets_per_primary_muscle"
         case fatigueManagementFlagged  = "fatigue_management_flagged"
         case deloadTriggered           = "deload_triggered"
     }
@@ -81,7 +87,7 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
                 weeklyAvgRPE: nil,
                 repCompletionRate: nil,
                 significantMissCount: 0,
-                setsPerMuscleGroup: [:],
+                setsPerPrimaryMuscle: [:],
                 fatigueManagementFlagged: false,
                 deloadTriggered: false
             )
@@ -94,7 +100,7 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
         // Where we have aiPrescribed data, compare. Otherwise skip.
         var repCompPairs: [(target: Int, actual: Int)] = []
         var sigMisses = 0
-        var muscleSetCounts: [String: Int] = [:]
+        var muscleSetCounts: [PrimaryMuscle: Int] = [:]
 
         for log in setLogs {
             if let prescribed = log.aiPrescribed {
@@ -104,9 +110,11 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
                 let rate = Double(actual) / Double(max(target, 1))
                 if rate < 0.60 { sigMisses += 1 }
             }
-            // Muscle group from exerciseId — use as-is (snake_case muscle group).
-            let key = muscleGroupKey(for: log.exerciseId)
-            muscleSetCounts[key, default: 0] += 1
+            // Primary muscle from exerciseId — drops core / unknown (no
+            // representation in the 9-case PrimaryMuscle taxonomy).
+            if let muscle = primaryMuscle(for: log.exerciseId) {
+                muscleSetCounts[muscle, default: 0] += 1
+            }
         }
 
         let repRate: Double?
@@ -133,27 +141,35 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
             weeklyAvgRPE: avgRPE,
             repCompletionRate: repRate,
             significantMissCount: sigMisses,
-            setsPerMuscleGroup: muscleSetCounts,
+            setsPerPrimaryMuscle: muscleSetCounts,
             fatigueManagementFlagged: fatigueManagementFlagged,
             deloadTriggered: deloadTriggered
         )
     }
 
-    /// Maps an exerciseId (e.g. "barbell_bench_press") to a coarse muscle group key.
-    private static func muscleGroupKey(for exerciseId: String) -> String {
+    /// Maps an exerciseId to a PrimaryMuscle. Prefers the canonical
+    /// ExerciseLibrary lookup; falls back to string heuristics for
+    /// non-canonical IDs. Returns nil for core / unmapped IDs (the 9-case
+    /// PrimaryMuscle taxonomy excludes core per ADR-0005).
+    private static func primaryMuscle(for exerciseId: String) -> PrimaryMuscle? {
+        if let primary = ExerciseLibrary.primaryMuscle(for: exerciseId) {
+            return primary
+        }
         let lower = exerciseId.lowercased()
-        if lower.contains("bench") || lower.contains("chest") || lower.contains("pec") { return "chest" }
-        if lower.contains("row") || lower.contains("pulldown") || lower.contains("pull_up") || lower.contains("lat") { return "back" }
-        if lower.contains("squat") || lower.contains("leg_press") || lower.contains("quad") || lower.contains("lunge") { return "quads" }
-        if lower.contains("deadlift") || lower.contains("hamstring") || lower.contains("rdl") { return "hamstrings" }
-        if lower.contains("glute") || lower.contains("hip_thrust") { return "glutes" }
-        if lower.contains("press") && lower.contains("shoulder") { return "shoulders" }
-        if lower.contains("overhead") || lower.contains("ohp") { return "shoulders" }
-        if lower.contains("curl") && !lower.contains("leg") { return "biceps" }
-        if lower.contains("tricep") || lower.contains("pushdown") { return "triceps" }
-        if lower.contains("calf") || lower.contains("raise") { return "calves" }
-        if lower.contains("ab") || lower.contains("core") { return "core" }
-        return "other"
+        if lower.contains("bench") || lower.contains("chest") || lower.contains("pec") { return .chest }
+        if lower.contains("row") || lower.contains("pulldown") || lower.contains("pull_up") || lower.contains("lat") { return .back }
+        if lower.contains("squat") || lower.contains("leg_press") || lower.contains("quad") || lower.contains("lunge") { return .quads }
+        if lower.contains("deadlift") || lower.contains("rdl") { return .hamstrings }
+        if lower.contains("hamstring") { return .hamstrings }
+        if lower.contains("glute") || lower.contains("hip_thrust") { return .glutes }
+        if lower.contains("press") && lower.contains("shoulder") { return .shoulders }
+        if lower.contains("overhead") || lower.contains("ohp") { return .shoulders }
+        if lower.contains("curl") && !lower.contains("leg") { return .biceps }
+        if lower.contains("tricep") || lower.contains("pushdown") { return .triceps }
+        if lower.contains("calf") || lower.contains("raise") { return .calves }
+        // "ab"/"core" mappings dropped — core is excluded from the 9-case
+        // PrimaryMuscle taxonomy per ADR-0005.
+        return nil
     }
 }
 

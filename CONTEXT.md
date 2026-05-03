@@ -45,12 +45,16 @@ _Avoid_: ambitious target, max goal
 ### Movement & sets
 
 **Movement pattern**:
-A type of motion (horizontal push, vertical pull, knee-dominant, hip-dominant, elbow flexion, etc.) — strictly motion taxonomy.
+A type of motion. Eight cases per the typed `MovementPattern` enum (Slice 1): `horizontalPush`, `verticalPush`, `horizontalPull`, `verticalPull`, `squat`, `hipHinge`, `lunge`, `isolation`. Strictly motion taxonomy — independent from muscle classification.
 _Avoid_: muscle group, exercise category
 
-**Muscle group**:
-One of six body-part groups (back, chest, biceps, shoulders, triceps, legs) — locked at six. Calves and core are not first-class muscle groups in v2.
-_Avoid_: movement pattern, body part (in code)
+**Muscle group** (trainee-model aggregation key):
+One of six body-part groups (back, chest, biceps, shoulders, triceps, legs) — locked at six. The trainee model's `muscles: [MuscleGroup: MuscleProfile]` keys on this. Calves and core are not first-class muscle groups in v2.
+_Avoid_: movement pattern, body part (in code), primary muscle (different concept — see below)
+
+**Primary muscle** (ExerciseLibrary classification, Slice 1):
+Finer-grained muscle classification carried on `ExerciseDefinition.primaryMuscle`. Nine cases: back, chest, biceps, shoulders, triceps, **quads, hamstrings, glutes, calves**. Used by AI prescription reasoning so the model can distinguish leg subgroups for muscle-balance coaching. Maps to `MuscleGroup` via `PrimaryMuscle.muscleGroup` (leg subgroups → `.legs`). Core is excluded — the 4 historical core exercises were removed from the library in Slice 1.
+_Avoid_: muscle group (different concept — primary muscle is finer-grained)
 
 **Set intent**:
 The required field on every set — `warmup`, `top`, `backoff`, `technique`, or `amrap`. No silent defaults at any layer. See ADR-0005.
