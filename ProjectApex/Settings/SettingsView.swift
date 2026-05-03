@@ -42,6 +42,9 @@ struct SettingsView: View {
     /// Called after a developer reset so ContentView can return to onboarding.
     var onResetAll: (() -> Void)? = nil
 
+    /// Shared ProgramViewModel — forwarded to DeveloperSettingsView for force-sync.
+    var programViewModel: ProgramViewModel? = nil
+
     // MARK: - Local mutable equipment list
 
     /// Working copy of the equipment list. Seeded from confirmedProfile on appear.
@@ -461,7 +464,7 @@ struct SettingsView: View {
     private var developerSection: some View {
         Section("Developer") {
             #if DEBUG
-            NavigationLink(destination: DeveloperSettingsView(onResetAll: onResetAll)) {
+            NavigationLink(destination: DeveloperSettingsView(onResetAll: onResetAll, programViewModel: programViewModel)) {
                 Label("Developer Settings", systemImage: "key.fill")
             }
             #endif
