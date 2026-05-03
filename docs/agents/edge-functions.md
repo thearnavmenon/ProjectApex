@@ -43,7 +43,7 @@ The Supabase service-role key is held by the solo developer only. Storage: a pas
 **Addenda — triggers.**
 
 - **"End of alpha" is concrete**, not vibes-based: the trigger fires the moment the **first non-friend user onboards** — i.e., the first user who is not personally known to the developer. Operational test: would you invite them to dinner? If yes, they're a friend; if no, end-of-alpha has fired and every secret that was live during the friend-only alpha rotates, regardless of suspicion.
-- **Plausible exposure** = the key may have transited a clipboard manager, screenshot, screen-share, unsandboxed dev tool, or a chat / email thread you did not author. Lower bar than "confirmed compromise"; higher bar than "I had a bad feeling."
+- **Plausible exposure** = the key may have transited a clipboard manager, screenshot, screen-share, unsandboxed dev tool, a chat / email thread you did not author, or **an LLM chat (Claude, ChatGPT, Copilot inline, etc.)**. Pasting a key into an LLM context — even for "just debugging this one error" — is exposure regardless of the provider's stated retention policy: prompts may be cached, indexed, used for training under some plans, or surfaced in operator dashboards. Treat any key that has been in an LLM chat as exposed. Lower bar than "confirmed compromise"; higher bar than "I had a bad feeling."
 - **Access-list change** for service-role includes both additions (CI added, bus-factor partner added) and removals (partner offboarded, CI deploys retired). New copies start fresh; offboarded copies die with the old key.
 
 **Addenda — non-triggers.** These are explicitly *not* incident-worthy:
@@ -51,6 +51,7 @@ The Supabase service-role key is held by the solo developer only. Storage: a pas
 - Discovering historical evidence of a key that has **since been rotated**. The leak is dead with the key. A screenshot from 4 months ago of a key rotated 2 months ago is a non-event — do not double-rotate out of anxiety.
 - Routine deploys, schema migrations, or new Edge Function additions that consume existing secrets.
 - A friend asking "what's your stack" — describing that you use Supabase service-role is not a leak.
+- Dependency security advisories (Deno std lib CVEs, Supabase JS client advisories, transitive npm/Deno package CVEs) that do **not** concern credential exposure. A standard RCE, DoS, or prototype-pollution advisory in a transitively-pulled package is a *patch* event, not a *rotation* event. The advisory must explicitly call out credential exfiltration, token leakage, or environment-variable disclosure to qualify as plausible exposure — otherwise upgrade the package and move on.
 
 ## Rotation playbooks
 
@@ -59,6 +60,8 @@ Executable without rederivation. If you are reading this with no prior context, 
 ### Anthropic API key
 
 **Prerequisite:** a recurring 90-day calendar reminder titled **"Rotate Anthropic API key"** must exist. If not already set, create it now — the cadence is worthless without a forcing function.
+
+**Concurrent-keys precondition:** the 24-hour overlap window relies on Anthropic Console permitting the new key and the old key to be active simultaneously. As of last verification, Console allows multiple concurrent API keys per organization with no hard cap documented at this scale. Verify once at console.anthropic.com → Settings → API Keys and record any per-account limit your plan enforces here — some providers cap at 2 or 5 concurrent keys, and discovering a cap mid-rotation defeats the rollback story. Per-account limit observed: _to be filled in on first verification_.
 
 1. console.anthropic.com → API Keys → create new key (label it with today's date, e.g., `apex-edge-2026-08-01`).
 2. `supabase secrets set ANTHROPIC_API_KEY=<new value>` (production project).
@@ -83,10 +86,10 @@ Reversion (if step 3 smoke-test fails): `supabase secrets set ANTHROPIC_API_KEY=
 
 No overlap window. Run only during a daylight window where you can debug breakage. Do not run on a Friday afternoon.
 
-**Fan-out checklist** — before rotating, confirm every place the key currently lives so the post-rotation update has no gaps:
+**Fan-out checklist** — before rotating, confirm every place the key currently lives so the post-rotation update has no gaps. Items marked `*` may not yet exist pre-Slice-9b; first appearance is during 9b's local-dev setup. **Pre-9b, only the password manager entry is a live location.**
 
 - [ ] Password manager entry **`ProjectApex — Supabase service-role key`**
-- [ ] Local `supabase/.env` (for `supabase functions serve`)
+- [ ] Local `supabase/.env`* (for `supabase functions serve`)
 - [ ] (Future, currently N/A) GitHub Actions secret — only relevant after CI deploys are added
 - [ ] (Future, currently N/A) any bus-factor partner's password manager — only relevant if Decision #2 is revisited
 

@@ -18,6 +18,10 @@ Default canonical vocabulary — `needs-triage`, `needs-info`, `ready-for-agent`
 
 Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+### Edge Function secrets
+
+Authoritative for Edge Function secret storage, service-role access list, and key rotation policy. Read before any Slice 9b+ Edge Function work — do not redo the analysis from scratch. See `docs/agents/edge-functions.md`.
+
 ### Worktree-aware git commands (mandatory in `.claude/worktrees/*` sessions)
 
 When working inside a worktree (path matches `.claude/worktrees/<name>/`), every git-mutating command MUST be `git -C <worktree-absolute-path> <subcommand>` rather than relying on the shell's current working directory. The bash agent's `cd` does not reliably persist across tool calls, and a `git commit` that runs from the parent main repo silently lands the wrong files on the wrong branch. This was a real incident during Slice 1.
