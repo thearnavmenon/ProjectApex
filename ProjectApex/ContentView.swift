@@ -539,7 +539,8 @@ struct ContentView: View {
                 confirmedProfile = nil
                 programViewModel = nil
                 showOnboarding = true
-            }
+            },
+            programViewModel: programViewModel
         )
     }
 

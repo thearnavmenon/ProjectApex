@@ -36,6 +36,9 @@ struct DeveloperSettingsView: View {
     /// Called after "Reset All App Data" completes so ContentView can return to onboarding.
     var onResetAll: (() -> Void)?
 
+    /// Shared ProgramViewModel — used by "Force Sync from Supabase" to bypass the UserDefaults cache.
+    var programViewModel: ProgramViewModel? = nil
+
     // MARK: - Environment
 
     @Environment(AppDependencies.self) private var deps
@@ -71,6 +74,8 @@ struct DeveloperSettingsView: View {
     @State private var showResetOnboardingConfirmation: Bool = false
     /// Controls the "Clear RAG Memory" confirmation alert.
     @State private var showClearMemoryConfirmation: Bool = false
+    /// Controls the "Force Sync from Supabase" confirmation alert.
+    @State private var showForceSyncConfirmation: Bool = false
 
     /// Gym weight correction facts loaded from GymFactStore for display and deletion.
     @State private var gymFacts: [GymFactStore.WeightFact] = []
@@ -143,6 +148,15 @@ struct DeveloperSettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Deletes all AI memory embeddings for this user from Supabase. Useful for testing cold-start AI behaviour.")
+        }
+        // Force Sync from Supabase confirmation
+        .alert("Force Sync from Supabase?", isPresented: $showForceSyncConfirmation) {
+            Button("Sync Now") {
+                Task { await performForceSync() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Clears the local programme cache and reloads from Supabase. Use this to reflect direct database edits.")
         }
     }
 
@@ -373,6 +387,15 @@ struct DeveloperSettingsView: View {
             } label: {
                 Label("Clear RAG Memory", systemImage: "brain.filled.head.profile")
             }
+
+            // Bypasses the UserDefaults cache and reloads the programme from Supabase.
+            // Useful when direct DB edits need to surface in the app.
+            Button {
+                showForceSyncConfirmation = true
+            } label: {
+                Label("Force Sync from Supabase", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(programViewModel == nil)
         } header: {
             Text("Developer Tools")
         } footer: {
@@ -620,6 +643,16 @@ struct DeveloperSettingsView: View {
         } catch {
             showBanner("Failed: \(error.localizedDescription)", isError: true)
         }
+    }
+
+    /// Clears the UserDefaults programme cache and reloads from Supabase.
+    /// Use this to surface direct database edits without a full app reset.
+    @MainActor
+    private func performForceSync() async {
+        guard let vm = programViewModel else { return }
+        Mesocycle.clearUserDefaults()
+        await vm.loadProgram()
+        showBanner("Programme reloaded from Supabase.", isError: false)
     }
 }
 
