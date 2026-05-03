@@ -324,13 +324,21 @@ struct ProgramDayDetailView: View {
                     viewModel?.markDayPaused(dayId: currentDay.id, weekId: week.id)
                 },
                 onSessionDismissed: {
-                    // Pop back to this view after the session is done; also trigger the
-                    // programme calendar to scroll to the current week.
                     navigateToWorkout = false
                     viewModel?.scrollToCurrentWeekTrigger += 1
+                    if currentDay.status == .completed {
+                        Task { await loadHistoricalSetLogs() }
+                    }
                 },
                 resumeState: resumeState,
-                startingExerciseIndex: workoutStartingExerciseIndex
+                startingExerciseIndex: workoutStartingExerciseIndex,
+                onSkipSession: {
+                    currentDay.status = .skipped
+                    viewModel?.markDaySkipped(dayId: currentDay.id, weekId: week.id)
+                },
+                onBack: {
+                    navigateToWorkout = false
+                }
             )
             .environment(deps)
         }
