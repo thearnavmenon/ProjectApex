@@ -36,6 +36,7 @@
 		51F067120CE1EA4A3EA813A6 /* MuscleTaxonomyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */; };
 		6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6DC23D0A3EB460CF97B18574 /* Foundation.framework */; };
 		729D1F4ED6B5BD11AFD51058 /* MigrationDatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */; };
+		73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */; };
 		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -81,6 +82,7 @@
 		47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymFactStoreTests.swift; sourceTree = "<group>"; };
 		6DC23D0A3EB460CF97B18574 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentRounderTests.swift; sourceTree = "<group>"; };
+		993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelSnapshotsTests.swift; sourceTree = "<group>"; };
 		E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MuscleTaxonomyTests.swift; sourceTree = "<group>"; };
 		EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelEnumsTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -202,6 +204,7 @@
 				E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */,
 				EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */,
 				1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */,
+				993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -333,6 +336,7 @@
 				51F067120CE1EA4A3EA813A6 /* MuscleTaxonomyTests.swift in Sources */,
 				39E16C19CFE1B1EF9BE00A32 /* TraineeModelEnumsTests.swift in Sources */,
 				729D1F4ED6B5BD11AFD51058 /* MigrationDatesTests.swift in Sources */,
+				73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
