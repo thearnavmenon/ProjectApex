@@ -7,11 +7,15 @@
 //   3. lookup() resolves canonical IDs directly
 //   4. lookup() resolves known normalization map variants
 //   5. lookup() returns nil for unknown exercise IDs
-//   6. primaryMuscle(for:) convenience returns correct strings
+//   6. primaryMuscle(for:) convenience returns correct PrimaryMuscle cases
 //   7. All exercises reference valid EquipmentType typeKey strings
-//   8. promptReferenceBlock() contains every exercise ID
-//   9. All normalization map values point to valid canonical IDs
-//  10. No exercise maps to "other" via its primaryMuscle
+//   8. Synergist values use the broader-than-PrimaryMuscle vocabulary correctly
+//   9. promptReferenceBlock() contains every exercise ID
+//  10. All normalization map values point to valid canonical IDs
+//  11. Slice 1 — no exercise is core-classified (the 4 core entries were removed)
+//  12. Slice 1 — every entry's primaryMuscle is a valid PrimaryMuscle case
+//      (vacuous via the type system, kept for documentation) and every entry's
+//      movementPattern is a valid MovementPattern case (also type-enforced)
 
 import Testing
 import Foundation
@@ -34,11 +38,12 @@ private let validEquipmentTypeKeys: Set<String> = [
     "pec_deck", "preacher_curl", "cable_crossover",
 ]
 
-/// Coarse muscle group keys that are valid for primary_muscle in set_logs.
-private let validMuscleGroups: Set<String> = [
-    "chest", "back", "shoulders", "quads", "hamstrings",
-    "glutes", "biceps", "triceps", "calves", "core",
-]
+/// Synergists use a broader vocabulary than PrimaryMuscle — "forearms" is
+/// a valid synergist hint on bicep curls but isn't a first-class trainee-model
+/// muscle group. This set is the union of PrimaryMuscle's raw values and the
+/// known broader hints.
+private let validSynergistMuscles: Set<String> = Set(PrimaryMuscle.allCases.map(\.rawValue))
+    .union(["forearms"])
 
 // MARK: - ExerciseLibraryTests
 
@@ -74,9 +79,9 @@ struct ExerciseLibraryTests {
     func lookupKnownExercise() {
         let def = ExerciseLibrary.lookup("barbell_bench_press")
         #expect(def != nil)
-        #expect(def?.primaryMuscle == "chest")
+        #expect(def?.primaryMuscle == .chest)
         #expect(def?.equipmentType == "barbell")
-        #expect(def?.movementPattern == "horizontal_push")
+        #expect(def?.movementPattern == .horizontalPush)
     }
 
     @Test("lookup resolves all canonical IDs in all[]")
@@ -150,30 +155,29 @@ struct ExerciseLibraryTests {
     }
 
     @Test("bare 'lat_pulldown' is intentionally NOT normalized (ambiguous width)")
-    func lookupBareLatiPulldownIsUnresolved() {
+    func lookupBareLatPulldownIsUnresolved() {
         // 'lat_pulldown' without _wide/_close suffix is ambiguous.
         // It is intentionally excluded from the normalization map.
         // The backfill script will surface it as unresolved for human review.
         #expect(ExerciseLibrary.lookup("lat_pulldown") == nil)
     }
 
-    // MARK: primaryMuscle(for:) convenience
+    // MARK: primaryMuscle(for:) convenience — typed result per Slice 1
 
-    @Test("primaryMuscle returns correct string for canonical ID")
+    @Test("primaryMuscle returns correct PrimaryMuscle for canonical ID")
     func primaryMuscleConvenienceCanonical() {
-        #expect(ExerciseLibrary.primaryMuscle(for: "barbell_back_squat") == "quads")
-        #expect(ExerciseLibrary.primaryMuscle(for: "conventional_deadlift") == "hamstrings")
-        #expect(ExerciseLibrary.primaryMuscle(for: "overhead_press") == "shoulders")
-        #expect(ExerciseLibrary.primaryMuscle(for: "cable_tricep_pushdown") == "triceps")
-        #expect(ExerciseLibrary.primaryMuscle(for: "hip_thrust") == "glutes")
-        #expect(ExerciseLibrary.primaryMuscle(for: "cable_crunch") == "core")
-        #expect(ExerciseLibrary.primaryMuscle(for: "standing_calf_raise") == "calves")
+        #expect(ExerciseLibrary.primaryMuscle(for: "barbell_back_squat") == .quads)
+        #expect(ExerciseLibrary.primaryMuscle(for: "conventional_deadlift") == .hamstrings)
+        #expect(ExerciseLibrary.primaryMuscle(for: "overhead_press") == .shoulders)
+        #expect(ExerciseLibrary.primaryMuscle(for: "cable_tricep_pushdown") == .triceps)
+        #expect(ExerciseLibrary.primaryMuscle(for: "hip_thrust") == .glutes)
+        #expect(ExerciseLibrary.primaryMuscle(for: "standing_calf_raise") == .calves)
     }
 
-    @Test("primaryMuscle returns correct string via normalization map")
+    @Test("primaryMuscle returns correct PrimaryMuscle via normalization map")
     func primaryMuscleConvenienceNormalized() {
-        #expect(ExerciseLibrary.primaryMuscle(for: "bench_press") == "chest")
-        #expect(ExerciseLibrary.primaryMuscle(for: "rdl") == "hamstrings")
+        #expect(ExerciseLibrary.primaryMuscle(for: "bench_press") == .chest)
+        #expect(ExerciseLibrary.primaryMuscle(for: "rdl") == .hamstrings)
     }
 
     @Test("primaryMuscle returns nil for unknown exercise")
@@ -194,29 +198,55 @@ struct ExerciseLibraryTests {
         #expect(invalid.isEmpty, "Exercises with invalid equipment types:\n\(invalid.joined(separator: "\n"))")
     }
 
-    // MARK: Muscle group validity
+    // MARK: Synergist validity (synergists remain [String] for broader vocabulary)
 
-    @Test("All exercises have valid primaryMuscle values")
-    func validPrimaryMuscles() {
-        var invalid: [String] = []
-        for ex in ExerciseLibrary.all {
-            if !validMuscleGroups.contains(ex.primaryMuscle) {
-                invalid.append("\(ex.id): '\(ex.primaryMuscle)'")
-            }
-        }
-        #expect(invalid.isEmpty, "Exercises with invalid primaryMuscle:\n\(invalid.joined(separator: "\n"))")
-    }
-
-    @Test("All synergist values are valid muscle group strings")
+    @Test("All synergist values are valid muscle hint strings")
     func validSynergists() {
-        let extendedValid = validMuscleGroups.union(["forearms"])
         var invalid: [String] = []
         for ex in ExerciseLibrary.all {
-            for s in ex.synergists where !extendedValid.contains(s) {
+            for s in ex.synergists where !validSynergistMuscles.contains(s) {
                 invalid.append("\(ex.id): synergist '\(s)'")
             }
         }
         #expect(invalid.isEmpty, "Exercises with invalid synergists:\n\(invalid.joined(separator: "\n"))")
+    }
+
+    // MARK: Slice 1 — classification-consistency + content-removal guards
+
+    @Test("No exercise has primaryMuscle outside the 9-case PrimaryMuscle set")
+    func primaryMuscleAlwaysInTaxonomy() {
+        // Type-system enforced. This test documents the contract and would
+        // catch any compile-level regression where ExerciseDefinition.primaryMuscle
+        // was widened back to String.
+        let valid = Set(PrimaryMuscle.allCases.map(\.rawValue))
+        for ex in ExerciseLibrary.all {
+            #expect(valid.contains(ex.primaryMuscle.rawValue))
+        }
+    }
+
+    @Test("No exercise has movementPattern outside the 8-case MovementPattern set")
+    func movementPatternAlwaysInTaxonomy() {
+        let valid = Set(MovementPattern.allCases.map(\.rawValue))
+        for ex in ExerciseLibrary.all {
+            #expect(valid.contains(ex.movementPattern.rawValue))
+        }
+    }
+
+    @Test("No core exercises remain — the 4 core entries were removed in Slice 1")
+    func coreExercisesRemoved() {
+        let coreIds = ["cable_crunch", "hanging_leg_raise", "ab_wheel_rollout", "plank"]
+        for id in coreIds {
+            #expect(ExerciseLibrary.byId[id] == nil,
+                    "Expected core exercise '\(id)' to be absent from ExerciseLibrary")
+        }
+    }
+
+    @Test("No synergist string equals 'core'")
+    func noCoreInSynergists() {
+        for ex in ExerciseLibrary.all {
+            #expect(!ex.synergists.contains("core"),
+                    "\(ex.id) lists 'core' as a synergist — core is excluded from the trainee-model taxonomy")
+        }
     }
 
     // MARK: Normalization map integrity

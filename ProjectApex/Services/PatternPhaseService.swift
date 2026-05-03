@@ -21,9 +21,12 @@ import Foundation
 // MARK: - MovementPatternPhaseState
 
 /// Per-movement-pattern periodization state. Persisted to UserDefaults.
+/// Slice 1 migrated `pattern` from String to MovementPattern; Codable
+/// round-trip is wire-compatible (MovementPattern's String raw values
+/// match the prior storage strings).
 nonisolated struct MovementPatternPhaseState: Codable, Sendable, Identifiable {
-    /// Movement pattern key, e.g. "horizontal_push", "squat", "isolation".
-    let pattern: String
+    /// Movement pattern, e.g. .horizontalPush, .squat, .isolation.
+    let pattern: MovementPattern
     /// Current periodization phase for this specific movement pattern.
     var phase: MesocyclePhase
     /// Completed (non-skipped) sessions for this pattern in the current phase.
@@ -32,7 +35,7 @@ nonisolated struct MovementPatternPhaseState: Codable, Sendable, Identifiable {
     let sessionsRequiredForPhase: Int
 
     /// Identifiable conformance — pattern is stable within a programme.
-    var id: String { pattern }
+    var id: MovementPattern { pattern }
 }
 
 // MARK: - PatternPhaseInfo
@@ -93,12 +96,12 @@ nonisolated enum PatternPhaseService {
     ///
     /// - Parameters:
     ///   - current: The currently persisted pattern phase states.
-    ///   - trainedPatterns: Movement pattern strings trained in the just-completed session.
+    ///   - trainedPatterns: Movement patterns trained in the just-completed session.
     ///   - daysPerWeek: The programme's training days per week (from UserDefaults or skeleton).
     /// - Returns: Updated array with counters incremented and phase transitions applied.
     static func advancePhases(
         current: [MovementPatternPhaseState],
-        trainedPatterns: Set<String>,
+        trainedPatterns: Set<MovementPattern>,
         daysPerWeek: Int
     ) -> [MovementPatternPhaseState] {
         guard !trainedPatterns.isEmpty else { return current }
@@ -126,7 +129,8 @@ nonisolated enum PatternPhaseService {
 
         // Create new entries for patterns encountered for the first time
         let existingPatterns = Set(updated.map(\.pattern))
-        for pattern in trainedPatterns.sorted() where !existingPatterns.contains(pattern) {
+        let newPatterns = trainedPatterns.subtracting(existingPatterns).sorted { $0.rawValue < $1.rawValue }
+        for pattern in newPatterns {
             let req = sessionsRequired(for: .accumulation, daysPerWeek: daysPerWeek)
             updated.append(MovementPatternPhaseState(
                 pattern: pattern,
@@ -158,10 +162,9 @@ nonisolated enum PatternPhaseService {
         guard !setLogs.isEmpty else { return [] }
 
         // Group distinct session IDs per movement pattern
-        var sessionsByPattern: [String: Set<UUID>] = [:]
+        var sessionsByPattern: [MovementPattern: Set<UUID>] = [:]
         for log in setLogs {
-            guard let def = ExerciseLibrary.lookup(log.exerciseId),
-                  !def.movementPattern.isEmpty else { continue }
+            guard let def = ExerciseLibrary.lookup(log.exerciseId) else { continue }
             sessionsByPattern[def.movementPattern, default: []].insert(log.sessionId)
         }
 
@@ -199,7 +202,7 @@ nonisolated enum PatternPhaseService {
             ))
         }
 
-        return states.sorted { $0.pattern < $1.pattern }
+        return states.sorted { $0.pattern.rawValue < $1.pattern.rawValue }
     }
 
     // MARK: - Persistence

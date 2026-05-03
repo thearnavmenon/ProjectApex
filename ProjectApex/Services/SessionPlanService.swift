@@ -56,8 +56,13 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
     let repCompletionRate: Double?
     /// Number of significant compound lift misses this week (< 60% rep completion).
     let significantMissCount: Int
-    /// Total sets per muscle group this week, e.g. ["chest": 12, "back": 14].
-    let setsPerMuscleGroup: [String: Int]
+    /// Total sets per muscle group this week, e.g. [.chest: 12, .back: 14].
+    /// Slice 1 migrated from [String: Int] to [MuscleGroup: Int] (locked-six
+    /// per ADR-0005). Wire-compatible JSON shape: leg subgroups
+    /// (quads/hamstrings/glutes/calves) collapse to "legs"; core entries
+    /// drop entirely. Behavioral note: this slightly coarsens what the LLM
+    /// sees compared to the previous string-keyed shape.
+    let setsPerMuscleGroup: [MuscleGroup: Int]
     /// True when cumulative weekly RPE > 8.2 across 3+ sessions.
     let fatigueManagementFlagged: Bool
     /// True when deload triggers fire: ≥2 of [avg_rpe > 8.0, rep_rate < 75%, 3+ misses].
@@ -94,7 +99,7 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
         // Where we have aiPrescribed data, compare. Otherwise skip.
         var repCompPairs: [(target: Int, actual: Int)] = []
         var sigMisses = 0
-        var muscleSetCounts: [String: Int] = [:]
+        var muscleSetCounts: [MuscleGroup: Int] = [:]
 
         for log in setLogs {
             if let prescribed = log.aiPrescribed {
@@ -104,9 +109,11 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
                 let rate = Double(actual) / Double(max(target, 1))
                 if rate < 0.60 { sigMisses += 1 }
             }
-            // Muscle group from exerciseId — use as-is (snake_case muscle group).
-            let key = muscleGroupKey(for: log.exerciseId)
-            muscleSetCounts[key, default: 0] += 1
+            // Muscle group from exerciseId — drops core / other (no
+            // representation in the locked-six MuscleGroup taxonomy).
+            if let group = muscleGroup(for: log.exerciseId) {
+                muscleSetCounts[group, default: 0] += 1
+            }
         }
 
         let repRate: Double?
@@ -139,21 +146,28 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
         )
     }
 
-    /// Maps an exerciseId (e.g. "barbell_bench_press") to a coarse muscle group key.
-    private static func muscleGroupKey(for exerciseId: String) -> String {
+    /// Maps an exerciseId to a MuscleGroup. Prefers the canonical
+    /// ExerciseLibrary lookup; falls back to string heuristics for
+    /// non-canonical IDs. Returns nil for core / unmapped IDs (the
+    /// locked-six MuscleGroup taxonomy excludes both per ADR-0005).
+    private static func muscleGroup(for exerciseId: String) -> MuscleGroup? {
+        if let primary = ExerciseLibrary.primaryMuscle(for: exerciseId) {
+            return primary.muscleGroup
+        }
         let lower = exerciseId.lowercased()
-        if lower.contains("bench") || lower.contains("chest") || lower.contains("pec") { return "chest" }
-        if lower.contains("row") || lower.contains("pulldown") || lower.contains("pull_up") || lower.contains("lat") { return "back" }
-        if lower.contains("squat") || lower.contains("leg_press") || lower.contains("quad") || lower.contains("lunge") { return "quads" }
-        if lower.contains("deadlift") || lower.contains("hamstring") || lower.contains("rdl") { return "hamstrings" }
-        if lower.contains("glute") || lower.contains("hip_thrust") { return "glutes" }
-        if lower.contains("press") && lower.contains("shoulder") { return "shoulders" }
-        if lower.contains("overhead") || lower.contains("ohp") { return "shoulders" }
-        if lower.contains("curl") && !lower.contains("leg") { return "biceps" }
-        if lower.contains("tricep") || lower.contains("pushdown") { return "triceps" }
-        if lower.contains("calf") || lower.contains("raise") { return "calves" }
-        if lower.contains("ab") || lower.contains("core") { return "core" }
-        return "other"
+        if lower.contains("bench") || lower.contains("chest") || lower.contains("pec") { return .chest }
+        if lower.contains("row") || lower.contains("pulldown") || lower.contains("pull_up") || lower.contains("lat") { return .back }
+        if lower.contains("squat") || lower.contains("leg_press") || lower.contains("quad") || lower.contains("lunge") { return .legs }
+        if lower.contains("deadlift") || lower.contains("hamstring") || lower.contains("rdl") { return .legs }
+        if lower.contains("glute") || lower.contains("hip_thrust") { return .legs }
+        if lower.contains("press") && lower.contains("shoulder") { return .shoulders }
+        if lower.contains("overhead") || lower.contains("ohp") { return .shoulders }
+        if lower.contains("curl") && !lower.contains("leg") { return .biceps }
+        if lower.contains("tricep") || lower.contains("pushdown") { return .triceps }
+        if lower.contains("calf") || lower.contains("raise") { return .legs }
+        // "ab"/"core" mappings dropped — core is excluded from the locked-six
+        // MuscleGroup taxonomy per ADR-0005.
+        return nil
     }
 }
 

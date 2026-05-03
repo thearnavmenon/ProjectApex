@@ -52,7 +52,7 @@ nonisolated enum VolumeValidationService {
             for exercise in day.exercises {
                 // Use ExerciseLibrary for the canonical muscle; fall back to the
                 // exercise's own primaryMuscle field if the ID is non-canonical.
-                let muscle = ExerciseLibrary.primaryMuscle(for: exercise.exerciseId)
+                let muscle = ExerciseLibrary.primaryMuscle(for: exercise.exerciseId)?.rawValue
                     ?? exercise.primaryMuscle
                 targetMap[muscle, default: 0] += exercise.sets
             }
@@ -66,7 +66,7 @@ nonisolated enum VolumeValidationService {
             // Prefer the primary_muscle column (populated at write time);
             // fall back to ExerciseLibrary lookup for older rows.
             let muscle = log.primaryMuscle
-                ?? ExerciseLibrary.primaryMuscle(for: log.exerciseId)
+                ?? ExerciseLibrary.primaryMuscle(for: log.exerciseId)?.rawValue
                 ?? "other"
             actualMap[muscle, default: 0] += 1
         }

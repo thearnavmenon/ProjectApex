@@ -25,16 +25,22 @@ import Foundation
 ///
 /// - `id`: Snake_case identifier, locked. Never changed once released. The LLM
 ///   must emit this exact string in exercise_id fields.
-/// - `primaryMuscle`: Coarse group key written to set_logs.primary_muscle.
-///   One of: chest | back | shoulders | quads | hamstrings | glutes |
-///   biceps | triceps | calves | core
+/// - `primaryMuscle`: PrimaryMuscle case (one of the 9 fine-grained values
+///   per ADR-0005's two-level muscle taxonomy). Writers to
+///   set_logs.primary_muscle pass `primaryMuscle.rawValue`.
+/// - `synergists`: Free-form muscle hint strings — broader vocabulary than
+///   PrimaryMuscle (e.g. "forearms" appears as a synergist on bicep curls
+///   but isn't a first-class trainee-model muscle group). Stays String to
+///   preserve the broader vocabulary.
+/// - `movementPattern`: MovementPattern case (one of the 8 values per
+///   ADR-0005). Writers to persisted fields pass `movementPattern.rawValue`.
 /// - `equipmentType`: Must match an EquipmentType.typeKey from GymProfile.swift.
 nonisolated struct ExerciseDefinition: Sendable, Identifiable {
     let id: String
     let name: String
-    let primaryMuscle: String
+    let primaryMuscle: PrimaryMuscle
     let synergists: [String]
-    let movementPattern: String
+    let movementPattern: MovementPattern
     let equipmentType: String
     let bodyweightOnly: Bool
 }
@@ -58,90 +64,90 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "barbell_bench_press",
             name: "Barbell Bench Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_bench_press",
             name: "Dumbbell Bench Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "incline_barbell_press",
             name: "Incline Barbell Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "incline_dumbbell_press",
             name: "Incline Dumbbell Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "decline_bench_press",
             name: "Decline Bench Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "machine_chest_press",
             name: "Machine Chest Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "chest_press_machine",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_chest_fly",
             name: "Cable Chest Fly",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["shoulders"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_crossover",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "pec_deck_fly",
             name: "Pec Deck Fly",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["shoulders"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "pec_deck",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_fly",
             name: "Dumbbell Fly",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["shoulders"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "push_ups",
             name: "Push-Ups",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "flat_bench",
             bodyweightOnly: true
         ),
@@ -150,126 +156,126 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "barbell_row",
             name: "Barbell Row",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
-            movementPattern: "horizontal_pull",
+            movementPattern: .horizontalPull,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_row",
             name: "Dumbbell Row",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
-            movementPattern: "horizontal_pull",
+            movementPattern: .horizontalPull,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "t_bar_row",
             name: "T-Bar Row",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
-            movementPattern: "horizontal_pull",
+            movementPattern: .horizontalPull,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_row",
             name: "Cable Row",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
-            movementPattern: "horizontal_pull",
+            movementPattern: .horizontalPull,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "seated_cable_row",
             name: "Seated Cable Row",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
-            movementPattern: "horizontal_pull",
+            movementPattern: .horizontalPull,
             equipmentType: "seated_row",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "lat_pulldown_wide",
             name: "Lat Pulldown (Wide Grip)",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
-            movementPattern: "vertical_pull",
+            movementPattern: .verticalPull,
             equipmentType: "lat_pulldown",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "lat_pulldown_close",
             name: "Lat Pulldown (Close Grip)",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps"],
-            movementPattern: "vertical_pull",
+            movementPattern: .verticalPull,
             equipmentType: "lat_pulldown",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "pull_ups",
             name: "Pull-Ups",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps"],
-            movementPattern: "vertical_pull",
+            movementPattern: .verticalPull,
             equipmentType: "pull_up_bar",
             bodyweightOnly: true
         ),
         ExerciseDefinition(
             id: "chin_ups",
             name: "Chin-Ups",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps"],
-            movementPattern: "vertical_pull",
+            movementPattern: .verticalPull,
             equipmentType: "pull_up_bar",
             bodyweightOnly: true
         ),
         ExerciseDefinition(
             id: "face_pull",
             name: "Face Pull",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["shoulders"],
-            movementPattern: "horizontal_pull",
+            movementPattern: .horizontalPull,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_rear_delt_fly",
             name: "Cable Rear Delt Fly",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["shoulders"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_crossover",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_straight_arm_pulldown",
             name: "Cable Straight Arm Pulldown",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["triceps"],
-            movementPattern: "vertical_pull",
+            movementPattern: .verticalPull,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_single_arm_row",
             name: "Dumbbell Single Arm Row",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
-            movementPattern: "horizontal_pull",
+            movementPattern: .horizontalPull,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "assisted_pull_up",
             name: "Assisted Pull-Up",
-            primaryMuscle: "back",
+            primaryMuscle: .back,
             synergists: ["biceps"],
-            movementPattern: "vertical_pull",
+            movementPattern: .verticalPull,
             // Uses the machine's weight stack for assistance — bodyweightOnly: false
             // (contrast with pull_ups which is bodyweightOnly: true).
             // equipmentType uses pull_up_bar since there is no distinct
@@ -282,72 +288,72 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "overhead_press",
             name: "Overhead Press",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: ["triceps"],
-            movementPattern: "vertical_push",
+            movementPattern: .verticalPush,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_shoulder_press",
             name: "Dumbbell Shoulder Press",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: ["triceps"],
-            movementPattern: "vertical_push",
+            movementPattern: .verticalPush,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "machine_shoulder_press",
             name: "Machine Shoulder Press",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: ["triceps"],
-            movementPattern: "vertical_push",
+            movementPattern: .verticalPush,
             equipmentType: "shoulder_press_machine",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "lateral_raise",
             name: "Lateral Raise",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_lateral_raise",
             name: "Cable Lateral Raise",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "rear_delt_fly",
             name: "Rear Delt Fly",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: ["back"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "arnold_press",
             name: "Arnold Press",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: ["triceps"],
-            movementPattern: "vertical_push",
+            movementPattern: .verticalPush,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "upright_row",
             name: "Upright Row",
-            primaryMuscle: "shoulders",
+            primaryMuscle: .shoulders,
             synergists: ["biceps", "back"],
-            movementPattern: "vertical_pull",
+            movementPattern: .verticalPull,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
@@ -356,81 +362,81 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "barbell_back_squat",
             name: "Barbell Back Squat",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes", "hamstrings"],
-            movementPattern: "squat",
+            movementPattern: .squat,
             equipmentType: "power_rack",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "front_squat",
             name: "Front Squat",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes", "hamstrings"],
-            movementPattern: "squat",
+            movementPattern: .squat,
             equipmentType: "power_rack",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "leg_press",
             name: "Leg Press",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes", "hamstrings"],
-            movementPattern: "squat",
+            movementPattern: .squat,
             equipmentType: "leg_press",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "hack_squat_machine",
             name: "Hack Squat Machine",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes", "hamstrings"],
-            movementPattern: "squat",
+            movementPattern: .squat,
             equipmentType: "hack_squat",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "goblet_squat",
             name: "Goblet Squat",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes"],
-            movementPattern: "squat",
+            movementPattern: .squat,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "leg_extension",
             name: "Leg Extension",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "leg_extension",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "bulgarian_split_squat",
             name: "Bulgarian Split Squat",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes", "hamstrings"],
-            movementPattern: "lunge",
+            movementPattern: .lunge,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "walking_lunge",
             name: "Walking Lunge",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes", "hamstrings"],
-            movementPattern: "lunge",
+            movementPattern: .lunge,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "smith_machine_squat",
             name: "Smith Machine Squat",
-            primaryMuscle: "quads",
+            primaryMuscle: .quads,
             synergists: ["glutes", "hamstrings"],
-            movementPattern: "squat",
+            movementPattern: .squat,
             equipmentType: "smith_machine",
             bodyweightOnly: false
         ),
@@ -439,54 +445,54 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "conventional_deadlift",
             name: "Conventional Deadlift",
-            primaryMuscle: "hamstrings",
+            primaryMuscle: .hamstrings,
             synergists: ["glutes", "back"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "romanian_deadlift",
             name: "Romanian Deadlift",
-            primaryMuscle: "hamstrings",
+            primaryMuscle: .hamstrings,
             synergists: ["glutes"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_romanian_deadlift",
             name: "Dumbbell Romanian Deadlift",
-            primaryMuscle: "hamstrings",
+            primaryMuscle: .hamstrings,
             synergists: ["glutes"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "lying_leg_curl",
             name: "Lying Leg Curl",
-            primaryMuscle: "hamstrings",
+            primaryMuscle: .hamstrings,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "leg_curl",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "seated_leg_curl",
             name: "Seated Leg Curl",
-            primaryMuscle: "hamstrings",
+            primaryMuscle: .hamstrings,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "leg_curl",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "stiff_leg_deadlift",
             name: "Stiff Leg Deadlift",
-            primaryMuscle: "hamstrings",
+            primaryMuscle: .hamstrings,
             synergists: ["glutes", "back"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
@@ -495,36 +501,36 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "hip_thrust",
             name: "Hip Thrust",
-            primaryMuscle: "glutes",
+            primaryMuscle: .glutes,
             synergists: ["hamstrings"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_pull_through",
             name: "Cable Pull-Through",
-            primaryMuscle: "glutes",
+            primaryMuscle: .glutes,
             synergists: ["hamstrings"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "glute_bridge",
             name: "Glute Bridge",
-            primaryMuscle: "glutes",
+            primaryMuscle: .glutes,
             synergists: ["hamstrings"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "flat_bench",
             bodyweightOnly: true
         ),
         ExerciseDefinition(
             id: "sumo_deadlift",
             name: "Sumo Deadlift",
-            primaryMuscle: "glutes",
+            primaryMuscle: .glutes,
             synergists: ["hamstrings", "quads"],
-            movementPattern: "hip_hinge",
+            movementPattern: .hipHinge,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
@@ -533,63 +539,63 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "barbell_curl",
             name: "Barbell Curl",
-            primaryMuscle: "biceps",
+            primaryMuscle: .biceps,
             synergists: ["forearms"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "ez_bar_curl",
             name: "EZ Bar Curl",
-            primaryMuscle: "biceps",
+            primaryMuscle: .biceps,
             synergists: ["forearms"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "ez_curl_bar",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_curl",
             name: "Dumbbell Curl",
-            primaryMuscle: "biceps",
+            primaryMuscle: .biceps,
             synergists: ["forearms"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "preacher_curl",
             name: "Preacher Curl",
-            primaryMuscle: "biceps",
+            primaryMuscle: .biceps,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "preacher_curl",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "hammer_curl",
             name: "Hammer Curl",
-            primaryMuscle: "biceps",
+            primaryMuscle: .biceps,
             synergists: ["forearms"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_curl",
             name: "Cable Curl",
-            primaryMuscle: "biceps",
+            primaryMuscle: .biceps,
             synergists: ["forearms"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_hammer_curl",
             name: "Cable Hammer Curl",
-            primaryMuscle: "biceps",
+            primaryMuscle: .biceps,
             synergists: ["forearms"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
@@ -598,63 +604,63 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "cable_tricep_pushdown",
             name: "Cable Tricep Pushdown",
-            primaryMuscle: "triceps",
+            primaryMuscle: .triceps,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "overhead_tricep_extension",
             name: "Overhead Tricep Extension",
-            primaryMuscle: "triceps",
+            primaryMuscle: .triceps,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "skull_crushers",
             name: "Skull Crushers",
-            primaryMuscle: "triceps",
+            primaryMuscle: .triceps,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "ez_curl_bar",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dips",
             name: "Dips",
-            primaryMuscle: "triceps",
+            primaryMuscle: .triceps,
             synergists: ["chest", "shoulders"],
-            movementPattern: "vertical_push",
+            movementPattern: .verticalPush,
             equipmentType: "dip_station",
             bodyweightOnly: true
         ),
         ExerciseDefinition(
             id: "close_grip_bench_press",
             name: "Close Grip Bench Press",
-            primaryMuscle: "triceps",
+            primaryMuscle: .triceps,
             synergists: ["chest", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "dumbbell_overhead_tricep_extension",
             name: "Dumbbell Overhead Tricep Extension",
-            primaryMuscle: "triceps",
+            primaryMuscle: .triceps,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "dumbbell_set",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_overhead_tricep_extension",
             name: "Cable Overhead Tricep Extension",
-            primaryMuscle: "triceps",
+            primaryMuscle: .triceps,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_machine_single",
             bodyweightOnly: false
         ),
@@ -663,27 +669,27 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "smith_machine_bench_press",
             name: "Smith Machine Bench Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "smith_machine",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "smith_machine_incline_press",
             name: "Smith Machine Incline Press",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["triceps", "shoulders"],
-            movementPattern: "horizontal_push",
+            movementPattern: .horizontalPush,
             equipmentType: "smith_machine",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "cable_crossover_chest_fly",
             name: "Cable Crossover Chest Fly",
-            primaryMuscle: "chest",
+            primaryMuscle: .chest,
             synergists: ["shoulders"],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "cable_crossover",
             bodyweightOnly: false
         ),
@@ -692,68 +698,36 @@ nonisolated enum ExerciseLibrary {
         ExerciseDefinition(
             id: "standing_calf_raise",
             name: "Standing Calf Raise",
-            primaryMuscle: "calves",
+            primaryMuscle: .calves,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "barbell",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "seated_calf_raise",
             name: "Seated Calf Raise",
-            primaryMuscle: "calves",
+            primaryMuscle: .calves,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "leg_press",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
             id: "smith_machine_calf_raise",
             name: "Smith Machine Calf Raise",
-            primaryMuscle: "calves",
+            primaryMuscle: .calves,
             synergists: [],
-            movementPattern: "isolation",
+            movementPattern: .isolation,
             equipmentType: "smith_machine",
             bodyweightOnly: false
         ),
 
-        // MARK: Core
-        ExerciseDefinition(
-            id: "cable_crunch",
-            name: "Cable Crunch",
-            primaryMuscle: "core",
-            synergists: [],
-            movementPattern: "isolation",
-            equipmentType: "cable_machine_single",
-            bodyweightOnly: false
-        ),
-        ExerciseDefinition(
-            id: "hanging_leg_raise",
-            name: "Hanging Leg Raise",
-            primaryMuscle: "core",
-            synergists: [],
-            movementPattern: "isolation",
-            equipmentType: "pull_up_bar",
-            bodyweightOnly: true
-        ),
-        ExerciseDefinition(
-            id: "ab_wheel_rollout",
-            name: "Ab Wheel Rollout",
-            primaryMuscle: "core",
-            synergists: ["back", "shoulders"],
-            movementPattern: "isolation",
-            equipmentType: "resistance_bands",
-            bodyweightOnly: true
-        ),
-        ExerciseDefinition(
-            id: "plank",
-            name: "Plank",
-            primaryMuscle: "core",
-            synergists: ["shoulders", "back"],
-            movementPattern: "isolation",
-            equipmentType: "flat_bench",
-            bodyweightOnly: true
-        ),
+        // Core exercises (cable_crunch, hanging_leg_raise, ab_wheel_rollout,
+        // plank) were removed in Phase 1 / Slice 1. Per ADR-0005's two-level
+        // muscle taxonomy, core is excluded from both PrimaryMuscle and
+        // MuscleGroup — core training stimuli don't fit the EWMA-over-top-sets
+        // model and the trainee model has no axis to track core capability.
     ]
 
     // MARK: - Lookup infrastructure
@@ -775,9 +749,10 @@ nonisolated enum ExerciseLibrary {
         return nil
     }
 
-    /// Returns the coarse primary_muscle string for a given exercise_id.
-    /// Used when writing the primary_muscle column in set_logs payloads.
-    static func primaryMuscle(for exerciseId: String) -> String? {
+    /// Returns the typed PrimaryMuscle for a given exercise_id. Callers
+    /// writing the primary_muscle column in set_logs payloads pass
+    /// `.rawValue` to convert at the persistence boundary.
+    static func primaryMuscle(for exerciseId: String) -> PrimaryMuscle? {
         lookup(exerciseId)?.primaryMuscle
     }
 
@@ -912,13 +887,20 @@ nonisolated enum ExerciseLibrary {
             "exercise_id | name | primary_muscle | equipment_required",
         ]
 
-        // Group by primaryMuscle for readability in the prompt
+        // Group by primaryMuscle for readability in the prompt. Order
+        // matches the prior chest→back→shoulders→…→calves layout (core is
+        // intentionally excluded — the 4 core exercises were removed in
+        // Phase 1 / Slice 1).
         let grouped = Dictionary(grouping: all, by: \.primaryMuscle)
-        let muscleOrder = ["chest", "back", "shoulders", "quads", "hamstrings", "glutes", "biceps", "triceps", "calves", "core"]
+        let muscleOrder: [PrimaryMuscle] = [
+            .chest, .back, .shoulders,
+            .quads, .hamstrings, .glutes,
+            .biceps, .triceps, .calves,
+        ]
         for muscle in muscleOrder {
             guard let exercises = grouped[muscle] else { continue }
             for ex in exercises.sorted(by: { $0.id < $1.id }) {
-                lines.append("\(ex.id) | \(ex.name) | \(ex.primaryMuscle) | \(ex.equipmentType)")
+                lines.append("\(ex.id) | \(ex.name) | \(ex.primaryMuscle.rawValue) | \(ex.equipmentType)")
             }
         }
 

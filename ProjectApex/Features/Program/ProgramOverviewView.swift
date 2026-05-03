@@ -356,7 +356,7 @@ struct ProgramOverviewView: View {
             : 1.0
         return HStack(spacing: 10) {
             // Human-readable pattern name (e.g. "Horizontal Push")
-            Text(formatPatternName(state.pattern))
+            Text(formatPatternName(state.pattern.rawValue))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -858,13 +858,26 @@ private struct DayCardView: View {
     }
 
     private func muscleColor(for muscle: String) -> Color {
+        // Typed-first dispatch (Slice 1). Falls back to substring-match for
+        // non-canonical strings (e.g. "pectoralis_major" coming from a free-form
+        // muscle field). Core branch removed — core is excluded from the
+        // locked-six taxonomy per ADR-0005.
+        if let primary = PrimaryMuscle(rawValue: muscle.lowercased()) {
+            switch primary {
+            case .chest:                            return Color(red: 0.96, green: 0.42, blue: 0.30)
+            case .back:                             return Color(red: 0.30, green: 0.70, blue: 0.96)
+            case .shoulders:                        return Color(red: 0.70, green: 0.50, blue: 0.96)
+            case .quads, .hamstrings, .glutes,
+                 .calves:                           return Color(red: 0.30, green: 0.96, blue: 0.60)
+            case .biceps, .triceps:                 return Color(red: 0.96, green: 0.80, blue: 0.30)
+            }
+        }
         let lower = muscle.lowercased()
         if lower.contains("chest") || lower.contains("pect") { return Color(red: 0.96, green: 0.42, blue: 0.30) }
         if lower.contains("back") || lower.contains("lat") { return Color(red: 0.30, green: 0.70, blue: 0.96) }
         if lower.contains("shoulder") || lower.contains("delt") { return Color(red: 0.70, green: 0.50, blue: 0.96) }
-        if lower.contains("leg") || lower.contains("quad") || lower.contains("glut") || lower.contains("hamstr") { return Color(red: 0.30, green: 0.96, blue: 0.60) }
+        if lower.contains("leg") || lower.contains("quad") || lower.contains("glut") || lower.contains("hamstr") || lower.contains("calf") { return Color(red: 0.30, green: 0.96, blue: 0.60) }
         if lower.contains("arm") || lower.contains("bicep") || lower.contains("tricep") { return Color(red: 0.96, green: 0.80, blue: 0.30) }
-        if lower.contains("core") { return Color(red: 0.96, green: 0.60, blue: 0.30) }
         return Color(red: 0.78, green: 0.82, blue: 0.88)
     }
 }
