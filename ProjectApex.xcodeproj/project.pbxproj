@@ -40,6 +40,7 @@
 		73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */; };
 		81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */; };
 		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
+		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +88,7 @@
 		85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelInteractionsTests.swift; sourceTree = "<group>"; };
 		878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelProfilesTests.swift; sourceTree = "<group>"; };
 		993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelSnapshotsTests.swift; sourceTree = "<group>"; };
+		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
 		E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MuscleTaxonomyTests.swift; sourceTree = "<group>"; };
 		EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelEnumsTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -211,6 +213,7 @@
 				993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */,
 				85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */,
 				878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */,
+				DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -345,6 +348,7 @@
 				73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */,
 				81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */,
 				6ECE420C1031E80360FF1EFE /* TraineeModelProfilesTests.swift in Sources */,
+				B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
