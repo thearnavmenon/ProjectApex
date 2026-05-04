@@ -34,6 +34,20 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Diagnostic — list runner Xcode and simulator runtimes (for #28)
+        # One-shot diagnostic to surface what the macos-15 runner image actually
+        # has installed. Will be reverted in PR-2 once the destination pin is
+        # known. Do not merge this PR.
+        run: |
+          echo "===== xcrun simctl list runtimes ====="
+          xcrun simctl list runtimes
+          echo
+          echo "===== ls /Applications | grep -i Xcode ====="
+          ls /Applications | grep -i Xcode
+          echo
+          echo "===== xcodebuild -showsdks ====="
+          xcodebuild -showsdks
+
       - name: Resolve Swift packages
         run: |
           xcodebuild -resolvePackageDependencies \
