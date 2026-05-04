@@ -26,11 +26,20 @@ struct ExerciseProfileTests {
 
     @Test("Round-trip with top sets")
     func roundTrip() throws {
+        // TopSetSnapshot's memberwise init is private — route through the
+        // canonical factory so timezone pinning is structurally enforced.
+        let log = SetLog(
+            id: UUID(), sessionId: UUID(), exerciseId: "barbell_bench_press",
+            setNumber: 1, weightKg: 100, repsCompleted: 5,
+            rpeFelt: nil, rirEstimated: nil, aiPrescribed: nil,
+            loggedAt: Date(timeIntervalSince1970: 1_777_708_800), // 2026-05-02 08:00 UTC
+            primaryMuscle: nil
+        )
+        let topSet = TopSetSnapshot.make(setLog: log, loggedInTimezone: TimeZone(identifier: "UTC")!)
         let original = ExerciseProfile(
             exerciseId: "barbell_bench_press",
-            topSets: [TopSetSnapshot(sessionId: UUID(), localDate: "2026-05-01",
-                                     weightKg: 100, reps: 5, e1rm: 116.67)],
-            e1rmCurrent: 116.67,
+            topSets: [topSet],
+            e1rmCurrent: topSet.e1rm,
             e1rmMedian: 115,
             e1rmPeak: 120,
             sessionCount: 12,
