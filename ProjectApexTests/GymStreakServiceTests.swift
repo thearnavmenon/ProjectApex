@@ -118,7 +118,15 @@ struct StreakResultTests {
 
     @Test("result computed exactly 6 hours ago is not stale")
     func isStale_exactlyTreshold() {
-        let sixHoursAgo = Date().addingTimeInterval(-6 * 3600)
+        // Anchor `now` to a fixed reference and derive `sixHoursAgo` from it,
+        // then pass `now` explicitly into `isStale(relativeTo:)`. Earlier the
+        // test computed `sixHoursAgo` via `Date().addingTimeInterval(-6h)` and
+        // then relied on the default `relativeTo: Date()` arg being evaluated
+        // later — the elapsed microseconds between the two `Date()` calls
+        // pushed `now.timeIntervalSince(computedAt)` strictly greater than 6h,
+        // making the strict `>` boundary fire and the test flaky.
+        let now = Date()
+        let sixHoursAgo = now.addingTimeInterval(-6 * 3600)
         let result = StreakResult(
             currentStreakDays: 5,
             longestStreak: 5,
@@ -127,7 +135,7 @@ struct StreakResultTests {
             computedAt: sixHoursAgo
         )
         // Exactly at threshold is NOT stale (> not >=)
-        #expect(!result.isStale())
+        #expect(!result.isStale(relativeTo: now))
     }
 
     @Test("neutral result is always stale (computedAt = .distantPast)")

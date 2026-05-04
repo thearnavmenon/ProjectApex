@@ -40,14 +40,52 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didFailWithError: URLError(.unknown))
             return
         }
+        // URLSession reifies httpBody → httpBodyStream for transport, so the
+        // request reaching this layer always has httpBody=nil even when the
+        // caller set one. Drain the stream into Data and rebuild the request
+        // so handlers can read body contents through request.httpBody as if
+        // it were a fresh URLRequest. See issue #23.
+        let canonical = Self.canonicalize(request)
         do {
-            let (response, data) = try handler(request)
+            let (response, data) = try handler(canonical)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
         } catch {
             client?.urlProtocol(self, didFailWithError: error)
         }
+    }
+
+    /// Drains `request.httpBodyStream` (if present) and re-attaches the bytes
+    /// as `httpBody` so test handlers can inspect POST/PATCH payloads through
+    /// the standard property. Returns the request unchanged when no stream
+    /// is present. Per issue #23.
+    private static func canonicalize(_ request: URLRequest) -> URLRequest {
+        guard request.httpBody == nil, let stream = request.httpBodyStream else {
+            return request
+        }
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read > 0 {
+                data.append(buffer, count: read)
+            } else if read < 0 {
+                break  // stream error — return whatever we accumulated
+            } else {
+                break  // 0 = EOF
+            }
+        }
+
+        var copy = request
+        copy.httpBody = data
+        return copy
     }
 
     override func stopLoading() {}
@@ -84,7 +122,13 @@ private func http500(url: URL) -> HTTPURLResponse {
 
 // MARK: - MemoryServiceTests
 
-@Suite("MemoryService")
+// .serialized: MockURLProtocol.requestHandler is a class-level
+// `nonisolated(unsafe) static var`. swift-testing runs @Tests within a @Suite
+// in parallel by default; concurrent tests would trample each other's handler
+// (issue #23, H2). Per-suite serialization is the cheap fix — the suite runs
+// in ~80ms even serialized — and should not be removed without first making
+// the handler per-instance.
+@Suite("MemoryService", .serialized)
 struct MemoryServiceTests {
 
     // MARK: Pain keyword detection
