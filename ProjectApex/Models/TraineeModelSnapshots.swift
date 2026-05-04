@@ -14,19 +14,65 @@ import Foundation
 
 /// One top-set observation (intent == .top, reps in 3..10) feeding the
 /// EWMA window per ADR-0005.
+///
+/// Carries both `date` (UTC instant — preserved for ordering and display)
+/// and `localDate` (pre-bucketed yyyy-MM-dd string in the user's then-local
+/// timezone). The UTC instant orders the EWMA window since localDate is
+/// day-granular only; the local string is what cadence and disruption
+/// derivations operate on.
 struct TopSetSnapshot: Codable, Sendable, Hashable {
     var sessionId: UUID
+    var date: Date
     var localDate: String
     var weightKg: Double
     var reps: Int
     var e1rm: Double
 
-    init(sessionId: UUID, localDate: String, weightKg: Double, reps: Int, e1rm: Double) {
+    /// Private to ensure `make(setLog:loggedInTimezone:)` is the structural
+    /// single construction path for new snapshots — no caller can bypass
+    /// the timezone pinning by stuffing arbitrary values in directly.
+    /// Codable's synthesised `init(from:)` does not depend on this init,
+    /// so JSON / SwiftData round-trips remain unaffected.
+    private init(sessionId: UUID, date: Date, localDate: String, weightKg: Double, reps: Int, e1rm: Double) {
         self.sessionId = sessionId
+        self.date = date
         self.localDate = localDate
         self.weightKg = weightKg
         self.reps = reps
         self.e1rm = e1rm
+    }
+
+    /// Phase 1 / Slice 5 — single construction path for new snapshots.
+    /// Pre-buckets `localDate` in the supplied timezone at write time so
+    /// subsequent timezone changes (Sydney → Tokyo) can't shift the
+    /// already-recorded date. See ADR-0005 — "Day boundaries for cadence:
+    /// chose pre-bucketed `localDate` string at write time."
+    static func make(setLog: SetLog, loggedInTimezone: TimeZone = .current) -> TopSetSnapshot {
+        let weight = setLog.weightKg
+        let reps   = setLog.repsCompleted
+        // Epley: weight × (1 + reps/30). Validity is gated by callers
+        // (top sets in 3..10 reps per ADR-0005); the formula itself is
+        // pure and applies the same shape to any (weight, reps).
+        let e1rm = weight * (1.0 + Double(reps) / 30.0)
+
+        // Locale pinned to en_US_POSIX so the format string yyyy-MM-dd is
+        // interpreted as ISO-8601 calendar fields regardless of host locale.
+        // Timezone is the explicit parameter — no implicit fallback to
+        // TimeZone.current at format time.
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone   = loggedInTimezone
+        let localDate = formatter.string(from: setLog.loggedAt)
+
+        return TopSetSnapshot(
+            sessionId: setLog.sessionId,
+            date: setLog.loggedAt,
+            localDate: localDate,
+            weightKg: weight,
+            reps: reps,
+            e1rm: e1rm
+        )
     }
 }
 

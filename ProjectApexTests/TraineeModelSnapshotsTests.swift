@@ -7,20 +7,43 @@ import Testing
 import Foundation
 @testable import ProjectApex
 
+/// Builds a TopSetSnapshot via the canonical factory — the memberwise init
+/// is private so that timezone pinning is structurally enforced. Tests use
+/// this helper instead of constructing TopSetSnapshot directly.
+private func makeTopSetFixture(
+    sessionId: UUID = UUID(),
+    loggedAt: Date = Date(timeIntervalSince1970: 1_777_818_600),
+    weightKg: Double = 100,
+    reps: Int = 5,
+    timezone: TimeZone = TimeZone(identifier: "Australia/Sydney")!
+) -> TopSetSnapshot {
+    let log = SetLog(
+        id: UUID(),
+        sessionId: sessionId,
+        exerciseId: "test_exercise",
+        setNumber: 1,
+        weightKg: weightKg,
+        repsCompleted: reps,
+        rpeFelt: nil,
+        rirEstimated: nil,
+        aiPrescribed: nil,
+        loggedAt: loggedAt,
+        primaryMuscle: nil
+    )
+    return TopSetSnapshot.make(setLog: log, loggedInTimezone: timezone)
+}
+
 @Suite("TopSetSnapshot")
 struct TopSetSnapshotTests {
     @Test("Codable round-trip preserves all fields")
     func roundTrip() throws {
-        let original = TopSetSnapshot(
-            sessionId: UUID(),
-            localDate: "2026-05-04",
-            weightKg: 100.0,
-            reps: 5,
-            e1rm: 116.67
-        )
+        // Factory pins timezone (Sydney) → localDate "2026-05-04" since
+        // 2026-05-03 14:30 UTC = 2026-05-04 00:30 Sydney.
+        let original = makeTopSetFixture()
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(TopSetSnapshot.self, from: data)
         #expect(decoded == original)
+        #expect(decoded.localDate == "2026-05-04")
     }
 }
 
@@ -28,11 +51,9 @@ struct TopSetSnapshotTests {
 struct ExerciseSessionSnapshotTests {
     @Test("Round-trip with heaviest top set")
     func withTopSet() throws {
-        let top = TopSetSnapshot(
-            sessionId: UUID(),
-            localDate: "2026-05-04",
-            weightKg: 120, reps: 4, e1rm: 136
-        )
+        // 120 × (1 + 4/30) = 136.0 exactly, so the asserted weightKg below
+        // doesn't drift relative to the factory-computed e1rm.
+        let top = makeTopSetFixture(weightKg: 120, reps: 4)
         let original = ExerciseSessionSnapshot(
             sessionId: top.sessionId,
             localDate: top.localDate,
