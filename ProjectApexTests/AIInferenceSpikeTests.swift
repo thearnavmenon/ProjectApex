@@ -50,13 +50,23 @@ private final class RetryMockProvider: LLMProvider, @unchecked Sendable {
     }
 }
 
-// MARK: - ThrowingMockProvider
+// MARK: - Provider mocks for retry classification (ADR-0007)
 
-/// A mock that always throws `LLMProviderError.httpError` — used to test the
-/// `.llmProviderError` fallback path.
-private struct ThrowingMockProvider: LLMProvider {
+/// Always throws a transient HTTP error (429 rate limit). Per ADR-0007 this
+/// classifies as transient so the retry policy retries until exhausted or
+/// the product timeout fires.
+private struct TransientThrowingMockProvider: LLMProvider {
     func complete(systemPrompt: String, userPayload: String) async throws -> String {
         throw LLMProviderError.httpError(statusCode: 429, body: "Rate limit exceeded")
+    }
+}
+
+/// Always throws a permanent HTTP error (401 auth). Per ADR-0007 this
+/// classifies as permanent so the retry policy fails fast without consuming
+/// the backoff schedule.
+private struct PermanentThrowingMockProvider: LLMProvider {
+    func complete(systemPrompt: String, userPayload: String) async throws -> String {
+        throw LLMProviderError.httpError(statusCode: 401, body: "Invalid API key")
     }
 }
 
@@ -167,25 +177,78 @@ final class AIInferenceSpikeTests: XCTestCase {
 
     /// When the underlying LLM provider always throws (e.g. HTTP 429),
     /// AIInferenceService must return .fallback(reason: .llmProviderError).
-    /// The service does NOT retry on provider throws — it returns immediately.
-    func test_retryPath_providerAlwaysThrows_returnsFallback() async {
-        let throwingProvider = ThrowingMockProvider()
+    /// Per ADR-0007: a transient provider error (HTTP 429) drives the
+    /// retry policy through its full backoff schedule (1 s + 2 s + 4 s = ~7 s
+    /// + jitter) until either the retries exhaust or the 8 s product timeout
+    /// fires — whichever wins first. Both outcomes are valid surfaces of the
+    /// no-silent-fallback contract: the user sees a fallback result rather
+    /// than a fabricated prescription.
+    func test_retryPath_transientErrors_retriesUntilExhaustionOrProductTimeout() async {
+        let provider = TransientThrowingMockProvider()
         let service = AIInferenceService(
-            provider: throwingProvider,
+            provider: provider,
             gymProfile: GymProfile.mockProfile(),
             maxRetries: 2
         )
 
+        let start = Date()
         let result = await service.prescribe(context: InferenceSpike.minimalWorkoutContext())
+        let elapsed = Date().timeIntervalSince(start)
+
+        // Retries must actually have happened — the first retry sleep alone is
+        // 1 s, so anything under ~1 s means the retry policy didn't kick in.
+        XCTAssertGreaterThan(elapsed, 1.0,
+            "Transient errors must drive retry backoff; elapsed=\(elapsed)s suggests no retry.")
 
         switch result {
         case .success:
-            XCTFail("Expected fallback when provider always throws.")
+            XCTFail("Expected fallback when provider always returns transient errors.")
+        case .fallback(let reason):
+            // Either .timeout (product timeout won the race) or
+            // .llmProviderError (retries exhausted before timeout) is correct
+            // per ADR-0007. The contract is "fallback was surfaced, not a
+            // synthesised prescription."
+            switch reason {
+            case .timeout, .llmProviderError, .maxRetriesExceeded:
+                break  // expected
+            case .encodingFailed:
+                XCTFail("Encoding should not have failed in this test path: \(reason)")
+            }
+        }
+    }
+
+    // MARK: - Permanent error path (ADR-0007)
+
+    /// Per ADR-0007: a permanent provider error (HTTP 401 auth) must fail fast
+    /// without consuming the retry budget. The first retry sleep is 1 s, so a
+    /// permanent error path should complete in well under that.
+    func test_retryPath_permanentErrors_failsFastWithoutRetry() async {
+        let provider = PermanentThrowingMockProvider()
+        let service = AIInferenceService(
+            provider: provider,
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 2
+        )
+
+        let start = Date()
+        let result = await service.prescribe(context: InferenceSpike.minimalWorkoutContext())
+        let elapsed = Date().timeIntervalSince(start)
+
+        // No retry sleep — the first retry sleep is 1 s base + up to 0.5 s
+        // jitter. A correctly classified permanent error skips all sleeps;
+        // budget 0.5 s for encode + provider call + decode + dispatch.
+        XCTAssertLessThan(elapsed, 0.5,
+            "Permanent errors must fail fast without retry backoff; elapsed=\(elapsed)s suggests retry happened.")
+
+        switch result {
+        case .success:
+            XCTFail("Expected fallback for permanent provider error.")
         case .fallback(let reason):
             if case .llmProviderError(let msg) = reason {
-                XCTAssertFalse(msg.isEmpty, "LLM provider error message must not be empty.")
+                XCTAssertFalse(msg.isEmpty,
+                    "Permanent error fallback must carry a non-empty diagnostic.")
             } else {
-                XCTFail("Expected .llmProviderError, got \(reason).")
+                XCTFail("Expected .llmProviderError for a permanent error, got \(reason).")
             }
         }
     }

@@ -32,10 +32,15 @@ private struct MockLLMProvider: LLMProvider {
     }
 }
 
-/// Always throws — used to exercise the fallback path.
+/// Always throws a permanent error — used to exercise the fallback path
+/// without burning the test on retry backoff. Per ADR-0007, transient errors
+/// (URLError network codes, HTTP 429/5xx) drive the retry policy through its
+/// 1+2+4 s schedule before falling back; permanent errors fail fast. This
+/// mock uses 401 so the test can assert on the post-fallback manager state
+/// in milliseconds rather than waiting ~7 s for retries to exhaust.
 private struct FailingLLMProvider: LLMProvider {
     func complete(systemPrompt: String, userPayload: String) async throws -> String {
-        throw URLError(.notConnectedToInternet)
+        throw LLMProviderError.httpError(statusCode: 401, body: "Invalid API key")
     }
 }
 
