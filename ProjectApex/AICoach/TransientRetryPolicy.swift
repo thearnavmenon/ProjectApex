@@ -25,8 +25,11 @@ import Foundation
 
 nonisolated enum TransientRetryPolicy {
 
-    /// HTTP status codes that represent transient server-side errors eligible for retry.
-    static let transientCodes: Set<Int> = [429, 502, 503, 504, 529]
+    /// HTTP status codes that represent transient server-side errors eligible
+    /// for retry. Aliased from `LLMProviderError.transientHTTPCodes` (the
+    /// canonical source of truth per ADR-0007) so existing call sites that
+    /// reference `TransientRetryPolicy.transientCodes` continue to work.
+    static var transientCodes: Set<Int> { LLMProviderError.transientHTTPCodes }
 
     /// Maximum number of retry attempts after the initial call (4 total attempts).
     static let maxRetries: Int = 3
@@ -37,10 +40,15 @@ nonisolated enum TransientRetryPolicy {
     /// Maximum random jitter added to the calculated delay.
     static let maxJitter: TimeInterval = 0.5
 
-    /// Executes `operation`, automatically retrying up to `maxRetries` times when it
-    /// throws `LLMProviderError.httpError` with a transient status code.
+    /// Executes `operation`, automatically retrying up to `maxRetries` times
+    /// when it throws an error classified as transient per ADR-0007.
+    /// `LLMErrorClassifier.classify(_:)` is the single source of truth —
+    /// `LLMProviderError` with a transient HTTP code AND `URLError` of the
+    /// network-condition codes (notConnectedToInternet, networkConnectionLost,
+    /// timedOut, cannotConnectToHost, dnsLookupFailed) all retry.
     ///
-    /// Non-transient errors and non-LLMProviderError errors are re-thrown immediately.
+    /// Permanent errors (auth failures, malformed responses, unknown error
+    /// types) re-throw immediately without consuming retries.
     /// Cooperative `Task` cancellation is checked between retries.
     static func execute<T: Sendable>(
         _ operation: @Sendable @escaping () async throws -> T
@@ -49,19 +57,14 @@ nonisolated enum TransientRetryPolicy {
         for attempt in 0...maxRetries {
             do {
                 return try await operation()
-            } catch let err as LLMProviderError {
-                switch err {
-                case .httpError(let status, _) where transientCodes.contains(status):
-                    // Transient — record and fall through to backoff logic below.
-                    lastError = err
-                default:
-                    // Non-transient (emptyResponse, malformedResponse, non-transient httpError).
-                    throw err
+            } catch {
+                switch LLMErrorClassifier.classify(error) {
+                case .transient:
+                    lastError = error
+                case .permanent:
+                    throw error
                 }
             }
-            // NOTE: Non-LLMProviderError errors (e.g. URLError, CancellationError) are NOT
-            // caught above — they propagate out of the do-catch and exit the for loop,
-            // surfacing directly to the caller without any retry.
 
             if attempt < maxRetries {
                 try Task.checkCancellation()

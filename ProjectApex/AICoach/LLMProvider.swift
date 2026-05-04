@@ -32,6 +32,64 @@ nonisolated enum LLMProviderError: LocalizedError {
             return "LLM API response could not be parsed: \(detail)"
         }
     }
+
+    // MARK: Classification (ADR-0007)
+
+    /// Compiler-checked transient/permanent split. Callers branch on this
+    /// rather than re-deriving from raw HTTP codes — that pattern was the
+    /// root cause of #24.2's stale assertion.
+    nonisolated enum Classification: Sendable, Equatable {
+        case transient
+        case permanent
+    }
+
+    /// HTTP status codes that classify as transient per ADR-0007.
+    /// Source of truth — `TransientRetryPolicy.transientCodes` aliases this.
+    nonisolated static let transientHTTPCodes: Set<Int> = [429, 502, 503, 504, 529]
+
+    nonisolated var classification: Classification {
+        switch self {
+        case .httpError(let code, _):
+            return Self.transientHTTPCodes.contains(code) ? .transient : .permanent
+        case .emptyResponse, .malformedResponse:
+            return .permanent
+        }
+    }
+}
+
+// MARK: - LLMErrorClassifier
+
+/// Maps any `Error` (LLMProviderError, URLError, or unknown) to a
+/// `LLMProviderError.Classification`. Per ADR-0007 — network errors classify
+/// as transient so the retry policy can recover from a brief disconnect; all
+/// other unknown errors classify as permanent so the policy fails fast rather
+/// than silently looping on something it doesn't understand.
+nonisolated enum LLMErrorClassifier {
+
+    /// `URLError` codes that represent a transient network condition where
+    /// retrying is the right behaviour. Other URLError codes (e.g. cancelled,
+    /// userAuthenticationRequired) are permanent.
+    nonisolated static let transientURLErrorCodes: Set<URLError.Code> = [
+        .notConnectedToInternet,
+        .networkConnectionLost,
+        .timedOut,
+        .cannotConnectToHost,
+        .dnsLookupFailed
+    ]
+
+    /// Returns the classification for any `Error`. Unknown error types
+    /// classify as `.permanent` — silent retry of an unclassified failure
+    /// would be a no-silent-fallback violation in the other direction.
+    nonisolated static func classify(_ error: Error) -> LLMProviderError.Classification {
+        if let llm = error as? LLMProviderError {
+            return llm.classification
+        }
+        if let urlError = error as? URLError,
+           transientURLErrorCodes.contains(urlError.code) {
+            return .transient
+        }
+        return .permanent
+    }
 }
 
 // MARK: - LLMProvider Protocol
