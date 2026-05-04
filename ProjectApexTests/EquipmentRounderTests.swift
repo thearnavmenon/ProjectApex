@@ -40,14 +40,18 @@ final class SetPrescriptionValidationTests: XCTestCase {
 
     // MARK: - weightKg
 
-    func test_weightKgZero_throwsInvalidWeight() {
+    // weightKg represents external/added load on the bar or machine, NOT total
+    // system load — the user's bodyweight is a separate field on UserProfile /
+    // InferenceContext (`bodyweightKg`). Zero is therefore a legitimate
+    // prescription for bodyweight exercises (push-ups, dips, pull-ups), and
+    // SystemPrompt_Inference.txt records the migration: "weight_kg response
+    // format changed from '> 0' to '>= 0' to allow bodyweight prescriptions."
+    // The negative case is covered by test_weightKgNegative_throwsInvalidWeight
+    // below; the original test asserting that zero throws was a stale leftover
+    // from the pre-migration ">0" rule. Resolves #24.1.
+    func test_weightKgZero_doesNotThrow_forBodyweightExercises() {
         var p = validPrescription(); p.weightKg = 0.0
-        XCTAssertThrowsError(try p.validate()) { error in
-            guard case .invalidWeight(let v) = error as? PrescriptionValidationError else {
-                return XCTFail("Expected .invalidWeight, got \(error)")
-            }
-            XCTAssertEqual(v, 0.0, accuracy: 0.001)
-        }
+        XCTAssertNoThrow(try p.validate())
     }
 
     func test_weightKgNegative_throwsInvalidWeight() {
