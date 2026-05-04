@@ -63,8 +63,13 @@ private final class WAQMockURLProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocolDidFinishLoading(self)
             return
         }
+        // URLSession reifies httpBody → httpBodyStream for transport, so
+        // request.httpBody at this layer is always nil. Drain the stream
+        // back into Data so handlers reading request.httpBody see the
+        // payload. See issue #23.
+        let canonical = Self.canonicalize(request)
         do {
-            let (response, data) = try handler(request)
+            let (response, data) = try handler(canonical)
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
@@ -74,6 +79,35 @@ private final class WAQMockURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+
+    /// Drains `request.httpBodyStream` (when present) and re-attaches the
+    /// bytes as `httpBody` so handlers can inspect POST/PATCH payloads
+    /// through the standard property. Per issue #23.
+    private static func canonicalize(_ request: URLRequest) -> URLRequest {
+        guard request.httpBody == nil, let stream = request.httpBodyStream else {
+            return request
+        }
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+
+        while stream.hasBytesAvailable {
+            let read = stream.read(buffer, maxLength: bufferSize)
+            if read > 0 {
+                data.append(buffer, count: read)
+            } else {
+                break  // 0 = EOF, <0 = error
+            }
+        }
+
+        var copy = request
+        copy.httpBody = data
+        return copy
+    }
 }
 
 // MARK: - Helper: build SupabaseClient with mock session
