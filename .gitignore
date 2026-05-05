@@ -1,0 +1,24 @@
+# macOS
+.DS_Store
+
+# Xcode
+.swiftpm/
+xcuserdata/
+build/
+DerivedData/
+
+# Supabase Edge Function local dev — never commit secrets.
+# See docs/agents/edge-functions.md §Decisions §1 for the storage policy
+# (production secrets live in Supabase-managed env vars, not on disk).
+supabase/.env
+supabase/.env.*
+
+# Supabase CLI local link state. Written by `supabase link`; contains the
+# linked project ref, pooler URL with embedded DB password, and version
+# cache. Local-machine-only — never commit.
+supabase/.temp/
+
+# Supabase CLI branch-tracking state. Written on first `supabase functions
+# deploy`; tracks the active local branch for preview-branch features.
+# Local-machine-only — never commit.
+supabase/.branches/

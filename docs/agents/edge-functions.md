@@ -53,6 +53,66 @@ The Supabase service-role key is held by the solo developer only. Storage: a pas
 - A friend asking "what's your stack" — describing that you use Supabase service-role is not a leak.
 - Dependency security advisories (Deno std lib CVEs, Supabase JS client advisories, transitive npm/Deno package CVEs) that do **not** concern credential exposure. A standard RCE, DoS, or prototype-pollution advisory in a transitively-pulled package is a *patch* event, not a *rotation* event. The advisory must explicitly call out credential exfiltration, token leakage, or environment-variable disclosure to qualify as plausible exposure — otherwise upgrade the package and move on.
 
+## Local dev workflow
+
+How to run, deploy, observe, and roll back the Edge Function. Added in Slice 9b (#9). Sister section to §Rotation playbooks: same "executable without rederivation" promise.
+
+**Prerequisites.**
+
+- Supabase CLI: `brew install supabase/tap/supabase` (macOS canonical).
+- Authenticated: `supabase login` (one-time, browser-based).
+- Linked: `supabase link --project-ref <ref>` (one-time per checkout — get `<ref>` from Dashboard → Project Settings → General → Reference ID; **do not** confuse with `project_id` in `supabase/config.toml`, which is a local-only identifier).
+- Local secrets: `supabase/.env` exists with at minimum `SUPABASE_SERVICE_ROLE_KEY=<value>` for `supabase functions serve` to mirror the platform-injected production env (see §Decisions §1 addenda). The file is gitignored at the repo root — never commit it. Created during the §Pre-Slice-9b hygiene rotation.
+
+**Run a function locally.**
+
+1. `supabase start` — boots the local stack (Postgres, Auth, Edge runtime) on the ports declared in `supabase/config.toml`. First run pulls Docker images.
+2. `supabase functions serve update-trainee-model --env-file ./supabase/.env` — starts the local Edge runtime for the named function; re-reads source on each request.
+3. Function URL: `http://127.0.0.1:54321/functions/v1/update-trainee-model`.
+
+**Smoke test locally.** Get the local anon key from `supabase status`, then:
+
+```bash
+curl -i -X POST http://127.0.0.1:54321/functions/v1/update-trainee-model \
+  -H "Authorization: Bearer <local-anon-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"00000000-0000-0000-0000-000000000001","session_id":"00000000-0000-0000-0000-000000000002","session_payload":{}}'
+```
+
+Expected: `HTTP/1.1 200 OK` and body `{"trainee_model":{}}`.
+
+**Deploy to production.** `supabase functions deploy update-trainee-model`. The CLI uses your `supabase login` token; the service-role key is platform-injected and is not required on disk at deploy time (§Decisions §2 addenda). Default JWT verification stays on — do **not** pass `--no-verify-jwt` for this function (it's invoked from the authenticated client via the WAQ per ADR-0006 §3).
+
+**Smoke test production.** Same curl as local, but against `https://<project-ref>.supabase.co/functions/v1/update-trainee-model` and with the project's anon key (Dashboard → Project Settings → API → `anon` `public`). The Phase 1 stub does not check user identity, so any valid project JWT passes verification.
+
+**View logs.** Two routes; the dashboard is authoritative.
+
+- Dashboard: Edge Functions → `update-trainee-model` → Logs tab. Works regardless of CLI version.
+- CLI: `supabase functions logs update-trainee-model`. Verify the exact subcommand and any tail/follow flag against `supabase functions --help` on first use — the CLI surface has shifted across versions.
+
+**Rollback.** No `supabase functions rollback` primitive. The deploy model is forward-only, mirroring the service-role rotation policy (§Decisions §3). To revert a bad deploy:
+
+1. `git revert <bad-commit>` (or `git checkout <last-known-good>` for the function file only).
+2. `supabase functions deploy update-trainee-model` again — the just-restored source replaces the broken version.
+
+During the outage window, the WAQ rails (ADR-0006 §3) keep client-side session-completion events in the queue; clients converge once a working version is live. No user-visible error for routine outages.
+
+### Gotchas
+
+Empirically observed during Slice 9b's first end-to-end run. Populated from real failures, not speculation. Add to this list when subsequent rotations or deploys surface new ones — keep entries action-oriented (what tripped, what fixed it).
+
+- **macOS Command Line Tools must be current.** `brew install supabase/tap/supabase` refuses with `Your Command Line Tools are too outdated` on a stale install, even when Xcode itself is up to date. Fix: System Settings → General → Software Update, install the CLT update that appears, retry brew. Not listed as a prerequisite above because most macOS dev setups have CLT current — but if you hit the error, this is the path. (Path B in the original surface — `sudo rm -rf /Library/Developer/CommandLineTools && sudo xcode-select --install` — was not needed; Software Update sufficed.)
+
+- **The Supabase CLI lazily writes local-only directories under `supabase/`.** `supabase link` creates `supabase/.temp/` (contains `linked-project.json` + `pooler-url` with embedded Postgres password). The first `supabase functions deploy` creates `supabase/.branches/` (preview-branch tracking). Both are gitignored at the repo root. **General rule**: after running any new `supabase` subcommand for the first time, run `git status` and check for new directories under `supabase/` that aren't `functions/`, `migrations/`, or `config.toml`. If any appear, gitignore them before the next commit. Slice 9b's original `.gitignore` missed both because neither directory exists until the relevant subcommand runs; the gaps were patched as they surfaced (commits `f040872` for `.temp/`, this commit for `.branches/`).
+
+- **`supabase functions serve` requires both Docker Desktop running AND `supabase start` having booted the local stack.** Two-stage startup: `open -a Docker` then wait ~20 s for the daemon, then `supabase start` (Postgres / Auth / Edge runtime, multi-GB Docker image pulls on first run, 2–5 min). The error messages don't chain — you get `Cannot connect to the Docker daemon` first, then after Docker is up, `supabase start is not running`. Both gates have to clear before serve works.
+
+- **Run the local stack only when the function exercises it.** Decision rule: does the function reference Postgres or Auth (DB reads/writes, RLS policy checks, JWT introspection beyond the platform-default verification)? Yes → run `supabase start`. No → skip it; deploy + production curl is sufficient. The cost of `supabase start` (Docker images, 2–5 min cold-start) is disproportionate for no-op stubs and external-API-only functions. Phase-1 scaffolds (this slice) don't need the local stack; Phase-2 rule logic (next slice) will.
+
+- **`supabase projects api-keys` returns a pipe-delimited table, not a JSON.** Row format: `<padding>name<padding>|<padding>value<padding>`. Extract a single key reliably with `awk -F'|' '/^[[:space:]]*<name>[[:space:]]*\|/{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); print $2; exit}'`. A naive `grep anon` matches multiple rows.
+
+- **Production deploy is genuinely fast for a stub.** `supabase functions deploy update-trainee-model` completed in <5 s for a 2.67 kB script — bundling, upload, and edge-runtime activation. No region selection step; the function deploys to the project's region (`ap-southeast-2` in this case, observable via the `x-sb-edge-region` response header). Mention this so a future reader doesn't think the command silently no-op'd.
+
 ## Rotation playbooks
 
 Executable without rederivation. If you are reading this with no prior context, the steps below are sufficient.
@@ -105,6 +165,16 @@ No overlap window. Run only during a daylight window where you can debug breakag
 ### Pre-Slice-9b hygiene rotation
 
 Run once, before Slice 9b's first real deploy, to guarantee clean provenance for the service-role key in the password manager (the auto-generated key from project creation may have transited setup notes, screenshots, or clipboard managers). Use the Supabase service-role playbook above; the fan-out checklist at that point is just the password manager + local `.env`. If `supabase/.env` does not yet exist, create it as part of step 3 — Slice 9b will need it for `supabase functions serve` regardless.
+
+#### Status: deferred-not-skipped (2026-05-06)
+
+Slice 9b shipped without running this rotation. The auto-generated service-role key from project creation is the live key; the same value populates local `supabase/.env`. **Deferred, not skipped** — provenance hygiene is still required, the policy in §Decisions is unchanged, and this slot remains pending. The rotation must run before *any* of:
+
+- ANTHROPIC_API_KEY is added to production (post-Phase-1, when the function actually invokes Anthropic), since the key chain expands beyond service-role at that point and the rotation cleans both.
+- The first non-developer user onboards (per §Decisions §3 "end of alpha" trigger).
+- A second human gains service-role access (CI deploys, bus-factor partner — per §Decisions §3 access-list-change trigger).
+
+Whichever fires first. Until then, the auto-generated key remains live. If you are reading this note before any of those triggers have fired and you have not yet rotated, run the §Supabase service-role key playbook now — the bar to *defer* once is lower than the bar to *forget*.
 
 ## Out of scope
 
