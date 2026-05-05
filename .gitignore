@@ -17,3 +17,8 @@ supabase/.env.*
 # linked project ref, pooler URL with embedded DB password, and version
 # cache. Local-machine-only — never commit.
 supabase/.temp/
+
+# Supabase CLI branch-tracking state. Written on first `supabase functions
+# deploy`; tracks the active local branch for preview-branch features.
+# Local-machine-only — never commit.
+supabase/.branches/
