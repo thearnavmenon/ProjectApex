@@ -12,3 +12,8 @@ DerivedData/
 # (production secrets live in Supabase-managed env vars, not on disk).
 supabase/.env
 supabase/.env.*
+
+# Supabase CLI local link state. Written by `supabase link`; contains the
+# linked project ref, pooler URL with embedded DB password, and version
+# cache. Local-machine-only — never commit.
+supabase/.temp/
