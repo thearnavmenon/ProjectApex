@@ -313,10 +313,10 @@ final class AnthropicProviderCachingTests: XCTestCase {
         try requireLiveAPI()
         let apiKey = try requireAnthropicKey()
 
-        // ~3,500 chars ≈ ~875 tokens with Anthropic's tokenizer — well above the
-        // 1,024-token minimum for claude-sonnet-4-5. If this ever fails because the
-        // pad tokenizes short, increase the repeat count.
-        let basePad = String(repeating: "You are a helpful strength and conditioning coach assistant. ", count: 60)
+        // ~7,300 chars ≈ ~1,800 tokens with Anthropic's tokenizer — above the
+        // 1,024-token minimum for claude-sonnet-4-5.
+        // 60 repeats (~875 tokens) was below the threshold; bumped to 120.
+        let basePad = String(repeating: "You are a helpful strength and conditioning coach assistant. ", count: 120)
         let stableSystemPrompt = """
             You are an elite AI strength and hypertrophy coach embedded in a workout app. \
             Your sole job is to prescribe the next set for the user based on the provided \
