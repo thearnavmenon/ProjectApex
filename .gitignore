@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Xcode
+.swiftpm/
+xcuserdata/
+build/
+DerivedData/
+
+# Supabase Edge Function local dev — never commit secrets.
+# See docs/agents/edge-functions.md §Decisions §1 for the storage policy
+# (production secrets live in Supabase-managed env vars, not on disk).
+supabase/.env
+supabase/.env.*

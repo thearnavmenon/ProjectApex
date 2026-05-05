@@ -53,6 +53,54 @@ The Supabase service-role key is held by the solo developer only. Storage: a pas
 - A friend asking "what's your stack" — describing that you use Supabase service-role is not a leak.
 - Dependency security advisories (Deno std lib CVEs, Supabase JS client advisories, transitive npm/Deno package CVEs) that do **not** concern credential exposure. A standard RCE, DoS, or prototype-pollution advisory in a transitively-pulled package is a *patch* event, not a *rotation* event. The advisory must explicitly call out credential exfiltration, token leakage, or environment-variable disclosure to qualify as plausible exposure — otherwise upgrade the package and move on.
 
+## Local dev workflow
+
+How to run, deploy, observe, and roll back the Edge Function. Added in Slice 9b (#9). Sister section to §Rotation playbooks: same "executable without rederivation" promise.
+
+**Prerequisites.**
+
+- Supabase CLI: `brew install supabase/tap/supabase` (macOS canonical).
+- Authenticated: `supabase login` (one-time, browser-based).
+- Linked: `supabase link --project-ref <ref>` (one-time per checkout — get `<ref>` from Dashboard → Project Settings → General → Reference ID; **do not** confuse with `project_id` in `supabase/config.toml`, which is a local-only identifier).
+- Local secrets: `supabase/.env` exists with at minimum `SUPABASE_SERVICE_ROLE_KEY=<value>` for `supabase functions serve` to mirror the platform-injected production env (see §Decisions §1 addenda). The file is gitignored at the repo root — never commit it. Created during the §Pre-Slice-9b hygiene rotation.
+
+**Run a function locally.**
+
+1. `supabase start` — boots the local stack (Postgres, Auth, Edge runtime) on the ports declared in `supabase/config.toml`. First run pulls Docker images.
+2. `supabase functions serve update-trainee-model --env-file ./supabase/.env` — starts the local Edge runtime for the named function; re-reads source on each request.
+3. Function URL: `http://127.0.0.1:54321/functions/v1/update-trainee-model`.
+
+**Smoke test locally.** Get the local anon key from `supabase status`, then:
+
+```bash
+curl -i -X POST http://127.0.0.1:54321/functions/v1/update-trainee-model \
+  -H "Authorization: Bearer <local-anon-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"00000000-0000-0000-0000-000000000001","session_id":"00000000-0000-0000-0000-000000000002","session_payload":{}}'
+```
+
+Expected: `HTTP/1.1 200 OK` and body `{"trainee_model":{}}`.
+
+**Deploy to production.** `supabase functions deploy update-trainee-model`. The CLI uses your `supabase login` token; the service-role key is platform-injected and is not required on disk at deploy time (§Decisions §2 addenda). Default JWT verification stays on — do **not** pass `--no-verify-jwt` for this function (it's invoked from the authenticated client via the WAQ per ADR-0006 §3).
+
+**Smoke test production.** Same curl as local, but against `https://<project-ref>.supabase.co/functions/v1/update-trainee-model` and with the project's anon key (Dashboard → Project Settings → API → `anon` `public`). The Phase 1 stub does not check user identity, so any valid project JWT passes verification.
+
+**View logs.** Two routes; the dashboard is authoritative.
+
+- Dashboard: Edge Functions → `update-trainee-model` → Logs tab. Works regardless of CLI version.
+- CLI: `supabase functions logs update-trainee-model`. Verify the exact subcommand and any tail/follow flag against `supabase functions --help` on first use — the CLI surface has shifted across versions.
+
+**Rollback.** No `supabase functions rollback` primitive. The deploy model is forward-only, mirroring the service-role rotation policy (§Decisions §3). To revert a bad deploy:
+
+1. `git revert <bad-commit>` (or `git checkout <last-known-good>` for the function file only).
+2. `supabase functions deploy update-trainee-model` again — the just-restored source replaces the broken version.
+
+During the outage window, the WAQ rails (ADR-0006 §3) keep client-side session-completion events in the queue; clients converge once a working version is live. No user-visible error for routine outages.
+
+### Gotchas
+
+<!-- gotchas land here after the rotation drill (Slice 9b acceptance #8) and after the first real deploy. Empty by design — populated empirically, not speculatively. -->
+
 ## Rotation playbooks
 
 Executable without rederivation. If you are reading this with no prior context, the steps below are sufficient.
