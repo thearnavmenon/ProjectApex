@@ -43,6 +43,7 @@
 		81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */; };
 		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* TopSetSnapshotFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */; };
+		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 		E50E3B4CBD53ED7ABE725DB8 /* EquipmentCatalogSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */; };
 /* End PBXBuildFile section */
@@ -98,6 +99,7 @@
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
 		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
 		E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MuscleTaxonomyTests.swift; sourceTree = "<group>"; };
+		E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelLocalStoreTests.swift; sourceTree = "<group>"; };
 		EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelEnumsTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MovementPatternTests.swift; sourceTree = "<group>"; };
@@ -225,6 +227,7 @@
 				878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */,
 				DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */,
 				4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */,
+				E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */,
 				18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */,
 			);
 			path = ProjectApexTests;
@@ -364,6 +367,7 @@
 				6ECE420C1031E80360FF1EFE /* TraineeModelProfilesTests.swift in Sources */,
 				B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */,
 				5DE94F8F1D136C65C96FCAD1 /* WeekFatigueSignalsHelperAgreementTests.swift in Sources */,
+				A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */,
 				E50E3B4CBD53ED7ABE725DB8 /* EquipmentCatalogSeedTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

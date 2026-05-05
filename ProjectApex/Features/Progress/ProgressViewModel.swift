@@ -146,6 +146,12 @@ final class ProgressViewModel {
         self.userId = userId
     }
 
+    // Prevent swift_task_deinitOnExecutorImpl crash: @MainActor deinit
+    // requires an active Swift Concurrency Task; SwiftUI releases @State-owned
+    // instances from CFRunLoop callbacks (no active Task). Stored properties
+    // are all plain value types — safe to release on any thread.
+    nonisolated deinit {}
+
     // MARK: - Load
 
     func loadAll(plannedWeekDays: [TrainingDay] = []) async {
