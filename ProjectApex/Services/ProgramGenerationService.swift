@@ -723,7 +723,8 @@ extension AnthropicProvider {
             apiKey: apiKey,
             model: "claude-sonnet-4-5",
             maxTokens: 16000,
-            requestTimeout: 180
+            requestTimeout: 180,
+            enableCaching: false   // one-shot, never repeats prompt — no cache benefit
         )
     }
 }

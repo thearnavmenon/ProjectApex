@@ -36,6 +36,12 @@ Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/ag
 
 Authoritative for Edge Function secret storage, service-role access list, and key rotation policy. Read before any Slice 9b+ Edge Function work — do not redo the analysis from scratch. See `docs/agents/edge-functions.md`.
 
+### Integration test flag
+
+`APEX_INTEGRATION_TESTS=1` — environment variable that gates live-API tests requiring real credentials and network access. Set in the Xcode scheme's environment variables for local or CI runs. Tests gated by this flag:
+- `AIInferenceServiceTests.test_liveAPI_*` — real Anthropic API round-trip
+- `AnthropicProviderCachingTests.test_smokeTest_cacheEffectiveness_*` — two identical Anthropic calls asserting `cache_read_input_tokens > 0` on the second call (verifies prompt-caching mechanism end-to-end; uses a padded system prompt to clear the 1,024-token cache minimum)
+
 ### Worktree-aware git commands (mandatory in `.claude/worktrees/*` sessions)
 
 When working inside a worktree (path matches `.claude/worktrees/<name>/`), every git-mutating command MUST be `git -C <worktree-absolute-path> <subcommand>` rather than relying on the shell's current working directory. The bash agent's `cd` does not reliably persist across tool calls, and a `git commit` that runs from the parent main repo silently lands the wrong files on the wrong branch. This was a real incident during Slice 1.

@@ -102,10 +102,27 @@ protocol LLMProvider: Sendable {
     func complete(systemPrompt: String, userPayload: String) async throws -> String
 }
 
+// MARK: - AnthropicCacheUsage
+
+/// Cache token counts from an Anthropic response's `usage` block.
+/// Both fields are zero when caching did not apply (e.g. prompt below the
+/// minimum token threshold, or `enableCaching` was false).
+nonisolated struct AnthropicCacheUsage: Sendable, Equatable {
+    let cacheCreationInputTokens: Int
+    let cacheReadInputTokens: Int
+}
+
 // MARK: - AnthropicProvider
 
 /// Calls the Anthropic Messages API (claude-3-5-sonnet-* and later models).
 /// Reference: https://docs.anthropic.com/en/api/messages
+///
+/// When `enableCaching` is true (the default), the system prompt is sent as a
+/// structured text block with `cache_control: { type: "ephemeral" }`, making it
+/// eligible for Anthropic's prompt-caching. Anthropic silently ignores the marker
+/// when the cached prefix is below the per-model minimum (1,024 tokens for
+/// claude-sonnet-4-5). Pass `enableCaching: false` for one-shot callers that never
+/// repeat the same prompt — they avoid the 25% cache-write overhead.
 nonisolated struct AnthropicProvider: LLMProvider {
 
     let apiKey: String
@@ -116,27 +133,69 @@ nonisolated struct AnthropicProvider: LLMProvider {
     /// URLSession request timeout in seconds.
     /// Set inference uses 30s; program generation uses 600s (Opus + 32k tokens can take 2+ min).
     let requestTimeout: TimeInterval
+    let enableCaching: Bool
 
     private let session: URLSession
+
+    // Rough character threshold below which the system prompt won't fill the
+    // 1,024-token cache minimum for claude-sonnet-4-5. Log once so the caller
+    // knows production caching is not yet active (Phase 2 will fix this).
+    private static let cachingThresholdChars = 3_000
+    private nonisolated(unsafe) static var hasLoggedShortPromptWarning = false
 
     init(
         apiKey: String,
         model: String = "claude-sonnet-4-5",
         maxTokens: Int = 1024,
-        requestTimeout: TimeInterval = 30
+        requestTimeout: TimeInterval = 30,
+        enableCaching: Bool = true,
+        urlSession: URLSession? = nil
     ) {
         self.apiKey = apiKey
         self.model = model
         self.maxTokens = maxTokens
         self.requestTimeout = requestTimeout
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = requestTimeout
-        // Resource timeout must be at least as large as the request timeout.
-        config.timeoutIntervalForResource = max(requestTimeout, 660)
-        self.session = URLSession(configuration: config)
+        self.enableCaching = enableCaching
+        if let injected = urlSession {
+            self.session = injected
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = requestTimeout
+            // Resource timeout must be at least as large as the request timeout.
+            config.timeoutIntervalForResource = max(requestTimeout, 660)
+            self.session = URLSession(configuration: config)
+        }
     }
 
+    // MARK: - LLMProvider
+
     func complete(systemPrompt: String, userPayload: String) async throws -> String {
+        let (text, _) = try await completeWithStats(systemPrompt: systemPrompt, userPayload: userPayload)
+        return text
+    }
+
+    // MARK: - Extended API
+
+    /// Calls the Anthropic Messages API and returns the response text together
+    /// with cache token counts from the `usage` block. Use this from tests or
+    /// any caller that needs to observe prompt-caching effectiveness.
+    func completeWithStats(
+        systemPrompt: String,
+        userPayload: String
+    ) async throws -> (text: String, cacheUsage: AnthropicCacheUsage) {
+
+        if enableCaching && !Self.hasLoggedShortPromptWarning
+            && systemPrompt.count < Self.cachingThresholdChars {
+            Self.hasLoggedShortPromptWarning = true
+            fputs(
+                "[AnthropicProvider] WARNING: system prompt is \(systemPrompt.count) chars " +
+                "(~\(systemPrompt.count / 4) tokens), likely below the 1,024-token cache minimum " +
+                "for \(model). Cache hits won't occur until Phase 2 adds TraineeModelDigest " +
+                "to the stable section.\n",
+                stderr
+            )
+        }
+
         let url = URL(string: "https://api.anthropic.com/v1/messages")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -144,10 +203,17 @@ nonisolated struct AnthropicProvider: LLMProvider {
         request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
 
+        // When caching is enabled, wrap the system prompt in a text block with
+        // cache_control so Anthropic can cache the stable section across calls.
+        // When disabled, send the plain string (original behaviour, no write overhead).
+        let systemValue: Any = enableCaching
+            ? [["type": "text", "text": systemPrompt, "cache_control": ["type": "ephemeral"]]]
+            : systemPrompt
+
         let body: [String: Any] = [
             "model": model,
             "max_tokens": maxTokens,
-            "system": systemPrompt,
+            "system": systemValue,
             "messages": [
                 ["role": "user", "content": userPayload]
             ]
@@ -175,7 +241,7 @@ nonisolated struct AnthropicProvider: LLMProvider {
             throw LLMProviderError.httpError(statusCode: http.statusCode, body: bodyString)
         }
 
-        // Anthropic envelope: {"content": [{"type": "text", "text": "..."}], ...}
+        // Anthropic envelope: {"content": [{"type": "text", "text": "..."}], "usage": {...}, ...}
         guard
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let contentArray = json["content"] as? [[String: Any]],
@@ -187,7 +253,14 @@ nonisolated struct AnthropicProvider: LLMProvider {
         }
 
         guard !text.isEmpty else { throw LLMProviderError.emptyResponse }
-        return text
+
+        let usageObj = json["usage"] as? [String: Any]
+        let cacheUsage = AnthropicCacheUsage(
+            cacheCreationInputTokens: usageObj?["cache_creation_input_tokens"] as? Int ?? 0,
+            cacheReadInputTokens: usageObj?["cache_read_input_tokens"] as? Int ?? 0
+        )
+
+        return (text, cacheUsage)
     }
 }
 
