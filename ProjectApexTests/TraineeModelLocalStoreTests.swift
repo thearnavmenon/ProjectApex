@@ -8,15 +8,23 @@
 // requirements), so all store interactions must happen on the main actor.
 // XCTest fully supports @MainActor test classes.
 //
-// All tests use an in-memory SwiftData container unless persistence across
-// simulated restart is being tested (which requires an on-disk container
-// at a temp URL that is cleaned up in tearDown).
+// Lifecycle design: the store is created in setUp() async throws and destroyed
+// in tearDown() async throws. Both run inside a Swift Concurrency Task, which
+// is required because ModelContainer uses task-local executor storage
+// internally — its deallocation must happen while an active Task exists.
+// Creating / destroying the store inside synchronous test methods (where no
+// Task is active) triggers swift_task_deinitOnExecutorImpl → crash.
+//
+// The persistence-across-restart test creates its own on-disk stores; it is
+// marked async for the same reason (local store variables are released at the
+// end of an async function, still within a Task).
 //
 // Behaviors covered:
 //   • Empty store returns nil on load()
 //   • save → load round-trips the model faithfully
 //   • Second save replaces first (upsert semantics)
 //   • clear() empties the store
+//   • clear() on empty store does not throw
 //   • Persistence survives simulated restart (new container, same SQLite file)
 //   • Cold-start hydration from a representative Edge Function payload
 
@@ -27,11 +35,19 @@ import SwiftData
 @MainActor
 final class TraineeModelLocalStoreTests: XCTestCase {
 
-    // MARK: ─── Helpers ────────────────────────────────────────────────────────
+    // MARK: ─── Lifecycle ─────────────────────────────────────────────────────
 
-    private func makeStore() throws -> TraineeModelLocalStore {
-        try TraineeModelLocalStore.makeInMemory()
+    private var store: TraineeModelLocalStore!
+
+    override func setUp() async throws {
+        store = try TraineeModelLocalStore.makeInMemory()
     }
+
+    override func tearDown() async throws {
+        store = nil
+    }
+
+    // MARK: ─── Helpers ────────────────────────────────────────────────────────
 
     /// Minimal TraineeModel for basic round-trip tests. Uses a fixed Date so
     /// JSON encode → decode produces bit-identical values.
@@ -106,14 +122,12 @@ final class TraineeModelLocalStoreTests: XCTestCase {
     // MARK: ─── Cycle 1: empty store → nil ────────────────────────────────────
 
     func test_load_returnsNil_whenStoreIsEmpty() throws {
-        let store = try makeStore()
         XCTAssertNil(store.load())
     }
 
     // MARK: ─── Cycle 2: save → load round-trip ────────────────────────────────
 
     func test_saveAndLoad_roundTripsModel() throws {
-        let store = try makeStore()
         let model = makeMinimalModel()
         try store.save(model)
         let loaded = store.load()
@@ -124,7 +138,6 @@ final class TraineeModelLocalStoreTests: XCTestCase {
     // MARK: ─── Cycle 3: second save replaces first ───────────────────────────
 
     func test_save_twice_secondValueWins() throws {
-        let store = try makeStore()
         let modelA = makeMinimalModel()
         var modelB = makeMinimalModel()
         modelB.goal = GoalState(
@@ -144,7 +157,6 @@ final class TraineeModelLocalStoreTests: XCTestCase {
     // MARK: ─── Cycle 4: clear → nil ─────────────────────────────────────────
 
     func test_clear_afterSave_returnsNilOnNextLoad() throws {
-        let store = try makeStore()
         try store.save(makeMinimalModel())
         XCTAssertNotNil(store.load(), "Precondition: model exists before clear")
 
@@ -154,12 +166,12 @@ final class TraineeModelLocalStoreTests: XCTestCase {
     }
 
     func test_clear_onEmptyStore_doesNotThrow() {
-        XCTAssertNoThrow(try makeStore().clear())
+        XCTAssertNoThrow(try store.clear())
     }
 
     // MARK: ─── Cycle 5: persistence across simulated restart ─────────────────
 
-    func test_persistenceAcrossSimulatedRestart() throws {
+    func test_persistenceAcrossSimulatedRestart() async throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("sqlite")
@@ -167,16 +179,17 @@ final class TraineeModelLocalStoreTests: XCTestCase {
 
         let model = makeMinimalModel()
 
-        // First "launch" — save and release the store
+        // First "launch" — save and release the store (dealloc in async Task)
         do {
-            let store = try TraineeModelLocalStore.makeOnDisk(at: url)
-            try store.save(model)
-            // store deallocated here; SQLite file remains on disk
+            let store1 = try TraineeModelLocalStore.makeOnDisk(at: url)
+            try store1.save(model)
+            // store1 released here, still inside async Task — safe
         }
 
         // Second "launch" — open same file with a fresh container
         let store2 = try TraineeModelLocalStore.makeOnDisk(at: url)
         let loaded = store2.load()
+        // store2 released at end of async function — safe
 
         XCTAssertNotNil(loaded, "Expected persisted model to survive container recreation")
         XCTAssertEqual(loaded, model)
@@ -185,7 +198,6 @@ final class TraineeModelLocalStoreTests: XCTestCase {
     // MARK: ─── Cycle 6: cold-start from representative payload ───────────────
 
     func test_coldStart_representativePayload_roundTrips() throws {
-        let store = try makeStore()
         let model = makeRepresentativeModel()
 
         try store.save(model)
