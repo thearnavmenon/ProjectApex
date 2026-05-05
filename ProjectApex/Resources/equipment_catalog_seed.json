@@ -1,0 +1,380 @@
+[
+  {
+    "id": "dumbbell-set",
+    "display_name": "Dumbbell Set",
+    "category": "fixed-weight",
+    "default_max_kg": 60,
+    "default_increment_kg": 2.5,
+    "primary_muscle_groups": ["chest", "back", "shoulders", "biceps", "triceps", "legs"],
+    "exercise_tags": ["dumbbell press", "dumbbell row", "dumbbell curl", "dumbbell fly", "lateral raise", "dumbbell lunge", "dumbbell shoulder press", "dumbbell tricep extension"]
+  },
+  {
+    "id": "barbell",
+    "display_name": "Barbell",
+    "category": "plate-loaded",
+    "default_max_kg": 200,
+    "default_increment_kg": 2.5,
+    "primary_muscle_groups": ["chest", "back", "shoulders", "legs", "biceps", "triceps"],
+    "exercise_tags": ["bench press", "squat", "deadlift", "barbell row", "overhead press", "Romanian deadlift", "barbell curl"]
+  },
+  {
+    "id": "ez-curl-bar",
+    "display_name": "EZ Curl Bar",
+    "category": "plate-loaded",
+    "default_max_kg": 80,
+    "default_increment_kg": 2.5,
+    "primary_muscle_groups": ["biceps", "triceps"],
+    "exercise_tags": ["EZ-bar curl", "EZ-bar skull crushers", "EZ-bar overhead extension"]
+  },
+  {
+    "id": "cable-machine",
+    "display_name": "Cable Machine",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["chest", "back", "shoulders", "biceps", "triceps", "legs"],
+    "exercise_tags": ["cable fly", "cable row", "cable curl", "tricep pushdown", "cable lateral raise", "cable face pull", "cable kickback"]
+  },
+  {
+    "id": "cable-machine-dual",
+    "display_name": "Cable Machine (Dual)",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["chest", "back", "shoulders", "biceps", "triceps"],
+    "exercise_tags": ["cable crossover", "cable fly", "cable row", "cable curl", "cable lateral raise", "cable face pull", "tricep pushdown"]
+  },
+  {
+    "id": "smith-machine",
+    "display_name": "Smith Machine",
+    "category": "plate-loaded",
+    "default_max_kg": 200,
+    "default_increment_kg": 2.5,
+    "primary_muscle_groups": ["chest", "back", "shoulders", "legs", "triceps"],
+    "exercise_tags": ["Smith machine squat", "Smith machine bench press", "Smith machine row", "Smith machine overhead press", "Smith machine Romanian deadlift"]
+  },
+  {
+    "id": "leg-press",
+    "display_name": "Leg Press",
+    "category": "plate-loaded",
+    "default_max_kg": 400,
+    "default_increment_kg": 10,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["leg press", "high-foot leg press", "single-leg press", "narrow-stance leg press"]
+  },
+  {
+    "id": "hack-squat",
+    "display_name": "Hack Squat",
+    "category": "plate-loaded",
+    "default_max_kg": 300,
+    "default_increment_kg": 10,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["hack squat", "reverse hack squat", "narrow-stance hack squat"]
+  },
+  {
+    "id": "adjustable-bench",
+    "display_name": "Adjustable Bench",
+    "category": "bodyweight",
+    "default_max_kg": null,
+    "default_increment_kg": null,
+    "primary_muscle_groups": ["chest", "shoulders", "back", "triceps", "biceps"],
+    "exercise_tags": ["dumbbell press", "dumbbell fly", "dumbbell row", "incline press", "seated curl", "step-up"]
+  },
+  {
+    "id": "flat-bench",
+    "display_name": "Flat Bench",
+    "category": "bodyweight",
+    "default_max_kg": null,
+    "default_increment_kg": null,
+    "primary_muscle_groups": ["chest", "triceps", "shoulders"],
+    "exercise_tags": ["barbell bench press", "dumbbell bench press", "dumbbell fly", "close-grip bench press"]
+  },
+  {
+    "id": "incline-bench",
+    "display_name": "Incline Bench",
+    "category": "bodyweight",
+    "default_max_kg": null,
+    "default_increment_kg": null,
+    "primary_muscle_groups": ["chest", "shoulders", "biceps"],
+    "exercise_tags": ["incline barbell press", "incline dumbbell press", "incline dumbbell fly", "incline curl"]
+  },
+  {
+    "id": "pull-up-bar",
+    "display_name": "Pull-Up Bar",
+    "category": "bodyweight",
+    "default_max_kg": null,
+    "default_increment_kg": null,
+    "primary_muscle_groups": ["back", "biceps"],
+    "exercise_tags": ["pull-up", "chin-up", "wide-grip pull-up", "hanging leg raise"]
+  },
+  {
+    "id": "dip-station",
+    "display_name": "Dip Station",
+    "category": "bodyweight",
+    "default_max_kg": null,
+    "default_increment_kg": null,
+    "primary_muscle_groups": ["chest", "triceps", "shoulders"],
+    "exercise_tags": ["tricep dip", "chest dip", "L-sit"]
+  },
+  {
+    "id": "resistance-bands",
+    "display_name": "Resistance Bands",
+    "category": "fixed-weight",
+    "default_max_kg": 50,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["back", "shoulders", "biceps", "chest", "legs", "triceps"],
+    "exercise_tags": ["band pull-apart", "band curl", "band face pull", "band lateral raise", "banded squat", "band tricep pushdown"]
+  },
+  {
+    "id": "kettlebell-set",
+    "display_name": "Kettlebell Set",
+    "category": "fixed-weight",
+    "default_max_kg": 40,
+    "default_increment_kg": 4,
+    "primary_muscle_groups": ["back", "shoulders", "legs", "biceps"],
+    "exercise_tags": ["kettlebell swing", "kettlebell goblet squat", "kettlebell press", "kettlebell row", "Turkish get-up"]
+  },
+  {
+    "id": "power-rack",
+    "display_name": "Power Rack",
+    "category": "plate-loaded",
+    "default_max_kg": 200,
+    "default_increment_kg": 2.5,
+    "primary_muscle_groups": ["chest", "back", "legs", "shoulders", "triceps"],
+    "exercise_tags": ["barbell squat", "barbell bench press", "overhead press", "rack pull", "barbell row", "pin press"]
+  },
+  {
+    "id": "squat-rack",
+    "display_name": "Squat Rack",
+    "category": "plate-loaded",
+    "default_max_kg": 200,
+    "default_increment_kg": 2.5,
+    "primary_muscle_groups": ["legs", "shoulders", "back"],
+    "exercise_tags": ["barbell squat", "overhead press", "front squat", "rack pull"]
+  },
+  {
+    "id": "lat-pulldown",
+    "display_name": "Lat Pulldown",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["back", "biceps"],
+    "exercise_tags": ["lat pulldown", "close-grip pulldown", "wide-grip pulldown", "single-arm pulldown"]
+  },
+  {
+    "id": "seated-row",
+    "display_name": "Seated Row",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["back", "biceps"],
+    "exercise_tags": ["seated cable row", "close-grip row", "wide-grip row", "single-arm seated row"]
+  },
+  {
+    "id": "chest-press-machine",
+    "display_name": "Chest Press Machine",
+    "category": "weight-stack",
+    "default_max_kg": 150,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["chest", "triceps", "shoulders"],
+    "exercise_tags": ["machine chest press", "machine incline press", "single-arm chest press"]
+  },
+  {
+    "id": "shoulder-press-machine",
+    "display_name": "Shoulder Press Machine",
+    "category": "weight-stack",
+    "default_max_kg": 120,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["shoulders", "triceps"],
+    "exercise_tags": ["machine shoulder press", "machine overhead press", "single-arm shoulder press"]
+  },
+  {
+    "id": "leg-extension",
+    "display_name": "Leg Extension",
+    "category": "weight-stack",
+    "default_max_kg": 120,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["leg extension", "single-leg extension"]
+  },
+  {
+    "id": "leg-curl",
+    "display_name": "Leg Curl",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["lying leg curl", "seated leg curl", "single-leg curl"]
+  },
+  {
+    "id": "pec-deck",
+    "display_name": "Pec Deck",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["chest"],
+    "exercise_tags": ["pec deck fly", "machine fly", "reverse pec deck"]
+  },
+  {
+    "id": "preacher-curl",
+    "display_name": "Preacher Curl",
+    "category": "weight-stack",
+    "default_max_kg": 80,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["biceps"],
+    "exercise_tags": ["preacher curl", "EZ-bar preacher curl", "dumbbell preacher curl", "machine preacher curl"]
+  },
+  {
+    "id": "cable-crossover",
+    "display_name": "Cable Crossover",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["chest", "shoulders", "triceps"],
+    "exercise_tags": ["cable crossover", "cable fly", "low-to-high cable fly", "high-to-low cable fly"]
+  },
+  {
+    "id": "hip-thrust-machine",
+    "display_name": "Hip Thrust Machine",
+    "category": "weight-stack",
+    "default_max_kg": 200,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["machine hip thrust", "glute bridge", "hip thrust"]
+  },
+  {
+    "id": "ghd-glute-ham-raise",
+    "display_name": "GHD / Glute-Ham Raise",
+    "category": "bodyweight",
+    "default_max_kg": null,
+    "default_increment_kg": null,
+    "primary_muscle_groups": ["legs", "back"],
+    "exercise_tags": ["glute-ham raise", "GHD sit-up", "Nordic curl", "GHD hyperextension"]
+  },
+  {
+    "id": "reverse-hyper",
+    "display_name": "Reverse Hyper",
+    "category": "plate-loaded",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs", "back"],
+    "exercise_tags": ["reverse hyperextension", "reverse hyper"]
+  },
+  {
+    "id": "t-bar-row",
+    "display_name": "T-Bar Row",
+    "category": "plate-loaded",
+    "default_max_kg": 150,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["back", "biceps"],
+    "exercise_tags": ["T-bar row", "landmine row", "chest-supported T-bar row"]
+  },
+  {
+    "id": "trap-bar",
+    "display_name": "Trap Bar",
+    "category": "plate-loaded",
+    "default_max_kg": 250,
+    "default_increment_kg": 2.5,
+    "primary_muscle_groups": ["legs", "back", "shoulders"],
+    "exercise_tags": ["trap bar deadlift", "trap bar squat", "trap bar shrug", "trap bar farmer carry"]
+  },
+  {
+    "id": "belt-squat-pendulum-squat",
+    "display_name": "Belt Squat / Pendulum Squat",
+    "category": "plate-loaded",
+    "default_max_kg": 300,
+    "default_increment_kg": 10,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["belt squat", "pendulum squat", "belt squat split squat", "goblet belt squat"]
+  },
+  {
+    "id": "hs-chest-press",
+    "display_name": "Hammer Strength Chest Press",
+    "category": "plate-loaded",
+    "default_max_kg": 200,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["chest", "triceps", "shoulders"],
+    "exercise_tags": ["Hammer Strength chest press", "plate-loaded chest press", "unilateral chest press"]
+  },
+  {
+    "id": "hs-incline-press",
+    "display_name": "Hammer Strength Incline Press",
+    "category": "plate-loaded",
+    "default_max_kg": 180,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["chest", "shoulders", "triceps"],
+    "exercise_tags": ["Hammer Strength incline press", "plate-loaded incline press", "unilateral incline press"]
+  },
+  {
+    "id": "hs-lat-pulldown",
+    "display_name": "Hammer Strength Lat Pulldown",
+    "category": "plate-loaded",
+    "default_max_kg": 180,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["back", "biceps"],
+    "exercise_tags": ["Hammer Strength lat pulldown", "plate-loaded lat pulldown", "unilateral lat pulldown"]
+  },
+  {
+    "id": "hs-iso-row",
+    "display_name": "Hammer Strength ISO-Row",
+    "category": "plate-loaded",
+    "default_max_kg": 180,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["back", "biceps"],
+    "exercise_tags": ["Hammer Strength ISO row", "plate-loaded row", "unilateral row", "chest-supported row"]
+  },
+  {
+    "id": "hs-shoulder-press",
+    "display_name": "Hammer Strength Shoulder Press",
+    "category": "plate-loaded",
+    "default_max_kg": 150,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["shoulders", "triceps"],
+    "exercise_tags": ["Hammer Strength shoulder press", "plate-loaded shoulder press", "unilateral shoulder press"]
+  },
+  {
+    "id": "standing-calf-raise",
+    "display_name": "Standing Calf Raise",
+    "category": "plate-loaded",
+    "default_max_kg": 300,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["standing calf raise", "single-leg calf raise", "donkey calf raise"]
+  },
+  {
+    "id": "seated-calf-raise",
+    "display_name": "Seated Calf Raise",
+    "category": "plate-loaded",
+    "default_max_kg": 150,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["seated calf raise", "single-leg seated calf raise"]
+  },
+  {
+    "id": "abductor-machine",
+    "display_name": "Abductor Machine",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["hip abductor", "outer thigh machine"]
+  },
+  {
+    "id": "adductor-machine",
+    "display_name": "Adductor Machine",
+    "category": "weight-stack",
+    "default_max_kg": 100,
+    "default_increment_kg": 5,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["hip adductor", "inner thigh machine", "adductor press"]
+  },
+  {
+    "id": "sissy-squat-machine",
+    "display_name": "Sissy Squat Machine",
+    "category": "bodyweight",
+    "default_max_kg": null,
+    "default_increment_kg": null,
+    "primary_muscle_groups": ["legs"],
+    "exercise_tags": ["sissy squat", "machine sissy squat"]
+  }
+]

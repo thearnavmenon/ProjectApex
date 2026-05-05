@@ -39,10 +39,11 @@
 		6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6DC23D0A3EB460CF97B18574 /* Foundation.framework */; };
 		729D1F4ED6B5BD11AFD51058 /* MigrationDatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */; };
 		73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */; };
-		A1B2C3D4E5F6A7B8C9D0E1F2 /* TopSetSnapshotFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */; };
 		81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */; };
 		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* TopSetSnapshotFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
+		E50E3B4CBD53ED7ABE725DB8 /* EquipmentCatalogSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -56,6 +57,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EquipmentCatalogSeedTests.swift; path = ProjectApexTests/EquipmentCatalogSeedTests.swift; sourceTree = "<group>"; };
 		1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MigrationDatesTests.swift; sourceTree = "<group>"; };
 		4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WeekFatigueSignalsHelperAgreementTests.swift; sourceTree = "<group>"; };
 		474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroPlanServiceDayCountTests.swift; sourceTree = "<group>"; };
@@ -220,6 +222,7 @@
 				878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */,
 				DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */,
 				4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */,
+				18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -357,6 +360,7 @@
 				6ECE420C1031E80360FF1EFE /* TraineeModelProfilesTests.swift in Sources */,
 				B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */,
 				5DE94F8F1D136C65C96FCAD1 /* WeekFatigueSignalsHelperAgreementTests.swift in Sources */,
+				E50E3B4CBD53ED7ABE725DB8 /* EquipmentCatalogSeedTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
