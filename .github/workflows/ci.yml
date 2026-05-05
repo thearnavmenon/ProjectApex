@@ -6,9 +6,22 @@
 # Real-API integration tests are excluded via the absence of APEX_INTEGRATION_TESTS=1.
 #
 # TDD Section 14.6 compliance:
-#   • macOS 15 runner
-#   • Xcode 16
-#   • iPhone 16 Pro simulator
+#   • macOS 15 runner (matches §14.6 verbatim)
+#   • Xcode 16.4 + iPhone 16 Pro simulator on iOS 26.2 — §14.6 specifies
+#     "Xcode 16" and "iPhone 16 Pro" generically without an OS pin. The
+#     specific pairing here is empirically what the GitHub macos-15-arm64
+#     runner image provisions: Xcode 16.0 (the bare Xcode_16.app symlink)
+#     ships with iOS 18.0 SDK and an iOS 18.0 runtime that is *not*
+#     installed on the runner; Xcode 16.4 selected against the runner's
+#     pre-instantiated simulators yields iPhone 16 Pro at OS=26.2. The
+#     Xcode-16-with-iOS-26 pairing is unusual on paper but matches the
+#     runner image's empirical provisioning; see issue #28 and PR #31's
+#     diagnostic for the verification trail.
+#   • Caveat: this pin is brittle to runner-image rotation. If GitHub
+#     re-provisions macos-15 with a different Xcode/runtime pairing the
+#     destination resolution breaks again. The §14.6 contract's
+#     "Xcode 16 / iPhone 16 Pro" generic spec may need amending in a
+#     follow-up if the empirical pairing drifts further.
 #   • Test results uploaded as artifact on failure
 
 name: CI
@@ -28,8 +41,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16
-        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+      - name: Select Xcode 16.4
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app/Contents/Developer
 
       - name: Show Xcode version
         run: xcodebuild -version
@@ -47,7 +60,7 @@ jobs:
             -project ProjectApex.xcodeproj \
             -scheme ProjectApex \
             -testPlan ProjectApex \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
+            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=26.2' \
             -resultBundlePath TestResults.xcresult \
             | xcpretty --color --report junit --output test-results.xml \
             ; exit ${PIPESTATUS[0]}
