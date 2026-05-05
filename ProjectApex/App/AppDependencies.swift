@@ -111,11 +111,13 @@ final class AppDependencies {
         self.aiInferenceService = inferenceService
 
         // 8. Program Generation — uses opus model; no timeout (user waits explicitly)
+        // enableCaching: false — one-shot call, never repeats the same prompt, no cache benefit.
         self.programGenerationService = ProgramGenerationService(
             provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
         )
 
         // 8b. MacroPlanService — Sonnet skeleton generation (one-shot at programme start)
+        // enableCaching: false — same reason as ProgramGenerationService above.
         self.macroPlanService = MacroPlanService(
             provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
         )
