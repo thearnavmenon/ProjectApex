@@ -1,6 +1,6 @@
 -- Migration: 0005_drop_intent_default_from_set_logs.sql
 -- Phase 2 / Slice 6 — drop set_logs.intent DEFAULT
--- Issue: #10  ·  ADR-0005  ·  PR: #<TBD — fill in after Slice 6 PR opens>
+-- Issue: #10  ·  ADR-0005  ·  PR: #47
 --
 -- ████████████████████████████████████████████████████████████████████████
 -- DEPLOYMENT GATE — do NOT apply until ALL of:

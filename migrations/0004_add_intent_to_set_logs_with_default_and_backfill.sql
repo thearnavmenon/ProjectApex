@@ -1,6 +1,6 @@
 -- Migration: 0004_add_intent_to_set_logs_with_default_and_backfill.sql
 -- Phase 1 / Slice 6 — set-intent column add + heuristic backfill
--- Issue: #10  ·  ADR-0005  ·  PR: #<TBD — fill in after Slice 6 PR opens>
+-- Issue: #10  ·  ADR-0005  ·  PR: #47
 --
 -- ████████████████████████████████████████████████████████████████████████
 -- DEPLOYMENT GATE — do NOT apply until ALL of the following steps complete
