@@ -22,9 +22,11 @@
 --
 -- STEP 3. Race-window mitigation — DM the alpha cohort to pause logging for
 --   the apply window, BEFORE running the SQL below. A Phase-0 write that
---   lands AFTER Pass 1 evaluates but BEFORE Pass 2 evaluates would receive
---   the column DEFAULT 'top' and miss the heuristic re-labelling. Cheap to
---   prevent at n ≤ 5; expensive to detect after the fact.
+--   lands during the apply receives the column DEFAULT 'top' as it inserts.
+--   The heuristic backfill below is a one-shot pass at apply time — it does
+--   not revisit rows on subsequent inserts, so any DEFAULT-tagged row that
+--   slips in during the window stays mislabelled. Cheap to prevent at
+--   n ≤ 5; expensive to detect after the fact.
 --
 --   Pre-written DM text — copy verbatim, fill in the two [HH:MM] times
 --   (give yourself a 30-minute buffer; the actual SQL runs in seconds but
@@ -83,9 +85,9 @@
 --   rows from per-intent breakdowns.
 --
 -- Idempotency: ADD COLUMN IF NOT EXISTS makes the schema change
--- re-runnable. Both UPDATE passes filter `intent = 'top'` so they only
--- touch rows still at the column DEFAULT — Pass-1-written real values
--- and Pass-2 heuristic labels are never overwritten on re-run.
+-- re-runnable. The UPDATE pass filters `intent = 'top'` so it only
+-- touches rows still at the column DEFAULT — heuristic labels written
+-- by a prior apply are never overwritten on re-run.
 
 -- ─── 1. Schema change ───────────────────────────────────────────────────────
 ALTER TABLE public.set_logs
@@ -104,32 +106,29 @@ COMMENT ON COLUMN public.set_logs.intent IS
   'break out per-intent must filter pre-cutoff via '
   'MigrationDates.v2SetIntentBackfill.';
 
--- ─── 2. Pass 1 — pull intent from ai_prescribed JSONB where Phase 0 stashed it.
+-- Pass 1 removed.
 --
---   AI-prescribed sets carry intent inside the `ai_prescribed` JSONB blob
---   from the moment Phase 0 ships, because SetPrescription.intent is a
---   field on the SetPrescription Codable shape and gets serialised into
---   ai_prescribed without a schema change.
+-- Original intent: pull intent values from set_logs.ai_prescribed JSONB
+-- where Phase 0 Swift had stashed them.
 --
---   (Freestyle / manual sets do NOT stash intent here per Slice 6 design
---   choice γ — the picker captures intent client-side as enforcement
---   theatre during the rollout window; pre-cutoff freestyle rows fall
---   through to the heuristic in Pass 2. See Slice 6 PR for the rationale.)
+-- Why removed: the assumption was wrong. set_logs.ai_prescribed never
+-- existed on the production schema, and Phase 0's SetLogPayload encoder
+-- did not serialize the field even when the in-memory SetLog carried it.
+-- Pass 1 was therefore either a no-op (column-exists case) or a hard
+-- error (column-doesn't-exist case, which is what production is).
 --
---   Idempotent: only touches rows still at the column DEFAULT.
-UPDATE public.set_logs
-SET intent = ai_prescribed->>'intent'
-WHERE intent = 'top'
-  AND ai_prescribed IS NOT NULL
-  AND ai_prescribed ? 'intent'
-  AND ai_prescribed->>'intent' IN ('warmup','top','backoff','technique','amrap');
+-- The heuristic backfill below (window function over weight/session/
+-- exercise) does all the actual work and operates only on columns that
+-- demonstrably exist on production.
+--
+-- See PR #47 (the original Slice 6 PR) and this fix-up PR's body for
+-- the failed deploy attempt context (2026-05-06) and audit findings.
 
--- ─── 3. Pass 2 — heuristic for the remainder ────────────────────────────────
+-- ─── 2. Heuristic backfill ──────────────────────────────────────────────────
 --
 --   Window over (session_id, exercise_id), pick the highest weight as 'top',
 --   and partition the rest by 50%-of-top into 'backoff' / 'warmup'.
---   Only touches rows still at the column DEFAULT so Pass-1-written real
---   values are preserved.
+--   Only touches rows still at the column DEFAULT.
 WITH ranked AS (
     SELECT
         id,
