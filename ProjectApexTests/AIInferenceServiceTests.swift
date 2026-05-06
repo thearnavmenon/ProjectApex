@@ -75,7 +75,8 @@ private let validPrescriptionJSON = """
     "reasoning": "Last set at 2 RIR; maintaining load for consistent volume.",
     "safety_flags": [],
     "confidence": 0.87,
-    "intent": "top"
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
@@ -98,7 +99,8 @@ private let painFlagPrescriptionJSON = """
     "reasoning": "Pain flag active; reduce load and increase rest.",
     "safety_flags": ["pain_reported"],
     "confidence": 0.70,
-    "intent": "top"
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
@@ -117,7 +119,8 @@ private let invalidTempoPrescriptionJSON = """
     "coaching_cue": "Tight arch.",
     "reasoning": "Progressive overload.",
     "safety_flags": [],
-    "intent": "top"
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """

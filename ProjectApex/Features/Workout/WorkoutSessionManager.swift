@@ -281,7 +281,12 @@ actor WorkoutSessionManager {
     ///   3. Assemble WorkoutContext
     ///   4. Await AI prescription on a child Task
     ///   5. On result: update currentPrescription; when timer expires → .active
-    func completeSet(actualReps: Int, rpeFelt: Int?, intent: SetIntent) async {
+    func completeSet(
+        actualReps: Int,
+        rpeFelt: Int?,
+        intent: SetIntent,
+        completionFlags: [SetCompletionFlag] = []
+    ) async {
         guard case .active(let exercise, let setNumber) = sessionState,
               let session = session else { return }
 
@@ -292,12 +297,14 @@ actor WorkoutSessionManager {
         let capturedGeneration = inferenceGeneration
 
         // Build and store set log.
-        // Slice 6 (#10): intent comes from the AI prescription in this
-        // (auto-driven) flow. Currently NOT exposed to the rep/RPE sheet
-        // for user override at completion time — completeSet is invoked
-        // with the prescription's intent implicit. If the picker UI ever
-        // grows the ability to override the AI's intent at completion,
-        // thread the picker's value here instead of `currentPrescription?.intent`.
+        // Slice 6 (#10): intent is the RESOLVED value from the rep/RPE
+        // sheet — defaults to the prescription's intent for AI-prescribed
+        // sets, or the user's deviation pick if they tapped "Did
+        // something different?". `is_deviation` is derivable from
+        // `setLog.intent != setLog.aiPrescribed?.intent`, so we don't
+        // store it as a separate field on SetLog — single source of
+        // truth principle. CompletedSet (the WorkoutContext shape) DOES
+        // materialize the boolean for AI prompt clarity.
         let setLog = SetLog(
             id: UUID(),
             sessionId: session.id,
@@ -310,7 +317,8 @@ actor WorkoutSessionManager {
             aiPrescribed: currentPrescription,
             loggedAt: Date(),
             primaryMuscle: ExerciseLibrary.primaryMuscle(for: exercise.exerciseId)?.rawValue ?? exercise.primaryMuscle,
-            intent: intent
+            intent: intent,
+            completionFlags: completionFlags
         )
         completedSets.append(setLog)
 
@@ -707,7 +715,12 @@ actor WorkoutSessionManager {
             confidence:        nil,
             userCorrectedWeight: nil,
             isManualFallback:  true,
-            intent:            lastSet?.intent
+            intent:            lastSet?.intent,
+            // Manual-fallback path uses a generic framing — there's no AI
+            // call to produce one. Inherits intent from last set; framing
+            // mirrors that. No silent default at the AI layer; this is
+            // the explicit fallback shape.
+            setFraming:        "Using last session weights. No AI guidance."
         )
         currentPrescription = prescription
         inferenceRetryNeeded = false
@@ -817,20 +830,7 @@ actor WorkoutSessionManager {
         exercises.prefix(upToExerciseIndex).map { exercise in
             let sets = setLogs
                 .filter { $0.exerciseId == exercise.exerciseId }
-                .map { log in
-                    CompletedSet(
-                        setNumber: log.setNumber,
-                        weightKg: log.weightKg,
-                        reps: log.repsCompleted,
-                        rirActual: log.rirEstimated,
-                        rpe: log.rpeFelt.map(Double.init),
-                        tempo: log.aiPrescribed?.tempo,
-                        restTakenSeconds: nil,
-                        completedAt: log.loggedAt,
-                        userCorrectedWeight: log.aiPrescribed?.userCorrectedWeight,
-                        daysAgo: 0
-                    )
-                }
+                .map { $0.toCompletedSet(daysAgo: 0) }
             return ExerciseHistoryItem(exerciseName: exercise.name, sets: sets)
         }
     }
@@ -1039,38 +1039,12 @@ actor WorkoutSessionManager {
 
         let currentExSets = completedSets
             .filter { $0.exerciseId == exercise.exerciseId }
-            .map { log in
-                CompletedSet(
-                    setNumber: log.setNumber,
-                    weightKg: log.weightKg,
-                    reps: log.repsCompleted,
-                    rirActual: log.rirEstimated,
-                    rpe: log.rpeFelt.map(Double.init),
-                    tempo: log.aiPrescribed?.tempo,
-                    restTakenSeconds: nil,
-                    completedAt: log.loggedAt,
-                    userCorrectedWeight: log.aiPrescribed?.userCorrectedWeight,
-                    daysAgo: 0
-                )
-            }
+            .map { $0.toCompletedSet(daysAgo: 0) }
 
         // within_session_performance: all prior sets for this exercise (FB-006)
         let withinSessionSets = completedSets
             .filter { $0.exerciseId == exercise.exerciseId }
-            .map { log in
-                CompletedSet(
-                    setNumber: log.setNumber,
-                    weightKg: log.weightKg,
-                    reps: log.repsCompleted,
-                    rirActual: log.rirEstimated,
-                    rpe: log.rpeFelt.map(Double.init),
-                    tempo: log.aiPrescribed?.tempo,
-                    restTakenSeconds: nil,
-                    completedAt: log.loggedAt,
-                    userCorrectedWeight: log.aiPrescribed?.userCorrectedWeight,
-                    daysAgo: 0
-                )
-            }
+            .map { $0.toCompletedSet(daysAgo: 0) }
 
         // Read confirmed unavailable weights for this equipment type from GymFactStore.
         // These are injected as hard constraints so the AI never prescribes unavailable loads.
@@ -1261,20 +1235,7 @@ actor WorkoutSessionManager {
     private func buildExerciseHistoryItem(for exercise: PlannedExercise) -> ExerciseHistoryItem {
         let sets = completedSets
             .filter { $0.exerciseId == exercise.exerciseId }
-            .map { log in
-                CompletedSet(
-                    setNumber: log.setNumber,
-                    weightKg: log.weightKg,
-                    reps: log.repsCompleted,
-                    rirActual: log.rirEstimated,
-                    rpe: log.rpeFelt.map(Double.init),
-                    tempo: log.aiPrescribed?.tempo,
-                    restTakenSeconds: nil,
-                    completedAt: log.loggedAt,
-                    userCorrectedWeight: log.aiPrescribed?.userCorrectedWeight,
-                    daysAgo: 0
-                )
-            }
+            .map { $0.toCompletedSet(daysAgo: 0) }
         return ExerciseHistoryItem(exerciseName: exercise.name, sets: sets)
     }
 

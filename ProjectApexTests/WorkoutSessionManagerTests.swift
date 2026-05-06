@@ -104,7 +104,8 @@ private func prescriptionJSON(
         "coaching_cue": "Drive through the bar",
         "reasoning": "Based on recent performance trend.",
         "safety_flags": [\(flags)],
-        "intent": "\(intent)"
+        "intent": "\(intent)",
+        "set_framing": "Heaviest work of the day. Brace and grind."
       }
     }
     """

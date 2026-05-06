@@ -1,98 +1,170 @@
 // SetCompletionFormStateTests.swift
 // ProjectApexTests — Slice 6 (#10)
 //
-// Unit tests for the rep / RPE / intent confirmation sheet's state model.
-// Encodes the AC from issue #10:
-//   "Save button on freestyle completion is disabled until the user
-//    explicitly interacts with the intent picker (UI test asserts this)"
-// Since the project has no UITests target, the rule is enforced via
-// SetCompletionFormState — `canSubmit` is false until `recordIntentTap`
-// has been called at least once, even when an AI prefill provides
-// `intent != nil`.
+// Unit tests for the redesigned rep/RPE/intent/flag state struct.
+//
+// REDESIGN NOTE (supersedes the prior intentTouched-based test set):
+//   The prior tests asserted that AI-prescribed sets required an explicit
+//   chip tap before Save enabled — the wrong model. The correct model is:
+//     - AI-prescribed: zero friction. resolvedIntent defaults to
+//       prescribedIntent. canSubmit immediately true.
+//     - Freestyle: requires explicit pick. canSubmit false until selectIntent.
+//   Deviation is captured separately via `isDeviation` (true when
+//   resolvedIntent differs from prescribedIntent).
+//   Pain / form_breakdown flags are independent multi-select toggles.
 
 import XCTest
 @testable import ProjectApex
 
 final class SetCompletionFormStateTests: XCTestCase {
 
-    // MARK: - C1: default state cannot submit
+    // MARK: - AI-prescribed default path (zero friction)
 
-    func test_freshState_noPrefill_cannotSubmit() {
-        let state = SetCompletionFormState(actualReps: 8)
-        XCTAssertNil(state.intent)
-        XCTAssertFalse(state.canSubmit, "Save must be disabled before any tap.")
-        XCTAssertFalse(state.hasUnconfirmedAIPrefill,
-                       "No prefill means no unconfirmed prefill.")
-    }
-
-    // MARK: - C2: AI-prefilled state still requires explicit interaction
-
-    func test_aiPrefilledState_stillRequiresTouch() {
-        // The "even if the initial selection matches their intent" rule —
-        // a prefilled SetIntent must not auto-enable Save.
+    /// The most important assertion in the file: AI-prescribed sets
+    /// can submit immediately with no picker friction.
+    func test_aiPrescribed_resolvesToPrescribedIntent_canSubmitImmediately() {
         let state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
-        XCTAssertEqual(state.intent, .top,
-                       "Prefill should populate the picker selection.")
-        XCTAssertFalse(state.canSubmit,
-                       "Prefilled selection must NOT enable Save before touch.")
-        XCTAssertTrue(state.hasUnconfirmedAIPrefill,
-                      "Prefill present but un-tapped — render distinct visual.")
-    }
-
-    // MARK: - C3: explicit tap promotes to submittable
-
-    func test_recordTap_enablesSubmit() {
-        var state = SetCompletionFormState(actualReps: 8)
-        state.recordIntentTap(.top)
-        XCTAssertEqual(state.intent, .top)
+        XCTAssertEqual(state.prescribedIntent, .top)
+        XCTAssertEqual(state.resolvedIntent, .top,
+                       "Default resolvedIntent should mirror the prescription.")
         XCTAssertTrue(state.canSubmit,
-                      "Tap on a chip must enable Save.")
-        XCTAssertFalse(state.hasUnconfirmedAIPrefill,
-                       "After tap, the prefill is confirmed.")
+                      "AI-prescribed sets must be submittable without picker interaction.")
+        XCTAssertFalse(state.isDeviation,
+                       "Default state is not a deviation.")
+        XCTAssertFalse(state.isDeviationPickerVisible,
+                       "Picker is collapsed by default for AI-prescribed sets.")
     }
 
-    // MARK: - C4: changing selection after first tap stays submittable
-
-    func test_changeSelectionAfterFirstTap_remainsSubmittable() {
+    func test_aiPrescribed_revealDeviationPicker_doesNotChangeIntent() {
         var state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
-        state.recordIntentTap(.top)
+        state.revealDeviationPicker()
+        XCTAssertTrue(state.isDeviationPickerVisible,
+                      "revealDeviationPicker flips the visibility.")
+        XCTAssertEqual(state.resolvedIntent, .top,
+                       "Revealing the picker does not change the resolved intent.")
+        XCTAssertFalse(state.isDeviation,
+                       "Revealing the picker is not by itself a deviation.")
+        XCTAssertTrue(state.canSubmit,
+                      "Revealing the picker keeps the gate open.")
+    }
+
+    func test_aiPrescribed_recordDeviation_resolvedIntentChanges_isDeviationTrue() {
+        var state = SetCompletionFormState(actualReps: 12, prescribedIntent: .top)
+        state.revealDeviationPicker()
+        state.selectIntent(.amrap)
+        XCTAssertEqual(state.resolvedIntent, .amrap,
+                       "selectIntent updates the resolved value.")
+        XCTAssertTrue(state.isDeviation,
+                      "User picked amrap when prescribed top — deviation true.")
+        XCTAssertTrue(state.canSubmit,
+                      "Deviation is still submittable.")
+    }
+
+    func test_aiPrescribed_pickSamePrescribed_isDeviationFalse() {
+        // Reaffirming the prescription is NOT a deviation. The user just
+        // tapped the same chip; nothing actually differs.
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        state.revealDeviationPicker()
+        state.selectIntent(.top)
+        XCTAssertFalse(state.isDeviation,
+                       "Picking the same intent the AI prescribed is not a deviation.")
+    }
+
+    func test_aiPrescribed_pickThenChangeMind_lastSelectionWins() {
+        var state = SetCompletionFormState(actualReps: 10, prescribedIntent: .top)
+        state.revealDeviationPicker()
+        state.selectIntent(.amrap)
+        state.selectIntent(.backoff)
+        XCTAssertEqual(state.resolvedIntent, .backoff,
+                       "Last selection wins; previous deviation is overwritten.")
+        XCTAssertTrue(state.isDeviation,
+                      "backoff still differs from prescribed top.")
+    }
+
+    // MARK: - Freestyle path (no prescription)
+
+    func test_freestyle_pickerVisibleByDefault() {
+        let state = SetCompletionFormState(actualReps: 8, prescribedIntent: nil)
+        XCTAssertNil(state.prescribedIntent)
+        XCTAssertNil(state.resolvedIntent,
+                     "Freestyle starts with no resolved intent.")
+        XCTAssertTrue(state.isDeviationPickerVisible,
+                      "Freestyle shows the picker by default — only path to an intent.")
+        XCTAssertFalse(state.canSubmit,
+                       "Freestyle blocks submission until an intent is picked.")
+        XCTAssertFalse(state.isDeviation,
+                       "Freestyle is never a deviation (nothing to deviate from).")
+    }
+
+    func test_freestyle_pickIntent_canSubmit() {
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: nil)
+        state.selectIntent(.warmup)
+        XCTAssertEqual(state.resolvedIntent, .warmup)
         XCTAssertTrue(state.canSubmit)
-
-        state.recordIntentTap(.backoff)
-        XCTAssertEqual(state.intent, .backoff,
-                       "Re-tap should change the selection.")
-        XCTAssertTrue(state.canSubmit,
-                      "Re-tapping a different chip stays submittable.")
+        XCTAssertFalse(state.isDeviation,
+                       "Freestyle never has isDeviation=true regardless of selection.")
     }
 
-    // MARK: - C5 (variant): tapping the same prefilled chip confirms
+    // MARK: - Completion flags
 
-    func test_tapMatchingPrefilledChip_confirms() {
+    func test_completionFlags_emptyByDefault() {
+        let state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        XCTAssertTrue(state.completionFlags.isEmpty)
+    }
+
+    func test_completionFlags_toggleAddsAndRemoves() {
         var state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
-        XCTAssertFalse(state.canSubmit)
-        state.recordIntentTap(.top)   // tap the already-prefilled selection
-        XCTAssertTrue(state.canSubmit,
-                      "Confirming the prefill via tap must enable Save.")
+        state.toggleFlag(.pain)
+        XCTAssertTrue(state.completionFlags.contains(.pain))
+        state.toggleFlag(.pain)
+        XCTAssertFalse(state.completionFlags.contains(.pain),
+                       "Toggle is symmetric — second tap removes.")
     }
 
-    // MARK: - All five SetIntent cases route through cleanly
-
-    func test_recordTap_eachSetIntentCase() {
-        for intent in SetIntent.allCases {
-            var state = SetCompletionFormState(actualReps: 5)
-            state.recordIntentTap(intent)
-            XCTAssertEqual(state.intent, intent)
-            XCTAssertTrue(state.canSubmit, "Should submit for \(intent)")
-        }
+    func test_completionFlags_multipleAllowedSimultaneously() {
+        // Pain AND form_breakdown can be raised on the same set.
+        var state = SetCompletionFormState(actualReps: 6, prescribedIntent: .top)
+        state.toggleFlag(.pain)
+        state.toggleFlag(.formBreakdown)
+        XCTAssertTrue(state.completionFlags.contains(.pain))
+        XCTAssertTrue(state.completionFlags.contains(.formBreakdown))
+        XCTAssertEqual(state.completionFlags.count, 2)
     }
 
-    // MARK: - Other picker fields don't toggle the gate
-
-    func test_repsAndRpeChanges_doNotEnableSubmit_withoutTap() {
-        var state = SetCompletionFormState(actualReps: 8)
+    func test_completionFlags_persistAcrossOtherStateChanges() {
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        state.toggleFlag(.pain)
+        // Other state changes must not clobber flags.
         state.actualReps = 10
-        state.rpeFelt    = 2
+        state.rpeFelt = 2
+        state.revealDeviationPicker()
+        state.selectIntent(.backoff)
+        XCTAssertTrue(state.completionFlags.contains(.pain),
+                      "Flags persist across reps/RPE/picker changes.")
+    }
+
+    // MARK: - Sanity: gate-and-fields don't entangle
+
+    func test_repsAndRpeChanges_doNotChangeIntent() {
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        state.actualReps = 10
+        state.rpeFelt = 2
+        XCTAssertEqual(state.resolvedIntent, .top,
+                       "Reps/RPE mutations don't touch the intent value.")
+    }
+
+    func test_repsAndRpeChanges_canSubmitUnaffected_aiPrescribed() {
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        state.actualReps = 10
+        XCTAssertTrue(state.canSubmit)
+    }
+
+    func test_repsAndRpeChanges_canSubmitUnaffected_freestyle() {
+        // Freestyle gate is intent-only; reps/RPE changes don't open it.
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: nil)
+        state.actualReps = 10
+        state.rpeFelt = 2
         XCTAssertFalse(state.canSubmit,
-                       "Reps/RPE changes must not bypass the intent gate.")
+                       "Freestyle without a picked intent stays blocked.")
     }
 }

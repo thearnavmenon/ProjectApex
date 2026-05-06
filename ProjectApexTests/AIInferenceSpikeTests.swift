@@ -86,7 +86,8 @@ private let validJSONResponse = """
     "reasoning": "Previous set at 85 kg with 2 RIR; small load increase is appropriate.",
     "safety_flags": [],
     "confidence": 0.88,
-    "intent": "top"
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
@@ -111,7 +112,8 @@ private let invalidTempoJSONResponse = """
     "reasoning": "Progressive overload from last session.",
     "safety_flags": [],
     "confidence": 0.8,
-    "intent": "top"
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """

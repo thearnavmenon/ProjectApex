@@ -4,34 +4,28 @@
 // Unit-testable state model for the rep / RPE / intent confirmation sheet
 // shown when the user taps "Set Complete" (Slice 6, issue #10).
 //
-// The shape exists to make the AC "Save is disabled until the user has
-// explicitly interacted with the picker, even if the initial selection
-// matches their intent" observable from XCTest. ActiveSetView consumes
-// this struct via `@State`; tests construct it directly and drive
-// transitions through `recordIntentTap(_:)`.
+// REDESIGN NOTE (supersedes the prior intentTouched-based shape):
+//   The prior model was wrong — it asked the user to confirm an intent
+//   the AI had already explicitly told them via the prescription. That's
+//   redundant data entry, not no-silent-defaults enforcement.
 //
-// Visual distinction between an AI-prefilled-pending-confirmation chip and
-// a user-explicitly-tapped chip is HITL territory and lives in the SwiftUI
-// view; this struct only carries the boolean separation that distinguishes
-// the two states.
+//   The correct model is: the AI's prescription IS the explicit intent.
+//   The picker captures DEVIATION (when the user actually did something
+//   different), not confirmation. AI-prescribed sets default to the
+//   prescribed intent — zero friction, Save Set always enabled.
+//   Freestyle sets (no AI prescription) still require an explicit pick
+//   before Save Set enables (the picker is the only source of intent
+//   in that case).
 //
-// LIFECYCLE ASSUMPTION (load-bearing):
-//   The form is constructed once when the rep/RPE sheet appears (user taps
-//   "Set Complete") and discarded when the sheet dismisses on commit. While
-//   the sheet is on-screen, `prescribedIntent` does NOT change — every path
-//   that mutates `WorkoutViewModel.currentPrescription` (AI re-prescribe,
-//   weight correction, weight override, manual fallback) operates on the
-//   underlying ActiveSetView card BEFORE Set Complete is tapped, not while
-//   the rep/RPE sheet is presented modally.
-//
-//   If a future flow introduces a path where `prescribedIntent` can change
-//   while the form is open, that path MUST reset `intentTouched` to false on
-//   meaningful prefill change — otherwise the AC silently breaks (the user
-//   would see a NEW AI suggestion already "confirmed" without explicit tap,
-//   defeating the no-silent-default rule). The reset hook would live as a
-//   new mutating method like `noteRePrefill(_ next: SetIntent?)` that wipes
-//   `intentTouched`. Add a unit test alongside it that asserts
-//   `canSubmit == false` after re-prefill.
+// LIFECYCLE ASSUMPTION (load-bearing, unchanged from prior version):
+//   The form is constructed once when the rep/RPE sheet appears (user
+//   taps "Set Complete") and discarded when the sheet dismisses on
+//   commit. While the sheet is on-screen, `prescribedIntent` does NOT
+//   change. If a future flow introduces a path where it can change,
+//   that path must reset `resolvedIntent` to the new prescribed value
+//   (collapsing any deviation the user already expressed) — otherwise
+//   the user's deviation gets silently re-attached to a different
+//   prescription, which is meaningless data.
 
 import Foundation
 
@@ -39,64 +33,103 @@ struct SetCompletionFormState: Equatable {
 
     // MARK: - User-entered fields
 
-    /// Reps the user actually completed. Pre-filled from the prescription at
-    /// init; mutated by the +/- stepper.
+    /// Reps the user actually completed. Pre-filled from the prescription
+    /// at init; mutated by the +/- stepper.
     var actualReps: Int
 
     /// 0 = too easy, 1 = on target, 2 = too hard. Mapped to RPE 5/7/9 at
     /// commit time (matches the existing ActiveSetView mapping).
     var rpeFelt: Int
 
-    /// The selected SetIntent. Pre-filled from `prescription.intent` for AI-
-    /// prescribed sets so the picker can highlight the AI's suggestion;
-    /// `nil` for freestyle sets where there is no AI pre-fill.
-    var intent: SetIntent?
+    // MARK: - Intent (Slice 6 redesign)
 
-    /// Whether the user has explicitly tapped a chip in this session of the
-    /// sheet. The "even if initial selection matches their intent" rule from
-    /// issue #10 forces this to be a separate signal from `intent != nil`.
-    /// Once true, never resets within the sheet's lifetime — re-tapping
-    /// keeps it true.
-    private(set) var intentTouched: Bool
+    /// What the AI prescribed, captured immutably at construction.
+    /// Nil for freestyle sets (no AI prescription).
+    let prescribedIntent: SetIntent?
+
+    /// What ends up persisted to SetLog. Defaults to `prescribedIntent`
+    /// for AI-prescribed sets; nil for freestyle until the user picks.
+    var resolvedIntent: SetIntent?
+
+    /// True when the deviation chip-row is currently visible.
+    /// AI-prescribed: false by default; flips true when the user taps
+    /// "Did something different?". Cannot revert to false (no need to
+    /// re-hide; user just picks the prescribed value if they change their
+    /// mind).
+    /// Freestyle: true by default — picker is the only path to an intent.
+    var isDeviationPickerVisible: Bool
+
+    /// User-reported flags raised on the rep/RPE sheet immediately
+    /// post-set. Multi-select; default empty. Slice 6 / #10.
+    var completionFlags: Set<SetCompletionFlag>
 
     // MARK: - Derived
 
-    /// Whether "Log Set" should enable. Both conditions are required:
-    ///   1. An intent is selected (`intent != nil`).
-    ///   2. The user has explicitly interacted with the picker
-    ///      (`intentTouched == true`).
-    /// The second condition is the load-bearing rule for Slice 6.
-    var canSubmit: Bool {
-        intent != nil && intentTouched
+    /// True when the user explicitly picked an intent that differs from
+    /// the prescribed value. Drives the `is_deviation` analytics signal
+    /// surfaced in `WorkoutContext` for in-session AI reasoning.
+    /// Always false for freestyle (no prescription to deviate from).
+    var isDeviation: Bool {
+        guard let prescribed = prescribedIntent,
+              let resolved = resolvedIntent else { return false }
+        return prescribed != resolved
     }
 
-    /// True when an AI prefill is sitting un-confirmed. Used by the view to
-    /// render the prefilled chip in a visually distinct "AI suggested,
-    /// awaiting confirmation" state vs. a confirmed selection.
-    var hasUnconfirmedAIPrefill: Bool {
-        intent != nil && !intentTouched
+    /// Whether "Log Set" should enable.
+    ///   AI-prescribed: always submittable (resolvedIntent always set
+    ///                  to prescribedIntent on init; the user can change
+    ///                  it but cannot make it nil).
+    ///   Freestyle:     requires resolvedIntent != nil — i.e., the user
+    ///                  has made an explicit pick.
+    var canSubmit: Bool {
+        resolvedIntent != nil
     }
 
     // MARK: - Init
 
     /// Construct fresh state for a new sheet appearance.
-    /// - Parameter prescribedIntent: when non-nil, the AI's suggested intent
-    ///   pre-fills the picker selection. `intentTouched` stays `false` until
-    ///   the user explicitly taps.
-    init(actualReps: Int, rpeFelt: Int = 1, prescribedIntent: SetIntent? = nil) {
-        self.actualReps    = actualReps
-        self.rpeFelt       = rpeFelt
-        self.intent        = prescribedIntent
-        self.intentTouched = false
+    ///   - prescribedIntent: AI's intent for this set, or nil for freestyle.
+    ///     Sets `resolvedIntent` to the same value (zero-friction default
+    ///     for AI-prescribed) and seeds `isDeviationPickerVisible` based
+    ///     on whether the picker is the only path (freestyle: yes;
+    ///     AI-prescribed: hidden behind the "Did something different?"
+    ///     affordance).
+    init(actualReps: Int, rpeFelt: Int = 1, prescribedIntent: SetIntent?) {
+        self.actualReps = actualReps
+        self.rpeFelt = rpeFelt
+        self.prescribedIntent = prescribedIntent
+        self.resolvedIntent = prescribedIntent
+        self.isDeviationPickerVisible = (prescribedIntent == nil)
+        self.completionFlags = []
     }
 
     // MARK: - Mutators
 
-    /// Record an explicit picker tap. Sets `intent` and flips
-    /// `intentTouched` to true. Subsequent taps keep `intentTouched` true
-    /// even if the user changes selection.
-    mutating func recordIntentTap(_ next: SetIntent) {
-        self.intent        = next
-        self.intentTouched = true
+    /// User tapped "Did something different?" on an AI-prescribed set.
+    /// Reveals the chip row. The prescribed intent is already selected
+    /// (resolvedIntent == prescribedIntent at this point) — the chip
+    /// row gives the user a way to change it. Idempotent: calling on
+    /// an already-visible picker is a no-op.
+    mutating func revealDeviationPicker() {
+        isDeviationPickerVisible = true
+    }
+
+    /// User picked an intent from the chip row. Updates resolvedIntent.
+    /// For AI-prescribed sets where this matches `prescribedIntent`,
+    /// `isDeviation` stays false (re-affirming the prescription is not
+    /// deviation). For freestyle, this is the ONLY path to a non-nil
+    /// resolvedIntent.
+    mutating func selectIntent(_ next: SetIntent) {
+        self.resolvedIntent = next
+    }
+
+    /// Toggle a completion flag on or off. Multi-select — pain and
+    /// formBreakdown can both be raised.
+    mutating func toggleFlag(_ flag: SetCompletionFlag) {
+        if completionFlags.contains(flag) {
+            completionFlags.remove(flag)
+        } else {
+            completionFlags.insert(flag)
+        }
     }
 }

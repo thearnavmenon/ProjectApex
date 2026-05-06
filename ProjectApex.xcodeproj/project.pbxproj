@@ -62,7 +62,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = EquipmentCatalogSeedTests.swift; path = EquipmentCatalogSeedTests.swift; sourceTree = "<group>"; };
+		18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentCatalogSeedTests.swift; sourceTree = "<group>"; };
 		1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MigrationDatesTests.swift; sourceTree = "<group>"; };
 		4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WeekFatigueSignalsHelperAgreementTests.swift; sourceTree = "<group>"; };
 		474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacroPlanServiceDayCountTests.swift; sourceTree = "<group>"; };
@@ -114,8 +114,6 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		47D91BC22F60266A007B3B34 /* ProjectApex */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = ProjectApex;
 			sourceTree = "<group>";
 		};

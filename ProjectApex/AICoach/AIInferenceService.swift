@@ -221,6 +221,23 @@ nonisolated struct CompletedSet: Codable, Sendable {
     /// How many days ago this set was completed (0 = today, 1 = yesterday, etc.).
     /// Used by the AI to weight recent performance more heavily than older sets.
     let daysAgo: Int?
+    /// What the user actually did on this set (Slice 6 / #10). For AI-prescribed
+    /// sets without deviation: equals `prescribedIntent`. For deviated sets: the
+    /// user's explicit pick. For freestyle sets: the user's pick. Nil only for
+    /// pre-Slice-6 historical rows that were never tagged.
+    let intent: String?
+    /// What the AI prescribed for this set, captured for in-prompt deviation
+    /// reasoning. Nil for freestyle (no prescription). Slice 6 / #10.
+    let prescribedIntent: String?
+    /// Materialized boolean — true when `intent != prescribedIntent` and both
+    /// are non-nil. Derivable from the two fields above; carried explicitly so
+    /// the AI prompt has unambiguous deviation signal without having to compare
+    /// strings. Nil for freestyle (no prescription to deviate from).
+    let isDeviation: Bool?
+    /// User-raised flags on the rep/RPE sheet immediately post-set.
+    /// Empty array (or nil) = no flags raised. Slice 6 / #10. Cross-session
+    /// persistence via DB column tracked separately as #43.
+    let completionFlags: [String]?
 
     enum CodingKeys: String, CodingKey {
         case setNumber              = "set_number"
@@ -233,6 +250,45 @@ nonisolated struct CompletedSet: Codable, Sendable {
         case completedAt            = "completed_at"
         case userCorrectedWeight    = "user_corrected_weight"
         case daysAgo                = "days_ago"
+        case intent
+        case prescribedIntent       = "prescribed_intent"
+        case isDeviation            = "is_deviation"
+        case completionFlags        = "completion_flags"
+    }
+
+    /// Memberwise init with the four Slice 6 (#10) fields defaulted to nil so
+    /// existing call sites that don't yet know about intent/deviation/flags
+    /// continue to compile. New call sites supply them explicitly.
+    nonisolated init(
+        setNumber: Int,
+        weightKg: Double,
+        reps: Int,
+        rirActual: Int?,
+        rpe: Double?,
+        tempo: String?,
+        restTakenSeconds: Int?,
+        completedAt: Date?,
+        userCorrectedWeight: Bool?,
+        daysAgo: Int?,
+        intent: String? = nil,
+        prescribedIntent: String? = nil,
+        isDeviation: Bool? = nil,
+        completionFlags: [String]? = nil
+    ) {
+        self.setNumber = setNumber
+        self.weightKg = weightKg
+        self.reps = reps
+        self.rirActual = rirActual
+        self.rpe = rpe
+        self.tempo = tempo
+        self.restTakenSeconds = restTakenSeconds
+        self.completedAt = completedAt
+        self.userCorrectedWeight = userCorrectedWeight
+        self.daysAgo = daysAgo
+        self.intent = intent
+        self.prescribedIntent = prescribedIntent
+        self.isDeviation = isDeviation
+        self.completionFlags = completionFlags
     }
 }
 
@@ -378,6 +434,13 @@ nonisolated struct SetPrescription: Codable, Sendable {
     /// (e.g. `"intent": "bogus"`) is rethrown from `init(from:)` as
     /// `PrescriptionValidationError.invalidIntent`.
     var intent: SetIntent?
+    /// 1-line mental-set framing for this specific set, distinct from
+    /// `coachingCue`. Sets the user's frame BEFORE they lift; rendered on the
+    /// active set view's prescription card as a brief italic line under the
+    /// intent label. Required (no silent default), max 80 chars. Slice 6 / #10.
+    /// Same Codable-optional shape as `intent` so `validate()` produces a
+    /// typed `.missingSetFraming` rather than a raw `DecodingError`.
+    var setFraming: String?
 
     enum CodingKeys: String, CodingKey {
         case weightKg            = "weight_kg"
@@ -392,6 +455,7 @@ nonisolated struct SetPrescription: Codable, Sendable {
         case userCorrectedWeight = "user_corrected_weight"
         case isManualFallback    = "is_manual_fallback"
         case intent
+        case setFraming          = "set_framing"
     }
 
     nonisolated init(
@@ -406,7 +470,8 @@ nonisolated struct SetPrescription: Codable, Sendable {
         confidence: Double? = nil,
         userCorrectedWeight: Bool? = nil,
         isManualFallback: Bool? = nil,
-        intent: SetIntent? = nil
+        intent: SetIntent? = nil,
+        setFraming: String? = nil
     ) {
         self.weightKg            = weightKg
         self.reps                = reps
@@ -420,6 +485,7 @@ nonisolated struct SetPrescription: Codable, Sendable {
         self.userCorrectedWeight = userCorrectedWeight
         self.isManualFallback    = isManualFallback
         self.intent              = intent
+        self.setFraming          = setFraming
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -460,6 +526,22 @@ nonisolated struct SetPrescription: Codable, Sendable {
         } else {
             intent = nil
         }
+
+        // setFraming: same Codable-optional shape as intent. Missing surfaces
+        // as nil → caught by validate() as `.missingSetFraming`. Non-string
+        // surfaces as a typed `.invalidSetFraming` so the AIInferenceService
+        // fail-fast path treats it as a permanent error per ADR-0007 §1.
+        if c.contains(.setFraming) {
+            let raw: String
+            do {
+                raw = try c.decode(String.self, forKey: .setFraming)
+            } catch {
+                throw PrescriptionValidationError.invalidSetFraming
+            }
+            setFraming = raw
+        } else {
+            setFraming = nil
+        }
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -476,6 +558,7 @@ nonisolated struct SetPrescription: Codable, Sendable {
         try c.encodeIfPresent(userCorrectedWeight, forKey: .userCorrectedWeight)
         try c.encodeIfPresent(isManualFallback,    forKey: .isManualFallback)
         try c.encodeIfPresent(intent,              forKey: .intent)
+        try c.encodeIfPresent(setFraming,          forKey: .setFraming)
     }
 }
 
@@ -505,6 +588,15 @@ nonisolated enum PrescriptionValidationError: LocalizedError, Equatable {
     /// `intent` field present but unparseable (unknown raw value or wrong
     /// JSON type). Permanent per ADR-0007 §1.
     case invalidIntent(String)
+    /// `set_framing` field absent from the AI's JSON response. Permanent per
+    /// ADR-0007 §1. Slice 6 / #10.
+    case missingSetFraming
+    /// `set_framing` field present but wrong type (e.g. number instead of
+    /// string). Permanent per ADR-0007 §1.
+    case invalidSetFraming
+    /// `set_framing` longer than 80 chars. Permanent per ADR-0007 §1 —
+    /// retry without prompt change won't fix.
+    case setFramingTooLong(Int)
 
     var errorDescription: String? {
         switch self {
@@ -526,6 +618,12 @@ nonisolated enum PrescriptionValidationError: LocalizedError, Equatable {
             return "intent field missing — required per ADR-0005 with no silent default."
         case .invalidIntent(let raw):
             return "intent '\(raw)' is not one of warmup/top/backoff/technique/amrap."
+        case .missingSetFraming:
+            return "set_framing field missing — required per Slice 6 with no silent default."
+        case .invalidSetFraming:
+            return "set_framing must be a string."
+        case .setFramingTooLong(let v):
+            return "set_framing is \(v) chars (max 80)."
         }
     }
 }
@@ -541,6 +639,14 @@ extension SetPrescription {
         // (`AIInferenceService.prescribe`) treats it as fail-fast.
         guard intent != nil else {
             throw PrescriptionValidationError.missingIntent
+        }
+        // Set-framing gate fires next, before field-level checks. Same
+        // no-silent-default regime as intent.
+        guard let framing = setFraming else {
+            throw PrescriptionValidationError.missingSetFraming
+        }
+        guard framing.count <= 80 else {
+            throw PrescriptionValidationError.setFramingTooLong(framing.count)
         }
         guard weightKg >= 0, weightKg <= 500 else {
             throw PrescriptionValidationError.invalidWeight(weightKg)
@@ -1058,7 +1164,8 @@ actor AIInferenceService {
             "reasoning": "<string, max 200 chars>",
             "safety_flags": ["shoulder_caution"|"joint_concern"|"fatigue_high"|"pain_reported"|"deload_recommended"],
             "confidence": <number 0.0–1.0, optional>,
-            "intent": "warmup"|"top"|"backoff"|"technique"|"amrap"
+            "intent": "warmup"|"top"|"backoff"|"technique"|"amrap",
+            "set_framing": "<string, max 80 chars>"
           }
         }
 
@@ -1074,6 +1181,30 @@ actor AIInferenceService {
             * backoff:   secondary working set following a top set, typically 70–85% of top weight.
             * technique: tempo/form-focused practice; load is incidental, may be light.
             * amrap:     last-set-as-many-reps-as-possible at the prescribed weight.
+        - set_framing is REQUIRED. A 1-line mental-set framing for THIS specific set, distinct from
+          coaching_cue. Sets the user's frame BEFORE they lift; not a form reminder during. Max 80 chars.
+
+        GOOD set_framings (set the mental frame, typed by intent):
+            top:       "Heaviest work of the day. Brace and grind."
+            top:       "This is the set that moves the needle. Treat it that way."
+            warmup:    "Groove the pattern. Don't fight the bar."
+            warmup:    "Wake up the muscles. Save the effort for later."
+            backoff:   "Build volume on a manageable load."
+            backoff:   "More reps, less weight. Stay tight throughout."
+            technique: "Slow the tempo. Quality over load."
+            technique: "Feel the right muscles working. Forget the number."
+            amrap:     "Push to genuine failure with form intact."
+            amrap:     "Last set, no reservations. Stop only when reps break."
+
+        BAD set_framings to avoid:
+            - Generic encouragement: "You got this!", "Make it count!", "Crush it!"
+              These add no information and condescend.
+            - Form cues that belong in coaching_cue: "Drive through your heels",
+              "Retract your scapulae", "Brace your core".
+              coaching_cue is the form note for the reps; set_framing is the frame for the set.
+            - Long sentences. Hard cap 80 chars; aim for ~50–70.
+            - Restating reps/weight: "Do 8 reps at 80kg." The user can already see those numbers.
+            - Repeating the intent word: "This is your top set." The intent label is already shown.
 
         EQUIPMENT-AWARE WEIGHT INCREMENTS:
         - barbell: minimum 5 kg increment. Use 2.5 kg only near a natural plate boundary (20/60/100 kg).

@@ -580,7 +580,8 @@ private struct LiquidWaveMiniModifier: ViewModifier {
         reasoning: "Up 2.5 kg from last session — HRV trending positive.",
         safetyFlags: [],
         confidence: 0.91,
-        intent: .top
+        intent: .top,
+        setFraming: "Heaviest work of the day. Brace and grind."
     )
     return RestTimerView(
         viewModel: vm,

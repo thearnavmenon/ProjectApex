@@ -22,8 +22,13 @@ final class SetPrescriptionIntentValidationTests: XCTestCase {
 
     /// Builds the JSON envelope shape that the LLM returns. `intent` is
     /// embedded literally so callers can omit / corrupt it in tests.
-    private func envelope(intent: String?, extras: String = "") -> Data {
+    private func envelope(
+        intent: String?,
+        setFraming: String? = "Heaviest work of the day. Brace and grind.",
+        extras: String = ""
+    ) -> Data {
         let intentLine = intent.map { ",\n    \"intent\": \"\($0)\"" } ?? ""
+        let framingLine = setFraming.map { ",\n    \"set_framing\": \"\($0)\"" } ?? ""
         let json = """
         {
           "weight_kg": 80.0,
@@ -34,7 +39,7 @@ final class SetPrescriptionIntentValidationTests: XCTestCase {
           "coaching_cue": "Drive through.",
           "reasoning": "Standard top set.",
           "safety_flags": [],
-          "confidence": 0.85\(intentLine)\(extras)
+          "confidence": 0.85\(intentLine)\(framingLine)\(extras)
         }
         """
         return Data(json.utf8)
@@ -55,7 +60,28 @@ final class SetPrescriptionIntentValidationTests: XCTestCase {
           "reasoning": "Standard top set.",
           "safety_flags": [],
           "confidence": 0.85,
-          "intent": \(intentFragment)
+          "intent": \(intentFragment),
+          "set_framing": "Heaviest work of the day. Brace and grind."
+        }
+        """
+        return Data(json.utf8)
+    }
+
+    /// Envelope with raw `set_framing` fragment for type-mismatch tests.
+    private func envelopeRawSetFraming(framingFragment: String) -> Data {
+        let json = """
+        {
+          "weight_kg": 80.0,
+          "reps": 8,
+          "tempo": "3-1-1-0",
+          "rir_target": 2,
+          "rest_seconds": 120,
+          "coaching_cue": "Drive through.",
+          "reasoning": "Standard top set.",
+          "safety_flags": [],
+          "confidence": 0.85,
+          "intent": "top",
+          "set_framing": \(framingFragment)
         }
         """
         return Data(json.utf8)
@@ -164,11 +190,13 @@ final class SetPrescriptionIntentValidationTests: XCTestCase {
             reasoning: "y",
             safetyFlags: [],
             confidence: 0.9,
-            intent: .backoff
+            intent: .backoff,
+            setFraming: "Build volume on a manageable load."
         )
         let encoded = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(SetPrescription.self, from: encoded)
         XCTAssertEqual(decoded.intent, .backoff)
+        XCTAssertEqual(decoded.setFraming, "Build volume on a manageable load.")
         XCTAssertNoThrow(try decoded.validate())
     }
 
@@ -184,11 +212,70 @@ final class SetPrescriptionIntentValidationTests: XCTestCase {
             coachingCue: "x",
             reasoning: "y",
             safetyFlags: [],
-            intent: nil
+            intent: nil,
+            setFraming: nil
         )
         let encoded = try JSONEncoder().encode(p)
         let json = String(data: encoded, encoding: .utf8) ?? ""
         XCTAssertFalse(json.contains("\"intent\""),
                        "Encoder must omit intent when nil.")
+        XCTAssertFalse(json.contains("\"set_framing\""),
+                       "Encoder must omit set_framing when nil.")
+    }
+
+    // MARK: - set_framing required, validated (Slice 6 redesign)
+
+    /// Missing set_framing surfaces .missingSetFraming from validate().
+    /// Same regime as intent: typed error, fires after the intent gate.
+    func test_decode_missing_setFraming_validate_throws_missingSetFraming() throws {
+        let p = try decode(envelope(intent: "top", setFraming: nil))
+        XCTAssertEqual(p.intent, .top)
+        XCTAssertNil(p.setFraming)
+        XCTAssertThrowsError(try p.validate()) { error in
+            guard case .missingSetFraming = error as? PrescriptionValidationError else {
+                return XCTFail("Expected .missingSetFraming, got \(error)")
+            }
+        }
+    }
+
+    /// set_framing > 80 chars throws .setFramingTooLong with the offending count.
+    func test_setFraming_tooLong_throws_setFramingTooLong() throws {
+        // 100-char framing — well over the 80 limit.
+        let longFraming = String(repeating: "a", count: 100)
+        let p = try decode(envelope(intent: "top", setFraming: longFraming))
+        XCTAssertThrowsError(try p.validate()) { error in
+            guard case .setFramingTooLong(let count) = error as? PrescriptionValidationError else {
+                return XCTFail("Expected .setFramingTooLong, got \(error)")
+            }
+            XCTAssertEqual(count, 100)
+        }
+    }
+
+    /// set_framing exactly 80 chars is valid (boundary).
+    func test_setFraming_at80Chars_valid() throws {
+        let framing = String(repeating: "a", count: 80)
+        let p = try decode(envelope(intent: "top", setFraming: framing))
+        XCTAssertNoThrow(try p.validate())
+    }
+
+    /// Type mismatch (e.g. number) → .invalidSetFraming, not raw DecodingError.
+    func test_decode_setFraming_typeMismatch_number_throws_invalidSetFraming() {
+        let data = envelopeRawSetFraming(framingFragment: "42")
+        XCTAssertThrowsError(try decode(data)) { error in
+            guard case .invalidSetFraming = error as? PrescriptionValidationError else {
+                return XCTFail("Expected .invalidSetFraming for non-string, got \(error)")
+            }
+        }
+    }
+
+    /// Intent gate has prior precedence over set_framing — both missing
+    /// surfaces .missingIntent first.
+    func test_intentGate_firesBefore_setFramingGate() throws {
+        let p = try decode(envelope(intent: nil, setFraming: nil))
+        XCTAssertThrowsError(try p.validate()) { error in
+            guard case .missingIntent = error as? PrescriptionValidationError else {
+                return XCTFail("Expected .missingIntent (gate precedence), got \(error)")
+            }
+        }
     }
 }

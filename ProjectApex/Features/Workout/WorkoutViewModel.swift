@@ -103,16 +103,28 @@ final class WorkoutViewModel {
         }
     }
 
-    /// Called when the user taps "Set Complete".
-    /// Disables the button during the async call to prevent double-taps.
-    /// `intent` is non-optional because the rep/RPE sheet's "Log Set"
-    /// button is gated on an explicit picker tap (Slice 6 / #10) — by the
-    /// time this method is invoked, the user has chosen.
-    func onSetComplete(actualReps: Int, rpeFelt: Int?, intent: SetIntent) {
+    /// Called when the user taps "Log Set" on the rep/RPE confirmation
+    /// sheet. Disables the button during the async call to prevent
+    /// double-taps. Slice 6 / #10:
+    ///   - `intent` is the resolved intent (deviated value if the user
+    ///     used the deviation picker; prescribed value otherwise).
+    ///   - `completionFlags` is the user-reported flag set raised on
+    ///     this specific set (pain / form_breakdown). Empty by default.
+    func onSetComplete(
+        actualReps: Int,
+        rpeFelt: Int?,
+        intent: SetIntent,
+        completionFlags: [SetCompletionFlag] = []
+    ) {
         guard !isCompletingSet else { return }
         isCompletingSet = true
         Task {
-            await manager.completeSet(actualReps: actualReps, rpeFelt: rpeFelt, intent: intent)
+            await manager.completeSet(
+                actualReps: actualReps,
+                rpeFelt: rpeFelt,
+                intent: intent,
+                completionFlags: completionFlags
+            )
             await pullState()
             isCompletingSet = false
         }
@@ -565,7 +577,8 @@ extension WorkoutViewModel {
             reasoning: "Up 2.5 kg from last session — HRV trending positive.",
             safetyFlags: [],
             confidence: 0.87,
-            intent: .top
+            intent: .top,
+        setFraming: "Heaviest work of the day. Brace and grind."
         )
         mock.isAIOffline = false
         return mock
@@ -643,7 +656,8 @@ private struct PreviewLLMProvider: LLMProvider {
             "coaching_cue": "Preview prescription",
             "reasoning": "Preview mode — no real AI.",
             "safety_flags": [],
-            "intent": "top"
+            "intent": "top",
+            "set_framing": "Heaviest work of the day. Brace and grind."
           }
         }
         """

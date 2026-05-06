@@ -25,7 +25,8 @@ private func validPrescription() -> SetPrescription {
         reasoning: "Load is within previous session range; slight volume increase.",
         safetyFlags: [],
         confidence: 0.9,
-        intent: .top
+        intent: .top,
+        setFraming: "Heaviest work of the day. Brace and grind."
     )
 }
 
