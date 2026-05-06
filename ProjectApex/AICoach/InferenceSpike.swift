@@ -116,6 +116,8 @@ enum InferenceSpike {
                 print("\(tag) ❌ Fallback: LLM provider error — \(msg)")
             case .encodingFailed(let msg):
                 print("\(tag) ❌ Fallback: encoding failed — \(msg)")
+            case .malformedResponse(let msg):
+                print("\(tag) ❌ Fallback: malformed response — \(msg)")
             }
         }
 

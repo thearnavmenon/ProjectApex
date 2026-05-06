@@ -115,6 +115,23 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
     /// Populated from ExerciseLibrary at write time. Nullable for rows that
     /// pre-date the column or use non-canonical exercise IDs.
     let primaryMuscle: String?
+    /// SetIntent captured at log time per Slice 6 / ADR-0005. Client-side
+    /// only in Phase 0 — the `set_logs.intent` column does not exist until
+    /// Phase 1 lands the migration, so the encoder for the REST write
+    /// (`SetLogPayload` / `ManualSetLogPayload`) does NOT serialise this
+    /// field. Carried on the Swift type so the picker / freestyle path can
+    /// thread the user's selection through to other client-side consumers
+    /// (analytics, in-flight reasoning) and so a Phase-1+ Swift release can
+    /// promote the field to the REST payload without restructuring the type.
+    let intent: SetIntent?
+    /// User-reported flags raised on the rep/RPE sheet immediately
+    /// post-set per Slice 6 / #10. Client-side carrier only in Slice 6
+    /// (γ pattern, like `intent`). Threaded into in-session
+    /// `WorkoutContext.withinSessionPerformance[].completion_flags` so
+    /// the AI can react to pain / form-breakdown signals when generating
+    /// the next set's prescription. Cross-session DB persistence tracked
+    /// as #43.
+    let completionFlags: [SetCompletionFlag]
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -128,6 +145,8 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         case aiPrescribed    = "ai_prescribed"
         case loggedAt        = "logged_at"
         case primaryMuscle   = "primary_muscle"
+        case intent
+        case completionFlags = "completion_flags"
     }
 
     // Memberwise initialiser — used by WorkoutSessionManager, ManualSessionLogView, etc.
@@ -142,19 +161,23 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         rirEstimated: Int?,
         aiPrescribed: SetPrescription?,
         loggedAt: Date,
-        primaryMuscle: String? = nil
+        primaryMuscle: String? = nil,
+        intent: SetIntent? = nil,
+        completionFlags: [SetCompletionFlag] = []
     ) {
-        self.id            = id
-        self.sessionId     = sessionId
-        self.exerciseId    = exerciseId
-        self.setNumber     = setNumber
-        self.weightKg      = weightKg
-        self.repsCompleted = repsCompleted
-        self.rpeFelt       = rpeFelt
-        self.rirEstimated  = rirEstimated
-        self.aiPrescribed  = aiPrescribed
-        self.loggedAt      = loggedAt
-        self.primaryMuscle = primaryMuscle
+        self.id              = id
+        self.sessionId       = sessionId
+        self.exerciseId      = exerciseId
+        self.setNumber       = setNumber
+        self.weightKg        = weightKg
+        self.repsCompleted   = repsCompleted
+        self.rpeFelt         = rpeFelt
+        self.rirEstimated    = rirEstimated
+        self.aiPrescribed    = aiPrescribed
+        self.loggedAt        = loggedAt
+        self.primaryMuscle   = primaryMuscle
+        self.intent          = intent
+        self.completionFlags = completionFlags
     }
 
     // Custom decoder so that optional columns (absent from older rows) decode
@@ -172,6 +195,8 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         aiPrescribed   = try c.decodeIfPresent(SetPrescription.self, forKey: .aiPrescribed)
         loggedAt       = try c.decode(Date.self,   forKey: .loggedAt)
         primaryMuscle  = try c.decodeIfPresent(String.self,          forKey: .primaryMuscle)
+        intent         = try c.decodeIfPresent(SetIntent.self,       forKey: .intent)
+        completionFlags = try c.decodeIfPresent([SetCompletionFlag].self, forKey: .completionFlags) ?? []
     }
 }
 
@@ -477,5 +502,46 @@ nonisolated struct PausedSessionState: Codable, Sendable {
             pausedAt:         Date()
         )
         state.save()
+    }
+}
+
+// MARK: - SetLog → CompletedSet bridge (Slice 6 / #10)
+
+extension SetLog {
+    /// Build the WorkoutContext-shape `CompletedSet` from a stored SetLog.
+    /// Threads the Slice 6 fields (`intent`, `prescribedIntent`, derived
+    /// `isDeviation`, `completionFlags`) into the AI prompt so in-session
+    /// reasoning can react to the user's actual choices and reported
+    /// signals from earlier sets in the same session.
+    ///
+    /// `is_deviation` is materialized here (rather than left for the AI to
+    /// derive) so the AI prompt has unambiguous deviation signal — the
+    /// reasoning text in the system prompt teaches the AI how to react to
+    /// it, and an explicit boolean is easier to reason about than a
+    /// string-comparison expectation.
+    nonisolated func toCompletedSet(daysAgo: Int) -> CompletedSet {
+        let prescribedIntentRaw = aiPrescribed?.intent?.rawValue
+        let actualIntentRaw     = intent?.rawValue
+        let isDeviationValue: Bool? = {
+            guard let p = prescribedIntentRaw, let a = actualIntentRaw else { return nil }
+            return p != a
+        }()
+        let flags = completionFlags.isEmpty ? nil : completionFlags.map(\.rawValue)
+        return CompletedSet(
+            setNumber: setNumber,
+            weightKg: weightKg,
+            reps: repsCompleted,
+            rirActual: rirEstimated,
+            rpe: rpeFelt.map(Double.init),
+            tempo: aiPrescribed?.tempo,
+            restTakenSeconds: nil,
+            completedAt: loggedAt,
+            userCorrectedWeight: aiPrescribed?.userCorrectedWeight,
+            daysAgo: daysAgo,
+            intent: actualIntentRaw,
+            prescribedIntent: prescribedIntentRaw,
+            isDeviation: isDeviationValue,
+            completionFlags: flags
+        )
     }
 }

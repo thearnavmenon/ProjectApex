@@ -84,11 +84,13 @@ private func makeTestSupabase() -> SupabaseClient {
 // MARK: - JSON Fixture Builders
 
 /// Builds a valid set_prescription JSON response string.
+/// Includes `intent` per Slice 6 (#10).
 private func prescriptionJSON(
     weightKg: Double = 80.0,
     reps: Int = 8,
     restSeconds: Int = 120,
-    safetyFlags: [String] = []
+    safetyFlags: [String] = [],
+    intent: String = "top"
 ) -> String {
     let flags = safetyFlags.map { "\"\($0)\"" }.joined(separator: ", ")
     return """
@@ -101,7 +103,9 @@ private func prescriptionJSON(
         "rest_seconds": \(restSeconds),
         "coaching_cue": "Drive through the bar",
         "reasoning": "Based on recent performance trend.",
-        "safety_flags": [\(flags)]
+        "safety_flags": [\(flags)],
+        "intent": "\(intent)",
+        "set_framing": "Heaviest work of the day. Brace and grind."
       }
     }
     """
@@ -208,7 +212,7 @@ final class WorkoutSessionManagerTests: XCTestCase {
             return
         }
 
-        await manager.completeSet(actualReps: 8, rpeFelt: 7)
+        await manager.completeSet(actualReps: 8, rpeFelt: 7, intent: .top)
 
         let stateAfter = await manager.sessionState
         guard case .resting = stateAfter else {
@@ -287,7 +291,7 @@ final class WorkoutSessionManagerTests: XCTestCase {
         try await Task.sleep(nanoseconds: 200_000_000)
 
         // Complete one set, then exit early
-        await manager.completeSet(actualReps: 10, rpeFelt: 6)
+        await manager.completeSet(actualReps: 10, rpeFelt: 6, intent: .top)
         await manager.endSessionEarly()
 
         let state = await manager.sessionState
@@ -323,7 +327,7 @@ final class WorkoutSessionManagerTests: XCTestCase {
         // Capture the generation counter before completeSet
         let generationBefore = await manager.inflightRequestCount
 
-        await manager.completeSet(actualReps: 8, rpeFelt: 7)
+        await manager.completeSet(actualReps: 8, rpeFelt: 7, intent: .top)
 
         // After completeSet, at least one new inference should have been launched
         // (for the next set of the same exercise)
@@ -385,7 +389,7 @@ final class WorkoutSessionManagerTests: XCTestCase {
         await manager.startSession(trainingDay: day, programId: UUID())
         try await Task.sleep(nanoseconds: 200_000_000)
 
-        await manager.completeSet(actualReps: 5, rpeFelt: 8)
+        await manager.completeSet(actualReps: 5, rpeFelt: 8, intent: .top)
         await manager.endSession()
 
         let state = await manager.sessionState

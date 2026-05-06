@@ -47,18 +47,11 @@ struct ActiveSetView: View {
     /// ViewModel driving the exercise swap chat sheet (P3-T10).
     @State private var swapViewModel: ExerciseSwapViewModel?
 
-    /// True after "Set Complete" tap — shows rep/RPE confirmation sheet
+    /// True after "Set Complete" tap — shows rep/RPE confirmation sheet.
+    /// The sheet's content lives in `RepRPEIntentConfirmationSheet`, which
+    /// owns its own form state — see Slice 6 / #10 for the rationale and
+    /// the unit-testable state struct (`SetCompletionFormState`).
     @State private var showRepConfirmation: Bool = false
-
-    /// Actual reps completed (pre-filled from prescription)
-    @State private var actualReps: Int = 8
-
-    /// RPE felt: 0 = Too easy, 1 = On target, 2 = Too hard
-    @State private var rpeFelt: Int = 1
-
-    /// Auto-dismiss timer for the rep/RPE sheet (counts down from 5)
-    @State private var dismissCountdown: Int = 5
-    @State private var dismissTask: Task<Void, Never>?
 
     /// Controls the collapsible reasoning section
     @State private var reasoningExpanded: Bool = false
@@ -127,9 +120,23 @@ struct ActiveSetView: View {
 
         }
         .sheet(isPresented: $showRepConfirmation) {
-            repRPEConfirmationSheet
-                .presentationDetents([.medium])
-                .presentationCornerRadius(24)
+            // Sheet content extracted to a previewable struct (Slice 6 / #10).
+            // The struct owns its own @State form, seeded once on construction
+            // from the live prescription. The struct calls back via `onCommit`
+            // when the user taps Log Set; the parent then dispatches to the
+            // session manager.
+            RepRPEIntentConfirmationSheet(
+                initialState: SetCompletionFormState(
+                    actualReps: viewModel.currentPrescription?.reps ?? 8,
+                    prescribedIntent: viewModel.currentPrescription?.intent
+                ),
+                tintColor: streak.tintColor,
+                onCommit: { state in
+                    commitSetComplete(state)
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationCornerRadius(24)
         }
         .sheet(isPresented: $showVoiceNoteModal) {
             voiceNoteModal
@@ -196,13 +203,6 @@ struct ActiveSetView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your progress so far will be saved. You can review your partial session summary.")
-        }
-        // Sync prescription reps into stepper when it changes
-        .onChange(of: viewModel.currentPrescription?.reps) { _, newReps in
-            if let r = newReps { actualReps = r }
-        }
-        .onAppear {
-            if let r = viewModel.currentPrescription?.reps { actualReps = r }
         }
     }
 
@@ -293,7 +293,7 @@ struct ActiveSetView: View {
     private func prescriptionCard(_ prescription: SetPrescription) -> some View {
         VStack(alignment: .leading, spacing: 0) {
 
-            // Header: exercise name + set badge
+            // Header: exercise name + set badge + intent pill (Slice 6 / #10)
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(exercise.name)
@@ -305,16 +305,45 @@ struct ActiveSetView: View {
                         .foregroundStyle(muscleColor(for: exercise.primaryMuscle))
                 }
                 Spacer()
-                Text("SET \(setNumber)/\(exercise.sets)")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(streak.tintColor)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(streak.tintColor.opacity(0.14), in: Capsule())
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("SET \(setNumber)/\(exercise.sets)")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(streak.tintColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(streak.tintColor.opacity(0.14), in: Capsule())
+                    if let intent = prescription.intent {
+                        // Intent pill — uppercased, smaller. Slice 6 / #10.
+                        // Sets the user's frame for what kind of set this is
+                        // BEFORE they read weight/reps.
+                        Text(RepRPEIntentConfirmationSheet.label(for: intent).uppercased())
+                            .font(.system(size: 10, weight: .heavy))
+                            .tracking(1.2)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.white.opacity(0.10), in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
+                            .accessibilityLabel("Intent: \(RepRPEIntentConfirmationSheet.label(for: intent))")
+                    }
+                }
             }
             .padding(.horizontal, 24)
             .padding(.top, 22)
-            .padding(.bottom, 16)
+            .padding(.bottom, 8)
+
+            // Set framing — 1-line mental-set framing under the header
+            // (Slice 6 / #10). Italic 14pt. Italics carry the "thought,
+            // not instruction" tone; the form cue (which IS instruction)
+            // lives below the metrics row in regular weight.
+            if let framing = prescription.setFraming, !framing.isEmpty {
+                Text(framing)
+                    .font(.system(size: 14, weight: .regular).italic())
+                    .foregroundStyle(.white.opacity(0.78))
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
+                    .accessibilityLabel("Set framing: \(framing)")
+            }
 
             // Weight / Reps hero numbers
             HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -618,97 +647,6 @@ struct ActiveSetView: View {
         }
     }
 
-    // MARK: - Rep / RPE Confirmation Sheet
-
-    private var repRPEConfirmationSheet: some View {
-        VStack(spacing: 28) {
-            // Header with auto-dismiss countdown
-            HStack {
-                Text("How did that feel?")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                Spacer()
-                if dismissCountdown > 0 {
-                    Text("Auto-logging in \(dismissCountdown)s")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.40))
-                }
-            }
-            .padding(.top, 4)
-
-            // Actual reps stepper
-            VStack(spacing: 10) {
-                Text("Actual Reps")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .tracking(0.5)
-
-                HStack(spacing: 24) {
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        if actualReps > 1 { actualReps -= 1 }
-                        resetDismissCountdown()
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(.white.opacity(0.55))
-                    }
-                    .frame(minWidth: 44, minHeight: 44)
-
-                    Text("\(actualReps)")
-                        .font(.system(size: 48, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white)
-                        .contentTransition(.numericText())
-                        .frame(minWidth: 72)
-
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        if actualReps < 30 { actualReps += 1 }
-                        resetDismissCountdown()
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(streak.tintColor.opacity(0.90))
-                    }
-                    .frame(minWidth: 44, minHeight: 44)
-                }
-            }
-
-            // RPE/RIR felt — 3-option segmented picker
-            VStack(spacing: 10) {
-                Text("How hard was it?")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .tracking(0.5)
-
-                Picker("RPE felt", selection: $rpeFelt) {
-                    Text("Too Easy").tag(0)
-                    Text("On Target").tag(1)
-                    Text("Too Hard").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: rpeFelt) { _, _ in resetDismissCountdown() }
-            }
-
-            // Log button
-            Button {
-                commitSetComplete()
-            } label: {
-                Text("Log Set")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(streak.tintColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-        }
-        .padding(24)
-        .background(Color(red: 0.07, green: 0.08, blue: 0.10))
-        .preferredColorScheme(.dark)
-        .onAppear { startDismissCountdown() }
-        .onDisappear { dismissTask?.cancel() }
-    }
-
     // MARK: - Voice Note Modal (P4-T06)
 
     private var voiceNoteModal: some View {
@@ -996,38 +934,504 @@ struct ActiveSetView: View {
 
     private func handleSetCompleteTap() {
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        actualReps = viewModel.currentPrescription?.reps ?? actualReps
-        rpeFelt = 1
         showRepConfirmation = true
     }
 
-    private func commitSetComplete() {
-        dismissTask?.cancel()
+    /// Called by `RepRPEIntentConfirmationSheet` when the user taps Log Set.
+    /// The sheet's gate guarantees `state.canSubmit == true` (resolvedIntent
+    /// non-nil) — we still guard defensively in case the closure is invoked
+    /// from a future code path that didn't come through the gate.
+    private func commitSetComplete(_ state: SetCompletionFormState) {
+        guard state.canSubmit, let chosenIntent = state.resolvedIntent else { return }
         showRepConfirmation = false
         // Map 0/1/2 picker to a rough RPE value: too easy = 5, on target = 7, too hard = 9
-        let rpeValue: Int = [5, 7, 9][rpeFelt]
-        viewModel.onSetComplete(actualReps: actualReps, rpeFelt: rpeValue)
+        let rpeValue: Int = [5, 7, 9][state.rpeFelt]
+        viewModel.onSetComplete(
+            actualReps: state.actualReps,
+            rpeFelt: rpeValue,
+            intent: chosenIntent,
+            completionFlags: Array(state.completionFlags)
+        )
     }
 
-    private func startDismissCountdown() {
-        dismissCountdown = 5
-        dismissTask = Task {
-            while dismissCountdown > 0 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if Task.isCancelled { return }
-                dismissCountdown -= 1
+}
+
+// MARK: - RepRPEIntentConfirmationSheet (Slice 6 / #10)
+//
+// REDESIGN NOTE (supersedes 7bac17b's chip-tap-required UX):
+//   The prior shape asked the user to confirm an intent the AI had
+//   already explicitly told them via the prescription. That's
+//   redundant data entry, not no-silent-defaults enforcement.
+//
+//   This shape captures DEVIATION, not confirmation:
+//     - AI-prescribed sets: zero friction. resolvedIntent defaults to
+//       prescribedIntent. Save Set always enabled. A subtle "Did
+//       something different?" link reveals the chip row for users who
+//       actually deviated. Deviation gets recorded distinctly via
+//       `formState.isDeviation`.
+//     - Freestyle sets: chip row visible by default — the only path to
+//       an intent. Save disabled until picked.
+//
+//   The sheet also captures user-reported flags (pain / form_breakdown)
+//   via toggles below the picker. High-signal for AI adaptation.
+
+/// The rep / RPE / intent / flag confirmation sheet's content, extracted
+/// from `ActiveSetView` so it's previewable in isolation. Owns its own
+/// `@State formState` — the parent supplies `initialState` once at
+/// construction and gets the final value back via `onCommit` when the
+/// user taps "Log Set".
+struct RepRPEIntentConfirmationSheet: View {
+
+    let initialState: SetCompletionFormState
+    let tintColor: Color
+    let onCommit: (SetCompletionFormState) -> Void
+
+    @State private var formState: SetCompletionFormState
+
+    init(
+        initialState: SetCompletionFormState,
+        tintColor: Color,
+        onCommit: @escaping (SetCompletionFormState) -> Void
+    ) {
+        self.initialState = initialState
+        self.tintColor = tintColor
+        self.onCommit = onCommit
+        self._formState = State(initialValue: initialState)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // Header — no auto-dismiss countdown.
+                HStack {
+                    Text("How did that feel?")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                }
+                .padding(.top, 4)
+
+                // Actual reps stepper
+                VStack(spacing: 10) {
+                    Text("Actual Reps")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.50))
+                        .tracking(0.5)
+
+                    HStack(spacing: 24) {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            if formState.actualReps > 1 { formState.actualReps -= 1 }
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+
+                        Text("\(formState.actualReps)")
+                            .font(.system(size: 48, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                            .frame(minWidth: 72)
+
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            if formState.actualReps < 30 { formState.actualReps += 1 }
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(tintColor.opacity(0.90))
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+
+                // RPE/RIR felt — 3-option segmented picker
+                VStack(spacing: 10) {
+                    Text("How hard was it?")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.50))
+                        .tracking(0.5)
+
+                    Picker("RPE felt", selection: $formState.rpeFelt) {
+                        Text("Too Easy").tag(0)
+                        Text("On Target").tag(1)
+                        Text("Too Hard").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                // Intent picker (deviation affordance for AI-prescribed,
+                // visible-by-default for freestyle).
+                intentSection
+
+                // Pain / form-breakdown flags. Always visible; both flags
+                // independently togglable.
+                flagsSection
+
+                // Log button. AI-prescribed: always enabled. Freestyle:
+                // enabled once an intent is picked.
+                Button {
+                    onCommit(formState)
+                } label: {
+                    Text("Log Set")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(
+                            tintColor,
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        )
+                        .opacity(formState.canSubmit ? 1.0 : 0.35)
+                }
+                .disabled(!formState.canSubmit)
+                .accessibilityHint(formState.canSubmit
+                                   ? "Log this set"
+                                   : "Pick an intent to enable logging")
+                .animation(.easeInOut(duration: 0.18), value: formState.canSubmit)
             }
-            // Auto-commit on expiry
-            commitSetComplete()
+            .padding(24)
+        }
+        .background(Color(red: 0.07, green: 0.08, blue: 0.10))
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Intent section (Slice 6 redesign)
+
+    @ViewBuilder
+    private var intentSection: some View {
+        VStack(spacing: 10) {
+            // The "Did something different?" / "Never mind" toggle. Only
+            // shown for AI-prescribed sets — freestyle has no prescription
+            // to deviate from, so the picker is always visible and there's
+            // nothing to toggle. One tappable element, two states:
+            //   collapsed: "Did something different?" + chevron.down → reveals picker
+            //   expanded:  "Never mind" + chevron.up → collapses picker AND resets
+            //                                          resolvedIntent to prescribedIntent
+            //                                          (discards any tentative deviation)
+            if formState.prescribedIntent != nil {
+                deviationToggleLink
+            }
+
+            if formState.isDeviationPickerVisible {
+                // Picker visible — either freestyle (always) or
+                // AI-prescribed after the user revealed it. Header text
+                // adapts to the path.
+                HStack {
+                    Text(formState.prescribedIntent == nil
+                         ? "What kind of set?"
+                         : "What did you actually do?")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.50))
+                        .tracking(0.5)
+                    Spacer()
+                }
+                intentChipRow
+            }
         }
     }
 
-    private func resetDismissCountdown() {
-        dismissTask?.cancel()
-        dismissCountdown = 5
-        startDismissCountdown()
+    /// Toggle link that reveals or dismisses the deviation picker. Lives
+    /// in a stable position regardless of expansion state — same element,
+    /// two labels, two chevron orientations. Auto-discoverable: the label
+    /// flips to "Never mind" on expansion, signalling the dismiss path.
+    /// Dismissing forgives any tentative deviation (resolvedIntent resets
+    /// to prescribedIntent) per the "forgiving over strict" rule.
+    @ViewBuilder
+    private var deviationToggleLink: some View {
+        let isExpanded = formState.isDeviationPickerVisible
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.22)) {
+                if isExpanded {
+                    formState.dismissDeviationPicker()
+                } else {
+                    formState.revealDeviationPicker()
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(isExpanded ? "Never mind" : "Did something different?")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isExpanded
+                            ? "Never mind — collapse the deviation picker and use the prescribed intent"
+                            : "Did something different? — reveal the intent picker")
+        .accessibilityHint(isExpanded
+                           ? "Resets the intent to what was prescribed"
+                           : "Reveals chips for picking a different kind of set than prescribed")
+        .animation(.easeInOut(duration: 0.18), value: isExpanded)
     }
 
+    /// Chip ordering is deliberate, not incidental. Order locks in user
+    /// muscle memory once shipped; getting it right at v1 is cheap.
+    ///   Row 1: warmup → top → backoff
+    ///     Mirrors typical within-exercise session progression. Top sits
+    ///     in the centre because it is by far the most common AI
+    ///     prescription — natural thumb path for the deviation case
+    ///     where the user often picks adjacent values.
+    ///   Row 2: technique → amrap
+    ///     Less common intents, demoted to the second row.
+    @ViewBuilder
+    private var intentChipRow: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                ForEach([SetIntent.warmup, .top, .backoff], id: \.self) { intent in
+                    intentChip(intent)
+                }
+            }
+            HStack(spacing: 8) {
+                ForEach([SetIntent.technique, .amrap], id: \.self) { intent in
+                    intentChip(intent)
+                }
+            }
+        }
+    }
+
+    /// Two visual states (no AI-pending state in the redesign — pickers
+    /// only render after the user has agency over the value):
+    ///   - **Selected** (`resolvedIntent == case`): solid tint, white bold.
+    ///   - **Unselected** (everything else): white-on-glass-low.
+    @ViewBuilder
+    private func intentChip(_ intent: SetIntent) -> some View {
+        let isSelected = formState.resolvedIntent == intent
+
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            formState.selectIntent(intent)
+        } label: {
+            Text(Self.label(for: intent))
+                .font(.system(size: 13, weight: isSelected ? .bold : .semibold))
+                .tracking(0.3)
+                .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.65))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    ZStack {
+                        Capsule()
+                            .fill(isSelected ? tintColor : Color.white.opacity(0.06))
+                        Capsule()
+                            .stroke(
+                                isSelected ? tintColor : Color.white.opacity(0.18),
+                                lineWidth: 0.5
+                            )
+                    }
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Self.label(for: intent))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .animation(.easeInOut(duration: 0.18), value: formState.resolvedIntent)
+    }
+
+    // MARK: - Flags section (Slice 6 / #10)
+
+    @ViewBuilder
+    private var flagsSection: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text("Anything to flag?")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.50))
+                    .tracking(0.5)
+                Spacer()
+            }
+            HStack(spacing: 8) {
+                flagToggle(.pain, label: "Something hurt", icon: "exclamationmark.triangle.fill")
+                flagToggle(.formBreakdown, label: "Form broke down", icon: "figure.strengthtraining.traditional")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func flagToggle(
+        _ flag: SetCompletionFlag,
+        label: String,
+        icon: String
+    ) -> some View {
+        let isOn = formState.completionFlags.contains(flag)
+        // Pain uses red (urgent); form_breakdown uses amber (warning).
+        let onColor: Color = (flag == .pain)
+            ? Color(red: 1.0, green: 0.40, blue: 0.30)
+            : Color(red: 1.0, green: 0.75, blue: 0.10)
+
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            formState.toggleFlag(flag)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .bold))
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .foregroundStyle(isOn ? Color.white : Color.white.opacity(0.55))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                ZStack {
+                    Capsule()
+                        .fill(isOn ? onColor.opacity(0.85) : Color.white.opacity(0.06))
+                    Capsule()
+                        .stroke(
+                            isOn ? onColor : Color.white.opacity(0.18),
+                            lineWidth: 0.5
+                        )
+                }
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(isOn ? "on" : "off")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .animation(.easeInOut(duration: 0.18), value: isOn)
+    }
+
+    /// Display label for a SetIntent. Static so the same labels can be
+    /// reused across surfaces.
+    static func label(for intent: SetIntent) -> String {
+        switch intent {
+        case .warmup:    return "Warmup"
+        case .top:       return "Top"
+        case .backoff:   return "Backoff"
+        case .technique: return "Technique"
+        case .amrap:     return "AMRAP"
+        }
+    }
+}
+
+// MARK: - Picker previews (Slice 6 / #10)
+//
+// These render in Xcode's SwiftUI canvas without needing a workout
+// session, programme, or API key — the whole point is a self-contained
+// HITL surface for visual review. The streak tint colour matches what
+// `mockActive()` uses elsewhere in this file.
+
+private let previewTint = StreakResult.compute(currentStreakDays: 7, longestStreak: 10).tintColor
+
+#Preview("Sheet — AI prescribed, default state") {
+    // The common case — AI prescribed Top, picker is collapsed behind
+    // the "Did something different?" affordance. Log Set is enabled
+    // immediately. User logs in 1 tap if they did the prescribed thing.
+    RepRPEIntentConfirmationSheet(
+        initialState: SetCompletionFormState(
+            actualReps: 8,
+            prescribedIntent: .top
+        ),
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — AI prescribed, deviation picker expanded") {
+    // After tapping "Did something different?", the chip row appears.
+    // The prescribed intent (Top) is pre-selected. User can tap a
+    // different chip to record a deviation; tapping the same chip is
+    // a no-op (reaffirms the prescription).
+    var seed = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+    seed.revealDeviationPicker()
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — AI prescribed, deviation recorded (AMRAP over Top)") {
+    // User tapped "Did something different?" → picker → AMRAP. The
+    // chip is now solid (selected); resolvedIntent == .amrap;
+    // isDeviation == true. The SetLog and WorkoutContext reflect the
+    // user's actual choice.
+    var seed = SetCompletionFormState(actualReps: 12, prescribedIntent: .top)
+    seed.revealDeviationPicker()
+    seed.selectIntent(.amrap)
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — AI prescribed, deviation picked then dismissed") {
+    // The "forgiving over strict" reset path. User revealed the picker,
+    // tapped AMRAP (tentative deviation), then tapped "Never mind".
+    // Result: picker collapsed, resolvedIntent reset to prescribed
+    // (.top), isDeviation back to false. The toggle link reads
+    // "Did something different?" again, ready to re-reveal if needed.
+    //
+    // NOTE: SwiftUI #Preview blocks render the seed state — the
+    // preview shows the post-dismiss state, NOT the dismiss animation.
+    // To see the animation, tap "Did something different?" → AMRAP →
+    // "Never mind" within an interactive Xcode canvas (Live Preview).
+    var seed = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+    seed.revealDeviationPicker()
+    seed.selectIntent(.amrap)         // tentative deviation
+    seed.dismissDeviationPicker()     // → reset to prescribed, picker collapsed
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — Freestyle, no intent picked (Log Set disabled)") {
+    // No prescription → picker visible by default. resolvedIntent is
+    // nil until the user picks one chip. Log Set is muted at 35%
+    // opacity because the gate is closed.
+    RepRPEIntentConfirmationSheet(
+        initialState: SetCompletionFormState(
+            actualReps: 8,
+            prescribedIntent: nil
+        ),
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — Freestyle, intent picked (Log Set enabled)") {
+    // Same as above after one chip tap. The picked chip is solid;
+    // Log Set is at 100% opacity.
+    var seed = SetCompletionFormState(actualReps: 8, prescribedIntent: nil)
+    seed.selectIntent(.backoff)
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — Pain flag raised") {
+    // Both flags togglable independently. Pain shows as red; form
+    // breakdown shows as amber. Both can be raised on the same set.
+    var seed = SetCompletionFormState(actualReps: 6, prescribedIntent: .top)
+    seed.toggleFlag(.pain)
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — Both flags raised") {
+    var seed = SetCompletionFormState(actualReps: 6, prescribedIntent: .top)
+    seed.toggleFlag(.pain)
+    seed.toggleFlag(.formBreakdown)
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
 }
 
 // MARK: - LiquidWaveModifier
@@ -1158,7 +1562,9 @@ private extension AnyTransition {
         coachingCue: "Reduce ROM slightly — pain flag active",
         reasoning: "HRV -22% · pain_reported in previous note → load reduced 15%.",
         safetyFlags: [.painReported, .shoulderCaution],
-        confidence: 0.72
+        confidence: 0.72,
+        intent: .top,
+        setFraming: "Heaviest work of the day. Brace and grind."
     )
     return ActiveSetView(
         viewModel: vm,

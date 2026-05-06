@@ -73,6 +73,7 @@ private struct PermanentThrowingMockProvider: LLMProvider {
 // MARK: - Test helpers
 
 /// A valid JSON response string wrapping a SetPrescription that passes validation.
+/// Includes `intent` per Slice 6 (#10) — required field with no silent default.
 private let validJSONResponse = """
 {
   "set_prescription": {
@@ -84,7 +85,9 @@ private let validJSONResponse = """
     "coaching_cue": "Retract scapula before unracking.",
     "reasoning": "Previous set at 85 kg with 2 RIR; small load increase is appropriate.",
     "safety_flags": [],
-    "confidence": 0.88
+    "confidence": 0.88,
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
@@ -95,6 +98,8 @@ private let invalidJSONResponse = """
 """
 
 /// JSON that decodes but fails SetPrescription.validate() — tempo has 3 parts.
+/// Carries a valid intent so `.invalidTempo` surfaces (intent gate has prior
+/// precedence per Slice 6).
 private let invalidTempoJSONResponse = """
 {
   "set_prescription": {
@@ -106,7 +111,9 @@ private let invalidTempoJSONResponse = """
     "coaching_cue": "Keep tight arch.",
     "reasoning": "Progressive overload from last session.",
     "safety_flags": [],
-    "confidence": 0.8
+    "confidence": 0.8,
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
@@ -115,12 +122,27 @@ private let invalidTempoJSONResponse = """
 
 final class AIInferenceSpikeTests: XCTestCase {
 
-    // MARK: - Retry path A: decode failure × 2 → success
+    // MARK: - Permanent-error fail-fast (ADR-0007 / Slice 6) ─────────────────
+    //
+    // ████████████████████████████████████████████████████████████████████████
+    // BEHAVIOUR CHANGE — Slice 6 (#10):
+    //   Pre-Slice-6, prescribe() RETRIED on JSON decode and validate()
+    //   failures, appending a "CORRECTION REQUIRED" addendum until either a
+    //   valid response arrived or maxRetries+1 attempts had been made.
+    //
+    //   ADR-0007 §1 classifies malformed responses as PERMANENT — same-prompt
+    //   retry will not fix the LLM's output. Slice 6 removes the
+    //   retry-on-validate loop. The tests below previously asserted "2
+    //   failures → 3rd succeeds"; they now assert "first failure → fail fast"
+    //   to lock the new contract. Spinoff issue tracks audit of all
+    //   retry-on-validate sites against ADR-0007.
+    // ████████████████████████████████████████████████████████████████████████
 
-    /// The provider returns two un-decodable JSON responses, then a valid one.
-    /// AIInferenceService must retry twice and ultimately return .success.
-    func test_retryPath_decodeFailureTwiceThenSuccess() async throws {
+    /// Slice 6: malformed JSON fails fast on the first attempt.
+    /// Pre-Slice-6 this test asserted retry-then-success after 2 failures.
+    func test_failFast_decodeFailure_oneCall_returnsMalformedResponse() async throws {
         let mock = RetryMockProvider(
+            // Multiple failures queued — only the first should ever be served.
             failureResponses: [invalidJSONResponse, invalidJSONResponse],
             successResponse: validJSONResponse
         )
@@ -132,23 +154,22 @@ final class AIInferenceSpikeTests: XCTestCase {
 
         let result = await service.prescribe(context: InferenceSpike.minimalWorkoutContext())
 
-        switch result {
-        case .success(let prescription):
-            XCTAssertTrue(mock.didSucceed, "Mock provider should have reached the success response.")
-            XCTAssertNoThrow(try prescription.validate(),
-                             "Prescription returned after retries must be valid.")
-            XCTAssertEqual(prescription.reps, 7)
-        case .fallback(let reason):
-            XCTFail("Expected .success after retries, got fallback: \(reason)")
+        XCTAssertFalse(
+            mock.didSucceed,
+            "Slice 6 fail-fast: malformed JSON must not trigger retry. " +
+            "If didSucceed=true, the retry-on-decode loop has regressed."
+        )
+        guard case .fallback(let reason) = result,
+              case .malformedResponse = reason
+        else {
+            return XCTFail("Expected .malformedResponse, got \(result)")
         }
     }
 
-    // MARK: - Retry path B: validation failure × 2 → success
-
-    /// The provider returns two structurally-valid JSON objects that contain an
-    /// invalid tempo field, causing validate() to throw. On the third call it
-    /// returns a fully-valid prescription.
-    func test_retryPath_validationFailureTwiceThenSuccess() async throws {
+    /// Slice 6: validate() failure on tempo fails fast on the first attempt.
+    /// Pre-Slice-6 this test asserted retry-then-success after 2 validation
+    /// failures.
+    func test_failFast_validationFailure_oneCall_returnsMalformedResponse() async throws {
         let mock = RetryMockProvider(
             failureResponses: [invalidTempoJSONResponse, invalidTempoJSONResponse],
             successResponse: validJSONResponse
@@ -161,16 +182,20 @@ final class AIInferenceSpikeTests: XCTestCase {
 
         let result = await service.prescribe(context: InferenceSpike.minimalWorkoutContext())
 
-        switch result {
-        case .success(let prescription):
-            XCTAssertTrue(mock.didSucceed)
-            // Verify the winning prescription has a valid tempo.
-            XCTAssertNoThrow(try prescription.validate())
-            // The valid response has tempo "3-1-1-0".
-            XCTAssertEqual(prescription.tempo, "3-1-1-0")
-        case .fallback(let reason):
-            XCTFail("Expected .success after validation retries, got fallback: \(reason)")
+        XCTAssertFalse(
+            mock.didSucceed,
+            "Slice 6 fail-fast: validate() failure must not trigger retry. " +
+            "If didSucceed=true, the retry-on-validate loop has regressed."
+        )
+        guard case .fallback(let reason) = result,
+              case .malformedResponse(let detail) = reason
+        else {
+            return XCTFail("Expected .malformedResponse, got \(result)")
         }
+        XCTAssertTrue(
+            detail.lowercased().contains("tempo"),
+            "Fallback detail should name the offending field. Got: \(detail)"
+        )
     }
 
     // MARK: - Retry path C: provider throws on every attempt → fallback
@@ -213,6 +238,8 @@ final class AIInferenceSpikeTests: XCTestCase {
                 break  // expected
             case .encodingFailed:
                 XCTFail("Encoding should not have failed in this test path: \(reason)")
+            case .malformedResponse:
+                XCTFail("Transient HTTP errors should not surface as malformedResponse: \(reason)")
             }
         }
     }
@@ -253,42 +280,15 @@ final class AIInferenceSpikeTests: XCTestCase {
         }
     }
 
-    // MARK: - Retry exhaustion (all attempts fail)
+    // MARK: - Prescription value correctness on the happy path
 
-    /// When all attempts return un-decodable JSON, the service must exhaust
-    /// maxRetries and return .fallback(reason: .maxRetriesExceeded).
-    func test_allRetriesExhausted_returnsFallbackWithMaxRetriesExceeded() async {
+    /// Slice 6: confirms that a valid first-attempt response decodes
+    /// faithfully. Pre-Slice-6 this test allowed one decode failure before
+    /// success; the retry-on-validate loop is gone, so the fixture starts
+    /// clean.
+    func test_prescriptionValues_validResponse_decodesFaithfully() async throws {
         let mock = RetryMockProvider(
-            failureResponses: [invalidJSONResponse, invalidJSONResponse, invalidJSONResponse],
-            successResponse: validJSONResponse // never reached
-        )
-        let service = AIInferenceService(
-            provider: mock,
-            gymProfile: GymProfile.mockProfile(),
-            maxRetries: 2   // 1 initial + 2 retries = 3 total attempts
-        )
-
-        let result = await service.prescribe(context: InferenceSpike.minimalWorkoutContext())
-
-        switch result {
-        case .success:
-            XCTFail("Expected fallback when all attempts fail.")
-        case .fallback(let reason):
-            if case .maxRetriesExceeded(let lastError) = reason {
-                XCTAssertFalse(lastError.isEmpty, "lastError must describe the final failure.")
-            } else {
-                XCTFail("Expected .maxRetriesExceeded, got \(reason).")
-            }
-        }
-    }
-
-    // MARK: - Prescription value correctness after retries
-
-    /// Confirms that the prescription values from the valid response are
-    /// decoded faithfully even when preceded by retry failures.
-    func test_prescriptionValues_correctAfterRetries() async throws {
-        let mock = RetryMockProvider(
-            failureResponses: [invalidJSONResponse],
+            failureResponses: [],
             successResponse: validJSONResponse
         )
         let service = AIInferenceService(
@@ -309,6 +309,8 @@ final class AIInferenceSpikeTests: XCTestCase {
         XCTAssertEqual(prescription.rirTarget, 2)
         XCTAssertEqual(prescription.restSeconds, 150)
         XCTAssertTrue(prescription.safetyFlags.isEmpty)
+        XCTAssertEqual(prescription.intent, .top,
+                       "Decoded intent must round-trip from the fixture.")
     }
 
     // MARK: - Equipment rounding applied after retries

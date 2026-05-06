@@ -103,13 +103,28 @@ final class WorkoutViewModel {
         }
     }
 
-    /// Called when the user taps "Set Complete".
-    /// Disables the button during the async call to prevent double-taps.
-    func onSetComplete(actualReps: Int, rpeFelt: Int?) {
+    /// Called when the user taps "Log Set" on the rep/RPE confirmation
+    /// sheet. Disables the button during the async call to prevent
+    /// double-taps. Slice 6 / #10:
+    ///   - `intent` is the resolved intent (deviated value if the user
+    ///     used the deviation picker; prescribed value otherwise).
+    ///   - `completionFlags` is the user-reported flag set raised on
+    ///     this specific set (pain / form_breakdown). Empty by default.
+    func onSetComplete(
+        actualReps: Int,
+        rpeFelt: Int?,
+        intent: SetIntent,
+        completionFlags: [SetCompletionFlag] = []
+    ) {
         guard !isCompletingSet else { return }
         isCompletingSet = true
         Task {
-            await manager.completeSet(actualReps: actualReps, rpeFelt: rpeFelt)
+            await manager.completeSet(
+                actualReps: actualReps,
+                rpeFelt: rpeFelt,
+                intent: intent,
+                completionFlags: completionFlags
+            )
             await pullState()
             isCompletingSet = false
         }
@@ -418,6 +433,8 @@ final class WorkoutViewModel {
             return "Coach offline — using program defaults"
         case .encodingFailed:
             return "Coach offline — using program defaults"
+        case .malformedResponse:
+            return "Coach offline — using program defaults"
         }
     }
 
@@ -433,6 +450,8 @@ final class WorkoutViewModel {
             return ".networkUnavailable(\(msg.prefix(80)))"
         case .encodingFailed(let detail):
             return ".encodingFailed(\(detail.prefix(80)))"
+        case .malformedResponse(let detail):
+            return ".malformedResponse(\(detail.prefix(80)))"
         }
     }
 
@@ -447,6 +466,8 @@ final class WorkoutViewModel {
             return "Network error: \(String(m.prefix(80)))"
         case .encodingFailed(let d):
             return "Internal error: \(String(d.prefix(80)))"
+        case .malformedResponse(let d):
+            return "Invalid response: \(String(d.prefix(80)))"
         }
     }
 
@@ -555,7 +576,9 @@ extension WorkoutViewModel {
             coachingCue: "Control descent, pause at chest",
             reasoning: "Up 2.5 kg from last session — HRV trending positive.",
             safetyFlags: [],
-            confidence: 0.87
+            confidence: 0.87,
+            intent: .top,
+        setFraming: "Heaviest work of the day. Brace and grind."
         )
         mock.isAIOffline = false
         return mock
@@ -632,7 +655,9 @@ private struct PreviewLLMProvider: LLMProvider {
             "rest_seconds": 120,
             "coaching_cue": "Preview prescription",
             "reasoning": "Preview mode — no real AI.",
-            "safety_flags": []
+            "safety_flags": [],
+            "intent": "top",
+            "set_framing": "Heaviest work of the day. Brace and grind."
           }
         }
         """

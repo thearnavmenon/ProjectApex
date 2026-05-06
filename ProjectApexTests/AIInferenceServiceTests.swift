@@ -62,6 +62,7 @@ private struct NetworkFailProvider: LLMProvider {
 // MARK: - Test fixtures
 
 /// A valid SetPrescription JSON envelope that passes all validation rules.
+/// Includes `intent` per Slice 6 (#10) — required field with no silent default.
 private let validPrescriptionJSON = """
 {
   "set_prescription": {
@@ -73,13 +74,19 @@ private let validPrescriptionJSON = """
     "coaching_cue": "Retract scapula, drive through the bar.",
     "reasoning": "Last set at 2 RIR; maintaining load for consistent volume.",
     "safety_flags": [],
-    "confidence": 0.87
+    "confidence": 0.87,
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
 
 /// A valid prescription that includes `pain_reported` — exercises the
 /// rest-seconds safety gate (must be clamped to ≥ 180).
+/// Intent is `top` because the scenario is "the working set with reduced
+/// load due to pain" — not a backoff (which by definition follows a top
+/// set in the same exercise). Reduced load on a top set still classifies
+/// as a top set.
 private let painFlagPrescriptionJSON = """
 {
   "set_prescription": {
@@ -91,12 +98,16 @@ private let painFlagPrescriptionJSON = """
     "coaching_cue": "Ease off — shoulder discomfort reported.",
     "reasoning": "Pain flag active; reduce load and increase rest.",
     "safety_flags": ["pain_reported"],
-    "confidence": 0.70
+    "confidence": 0.70,
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
 
 /// JSON that decodes but fails validate() — tempo has only 3 segments.
+/// Carries a valid intent so `.invalidTempo` is the surfaced error rather
+/// than the (now-prior-precedence) `.missingIntent` gate.
 private let invalidTempoPrescriptionJSON = """
 {
   "set_prescription": {
@@ -107,7 +118,9 @@ private let invalidTempoPrescriptionJSON = """
     "rest_seconds": 150,
     "coaching_cue": "Tight arch.",
     "reasoning": "Progressive overload.",
-    "safety_flags": []
+    "safety_flags": [],
+    "intent": "top",
+    "set_framing": "Heaviest work of the day. Brace and grind."
   }
 }
 """
@@ -223,39 +236,67 @@ final class AIInferenceServiceTests: XCTestCase {
                                     "restSeconds must be ≥ 180 when painReported is set.")
     }
 
-    // MARK: ─── 2. Retry path test ─────────────────────────────────────────────
+    // MARK: ─── 2. Permanent-error fail-fast (ADR-0007 / Slice 6) ────────────
+    //
+    // ████████████████████████████████████████████████████████████████████████
+    // BEHAVIOUR CHANGE — Slice 6 (#10):
+    //   Pre-Slice-6, prescribe() RETRIED on JSON decode failures and on
+    //   validate() failures, appending a "CORRECTION REQUIRED" addendum and
+    //   re-running up to maxRetries+1 times. The two tests below previously
+    //   asserted that 2 invalid responses followed by 1 valid response
+    //   produced .success after 3 calls.
+    //
+    //   ADR-0007 §1 classifies malformed-response and validation errors as
+    //   PERMANENT — same-prompt retry will not fix the LLM's output. Slice 6
+    //   removes the retry-on-validate loop, replacing it with fail-fast
+    //   `.fallback(.malformedResponse)` after a single call. The user-facing
+    //   surface is `InferenceRetrySheet`, giving the user agency rather than
+    //   silently burning the 8-second budget.
+    //
+    //   The old "invalid twice then succeed" assertions are now invariant
+    //   violations. The replacement tests below assert callCount == 1 and
+    //   `.fallback(.malformedResponse)` instead. Spinoff issue tracks the
+    //   broader audit of retry-on-validate sites against ADR-0007.
+    // ████████████████████████████████████████████████████████████████████████
 
-    /// MockLLMProvider returns unparsable JSON on attempts 1 and 2, valid JSON
-    /// on attempt 3.  Result must be .success — verifying maxRetries=2 works.
-    func test_retryPath_invalidJSONTwice_thenSuccess() async {
+    /// B4 — Slice 6 fail-fast: structurally invalid JSON returns
+    /// `.fallback(.malformedResponse)` after exactly ONE provider call.
+    func test_failFast_invalidJSON_oneCall_returnsMalformedResponse() async {
         let provider = RetryOnceProvider(
-            failCount: 2,
+            failCount: 999,                  // never serve a success
             failResponse: unparsableJSON,
             successResponse: validPrescriptionJSON
         )
         let service = AIInferenceService(
             provider: provider,
             gymProfile: GymProfile.mockProfile(),
-            maxRetries: 2
+            maxRetries: 2                    // intentionally non-zero — must be ignored
         )
 
         let result = await service.prescribe(context: WorkoutContext.mockContext())
 
-        switch result {
-        case .success(let prescription):
-            XCTAssertEqual(provider.callCount, 3,
-                           "Provider must have been called exactly 3 times (1 initial + 2 retries).")
-            XCTAssertNoThrow(try prescription.validate(),
-                             "Prescription from the third attempt must pass validation.")
-        case .fallback(let reason):
-            XCTFail("Expected .success on attempt 3, got fallback: \(reason)")
+        XCTAssertEqual(
+            provider.callCount, 1,
+            "Slice 6 fail-fast: malformed JSON must NOT trigger same-prompt retry. " +
+            "If callCount > 1, the prescribe() retry loop has regressed to pre-ADR-0007 behaviour."
+        )
+        guard case .fallback(let reason) = result,
+              case .malformedResponse = reason
+        else {
+            return XCTFail(
+                "Slice 6 fail-fast expected .fallback(.malformedResponse), got \(result). " +
+                "ADR-0007 §1 classifies decode failure as permanent."
+            )
         }
     }
 
-    /// Same as above but uses a bad tempo (structurally valid JSON, fails validate()).
-    func test_retryPath_invalidTempoTwice_thenSuccess() async {
+    /// B4 — Slice 6 fail-fast: validation failure (non-intent) returns
+    /// `.fallback(.malformedResponse)` after exactly ONE provider call.
+    /// Locks the broader scope of the behaviour change — the fail-fast rule
+    /// applies to ALL PrescriptionValidationError variants, not just intent.
+    func test_failFast_invalidTempo_oneCall_returnsMalformedResponse() async {
         let provider = RetryOnceProvider(
-            failCount: 2,
+            failCount: 999,
             failResponse: invalidTempoPrescriptionJSON,
             successResponse: validPrescriptionJSON
         )
@@ -267,13 +308,179 @@ final class AIInferenceServiceTests: XCTestCase {
 
         let result = await service.prescribe(context: WorkoutContext.mockContext())
 
-        switch result {
-        case .success(let prescription):
-            XCTAssertEqual(provider.callCount, 3)
-            XCTAssertEqual(prescription.tempo, "3-1-1-0",
-                           "Winning prescription must have the valid tempo from attempt 3.")
-        case .fallback(let reason):
-            XCTFail("Expected .success on attempt 3, got fallback: \(reason)")
+        XCTAssertEqual(
+            provider.callCount, 1,
+            "Slice 6 fail-fast: validate() failure on tempo must NOT trigger retry. " +
+            "If callCount > 1, the prescribe() retry-on-validate loop has regressed."
+        )
+        guard case .fallback(let reason) = result,
+              case .malformedResponse(let detail) = reason
+        else {
+            return XCTFail("Expected .malformedResponse, got \(result)")
+        }
+        XCTAssertTrue(
+            detail.lowercased().contains("tempo"),
+            "Fallback detail should name the offending field. Got: \(detail)"
+        )
+    }
+
+    /// B1 — Slice 6 fail-fast: missing `intent` in AI response triggers
+    /// `.fallback(.malformedResponse)` carrying the typed PrescriptionValidationError
+    /// description, and the provider is called exactly once. The most direct
+    /// test of the new no-silent-defaults invariant.
+    func test_failFast_missingIntent_oneCall_returnsMalformedResponse() async {
+        let missingIntentJSON = """
+        {
+          "set_prescription": {
+            "weight_kg": 80.0,
+            "reps": 8,
+            "tempo": "3-1-1-0",
+            "rir_target": 2,
+            "rest_seconds": 120,
+            "coaching_cue": "Drive through.",
+            "reasoning": "Standard top set.",
+            "safety_flags": [],
+            "confidence": 0.85
+          }
+        }
+        """
+        let provider = RetryOnceProvider(
+            failCount: 999,
+            failResponse: missingIntentJSON,
+            successResponse: validPrescriptionJSON
+        )
+        let service = AIInferenceService(
+            provider: provider,
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 2
+        )
+
+        let result = await service.prescribe(context: WorkoutContext.mockContext())
+
+        XCTAssertEqual(provider.callCount, 1,
+                       "Missing intent must fail fast — exactly one provider call.")
+        guard case .fallback(let reason) = result,
+              case .malformedResponse(let detail) = reason
+        else {
+            return XCTFail("Expected .malformedResponse, got \(result)")
+        }
+        XCTAssertTrue(
+            detail.lowercased().contains("intent"),
+            "Fallback detail should name 'intent'. Got: \(detail)"
+        )
+    }
+
+    /// B2 — Slice 6 fail-fast: invalid intent string (e.g. "bogus") triggers
+    /// `.fallback(.malformedResponse)` after exactly one provider call. The
+    /// custom Codable init rethrows DecodingError as
+    /// PrescriptionValidationError.invalidIntent, which is caught at the
+    /// decode site as a permanent error.
+    func test_failFast_invalidIntentString_oneCall_returnsMalformedResponse() async {
+        let invalidIntentJSON = """
+        {
+          "set_prescription": {
+            "weight_kg": 80.0,
+            "reps": 8,
+            "tempo": "3-1-1-0",
+            "rir_target": 2,
+            "rest_seconds": 120,
+            "coaching_cue": "Drive through.",
+            "reasoning": "Standard top set.",
+            "safety_flags": [],
+            "confidence": 0.85,
+            "intent": "bogus"
+          }
+        }
+        """
+        let provider = RetryOnceProvider(
+            failCount: 999,
+            failResponse: invalidIntentJSON,
+            successResponse: validPrescriptionJSON
+        )
+        let service = AIInferenceService(
+            provider: provider,
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 2
+        )
+
+        let result = await service.prescribe(context: WorkoutContext.mockContext())
+
+        XCTAssertEqual(provider.callCount, 1,
+                       "Invalid intent must fail fast — exactly one provider call.")
+        guard case .fallback(let reason) = result,
+              case .malformedResponse(let detail) = reason
+        else {
+            return XCTFail("Expected .malformedResponse, got \(result)")
+        }
+        XCTAssertTrue(
+            detail.lowercased().contains("intent"),
+            "Fallback detail should name 'intent'. Got: \(detail)"
+        )
+    }
+
+    /// B3 — Happy path: valid prescription with intent returns `.success`
+    /// on the first call (regression coverage; the validPrescriptionJSON
+    /// fixture now carries `"intent": "top"`).
+    func test_validPrescription_returnsSuccess_oneCall() async {
+        let provider = RetryOnceProvider(
+            failCount: 0,
+            failResponse: "",
+            successResponse: validPrescriptionJSON
+        )
+        let service = AIInferenceService(
+            provider: provider,
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 0
+        )
+
+        let result = await service.prescribe(context: WorkoutContext.mockContext())
+
+        XCTAssertEqual(provider.callCount, 1)
+        guard case .success(let prescription) = result else {
+            return XCTFail("Expected .success, got \(result)")
+        }
+        XCTAssertEqual(prescription.intent, .top,
+                       "Decoded intent must round-trip from the fixture.")
+    }
+
+    /// B6 — prescribeAdaptation aligns with prescribe() on the fail-fast
+    /// rule. A missing-intent response from the LLM during adaptation must
+    /// also fail fast as `.malformedResponse`.
+    func test_failFast_prescribeAdaptation_missingIntent_returnsMalformedResponse() async {
+        let missingIntentJSON = """
+        {
+          "set_prescription": {
+            "weight_kg": 75.0,
+            "reps": 8,
+            "tempo": "3-1-1-0",
+            "rir_target": 2,
+            "rest_seconds": 120,
+            "coaching_cue": "x",
+            "reasoning": "y",
+            "safety_flags": []
+          }
+        }
+        """
+        let provider = RetryOnceProvider(
+            failCount: 0,
+            failResponse: "",
+            successResponse: missingIntentJSON
+        )
+        let service = AIInferenceService(
+            provider: provider,
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 0
+        )
+
+        let result = await service.prescribeAdaptation(
+            userPayload: "irrelevant for the mock",
+            workoutContext: WorkoutContext.mockContext()
+        )
+
+        guard case .fallback(let reason) = result,
+              case .malformedResponse = reason
+        else {
+            return XCTFail("Expected .malformedResponse from prescribeAdaptation, got \(result)")
         }
     }
 

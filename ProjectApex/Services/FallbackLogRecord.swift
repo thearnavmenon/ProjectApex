@@ -112,6 +112,8 @@ nonisolated struct FallbackLogRecord: Codable, Sendable {
             reason = "llmProviderError: \(msg.prefix(200))"
         case .encodingFailed(let msg):
             reason = "encodingFailed: \(msg)"
+        case .malformedResponse(let msg):
+            reason = "malformedResponse: \(msg.prefix(200))"
         }
         return FallbackLogRecord(
             callSite: callSite,
@@ -119,4 +121,47 @@ nonisolated struct FallbackLogRecord: Codable, Sendable {
             sessionId: sessionId
         )
     }
+}
+
+// MARK: - Permanent-failure fallback hook (Slice 6 / ADR-0007 §1) ───────────
+//
+// AUDIT HOOK — spinoff issue "Audit retry-on-validate sites against ADR-0007":
+//   Grep for callers of `emitPermanentFailureFallback` to inventory which
+//   foreground services have adopted the ADR-0007 fail-fast pattern. Sites
+//   that decode/validate LLM responses but DO NOT call this helper are
+//   candidates for the audit — they likely either retry-on-validate
+//   (pre-Slice-6 behaviour) or silently swallow the failure.
+//
+// Slice 6 call sites (initial inventory):
+//   - AIInferenceService.prescribe (decode failure, validate failure)
+//   - AIInferenceService.prescribeAdaptation (decode failure, validate failure)
+//
+// Foreground call sites flagged by ADR-0007 §3 that the audit should check:
+//   - SessionPlanService.callAndDecodeSession
+//   - ExerciseSwapService.sendMessage
+//
+// Foreground services map the returned `FallbackLogRecord` (already emitted)
+// onto their own fallback-result type — this helper is intentionally
+// generic over result type so each service stays in control of its own
+// fallback DTOs.
+
+/// Emits a `FallbackLogRecord` for a permanent (malformed-response or
+/// validation) error per ADR-0007 §1 and returns the record. The caller
+/// maps to its own fallback result type.
+///
+/// Use this anywhere a foreground LLM call site would otherwise have to
+/// decide between (wrong) silent retry and (correct) fail-fast surface.
+@discardableResult
+nonisolated func emitPermanentFailureFallback(
+    callSite: String,
+    description: String,
+    sessionId: String? = nil
+) -> FallbackLogRecord {
+    let record = FallbackLogRecord(
+        callSite: callSite,
+        reason: "malformedResponse: \(description.prefix(200))",
+        sessionId: sessionId
+    )
+    record.emit()
+    return record
 }

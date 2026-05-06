@@ -1,0 +1,44 @@
+-- Migration: 0005_drop_intent_default_from_set_logs.sql
+-- Phase 2 / Slice 6 — drop set_logs.intent DEFAULT
+-- Issue: #10  ·  ADR-0005  ·  PR: #47
+--
+-- ████████████████████████████████████████████████████████████████████████
+-- DEPLOYMENT GATE — do NOT apply until ALL of:
+--
+-- 1. 0004 (Phase 1) has been applied successfully and the apply was
+--    captured in the Slice 6 PR thread.
+--
+-- 2. Spot-check confirms backfill labels look reasonable. Suggested checks:
+--
+--      -- Distribution sanity check — expect majority 'top' and 'backoff'
+--      -- on a strength/hypertrophy programme; warmup/technique/amrap
+--      -- counts depend on programme shape. AMRAP and technique should
+--      -- both be 0 for pre-cutoff rows (heuristic cannot recover them).
+--      SELECT intent, COUNT(*)
+--      FROM public.set_logs
+--      GROUP BY intent
+--      ORDER BY 2 DESC;
+--
+--      -- Sample inspection — pull 50 rows ordered by session/exercise/set
+--      -- and eyeball whether the top set in each group is the heaviest.
+--      SELECT session_id, exercise_id, set_number, weight_kg,
+--             reps_completed, intent
+--      FROM public.set_logs
+--      ORDER BY session_id, exercise_id, set_number
+--      LIMIT 50;
+--
+-- 3. MigrationDates.v2SetIntentBackfill in Swift is updated to the
+--    0004-apply timestamp in a follow-up commit (existing pattern from
+--    Slice 5's local_date migration — see Models/MigrationDates.swift).
+--
+-- See the Slice 6 PR description for the full deploy sequence.
+-- ████████████████████████████████████████████████████████████████████████
+--
+-- After this migration applies, post-cutoff INSERTs into set_logs MUST
+-- populate intent explicitly — a write without intent yields a NOT NULL
+-- violation rather than a silent 'top' default. Combined with the Phase 0
+-- client-side validation, this gives layered enforcement of the
+-- no-silent-defaults invariant from ADR-0005.
+
+ALTER TABLE public.set_logs
+  ALTER COLUMN intent DROP DEFAULT;

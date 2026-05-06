@@ -6,13 +6,20 @@
 // rule logic, cached-snapshot return) are present but inert so that
 // Phase 2 plugs into the same lifecycle without restructuring.
 //
+// Slice 6 (issue #10): payload validator now descends into
+// session_payload.set_logs[] (when present) and rejects any element
+// missing or carrying an invalid `intent` field. Forward-compatible —
+// the actual set_logs[] payload is wired in Slice 9c+; this validator
+// is the contract that wiring will satisfy. See ADR-0005 (no silent
+// defaults at any layer).
+//
 // Contract: POST { user_id, session_id, session_payload } → 200
 // { trainee_model: {} }. See:
-//   - ADR-0005 (TraineeModel shape)
+//   - ADR-0005 (TraineeModel shape, set-intent invariant)
 //   - ADR-0006 (server-side placement, idempotency at DB layer)
 //   - docs/agents/edge-functions.md (secrets, deploy, local dev)
 
-interface UpdateTraineeModelRequest {
+export interface UpdateTraineeModelRequest {
   user_id: string;
   session_id: string;
   session_payload: Record<string, unknown>;
@@ -21,6 +28,17 @@ interface UpdateTraineeModelRequest {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// SetIntent — must mirror the Swift `SetIntent` enum (TraineeModelEnums.swift)
+// and the eventual `set_logs.intent` CHECK constraint. Any drift breaks the
+// no-silent-defaults invariant.
+const VALID_INTENTS = new Set([
+  "warmup",
+  "top",
+  "backoff",
+  "technique",
+  "amrap",
+]);
+
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -28,7 +46,7 @@ function jsonResponse(body: unknown, status: number): Response {
   });
 }
 
-function validateRequest(
+export function validateRequest(
   body: unknown,
 ): UpdateTraineeModelRequest | { error: string } {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -51,10 +69,44 @@ function validateRequest(
   ) {
     return { error: "session_payload must be a JSON object" };
   }
+  const payload = session_payload as Record<string, unknown>;
+
+  // Slice 6 — validate set_logs[] when present. Forward-compatible: when
+  // session_payload omits set_logs entirely, the request still passes (the
+  // actual call site is wired in Slice 9c+). When the array is present,
+  // every element must carry a valid intent — no silent default.
+  if ("set_logs" in payload) {
+    const setLogs = payload.set_logs;
+    if (!Array.isArray(setLogs)) {
+      return { error: "session_payload.set_logs must be an array" };
+    }
+    for (let i = 0; i < setLogs.length; i++) {
+      const entry = setLogs[i];
+      if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+        return {
+          error: `session_payload.set_logs[${i}] must be a JSON object`,
+        };
+      }
+      const intent = (entry as Record<string, unknown>).intent;
+      if (intent === undefined || intent === null) {
+        return {
+          error: `session_payload.set_logs[${i}] missing required field 'intent'`,
+        };
+      }
+      if (typeof intent !== "string" || !VALID_INTENTS.has(intent)) {
+        return {
+          error:
+            `session_payload.set_logs[${i}].intent must be one of ` +
+            `warmup/top/backoff/technique/amrap (got ${JSON.stringify(intent)})`,
+        };
+      }
+    }
+  }
+
   return {
     user_id,
     session_id,
-    session_payload: session_payload as Record<string, unknown>,
+    session_payload: payload,
   };
 }
 
@@ -72,7 +124,7 @@ async function checkAlreadyApplied(
   return false;
 }
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== "POST") {
     return jsonResponse({ error: "method not allowed" }, 405);
   }
@@ -106,4 +158,12 @@ Deno.serve(async (req: Request) => {
   // returns the updated snapshot.
 
   return jsonResponse({ trainee_model: {} }, 200);
-});
+}
+
+// Only boot the server when this module is invoked as the entrypoint —
+// `deno test` and other importers can pull in `validateRequest` /
+// `handleRequest` without binding to a port. Slice 6 (#10) added this
+// gate so the validator could be tested in isolation.
+if (import.meta.main) {
+  Deno.serve(handleRequest);
+}

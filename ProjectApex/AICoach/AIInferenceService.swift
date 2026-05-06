@@ -221,6 +221,23 @@ nonisolated struct CompletedSet: Codable, Sendable {
     /// How many days ago this set was completed (0 = today, 1 = yesterday, etc.).
     /// Used by the AI to weight recent performance more heavily than older sets.
     let daysAgo: Int?
+    /// What the user actually did on this set (Slice 6 / #10). For AI-prescribed
+    /// sets without deviation: equals `prescribedIntent`. For deviated sets: the
+    /// user's explicit pick. For freestyle sets: the user's pick. Nil only for
+    /// pre-Slice-6 historical rows that were never tagged.
+    let intent: String?
+    /// What the AI prescribed for this set, captured for in-prompt deviation
+    /// reasoning. Nil for freestyle (no prescription). Slice 6 / #10.
+    let prescribedIntent: String?
+    /// Materialized boolean — true when `intent != prescribedIntent` and both
+    /// are non-nil. Derivable from the two fields above; carried explicitly so
+    /// the AI prompt has unambiguous deviation signal without having to compare
+    /// strings. Nil for freestyle (no prescription to deviate from).
+    let isDeviation: Bool?
+    /// User-raised flags on the rep/RPE sheet immediately post-set.
+    /// Empty array (or nil) = no flags raised. Slice 6 / #10. Cross-session
+    /// persistence via DB column tracked separately as #43.
+    let completionFlags: [String]?
 
     enum CodingKeys: String, CodingKey {
         case setNumber              = "set_number"
@@ -233,6 +250,45 @@ nonisolated struct CompletedSet: Codable, Sendable {
         case completedAt            = "completed_at"
         case userCorrectedWeight    = "user_corrected_weight"
         case daysAgo                = "days_ago"
+        case intent
+        case prescribedIntent       = "prescribed_intent"
+        case isDeviation            = "is_deviation"
+        case completionFlags        = "completion_flags"
+    }
+
+    /// Memberwise init with the four Slice 6 (#10) fields defaulted to nil so
+    /// existing call sites that don't yet know about intent/deviation/flags
+    /// continue to compile. New call sites supply them explicitly.
+    nonisolated init(
+        setNumber: Int,
+        weightKg: Double,
+        reps: Int,
+        rirActual: Int?,
+        rpe: Double?,
+        tempo: String?,
+        restTakenSeconds: Int?,
+        completedAt: Date?,
+        userCorrectedWeight: Bool?,
+        daysAgo: Int?,
+        intent: String? = nil,
+        prescribedIntent: String? = nil,
+        isDeviation: Bool? = nil,
+        completionFlags: [String]? = nil
+    ) {
+        self.setNumber = setNumber
+        self.weightKg = weightKg
+        self.reps = reps
+        self.rirActual = rirActual
+        self.rpe = rpe
+        self.tempo = tempo
+        self.restTakenSeconds = restTakenSeconds
+        self.completedAt = completedAt
+        self.userCorrectedWeight = userCorrectedWeight
+        self.daysAgo = daysAgo
+        self.intent = intent
+        self.prescribedIntent = prescribedIntent
+        self.isDeviation = isDeviation
+        self.completionFlags = completionFlags
     }
 }
 
@@ -371,6 +427,20 @@ nonisolated struct SetPrescription: Codable, Sendable {
     /// True when the user tapped "Continue with last weights" on InferenceRetrySheet
     /// because AI inference was unavailable. Stored in the ai_prescribed JSONB blob.
     var isManualFallback: Bool?
+    /// Required field per ADR-0005 Slice 6 — gates which sets contribute to e1RM,
+    /// volume aggregation, and RPE calibration. Codable-optional so a missing key
+    /// surfaces as a typed `PrescriptionValidationError.missingIntent` from
+    /// `validate()` rather than a raw `DecodingError`. An invalid raw string
+    /// (e.g. `"intent": "bogus"`) is rethrown from `init(from:)` as
+    /// `PrescriptionValidationError.invalidIntent`.
+    var intent: SetIntent?
+    /// 1-line mental-set framing for this specific set, distinct from
+    /// `coachingCue`. Sets the user's frame BEFORE they lift; rendered on the
+    /// active set view's prescription card as a brief italic line under the
+    /// intent label. Required (no silent default), max 80 chars. Slice 6 / #10.
+    /// Same Codable-optional shape as `intent` so `validate()` produces a
+    /// typed `.missingSetFraming` rather than a raw `DecodingError`.
+    var setFraming: String?
 
     enum CodingKeys: String, CodingKey {
         case weightKg            = "weight_kg"
@@ -384,6 +454,111 @@ nonisolated struct SetPrescription: Codable, Sendable {
         case confidence
         case userCorrectedWeight = "user_corrected_weight"
         case isManualFallback    = "is_manual_fallback"
+        case intent
+        case setFraming          = "set_framing"
+    }
+
+    nonisolated init(
+        weightKg: Double,
+        reps: Int,
+        tempo: String,
+        rirTarget: Int,
+        restSeconds: Int,
+        coachingCue: String,
+        reasoning: String,
+        safetyFlags: [SafetyFlag],
+        confidence: Double? = nil,
+        userCorrectedWeight: Bool? = nil,
+        isManualFallback: Bool? = nil,
+        intent: SetIntent? = nil,
+        setFraming: String? = nil
+    ) {
+        self.weightKg            = weightKg
+        self.reps                = reps
+        self.tempo               = tempo
+        self.rirTarget           = rirTarget
+        self.restSeconds         = restSeconds
+        self.coachingCue         = coachingCue
+        self.reasoning           = reasoning
+        self.safetyFlags         = safetyFlags
+        self.confidence          = confidence
+        self.userCorrectedWeight = userCorrectedWeight
+        self.isManualFallback    = isManualFallback
+        self.intent              = intent
+        self.setFraming          = setFraming
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        weightKg            = try c.decode(Double.self,        forKey: .weightKg)
+        reps                = try c.decode(Int.self,           forKey: .reps)
+        tempo               = try c.decode(String.self,        forKey: .tempo)
+        rirTarget           = try c.decode(Int.self,           forKey: .rirTarget)
+        restSeconds         = try c.decode(Int.self,           forKey: .restSeconds)
+        coachingCue         = try c.decode(String.self,        forKey: .coachingCue)
+        reasoning           = try c.decode(String.self,        forKey: .reasoning)
+        safetyFlags         = try c.decode([SafetyFlag].self,  forKey: .safetyFlags)
+        confidence          = try c.decodeIfPresent(Double.self, forKey: .confidence)
+        userCorrectedWeight = try c.decodeIfPresent(Bool.self,   forKey: .userCorrectedWeight)
+        isManualFallback    = try c.decodeIfPresent(Bool.self,   forKey: .isManualFallback)
+
+        // Intent: decode as Optional<String> so we can route a missing key to
+        // `nil` (caught by `validate()` as `.missingIntent`) and a present-but-
+        // invalid value to a typed `.invalidIntent`. Both are permanent errors
+        // per ADR-0007 §1 — the LLM's response was malformed and a same-prompt
+        // retry will not fix it.
+        if c.contains(.intent) {
+            // contains(.intent) is true even when the value is JSON null;
+            // decodeIfPresent returns nil only on missing-key OR null, so
+            // pull the raw String through decode(...) to surface a type
+            // mismatch (e.g. `"intent": 42`) as `.invalidIntent` rather
+            // than a raw DecodingError.
+            let raw: String
+            do {
+                raw = try c.decode(String.self, forKey: .intent)
+            } catch {
+                throw PrescriptionValidationError.invalidIntent("<non-string>")
+            }
+            guard let parsed = SetIntent(rawValue: raw) else {
+                throw PrescriptionValidationError.invalidIntent(raw)
+            }
+            intent = parsed
+        } else {
+            intent = nil
+        }
+
+        // setFraming: same Codable-optional shape as intent. Missing surfaces
+        // as nil → caught by validate() as `.missingSetFraming`. Non-string
+        // surfaces as a typed `.invalidSetFraming` so the AIInferenceService
+        // fail-fast path treats it as a permanent error per ADR-0007 §1.
+        if c.contains(.setFraming) {
+            let raw: String
+            do {
+                raw = try c.decode(String.self, forKey: .setFraming)
+            } catch {
+                throw PrescriptionValidationError.invalidSetFraming
+            }
+            setFraming = raw
+        } else {
+            setFraming = nil
+        }
+    }
+
+    nonisolated func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(weightKg,                forKey: .weightKg)
+        try c.encode(reps,                    forKey: .reps)
+        try c.encode(tempo,                   forKey: .tempo)
+        try c.encode(rirTarget,               forKey: .rirTarget)
+        try c.encode(restSeconds,             forKey: .restSeconds)
+        try c.encode(coachingCue,             forKey: .coachingCue)
+        try c.encode(reasoning,               forKey: .reasoning)
+        try c.encode(safetyFlags,             forKey: .safetyFlags)
+        try c.encodeIfPresent(confidence,          forKey: .confidence)
+        try c.encodeIfPresent(userCorrectedWeight, forKey: .userCorrectedWeight)
+        try c.encodeIfPresent(isManualFallback,    forKey: .isManualFallback)
+        try c.encodeIfPresent(intent,              forKey: .intent)
+        try c.encodeIfPresent(setFraming,          forKey: .setFraming)
     }
 }
 
@@ -399,7 +574,7 @@ nonisolated enum SafetyFlag: String, Codable, Sendable {
 
 // MARK: Validation
 
-nonisolated enum PrescriptionValidationError: LocalizedError {
+nonisolated enum PrescriptionValidationError: LocalizedError, Equatable {
     case invalidWeight(Double)
     case invalidReps(Int)
     case invalidTempo(String)
@@ -407,6 +582,21 @@ nonisolated enum PrescriptionValidationError: LocalizedError {
     case coachingCueTooLong(Int)
     case reasoningTooLong(Int)
     case confidenceOutOfRange(Double)
+    /// `intent` field absent from the AI's JSON response. Permanent per
+    /// ADR-0007 §1 — same-prompt retry will not fix.
+    case missingIntent
+    /// `intent` field present but unparseable (unknown raw value or wrong
+    /// JSON type). Permanent per ADR-0007 §1.
+    case invalidIntent(String)
+    /// `set_framing` field absent from the AI's JSON response. Permanent per
+    /// ADR-0007 §1. Slice 6 / #10.
+    case missingSetFraming
+    /// `set_framing` field present but wrong type (e.g. number instead of
+    /// string). Permanent per ADR-0007 §1.
+    case invalidSetFraming
+    /// `set_framing` longer than 80 chars. Permanent per ADR-0007 §1 —
+    /// retry without prompt change won't fix.
+    case setFramingTooLong(Int)
 
     var errorDescription: String? {
         switch self {
@@ -424,6 +614,16 @@ nonisolated enum PrescriptionValidationError: LocalizedError {
             return "reasoning is \(v) chars (max 200)."
         case .confidenceOutOfRange(let v):
             return "confidence \(v) is outside 0.0...1.0."
+        case .missingIntent:
+            return "intent field missing — required per ADR-0005 with no silent default."
+        case .invalidIntent(let raw):
+            return "intent '\(raw)' is not one of warmup/top/backoff/technique/amrap."
+        case .missingSetFraming:
+            return "set_framing field missing — required per Slice 6 with no silent default."
+        case .invalidSetFraming:
+            return "set_framing must be a string."
+        case .setFramingTooLong(let v):
+            return "set_framing is \(v) chars (max 80)."
         }
     }
 }
@@ -433,6 +633,21 @@ extension SetPrescription {
     private nonisolated static let tempoRegex = try! NSRegularExpression(pattern: #"^\d-\d-\d-\d$"#)
 
     nonisolated func validate() throws {
+        // Intent gate fires first per Slice 6 / ADR-0005 — the no-silent-defaults
+        // contract is the load-bearing invariant for this slice. A missing-intent
+        // failure is a permanent malformed-response per ADR-0007 §1; the caller
+        // (`AIInferenceService.prescribe`) treats it as fail-fast.
+        guard intent != nil else {
+            throw PrescriptionValidationError.missingIntent
+        }
+        // Set-framing gate fires next, before field-level checks. Same
+        // no-silent-default regime as intent.
+        guard let framing = setFraming else {
+            throw PrescriptionValidationError.missingSetFraming
+        }
+        guard framing.count <= 80 else {
+            throw PrescriptionValidationError.setFramingTooLong(framing.count)
+        }
         guard weightKg >= 0, weightKg <= 500 else {
             throw PrescriptionValidationError.invalidWeight(weightKg)
         }
@@ -467,6 +682,12 @@ nonisolated enum FallbackReason: Sendable {
     case maxRetriesExceeded(lastError: String)
     case llmProviderError(String)
     case encodingFailed(String)
+    /// LLM returned a response that cannot be turned into a valid
+    /// SetPrescription — JSON decode failure, missing intent, invalid
+    /// intent, or any other validation rule. Permanent per ADR-0007 §1;
+    /// no same-prompt retry. Surfaced via `InferenceRetrySheet` so the
+    /// user gets agency rather than a silent default.
+    case malformedResponse(String)
 }
 
 nonisolated enum PrescriptionResult: Sendable {
@@ -656,112 +877,133 @@ actor AIInferenceService {
         }
 
         let systemPrompt = Self.systemPrompt
-        var userPayload = contextJSON
-        var lastErrorDescription: String = ""
+        let userPayload = contextJSON
 
-        for attempt in 0...maxRetries {
-            // Append correction instruction on retries
-            if attempt > 0 {
-                userPayload = """
-                    \(contextJSON)
-
-                    --- CORRECTION REQUIRED ---
-                    Your previous response failed validation with this error:
-                    \(lastErrorDescription)
-                    Please fix the issue and return only the corrected JSON object.
-                    """
-            }
-
-            // 2. Call LLM with 8-second timeout (retries for transient HTTP errors happen
-            //    inside the timeout so the product patience threshold is always respected).
-            // Snapshot `userPayload` into an immutable let so the closure
-            // captures a value rather than a mutable variable (Swift 6 safety).
-            let payloadSnapshot = userPayload
-            let rawResponse: String
-            do {
-                rawResponse = try await withTimeout(seconds: 8.0) {
-                    try await TransientRetryPolicy.execute {
-                        try await self.provider.complete(
-                            systemPrompt: systemPrompt,
-                            userPayload: payloadSnapshot
-                        )
-                    }
+        // Per ADR-0007 §1: malformed-response and validation errors are
+        // PERMANENT — same-prompt retry will not fix the LLM's output. Slice 6
+        // (#10) removed the prior maxRetries-on-validate loop; transient
+        // HTTP errors are still retried inside `TransientRetryPolicy`, but
+        // any decode/validate failure here returns `.fallback(.malformedResponse)`
+        // immediately and surfaces `InferenceRetrySheet` to the user.
+        // History: the prior loop appended a "CORRECTION REQUIRED" addendum and
+        // re-ran. Sometimes worked for malformed JSON; ADR-0007 §1 nevertheless
+        // classes malformed responses as permanent because the same prompt is
+        // unlikely to yield a different shape, and a fail-fast surface gives
+        // the user agency rather than burning the 8-second budget on a
+        // probably-doomed retry. See spinoff issue for the broader audit.
+        // 2. Call LLM with 8-second timeout (transient HTTP retries happen
+        //    inside the timeout per ADR-0007 §2).
+        let rawResponse: String
+        do {
+            rawResponse = try await withTimeout(seconds: 8.0) {
+                try await TransientRetryPolicy.execute {
+                    try await self.provider.complete(
+                        systemPrompt: systemPrompt,
+                        userPayload: userPayload
+                    )
                 }
-            } catch is TimeoutError {
-                FallbackLogRecord(
+            }
+        } catch is TimeoutError {
+            FallbackLogRecord(
+                callSite: FallbackLogRecord.prescribeCallSite,
+                reason: "timeout (8s)",
+                sessionId: context.sessionMetadata.sessionId
+            ).emit()
+            return .fallback(reason: .timeout)
+        } catch {
+            if let llmError = error as? LLMProviderError {
+                FallbackLogRecord.from(
                     callSite: FallbackLogRecord.prescribeCallSite,
-                    reason: "timeout (8s)",
+                    error: llmError,
                     sessionId: context.sessionMetadata.sessionId
                 ).emit()
-                return .fallback(reason: .timeout)
-            } catch {
-                if let llmError = error as? LLMProviderError {
-                    FallbackLogRecord.from(
-                        callSite: FallbackLogRecord.prescribeCallSite,
-                        error: llmError,
-                        sessionId: context.sessionMetadata.sessionId
-                    ).emit()
-                } else {
-                    FallbackLogRecord(
-                        callSite: FallbackLogRecord.prescribeCallSite,
-                        reason: error.localizedDescription,
-                        sessionId: context.sessionMetadata.sessionId
-                    ).emit()
-                }
-                return .fallback(reason: .llmProviderError(error.localizedDescription))
+            } else {
+                FallbackLogRecord(
+                    callSite: FallbackLogRecord.prescribeCallSite,
+                    reason: error.localizedDescription,
+                    sessionId: context.sessionMetadata.sessionId
+                ).emit()
             }
-
-            // 3. Strip ```json … ``` markdown fences if present
-            let stripped = Self.stripMarkdownFences(rawResponse)
-
-            // 4. Decode {"set_prescription": SetPrescription}
-            guard let responseData = stripped.data(using: .utf8) else {
-                lastErrorDescription = "Response could not be converted to UTF-8 data."
-                continue
-            }
-
-            // Construct decoder inline (same reason as encoder above).
-            let decoder: JSONDecoder = {
-                let d = JSONDecoder()
-                d.dateDecodingStrategy = .iso8601
-                return d
-            }()
-            let wrapper: SetPrescriptionWrapper
-            do {
-                wrapper = try decoder.decode(SetPrescriptionWrapper.self, from: responseData)
-            } catch {
-                lastErrorDescription = "JSON decode failed: \(error.localizedDescription). Raw: \(stripped.prefix(300))"
-                continue
-            }
-
-            var prescription = wrapper.setPrescription
-
-            // 5. Validate
-            do {
-                try prescription.validate()
-            } catch {
-                lastErrorDescription = error.localizedDescription
-                continue
-            }
-
-            // 6. Safety gate: pain reported → rest ≥ 180 s
-            if prescription.safetyFlags.contains(.painReported) {
-                prescription.restSeconds = max(prescription.restSeconds, 180)
-            }
-
-            // 7. Return successful prescription.
-            // Note: weight availability is handled at runtime via GymFactStore
-            // + WeightCorrectionView — not here.
-            return .success(prescription)
+            return .fallback(reason: .llmProviderError(error.localizedDescription))
         }
 
-        let fallback = PrescriptionResult.fallback(reason: .maxRetriesExceeded(lastError: lastErrorDescription))
-        FallbackLogRecord(
-            callSite: FallbackLogRecord.prescribeCallSite,
-            reason: "maxRetriesExceeded: \(lastErrorDescription.prefix(200))",
-            sessionId: context.sessionMetadata.sessionId
-        ).emit()
-        return fallback
+        // 3. Strip ```json … ``` markdown fences if present
+        let stripped = Self.stripMarkdownFences(rawResponse)
+
+        // 4. Decode {"set_prescription": SetPrescription}
+        guard let responseData = stripped.data(using: .utf8) else {
+            return failPermanent(
+                "Response could not be converted to UTF-8 data.",
+                sessionId: context.sessionMetadata.sessionId,
+                callSite: FallbackLogRecord.prescribeCallSite
+            )
+        }
+
+        let decoder: JSONDecoder = {
+            let d = JSONDecoder()
+            d.dateDecodingStrategy = .iso8601
+            return d
+        }()
+        let wrapper: SetPrescriptionWrapper
+        do {
+            wrapper = try decoder.decode(SetPrescriptionWrapper.self, from: responseData)
+        } catch let validationError as PrescriptionValidationError {
+            // Custom `init(from:)` rethrows invalid-intent shapes as a typed
+            // PrescriptionValidationError. Same fail-fast treatment.
+            return failPermanent(
+                "decode/validate: \(validationError.errorDescription ?? "\(validationError)")",
+                sessionId: context.sessionMetadata.sessionId,
+                callSite: FallbackLogRecord.prescribeCallSite
+            )
+        } catch {
+            return failPermanent(
+                "JSON decode failed: \(error.localizedDescription). Raw: \(stripped.prefix(300))",
+                sessionId: context.sessionMetadata.sessionId,
+                callSite: FallbackLogRecord.prescribeCallSite
+            )
+        }
+
+        var prescription = wrapper.setPrescription
+
+        // 5. Validate
+        do {
+            try prescription.validate()
+        } catch {
+            return failPermanent(
+                error.localizedDescription,
+                sessionId: context.sessionMetadata.sessionId,
+                callSite: FallbackLogRecord.prescribeCallSite
+            )
+        }
+
+        // 6. Safety gate: pain reported → rest ≥ 180 s
+        if prescription.safetyFlags.contains(.painReported) {
+            prescription.restSeconds = max(prescription.restSeconds, 180)
+        }
+
+        // 7. Return successful prescription.
+        return .success(prescription)
+    }
+
+    /// Maps the ADR-0007 fail-fast hook (`emitPermanentFailureFallback`,
+    /// declared at file scope in `FallbackLogRecord.swift`) onto this
+    /// service's `PrescriptionResult`. The hook does the emission; this
+    /// wrapper builds the typed result.
+    ///
+    /// Audit hook for the spinoff "Audit retry-on-validate sites against
+    /// ADR-0007" — `emitPermanentFailureFallback` is the canonical
+    /// greppable inventory of fail-fast adoptions across services.
+    private func failPermanent(
+        _ description: String,
+        sessionId: String,
+        callSite: String
+    ) -> PrescriptionResult {
+        emitPermanentFailureFallback(
+            callSite: callSite,
+            description: description,
+            sessionId: sessionId
+        )
+        return .fallback(reason: .malformedResponse(description))
     }
 
     // MARK: - Public API: Weight Adaptation
@@ -791,7 +1033,11 @@ actor AIInferenceService {
 
             let stripped = Self.stripMarkdownFences(rawResponse)
             guard let responseData = stripped.data(using: .utf8) else {
-                return .fallback(reason: .encodingFailed("Adaptation response could not be decoded."))
+                return failPermanent(
+                    "Adaptation response could not be decoded.",
+                    sessionId: workoutContext.sessionMetadata.sessionId,
+                    callSite: FallbackLogRecord.prescribeAdaptationCallSite
+                )
             }
 
             let decoder: JSONDecoder = {
@@ -800,15 +1046,37 @@ actor AIInferenceService {
                 return d
             }()
 
-            guard let wrapper = try? decoder.decode(SetPrescriptionWrapper.self, from: responseData) else {
-                return .fallback(reason: .maxRetriesExceeded(lastError: "Adaptation decode failed."))
+            // Per ADR-0007 §1: malformed-response and validation errors are
+            // PERMANENT. prescribeAdaptation aligns with prescribe() — any
+            // decode or validate failure returns `.fallback(.malformedResponse)`
+            // immediately so the foreground call site surfaces an error UI
+            // rather than silently degrading.
+            let wrapper: SetPrescriptionWrapper
+            do {
+                wrapper = try decoder.decode(SetPrescriptionWrapper.self, from: responseData)
+            } catch let validationError as PrescriptionValidationError {
+                return failPermanent(
+                    "Adaptation decode/validate: \(validationError.errorDescription ?? "\(validationError)")",
+                    sessionId: workoutContext.sessionMetadata.sessionId,
+                    callSite: FallbackLogRecord.prescribeAdaptationCallSite
+                )
+            } catch {
+                return failPermanent(
+                    "Adaptation decode failed: \(error.localizedDescription)",
+                    sessionId: workoutContext.sessionMetadata.sessionId,
+                    callSite: FallbackLogRecord.prescribeAdaptationCallSite
+                )
             }
 
             var prescription = wrapper.setPrescription
             do {
                 try prescription.validate()
             } catch {
-                return .fallback(reason: .maxRetriesExceeded(lastError: "Adaptation validation failed: \(error.localizedDescription)"))
+                return failPermanent(
+                    "Adaptation validation failed: \(error.localizedDescription)",
+                    sessionId: workoutContext.sessionMetadata.sessionId,
+                    callSite: FallbackLogRecord.prescribeAdaptationCallSite
+                )
             }
 
             if prescription.safetyFlags.contains(.painReported) {
@@ -895,7 +1163,9 @@ actor AIInferenceService {
             "coaching_cue": "<string, max 100 chars>",
             "reasoning": "<string, max 200 chars>",
             "safety_flags": ["shoulder_caution"|"joint_concern"|"fatigue_high"|"pain_reported"|"deload_recommended"],
-            "confidence": <number 0.0–1.0, optional>
+            "confidence": <number 0.0–1.0, optional>,
+            "intent": "warmup"|"top"|"backoff"|"technique"|"amrap",
+            "set_framing": "<string, max 80 chars>"
           }
         }
 
@@ -905,6 +1175,36 @@ actor AIInferenceService {
         - weight_kg must be achievable on the equipment described in current_exercise.equipment_type_key.
         - coaching_cue must be ≤ 100 characters. reasoning must be ≤ 200 characters.
         - Always consider safety flags from qualitative notes (pain → slow down, fatigue → reduce load).
+        - intent is REQUIRED on every prescription. No silent default. Choose deliberately:
+            * top:       the working set that drives capability (3–10 reps, max effort within RIR target).
+            * warmup:    sub-maximal preparation set; lighter load, higher reps, low RIR risk.
+            * backoff:   secondary working set following a top set, typically 70–85% of top weight.
+            * technique: tempo/form-focused practice; load is incidental, may be light.
+            * amrap:     last-set-as-many-reps-as-possible at the prescribed weight.
+        - set_framing is REQUIRED. A 1-line mental-set framing for THIS specific set, distinct from
+          coaching_cue. Sets the user's frame BEFORE they lift; not a form reminder during. Max 80 chars.
+
+        GOOD set_framings (set the mental frame, typed by intent):
+            top:       "Heaviest work of the day. Brace and grind."
+            top:       "This is the set that moves the needle. Treat it that way."
+            warmup:    "Groove the pattern. Don't fight the bar."
+            warmup:    "Wake up the muscles. Save the effort for later."
+            backoff:   "Build volume on a manageable load."
+            backoff:   "More reps, less weight. Stay tight throughout."
+            technique: "Slow the tempo. Quality over load."
+            technique: "Feel the right muscles working. Forget the number."
+            amrap:     "Push to genuine failure with form intact."
+            amrap:     "Last set, no reservations. Stop only when reps break."
+
+        BAD set_framings to avoid:
+            - Generic encouragement: "You got this!", "Make it count!", "Crush it!"
+              These add no information and condescend.
+            - Form cues that belong in coaching_cue: "Drive through your heels",
+              "Retract your scapulae", "Brace your core".
+              coaching_cue is the form note for the reps; set_framing is the frame for the set.
+            - Long sentences. Hard cap 80 chars; aim for ~50–70.
+            - Restating reps/weight: "Do 8 reps at 80kg." The user can already see those numbers.
+            - Repeating the intent word: "This is your top set." The intent label is already shown.
 
         EQUIPMENT-AWARE WEIGHT INCREMENTS:
         - barbell: minimum 5 kg increment. Use 2.5 kg only near a natural plate boundary (20/60/100 kg).
