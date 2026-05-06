@@ -41,6 +41,7 @@
 		6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6DC23D0A3EB460CF97B18574 /* Foundation.framework */; };
 		729D1F4ED6B5BD11AFD51058 /* MigrationDatesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F6BA9A7C15E3ED7575683DB /* MigrationDatesTests.swift */; };
 		73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */; };
+		7D8C4E6ADC8DEDCA31B72B1D /* ManualLogIntentGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED8AB93C545B445971A78F14 /* ManualLogIntentGateTests.swift */; };
 		81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */; };
 		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
 		8A28FF4A9DE063DFA4183B29 /* SetPrescriptionIntentValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */; };
@@ -104,6 +105,7 @@
 		E2D46426254666742A81E0B8 /* MuscleTaxonomyTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MuscleTaxonomyTests.swift; sourceTree = "<group>"; };
 		E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelLocalStoreTests.swift; sourceTree = "<group>"; };
 		ED1E4BCA9CBB3EDBB8068E06 /* SetCompletionFormStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SetCompletionFormStateTests.swift; sourceTree = "<group>"; };
+		ED8AB93C545B445971A78F14 /* ManualLogIntentGateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ManualLogIntentGateTests.swift; sourceTree = "<group>"; };
 		EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelEnumsTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MovementPatternTests.swift; sourceTree = "<group>"; };
@@ -235,6 +237,7 @@
 				18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */,
 				ED1E4BCA9CBB3EDBB8068E06 /* SetCompletionFormStateTests.swift */,
 				DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */,
+				ED8AB93C545B445971A78F14 /* ManualLogIntentGateTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -377,6 +380,7 @@
 				E50E3B4CBD53ED7ABE725DB8 /* EquipmentCatalogSeedTests.swift in Sources */,
 				0CFD5EC802FC7842DCAC24AE /* SetCompletionFormStateTests.swift in Sources */,
 				8A28FF4A9DE063DFA4183B29 /* SetPrescriptionIntentValidationTests.swift in Sources */,
+				7D8C4E6ADC8DEDCA31B72B1D /* ManualLogIntentGateTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

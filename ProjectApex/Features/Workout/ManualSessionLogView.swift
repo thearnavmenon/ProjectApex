@@ -31,6 +31,43 @@ struct ManualSetEntry: Identifiable {
     // Formatted weight string for the text field
     var weightString: String = ""
     var rpeString: String = ""
+
+    // Slice 6 (#10) — set-intent capture for manual log entries.
+    /// Selected intent. Nil until the user picks one — no silent default.
+    var intent: SetIntent? = nil
+    /// Whether the user has explicitly interacted with the intent picker
+    /// for this set. Save is gated on this flag for every non-empty entry.
+    /// The flag is the load-bearing rule from issue #10 — even if a future
+    /// flow pre-fills `intent`, the user must still tap.
+    var intentTouched: Bool = false
+
+    /// True when this entry has weight or reps and therefore counts toward
+    /// the manual-log submission. Mirrors the
+    /// `guard reps > 0 || weight > 0 else { continue }` filter applied at
+    /// submit time (see `submitSession`). Empty entries are skipped — they
+    /// neither gate nor contribute.
+    var hasContent: Bool {
+        let parsedWeight = Double(weightString.replacingOccurrences(of: ",", with: ".")) ?? weightKg
+        return reps > 0 || parsedWeight > 0
+    }
+}
+
+// MARK: - Submit gate (Slice 6 / #10) — unit-testable helper
+
+/// Returns true when every non-empty set entry across every exercise has
+/// a touched intent. Pulled out as a top-level function so the gate is
+/// observable from XCTest without a SwiftUI / @State harness.
+///
+/// AC from issue #10: Save disabled until each non-empty set entry has
+/// an explicitly-tapped intent. Empty entries (no weight, no reps) do
+/// not gate — they're filtered out at submit.
+func manualLogCanSubmit(entries: [ManualExerciseEntry]) -> Bool {
+    for entry in entries {
+        for setEntry in entry.sets where setEntry.hasContent {
+            if !setEntry.intentTouched { return false }
+        }
+    }
+    return true
 }
 
 // MARK: - ManualExerciseEntry
@@ -194,9 +231,33 @@ struct ManualSessionLogView: View {
 
     // MARK: - Submit Button
 
+    /// Slice 6 (#10): Save is disabled until every non-empty set entry has
+    /// a touched intent. Gating logic lives in the file-scope helper
+    /// `manualLogCanSubmit(entries:)` so it's unit-testable.
+    private var canSubmit: Bool {
+        !isSubmitting && manualLogCanSubmit(entries: entries)
+    }
+
     private var submitButton: some View {
         VStack(spacing: 0) {
             Divider().background(Color.white.opacity(0.06))
+
+            // Inline hint when the gate is closed by missing intents — gives
+            // the user a reason for the disabled state rather than a silent
+            // dead button.
+            if !isSubmitting && !manualLogCanSubmit(entries: entries) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Pick an intent for every logged set before saving")
+                        .font(.system(size: 12, weight: .medium))
+                    Spacer()
+                }
+                .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.85))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+            }
+
             Button(action: {
                 Task { await submitSession() }
             }) {
@@ -216,17 +277,21 @@ struct ManualSessionLogView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 18)
                 .background(
-                    isSubmitting
-                        ? Color(red: 0.23, green: 0.56, blue: 1.00).opacity(0.60)
-                        : Color(red: 0.23, green: 0.56, blue: 1.00),
+                    canSubmit
+                        ? Color(red: 0.23, green: 0.56, blue: 1.00)
+                        : Color(red: 0.23, green: 0.56, blue: 1.00).opacity(0.30),
                     in: RoundedRectangle(cornerRadius: 16, style: .continuous)
                 )
                 .foregroundStyle(.white)
             }
-            .disabled(isSubmitting)
+            .disabled(!canSubmit)
+            .accessibilityHint(canSubmit
+                               ? "Save this manual session"
+                               : "Pick an intent for every logged set first")
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .background(Color(red: 0.04, green: 0.04, blue: 0.06))
+            .animation(.easeInOut(duration: 0.18), value: canSubmit)
         }
     }
 
@@ -318,7 +383,14 @@ struct ManualSessionLogView: View {
                     rirEstimated: rpe.map { max(0, 10 - $0) },
                     aiPrescribed: nil,
                     loggedAt: sessionDate,
-                    primaryMuscle: ExerciseLibrary.primaryMuscle(for: entry.exercise.exerciseId)?.rawValue ?? entry.exercise.primaryMuscle
+                    primaryMuscle: ExerciseLibrary.primaryMuscle(for: entry.exercise.exerciseId)?.rawValue ?? entry.exercise.primaryMuscle,
+                    // Slice 6 (#10): picker-captured intent threaded into
+                    // the SetLog client-side. ManualSetLogPayload encoder
+                    // does NOT serialise this in Phase 0 (γ — top-level
+                    // column doesn't exist; user-truthful intent for
+                    // pre-cutoff freestyle rows is the documented
+                    // trade-off). Phase 1+ Swift release will promote.
+                    intent: setEntry.intent
                 )
                 allSetLogs.append((setLog, entry.exercise))
             }
@@ -428,18 +500,20 @@ private struct ExerciseLogCard: View {
             // Column headers
             HStack(spacing: 0) {
                 Text("SET")
-                    .frame(width: 40, alignment: .center)
+                    .frame(width: 32, alignment: .center)
                 Text("WEIGHT (KG)")
                     .frame(maxWidth: .infinity, alignment: .center)
                 Text("REPS")
-                    .frame(width: 64, alignment: .center)
+                    .frame(width: 56, alignment: .center)
                 Text("RPE")
-                    .frame(width: 64, alignment: .center)
+                    .frame(width: 48, alignment: .center)
+                Text("INTENT")
+                    .frame(width: 80, alignment: .center)
             }
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(.white.opacity(0.35))
             .kerning(0.4)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
             Divider().background(Color.white.opacity(0.06))
@@ -529,7 +603,7 @@ private struct SetInputRow: View {
             Text("\(setNumber)")
                 .font(.system(size: 14, weight: .bold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.45))
-                .frame(width: 40, alignment: .center)
+                .frame(width: 32, alignment: .center)
 
             // Weight input
             TextField("0", text: $setEntry.weightString)
@@ -541,22 +615,22 @@ private struct SetInputRow: View {
                 .padding(.vertical, 10)
 
             // Reps stepper
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Button(action: {
                     setEntry.reps = max(0, setEntry.reps - 1)
                 }) {
                     Image(systemName: "minus")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.50))
-                        .frame(width: 24, height: 24)
+                        .frame(width: 20, height: 20)
                         .background(Color.white.opacity(0.08), in: Circle())
                 }
                 .buttonStyle(.plain)
 
                 Text("\(setEntry.reps)")
-                    .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(.white)
-                    .frame(width: 30, alignment: .center)
+                    .frame(width: 24, alignment: .center)
 
                 Button(action: {
                     setEntry.reps = setEntry.reps + 1
@@ -564,23 +638,93 @@ private struct SetInputRow: View {
                     Image(systemName: "plus")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.50))
-                        .frame(width: 24, height: 24)
+                        .frame(width: 20, height: 20)
                         .background(Color.white.opacity(0.08), in: Circle())
                 }
                 .buttonStyle(.plain)
             }
-            .frame(width: 64)
+            .frame(width: 56)
 
             // RPE input (optional, 1-10)
             TextField("—", text: $setEntry.rpeString)
                 .keyboardType(.numberPad)
-                .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
+                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(.white.opacity(0.70))
                 .multilineTextAlignment(.center)
-                .frame(width: 64)
+                .frame(width: 48)
                 .padding(.vertical, 10)
+
+            // Intent picker (Slice 6 / #10).
+            // Compact menu — fits the existing dense-row visual rhythm. Shows
+            // "—" while untouched (visual cue that the field is required);
+            // shows the selected intent name once tapped. Empty rows
+            // (weight = 0 AND reps = 0) don't gate at submit, but the
+            // picker is still tappable in case the user wants to fill the
+            // intent before the numbers.
+            intentMenu
+                .frame(width: 80)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 12)
+    }
+
+    @ViewBuilder
+    private var intentMenu: some View {
+        Menu {
+            ForEach(SetIntent.allCases, id: \.self) { intent in
+                Button {
+                    setEntry.intent = intent
+                    setEntry.intentTouched = true
+                } label: {
+                    if setEntry.intent == intent {
+                        Label(intentLabel(intent), systemImage: "checkmark")
+                    } else {
+                        Text(intentLabel(intent))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(setEntry.intentTouched
+                     ? (setEntry.intent.map(intentLabel) ?? "—")
+                     : "—")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(setEntry.intentTouched
+                                     ? Color(red: 0.23, green: 0.56, blue: 1.00)
+                                     : .white.opacity(0.45))
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.40))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.06))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(
+                        setEntry.intentTouched
+                            ? Color(red: 0.23, green: 0.56, blue: 1.00).opacity(0.50)
+                            : Color.white.opacity(0.15),
+                        lineWidth: 0.5
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Set \(setNumber) intent")
+        .accessibilityValue(setEntry.intent.map(intentLabel) ?? "Not selected")
+    }
+
+    private func intentLabel(_ intent: SetIntent) -> String {
+        switch intent {
+        case .warmup:    return "Warmup"
+        case .top:       return "Top"
+        case .backoff:   return "Backoff"
+        case .technique: return "Technique"
+        case .amrap:     return "AMRAP"
+        }
     }
 }
 

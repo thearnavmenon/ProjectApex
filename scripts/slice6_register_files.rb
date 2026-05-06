@@ -55,6 +55,7 @@ raise 'ProjectApexTests group not found' unless tests_group
 %w[
   SetCompletionFormStateTests.swift
   SetPrescriptionIntentValidationTests.swift
+  ManualLogIntentGateTests.swift
 ].each do |name|
   ensure_file(
     project:  project,

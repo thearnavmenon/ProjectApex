@@ -281,7 +281,7 @@ actor WorkoutSessionManager {
     ///   3. Assemble WorkoutContext
     ///   4. Await AI prescription on a child Task
     ///   5. On result: update currentPrescription; when timer expires → .active
-    func completeSet(actualReps: Int, rpeFelt: Int?) async {
+    func completeSet(actualReps: Int, rpeFelt: Int?, intent: SetIntent) async {
         guard case .active(let exercise, let setNumber) = sessionState,
               let session = session else { return }
 
@@ -291,7 +291,13 @@ actor WorkoutSessionManager {
         inflightRequestCount += 1
         let capturedGeneration = inferenceGeneration
 
-        // Build and store set log
+        // Build and store set log.
+        // Slice 6 (#10): intent comes from the AI prescription in this
+        // (auto-driven) flow. Currently NOT exposed to the rep/RPE sheet
+        // for user override at completion time — completeSet is invoked
+        // with the prescription's intent implicit. If the picker UI ever
+        // grows the ability to override the AI's intent at completion,
+        // thread the picker's value here instead of `currentPrescription?.intent`.
         let setLog = SetLog(
             id: UUID(),
             sessionId: session.id,
@@ -303,7 +309,8 @@ actor WorkoutSessionManager {
             rirEstimated: rpeFelt.map { max(0, 10 - $0) },
             aiPrescribed: currentPrescription,
             loggedAt: Date(),
-            primaryMuscle: ExerciseLibrary.primaryMuscle(for: exercise.exerciseId)?.rawValue ?? exercise.primaryMuscle
+            primaryMuscle: ExerciseLibrary.primaryMuscle(for: exercise.exerciseId)?.rawValue ?? exercise.primaryMuscle,
+            intent: intent
         )
         completedSets.append(setLog)
 

@@ -105,11 +105,14 @@ final class WorkoutViewModel {
 
     /// Called when the user taps "Set Complete".
     /// Disables the button during the async call to prevent double-taps.
-    func onSetComplete(actualReps: Int, rpeFelt: Int?) {
+    /// `intent` is non-optional because the rep/RPE sheet's "Log Set"
+    /// button is gated on an explicit picker tap (Slice 6 / #10) — by the
+    /// time this method is invoked, the user has chosen.
+    func onSetComplete(actualReps: Int, rpeFelt: Int?, intent: SetIntent) {
         guard !isCompletingSet else { return }
         isCompletingSet = true
         Task {
-            await manager.completeSet(actualReps: actualReps, rpeFelt: rpeFelt)
+            await manager.completeSet(actualReps: actualReps, rpeFelt: rpeFelt, intent: intent)
             await pullState()
             isCompletingSet = false
         }
