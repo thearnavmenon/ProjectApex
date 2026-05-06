@@ -76,8 +76,18 @@ actor TraineeModelService {
     }
 
     /// Returns the request-time digest projection of the cached model,
-    /// or nil if the local store is empty. See file header for the
-    /// rationale for the Optional return.
+    /// or nil if the local store is empty (cold-start / pre-onboarding,
+    /// before the first server update hydrates the cache).
+    ///
+    /// Callers must handle the nil case — do not assume a digest is
+    /// always present. Typical guard pattern:
+    ///
+    ///     guard let digest = await service.digest() else {
+    ///         // trainee model not yet available; skip prompt section
+    ///         return
+    ///     }
+    ///
+    /// See file header for the rationale for the Optional return.
     func digest() async -> TraineeModelDigest? {
         guard let model = await store.load() else { return nil }
         return TraineeModelDigest(from: model, asOf: now())

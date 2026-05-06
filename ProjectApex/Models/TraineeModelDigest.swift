@@ -36,6 +36,9 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     var perMuscleSummary: [MuscleSummary]
     var activeFatigueInteractions: [FatigueInteraction]
     var activeLimitations: [ActiveLimitation]
+    /// Unfiltered — every entry from the source model's nested map, flattened.
+    /// Callers consuming this for prompt assembly must filter by request context
+    /// before passing to the model; do not forward the full list verbatim.
     var prescriptionAccuracy: [PrescriptionAccuracy]
     var disruptedPatterns: [MovementPattern]
 
