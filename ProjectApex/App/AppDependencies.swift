@@ -9,6 +9,7 @@
 //   KeychainService → SupabaseClient → HealthKitService
 //     → MemoryService → SpeechService → GymFactStore
 //     → AIInferenceService → ProgramGenerationService
+//     → WriteAheadQueue → TraineeModelLocalStore → TraineeModelUpdateJob
 //     → WorkoutSessionManager
 
 import SwiftUI
@@ -38,6 +39,10 @@ final class AppDependencies {
     let exerciseSwapService: ExerciseSwapService
     /// Local write-ahead queue for reliable Supabase writes during workouts.
     let writeAheadQueue: WriteAheadQueue
+    /// Local SwiftData cache for the trainee model snapshot (Phase 1 / Slice 8).
+    let traineeModelLocalStore: TraineeModelLocalStore
+    /// WAQ adapter: routes trainee_model_updates items to the Edge Function (Phase 1 / Slice 11).
+    let traineeModelUpdateJob: TraineeModelUpdateJob
     /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
     let workoutSessionManager: WorkoutSessionManager
 
@@ -138,7 +143,18 @@ final class AppDependencies {
         let waq = WriteAheadQueue(supabase: supabaseClient)
         self.writeAheadQueue = waq
 
-        // 10. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak
+        // 10. TraineeModelLocalStore + TraineeModelUpdateJob (Phase 1 / Slices 8 + 11)
+        // makeShared() can fail only if SwiftData can't create the container — treat as fatal.
+        let tmStore = (try? TraineeModelLocalStore.makeShared()) ?? (try! TraineeModelLocalStore.makeInMemory())
+        self.traineeModelLocalStore = tmStore
+        let tmJob = TraineeModelUpdateJob(supabase: supabaseClient, store: tmStore)
+        self.traineeModelUpdateJob = tmJob
+        // Register the handler with the WAQ. Done via Task so the async WAQ actor hop
+        // doesn't block the synchronous init. The Task is scheduled immediately and
+        // completes before any user interaction can trigger a WAQ flush.
+        Task { await tmJob.register(with: waq) }
+
+        // 11. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak
         self.workoutSessionManager = WorkoutSessionManager(
             aiInference: inferenceService,
             healthKit: healthKitService,

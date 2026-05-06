@@ -21,6 +21,7 @@
 // in a future iteration without changing the public API.
 
 import Foundation
+import OSLog
 
 // MARK: - QueuedWrite
 
@@ -107,6 +108,8 @@ actor WriteAheadQueue {
     /// startup by job types such as TraineeModelUpdateJob.
     private var flushHandlers: [String: @Sendable (QueuedWrite) async -> WAQFlushOutcome] = [:]
 
+    private static let logger = Logger(subsystem: "com.projectapex", category: "WriteAheadQueue")
+
     // MARK: - Dependencies
 
     private let supabase: SupabaseClient
@@ -191,7 +194,7 @@ actor WriteAheadQueue {
             case .permanentFailure(let reason):
                 queue.removeFirst()
                 persistQueue()
-                print("[WriteAheadQueue] PERMANENT FAILURE for item \(item.id), table: \(item.table) — \(reason)")
+                Self.logger.error("[WriteAheadQueue] permanent failure, item \(item.id, privacy: .public), table: \(item.table, privacy: .public) — \(reason, privacy: .public)")
 
             case .transientFailure:
                 item.retryCount += 1
@@ -200,7 +203,7 @@ actor WriteAheadQueue {
                     // Exhausted retries — remove and log (data loss for this item)
                     queue.removeFirst()
                     persistQueue()
-                    print("[WriteAheadQueue] DROPPED item \(item.id) after \(Self.maxRetries) retries — table: \(item.table)")
+                    Self.logger.error("[WriteAheadQueue] dropped item \(item.id, privacy: .public) after \(Self.maxRetries) retries — table: \(item.table, privacy: .public)")
                     continue
                 }
 
