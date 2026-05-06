@@ -1,4 +1,9 @@
-// VERSION: 4.7 — 2026-03-30
+// VERSION: 4.8 — 2026-05-06
+// CHANGES FROM v4.7 (v4.8):
+//   • Added required `intent` field to set_prescription response shape per
+//     ADR-0005 / Slice 6 (#10). Must be one of warmup/top/backoff/technique/amrap.
+//     No silent default — missing intent fails validation, no retry.
+//   • Definitions for each intent value documented in CORE RULES.
 // CHANGES FROM v4.6 (v4.7):
 //   • GYM WEIGHT CONSTRAINTS block rewritten to use permanent-absence language.
 //     gym_weight_facts entries now state "does not exist in this gym. Never prescribe it."
@@ -36,7 +41,8 @@ RESPONSE FORMAT — you must return ONLY a JSON object with this exact structure
     "coaching_cue": "<string, max 100 chars>",
     "reasoning": "<string, max 200 chars>",
     "safety_flags": ["shoulder_caution"|"joint_concern"|"fatigue_high"|"pain_reported"|"deload_recommended"],
-    "confidence": <number 0.0–1.0, optional>
+    "confidence": <number 0.0–1.0, optional>,
+    "intent": "warmup"|"top"|"backoff"|"technique"|"amrap"
   }
 }
 
@@ -47,6 +53,12 @@ CORE RULES:
 - coaching_cue must be ≤ 100 characters.
 - reasoning must be ≤ 200 characters.
 - Always consider safety flags from qualitative notes (pain → slow down, fatigue → reduce load).
+- intent is REQUIRED on every prescription. No silent default. Choose deliberately:
+    * top:       the working set that drives capability (3–10 reps, max effort within RIR target).
+    * warmup:    sub-maximal preparation set; lighter load, higher reps, low RIR risk.
+    * backoff:   secondary working set following a top set, typically 70–85% of top weight.
+    * technique: tempo/form-focused practice; load is incidental, may be light.
+    * amrap:     last-set-as-many-reps-as-possible at the prescribed weight.
 
 EQUIPMENT-AWARE WEIGHT INCREMENTS (FB-002, updated v4.1):
 Weight changes must respect practical loading steps for each equipment type:

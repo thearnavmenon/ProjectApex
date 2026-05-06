@@ -1158,7 +1158,8 @@ private extension AnyTransition {
         coachingCue: "Reduce ROM slightly — pain flag active",
         reasoning: "HRV -22% · pain_reported in previous note → load reduced 15%.",
         safetyFlags: [.painReported, .shoulderCaution],
-        confidence: 0.72
+        confidence: 0.72,
+        intent: .top
     )
     return ActiveSetView(
         viewModel: vm,

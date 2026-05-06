@@ -683,6 +683,11 @@ actor WorkoutSessionManager {
             .filter { $0.exerciseId == exercise.exerciseId }
             .max(by: { $0.setNumber < $1.setNumber })
 
+        // Intent carry-over: when the user opts into the manual fallback
+        // ("Continue with last weights"), inherit the prior set's intent as a
+        // *suggestion* for the picker to prefill. Stays `nil` when there's no
+        // prior set in the session — the picker then has no prefill and the
+        // user must pick explicitly per Slice 6's no-silent-default rule.
         let prescription = SetPrescription(
             weightKg:          lastSet?.weightKg ?? 0.0,
             reps:              lastSet?.repsCompleted ?? exercise.repRange.min,
@@ -694,7 +699,8 @@ actor WorkoutSessionManager {
             safetyFlags:       [],
             confidence:        nil,
             userCorrectedWeight: nil,
-            isManualFallback:  true
+            isManualFallback:  true,
+            intent:            lastSet?.intent
         )
         currentPrescription = prescription
         inferenceRetryNeeded = false

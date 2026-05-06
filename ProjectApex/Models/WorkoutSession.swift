@@ -115,6 +115,15 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
     /// Populated from ExerciseLibrary at write time. Nullable for rows that
     /// pre-date the column or use non-canonical exercise IDs.
     let primaryMuscle: String?
+    /// SetIntent captured at log time per Slice 6 / ADR-0005. Client-side
+    /// only in Phase 0 — the `set_logs.intent` column does not exist until
+    /// Phase 1 lands the migration, so the encoder for the REST write
+    /// (`SetLogPayload` / `ManualSetLogPayload`) does NOT serialise this
+    /// field. Carried on the Swift type so the picker / freestyle path can
+    /// thread the user's selection through to other client-side consumers
+    /// (analytics, in-flight reasoning) and so a Phase-1+ Swift release can
+    /// promote the field to the REST payload without restructuring the type.
+    let intent: SetIntent?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -128,6 +137,7 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         case aiPrescribed    = "ai_prescribed"
         case loggedAt        = "logged_at"
         case primaryMuscle   = "primary_muscle"
+        case intent
     }
 
     // Memberwise initialiser — used by WorkoutSessionManager, ManualSessionLogView, etc.
@@ -142,7 +152,8 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         rirEstimated: Int?,
         aiPrescribed: SetPrescription?,
         loggedAt: Date,
-        primaryMuscle: String? = nil
+        primaryMuscle: String? = nil,
+        intent: SetIntent? = nil
     ) {
         self.id            = id
         self.sessionId     = sessionId
@@ -155,6 +166,7 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         self.aiPrescribed  = aiPrescribed
         self.loggedAt      = loggedAt
         self.primaryMuscle = primaryMuscle
+        self.intent        = intent
     }
 
     // Custom decoder so that optional columns (absent from older rows) decode
@@ -172,6 +184,7 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
         aiPrescribed   = try c.decodeIfPresent(SetPrescription.self, forKey: .aiPrescribed)
         loggedAt       = try c.decode(Date.self,   forKey: .loggedAt)
         primaryMuscle  = try c.decodeIfPresent(String.self,          forKey: .primaryMuscle)
+        intent         = try c.decodeIfPresent(SetIntent.self,       forKey: .intent)
     }
 }
 

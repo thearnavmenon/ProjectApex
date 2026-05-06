@@ -84,11 +84,13 @@ private func makeTestSupabase() -> SupabaseClient {
 // MARK: - JSON Fixture Builders
 
 /// Builds a valid set_prescription JSON response string.
+/// Includes `intent` per Slice 6 (#10).
 private func prescriptionJSON(
     weightKg: Double = 80.0,
     reps: Int = 8,
     restSeconds: Int = 120,
-    safetyFlags: [String] = []
+    safetyFlags: [String] = [],
+    intent: String = "top"
 ) -> String {
     let flags = safetyFlags.map { "\"\($0)\"" }.joined(separator: ", ")
     return """
@@ -101,7 +103,8 @@ private func prescriptionJSON(
         "rest_seconds": \(restSeconds),
         "coaching_cue": "Drive through the bar",
         "reasoning": "Based on recent performance trend.",
-        "safety_flags": [\(flags)]
+        "safety_flags": [\(flags)],
+        "intent": "\(intent)"
       }
     }
     """

@@ -24,7 +24,8 @@ private func validPrescription() -> SetPrescription {
         coachingCue: "Drive through the floor on the concentric.",
         reasoning: "Load is within previous session range; slight volume increase.",
         safetyFlags: [],
-        confidence: 0.9
+        confidence: 0.9,
+        intent: .top
     )
 }
 

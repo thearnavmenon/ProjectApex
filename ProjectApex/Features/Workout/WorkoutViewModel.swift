@@ -418,6 +418,8 @@ final class WorkoutViewModel {
             return "Coach offline — using program defaults"
         case .encodingFailed:
             return "Coach offline — using program defaults"
+        case .malformedResponse:
+            return "Coach offline — using program defaults"
         }
     }
 
@@ -433,6 +435,8 @@ final class WorkoutViewModel {
             return ".networkUnavailable(\(msg.prefix(80)))"
         case .encodingFailed(let detail):
             return ".encodingFailed(\(detail.prefix(80)))"
+        case .malformedResponse(let detail):
+            return ".malformedResponse(\(detail.prefix(80)))"
         }
     }
 
@@ -447,6 +451,8 @@ final class WorkoutViewModel {
             return "Network error: \(String(m.prefix(80)))"
         case .encodingFailed(let d):
             return "Internal error: \(String(d.prefix(80)))"
+        case .malformedResponse(let d):
+            return "Invalid response: \(String(d.prefix(80)))"
         }
     }
 
@@ -555,7 +561,8 @@ extension WorkoutViewModel {
             coachingCue: "Control descent, pause at chest",
             reasoning: "Up 2.5 kg from last session — HRV trending positive.",
             safetyFlags: [],
-            confidence: 0.87
+            confidence: 0.87,
+            intent: .top
         )
         mock.isAIOffline = false
         return mock
@@ -632,7 +639,8 @@ private struct PreviewLLMProvider: LLMProvider {
             "rest_seconds": 120,
             "coaching_cue": "Preview prescription",
             "reasoning": "Preview mode — no real AI.",
-            "safety_flags": []
+            "safety_flags": [],
+            "intent": "top"
           }
         }
         """

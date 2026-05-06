@@ -579,7 +579,8 @@ private struct LiquidWaveMiniModifier: ViewModifier {
         coachingCue: "Drive through the bar",
         reasoning: "Up 2.5 kg from last session — HRV trending positive.",
         safetyFlags: [],
-        confidence: 0.91
+        confidence: 0.91,
+        intent: .top
     )
     return RestTimerView(
         viewModel: vm,
