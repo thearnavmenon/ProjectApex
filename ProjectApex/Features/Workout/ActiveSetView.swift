@@ -47,15 +47,11 @@ struct ActiveSetView: View {
     /// ViewModel driving the exercise swap chat sheet (P3-T10).
     @State private var swapViewModel: ExerciseSwapViewModel?
 
-    /// True after "Set Complete" tap — shows rep/RPE confirmation sheet
+    /// True after "Set Complete" tap — shows rep/RPE confirmation sheet.
+    /// The sheet's content lives in `RepRPEIntentConfirmationSheet`, which
+    /// owns its own form state — see Slice 6 / #10 for the rationale and
+    /// the unit-testable state struct (`SetCompletionFormState`).
     @State private var showRepConfirmation: Bool = false
-
-    /// Reps / RPE / intent state for the active rep-confirmation sheet.
-    /// Initialised on sheet appearance from the live prescription. Slice 6
-    /// (#10) replaced the previous individual @State fields and the
-    /// 5-second auto-dismiss timer with this unit-testable struct so the
-    /// "Save disabled until explicit intent tap" AC is observable.
-    @State private var formState: SetCompletionFormState = SetCompletionFormState(actualReps: 8)
 
     /// Controls the collapsible reasoning section
     @State private var reasoningExpanded: Bool = false
@@ -124,9 +120,23 @@ struct ActiveSetView: View {
 
         }
         .sheet(isPresented: $showRepConfirmation) {
-            repRPEConfirmationSheet
-                .presentationDetents([.medium])
-                .presentationCornerRadius(24)
+            // Sheet content extracted to a previewable struct (Slice 6 / #10).
+            // The struct owns its own @State form, seeded once on construction
+            // from the live prescription. The struct calls back via `onCommit`
+            // when the user taps Log Set; the parent then dispatches to the
+            // session manager.
+            RepRPEIntentConfirmationSheet(
+                initialState: SetCompletionFormState(
+                    actualReps: viewModel.currentPrescription?.reps ?? 8,
+                    prescribedIntent: viewModel.currentPrescription?.intent
+                ),
+                tintColor: streak.tintColor,
+                onCommit: { state in
+                    commitSetComplete(state)
+                }
+            )
+            .presentationDetents([.medium, .large])
+            .presentationCornerRadius(24)
         }
         .sheet(isPresented: $showVoiceNoteModal) {
             voiceNoteModal
@@ -608,230 +618,6 @@ struct ActiveSetView: View {
         }
     }
 
-    // MARK: - Rep / RPE / Intent Confirmation Sheet (Slice 6 / #10)
-
-    private var repRPEConfirmationSheet: some View {
-        ScrollView {
-            VStack(spacing: 24) {
-                // Header — no auto-dismiss countdown per Slice 6 AC.
-                HStack {
-                    Text("How did that feel?")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Spacer()
-                }
-                .padding(.top, 4)
-
-                // Actual reps stepper
-                VStack(spacing: 10) {
-                    Text("Actual Reps")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
-                        .tracking(0.5)
-
-                    HStack(spacing: 24) {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            if formState.actualReps > 1 { formState.actualReps -= 1 }
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .font(.system(size: 36))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-
-                        Text("\(formState.actualReps)")
-                            .font(.system(size: 48, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white)
-                            .contentTransition(.numericText())
-                            .frame(minWidth: 72)
-
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            if formState.actualReps < 30 { formState.actualReps += 1 }
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 36))
-                                .foregroundStyle(streak.tintColor.opacity(0.90))
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-                    }
-                }
-
-                // RPE/RIR felt — 3-option segmented picker
-                VStack(spacing: 10) {
-                    Text("How hard was it?")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
-                        .tracking(0.5)
-
-                    Picker("RPE felt", selection: $formState.rpeFelt) {
-                        Text("Too Easy").tag(0)
-                        Text("On Target").tag(1)
-                        Text("Too Hard").tag(2)
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                // Intent picker (Slice 6 / #10) — required, no silent default.
-                intentPickerSection
-
-                // Log button — disabled until intent is explicitly selected.
-                Button {
-                    commitSetComplete()
-                } label: {
-                    Text("Log Set")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(
-                            (formState.canSubmit
-                                ? streak.tintColor
-                                : Color.white.opacity(0.10)),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        )
-                }
-                .disabled(!formState.canSubmit)
-                .accessibilityHint(formState.canSubmit
-                                   ? "Log this set"
-                                   : "Pick an intent to enable logging")
-                .animation(.easeInOut(duration: 0.18), value: formState.canSubmit)
-            }
-            .padding(24)
-        }
-        .background(Color(red: 0.07, green: 0.08, blue: 0.10))
-        .preferredColorScheme(.dark)
-        .onAppear {
-            // Initialise form state from the live prescription. Intent
-            // pre-fills from prescription.intent when present (AI-prescribed
-            // sets) and stays nil for freestyle. `intentTouched` starts
-            // false in both cases — Slice 6 AC: even a matching prefill
-            // requires explicit interaction.
-            formState = SetCompletionFormState(
-                actualReps: viewModel.currentPrescription?.reps ?? formState.actualReps,
-                prescribedIntent: viewModel.currentPrescription?.intent
-            )
-        }
-    }
-
-    // MARK: - Intent Picker (Slice 6 / #10)
-
-    @ViewBuilder
-    private var intentPickerSection: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 6) {
-                Text("What kind of set?")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .tracking(0.5)
-                if formState.hasUnconfirmedAIPrefill {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(streak.tintColor.opacity(0.90))
-                    Text("Coach suggested — tap to confirm")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(streak.tintColor.opacity(0.90))
-                }
-                Spacer()
-            }
-
-            // Two rows: 3 + 2 chips. Centred. Wrapping is deterministic and
-            // works across iPhone widths (5 chips × ~80pt > 375pt).
-            VStack(spacing: 8) {
-                HStack(spacing: 8) {
-                    ForEach([SetIntent.warmup, .top, .backoff], id: \.self) { intent in
-                        intentChip(intent)
-                    }
-                }
-                HStack(spacing: 8) {
-                    ForEach([SetIntent.technique, .amrap], id: \.self) { intent in
-                        intentChip(intent)
-                    }
-                }
-            }
-        }
-    }
-
-    /// Three visual states drive chip rendering, derived from `formState`:
-    ///   - **Confirmed**         (`intentTouched && intent == case`): solid
-    ///                            tint background, white bold text — the
-    ///                            user's explicit choice.
-    ///   - **AI-suggested-pending** (`hasUnconfirmedAIPrefill && intent == case`):
-    ///                            tint outline + low-opacity tint fill +
-    ///                            sparkles icon. Visually distinct from
-    ///                            "confirmed" so the user knows a tap is
-    ///                            still required (Slice 6 AC).
-    ///   - **Unselected**         (everything else): white-on-glass-low.
-    @ViewBuilder
-    private func intentChip(_ intent: SetIntent) -> some View {
-        let isConfirmed = formState.intentTouched && formState.intent == intent
-        let isAISuggested = formState.hasUnconfirmedAIPrefill && formState.intent == intent
-
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            formState.recordIntentTap(intent)
-        } label: {
-            HStack(spacing: 4) {
-                if isAISuggested {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                Text(intentLabel(intent))
-                    .font(.system(size: 13, weight: isConfirmed ? .bold : .semibold))
-                    .tracking(0.3)
-            }
-            .foregroundStyle(
-                isConfirmed
-                    ? Color.white
-                    : (isAISuggested
-                        ? streak.tintColor
-                        : Color.white.opacity(0.65))
-            )
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(
-                ZStack {
-                    Capsule()
-                        .fill(
-                            isConfirmed
-                                ? streak.tintColor
-                                : (isAISuggested
-                                    ? streak.tintColor.opacity(0.14)
-                                    : Color.white.opacity(0.06))
-                        )
-                    Capsule()
-                        .stroke(
-                            isConfirmed
-                                ? streak.tintColor
-                                : (isAISuggested
-                                    ? streak.tintColor.opacity(0.55)
-                                    : Color.white.opacity(0.18)),
-                            lineWidth: isAISuggested ? 1.0 : 0.5
-                        )
-                }
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(intentLabel(intent))
-        .accessibilityValue(isConfirmed
-                            ? "selected"
-                            : (isAISuggested ? "AI suggested, awaiting confirmation" : ""))
-        .accessibilityAddTraits(isConfirmed ? .isSelected : [])
-        .animation(.easeInOut(duration: 0.18), value: formState.intent)
-        .animation(.easeInOut(duration: 0.18), value: formState.intentTouched)
-    }
-
-    private func intentLabel(_ intent: SetIntent) -> String {
-        switch intent {
-        case .warmup:    return "Warmup"
-        case .top:       return "Top"
-        case .backoff:   return "Backoff"
-        case .technique: return "Technique"
-        case .amrap:     return "AMRAP"
-        }
-    }
-
     // MARK: - Voice Note Modal (P4-T06)
 
     private var voiceNoteModal: some View {
@@ -1119,27 +905,342 @@ struct ActiveSetView: View {
 
     private func handleSetCompleteTap() {
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-        // Sheet's onAppear seeds the formState from the prescription —
-        // resetting here would race with that. The sheet is single-shot
-        // per Set Complete tap.
         showRepConfirmation = true
     }
 
-    private func commitSetComplete() {
-        // Slice 6 AC: this path is only reachable when formState.canSubmit
-        // is true (button is disabled otherwise). Defensive guard left in
-        // case the path is invoked programmatically in the future.
-        guard formState.canSubmit, let chosenIntent = formState.intent else { return }
+    /// Called by `RepRPEIntentConfirmationSheet` when the user taps Log Set.
+    /// The sheet's gate guarantees `state.canSubmit == true` — we still
+    /// guard defensively in case the closure is invoked from a future code
+    /// path that didn't come through the gate.
+    private func commitSetComplete(_ state: SetCompletionFormState) {
+        guard state.canSubmit, let chosenIntent = state.intent else { return }
         showRepConfirmation = false
         // Map 0/1/2 picker to a rough RPE value: too easy = 5, on target = 7, too hard = 9
-        let rpeValue: Int = [5, 7, 9][formState.rpeFelt]
+        let rpeValue: Int = [5, 7, 9][state.rpeFelt]
         viewModel.onSetComplete(
-            actualReps: formState.actualReps,
+            actualReps: state.actualReps,
             rpeFelt: rpeValue,
             intent: chosenIntent
         )
     }
 
+}
+
+// MARK: - RepRPEIntentConfirmationSheet (Slice 6 / #10)
+
+/// The rep / RPE / intent confirmation sheet's content, extracted from
+/// `ActiveSetView` so it's previewable in isolation. Owns its own
+/// `@State formState` — the parent supplies `initialState` once at
+/// construction and gets the final value back via `onCommit` when the
+/// user taps "Log Set".
+///
+/// HITL visual review uses the `#Preview` blocks below to render the
+/// three states the AC ("Save disabled until explicit intent tap, even
+/// if the initial selection matches their intent") covers:
+///   - AI prefilled, awaiting confirmation
+///   - Freestyle, untouched (Log Set disabled)
+///   - Confirmed selection (Log Set enabled, chip solid)
+struct RepRPEIntentConfirmationSheet: View {
+
+    let initialState: SetCompletionFormState
+    let tintColor: Color
+    let onCommit: (SetCompletionFormState) -> Void
+
+    @State private var formState: SetCompletionFormState
+
+    init(
+        initialState: SetCompletionFormState,
+        tintColor: Color,
+        onCommit: @escaping (SetCompletionFormState) -> Void
+    ) {
+        self.initialState = initialState
+        self.tintColor = tintColor
+        self.onCommit = onCommit
+        self._formState = State(initialValue: initialState)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // Header — no auto-dismiss countdown per Slice 6 AC.
+                HStack {
+                    Text("How did that feel?")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                    Spacer()
+                }
+                .padding(.top, 4)
+
+                // Actual reps stepper
+                VStack(spacing: 10) {
+                    Text("Actual Reps")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.50))
+                        .tracking(0.5)
+
+                    HStack(spacing: 24) {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            if formState.actualReps > 1 { formState.actualReps -= 1 }
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(.white.opacity(0.55))
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+
+                        Text("\(formState.actualReps)")
+                            .font(.system(size: 48, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .contentTransition(.numericText())
+                            .frame(minWidth: 72)
+
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            if formState.actualReps < 30 { formState.actualReps += 1 }
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.system(size: 36))
+                                .foregroundStyle(tintColor.opacity(0.90))
+                        }
+                        .frame(minWidth: 44, minHeight: 44)
+                    }
+                }
+
+                // RPE/RIR felt — 3-option segmented picker
+                VStack(spacing: 10) {
+                    Text("How hard was it?")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.50))
+                        .tracking(0.5)
+
+                    Picker("RPE felt", selection: $formState.rpeFelt) {
+                        Text("Too Easy").tag(0)
+                        Text("On Target").tag(1)
+                        Text("Too Hard").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                }
+
+                // Intent picker (Slice 6 / #10) — required, no silent default.
+                intentPickerSection
+
+                // Log button — disabled until intent is explicitly selected.
+                // Disabled state dims the whole pill monolithically (background
+                // and label together) at ~35% opacity; conventional disabled
+                // affordance, avoids the "transparent fill + opaque text"
+                // visual ambiguity.
+                Button {
+                    onCommit(formState)
+                } label: {
+                    Text("Log Set")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(
+                            tintColor,
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        )
+                        .opacity(formState.canSubmit ? 1.0 : 0.35)
+                }
+                .disabled(!formState.canSubmit)
+                .accessibilityHint(formState.canSubmit
+                                   ? "Log this set"
+                                   : "Pick an intent to enable logging")
+                .animation(.easeInOut(duration: 0.18), value: formState.canSubmit)
+            }
+            .padding(24)
+        }
+        .background(Color(red: 0.07, green: 0.08, blue: 0.10))
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Intent Picker (Slice 6 / #10)
+
+    @ViewBuilder
+    private var intentPickerSection: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 6) {
+                Text("What kind of set?")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.50))
+                    .tracking(0.5)
+                if formState.hasUnconfirmedAIPrefill {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(tintColor.opacity(0.90))
+                    Text("Coach suggested — tap to confirm")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(tintColor.opacity(0.90))
+                }
+                Spacer()
+            }
+
+            // Two rows: 3 + 2 chips. Centred. Wrapping is deterministic and
+            // works across iPhone widths (5 chips × ~80pt > 375pt).
+            //
+            // Ordering is deliberate, not incidental. Order locks in user
+            // muscle memory once shipped; getting it right at v1 is cheap.
+            //   Row 1: warmup → top → backoff
+            //     Mirrors typical within-exercise session progression
+            //     (lighter prep set → heavy working set → secondary set
+            //     after the top). Top sits in the centre of row 1 because
+            //     it is by far the most common AI prefill — placing it on
+            //     the user's natural thumb path minimises tap travel for
+            //     the modal case.
+            //   Row 2: technique → amrap
+            //     Less common intents, demoted to the second row.
+            //     Technique on the left because it's the more common of
+            //     the two for hypertrophy programmes; AMRAP is a
+            //     last-set-of-block surface.
+            VStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    ForEach([SetIntent.warmup, .top, .backoff], id: \.self) { intent in
+                        intentChip(intent)
+                    }
+                }
+                HStack(spacing: 8) {
+                    ForEach([SetIntent.technique, .amrap], id: \.self) { intent in
+                        intentChip(intent)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Three visual states drive chip rendering, derived from `formState`:
+    ///   - **Confirmed**         (`intentTouched && intent == case`): solid
+    ///                            tint background, white bold text — the
+    ///                            user's explicit choice.
+    ///   - **AI-suggested-pending** (`hasUnconfirmedAIPrefill && intent == case`):
+    ///                            tint outline + low-opacity tint fill +
+    ///                            sparkles icon. Visually distinct from
+    ///                            "confirmed" so the user knows a tap is
+    ///                            still required (Slice 6 AC).
+    ///   - **Unselected**         (everything else): white-on-glass-low.
+    @ViewBuilder
+    private func intentChip(_ intent: SetIntent) -> some View {
+        let isConfirmed = formState.intentTouched && formState.intent == intent
+        let isAISuggested = formState.hasUnconfirmedAIPrefill && formState.intent == intent
+
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            formState.recordIntentTap(intent)
+        } label: {
+            HStack(spacing: 4) {
+                if isAISuggested {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                Text(Self.label(for: intent))
+                    .font(.system(size: 13, weight: isConfirmed ? .bold : .semibold))
+                    .tracking(0.3)
+            }
+            .foregroundStyle(
+                isConfirmed
+                    ? Color.white
+                    : (isAISuggested
+                        ? tintColor
+                        : Color.white.opacity(0.65))
+            )
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(
+                ZStack {
+                    Capsule()
+                        .fill(
+                            isConfirmed
+                                ? tintColor
+                                : (isAISuggested
+                                    ? tintColor.opacity(0.14)
+                                    : Color.white.opacity(0.06))
+                        )
+                    Capsule()
+                        .stroke(
+                            isConfirmed
+                                ? tintColor
+                                : (isAISuggested
+                                    ? tintColor.opacity(0.55)
+                                    : Color.white.opacity(0.18)),
+                            lineWidth: isAISuggested ? 1.0 : 0.5
+                        )
+                }
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Self.label(for: intent))
+        .accessibilityValue(isConfirmed
+                            ? "selected"
+                            : (isAISuggested ? "AI suggested, awaiting confirmation" : ""))
+        .accessibilityAddTraits(isConfirmed ? .isSelected : [])
+        .animation(.easeInOut(duration: 0.18), value: formState.intent)
+        .animation(.easeInOut(duration: 0.18), value: formState.intentTouched)
+    }
+
+    /// Display label for a SetIntent. Static so the same labels can be
+    /// reused if a future surface needs them.
+    static func label(for intent: SetIntent) -> String {
+        switch intent {
+        case .warmup:    return "Warmup"
+        case .top:       return "Top"
+        case .backoff:   return "Backoff"
+        case .technique: return "Technique"
+        case .amrap:     return "AMRAP"
+        }
+    }
+}
+
+// MARK: - Picker previews (Slice 6 / #10)
+//
+// These render in Xcode's SwiftUI canvas without needing a workout
+// session, programme, or API key — the whole point is a self-contained
+// HITL surface for visual review. The streak tint colour matches what
+// `mockActive()` uses elsewhere in this file.
+
+private let previewTint = StreakResult.compute(currentStreakDays: 7, longestStreak: 10).tintColor
+
+#Preview("Sheet — AI prefilled, awaiting confirmation") {
+    // hasUnconfirmedAIPrefill == true, canSubmit == false.
+    // The "Top" chip should render with sparkles + low-opacity tint fill.
+    // The "Coach suggested — tap to confirm" hint should appear next to
+    // the "What kind of set?" header. Log Set should be muted (35%
+    // opacity).
+    RepRPEIntentConfirmationSheet(
+        initialState: SetCompletionFormState(
+            actualReps: 8,
+            prescribedIntent: .top
+        ),
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — Freestyle, untouched (Log Set disabled)") {
+    // intent == nil, intentTouched == false, canSubmit == false.
+    // No chip is highlighted; no AI-suggested hint. Log Set is muted
+    // (35% opacity) because the gate is closed.
+    RepRPEIntentConfirmationSheet(
+        initialState: SetCompletionFormState(
+            actualReps: 8,
+            prescribedIntent: nil
+        ),
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — Confirmed selection (Log Set enabled)") {
+    // intent == .top, intentTouched == true, canSubmit == true.
+    // The "Top" chip renders solid tint + white bold; no AI-suggested
+    // hint. Log Set renders solid tint at 100% opacity.
+    var seed = SetCompletionFormState(actualReps: 8, prescribedIntent: nil)
+    seed.recordIntentTap(.top)
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
 }
 
 // MARK: - LiquidWaveModifier

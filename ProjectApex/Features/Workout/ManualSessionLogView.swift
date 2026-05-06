@@ -655,12 +655,30 @@ private struct SetInputRow: View {
                 .padding(.vertical, 10)
 
             // Intent picker (Slice 6 / #10).
-            // Compact menu — fits the existing dense-row visual rhythm. Shows
-            // "—" while untouched (visual cue that the field is required);
-            // shows the selected intent name once tapped. Empty rows
-            // (weight = 0 AND reps = 0) don't gate at submit, but the
-            // picker is still tappable in case the user wants to fill the
-            // intent before the numbers.
+            //
+            // Deliberate asymmetry with ActiveSetView's chip-row picker:
+            // ActiveSetView dedicates the full screen width to one set,
+            // so a 5-chip row is thumb-friendly and visually rich. This
+            // surface packs N exercises × M sets per exercise into a
+            // dense table — adding a 5-chip row per set would either
+            // double the table height (a chip row below each input row)
+            // or wrap-fail at iPhone widths (5 × ~80pt chip > 375pt
+            // available row width minus the existing 4 columns). A
+            // compact Menu fits as a 5th column in the existing row
+            // rhythm.
+            //
+            // The trade-off is one of two interaction patterns for the
+            // same data type — chips elsewhere, dropdown here. Documented
+            // in the PR description so future maintainers understand the
+            // intent. If the manual log is ever redesigned to a per-set
+            // expanded layout (e.g. card per set), revisit and unify on
+            // chips.
+            //
+            // Visual: shows "—" while untouched (cue that the field is
+            // required); shows the selected intent name once tapped.
+            // Empty rows (weight = 0 AND reps = 0) don't gate at submit,
+            // but the picker is still tappable so the user can fill the
+            // intent before the numbers if they prefer that order.
             intentMenu
                 .frame(width: 80)
         }
@@ -816,4 +834,72 @@ private extension String {
         programId: UUID()
     )
     .environment(AppDependencies())
+}
+
+// MARK: - Slice 6 picker previews (#10)
+//
+// Exercises the per-set intent picker (compact Menu in the rightmost
+// column) under realistic mixed-state data. HITL visual review uses
+// these to verify column readability at iPhone Pro widths and the
+// touched/untouched visual distinction.
+
+private struct ManualLogIntentPickerPreview: View {
+    @State private var entry: ManualExerciseEntry
+
+    init() {
+        let exercise = PlannedExercise(
+            id: UUID(),
+            exerciseId: "barbell_bench_press",
+            name: "Barbell Bench Press",
+            primaryMuscle: "pectoralis_major",
+            synergists: ["anterior_deltoid", "triceps_brachii"],
+            equipmentRequired: .barbell,
+            sets: 4,
+            repRange: RepRange(min: 6, max: 10),
+            tempo: "3-1-1-0",
+            restSeconds: 150,
+            rirTarget: 2,
+            coachingCues: []
+        )
+        var e = ManualExerciseEntry(exercise: exercise)
+        // Replace auto-generated empties with a realistic mixed-state set.
+        // Set 1: confirmed top (touched) — picker shows "Top" in blue.
+        var s1 = ManualSetEntry(); s1.weightString = "80"; s1.reps = 10
+        s1.rpeString = "7"; s1.intent = .top; s1.intentTouched = true
+        // Set 2: non-empty but UNTOUCHED — gates the Save button. Picker
+        // shows "—" in muted white. This is the case the AC hangs on.
+        var s2 = ManualSetEntry(); s2.weightString = "80"; s2.reps = 10
+        s2.rpeString = "8"
+        // Set 3: empty — does not gate, picker still tappable but stays "—".
+        let s3 = ManualSetEntry()
+        // Set 4: confirmed backoff (touched) — picker shows "Backoff" in blue.
+        var s4 = ManualSetEntry(); s4.weightString = "70"; s4.reps = 8
+        s4.rpeString = "7"; s4.intent = .backoff; s4.intentTouched = true
+        e.sets = [s1, s2, s3, s4]
+        _entry = State(initialValue: e)
+    }
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+            ScrollView {
+                VStack(spacing: 16) {
+                    ExerciseLogCard(entry: $entry)
+                        .padding(.horizontal, 16)
+                }
+                .padding(.top, 16)
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
+#Preview("Manual log — 4 sets, mixed touched/untouched") {
+    // Row 1 (touched, .top):       Picker shows "Top"     in app-blue.
+    // Row 2 (NON-EMPTY, untouched): Picker shows "—" muted — the gating case.
+    // Row 3 (empty):                Picker shows "—" muted — does not gate.
+    // Row 4 (touched, .backoff):    Picker shows "Backoff" in app-blue.
+    // The Save Session button (not visible in this card-only preview) would
+    // be DISABLED by row 2's untouched intent.
+    ManualLogIntentPickerPreview()
 }
