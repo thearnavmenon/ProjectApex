@@ -114,6 +114,24 @@ struct SetCompletionFormState: Equatable {
         isDeviationPickerVisible = true
     }
 
+    /// User tapped the dismiss affordance ("Never mind") on the
+    /// expanded deviation picker. Collapses the picker AND resets
+    /// `resolvedIntent` to `prescribedIntent` — discards any deviation
+    /// the user expressed but then thought better of. The "forgiving
+    /// over strict" rule: users change their minds about whether they
+    /// deviated; don't trap them in tentative selections.
+    ///
+    /// No-op for freestyle (`prescribedIntent == nil`) — the picker is
+    /// the only path to an intent in that case, so dismissing it would
+    /// strand the user with a non-submittable form. The UI affordance
+    /// is also hidden in that case (only AI-prescribed sets show the
+    /// "Did something different?" / "Never mind" link).
+    mutating func dismissDeviationPicker() {
+        guard prescribedIntent != nil else { return }
+        isDeviationPickerVisible = false
+        resolvedIntent = prescribedIntent
+    }
+
     /// User picked an intent from the chip row. Updates resolvedIntent.
     /// For AI-prescribed sets where this matches `prescribedIntent`,
     /// `isDeviation` stays false (re-affirming the prescription is not

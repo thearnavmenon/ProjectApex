@@ -1103,6 +1103,18 @@ struct RepRPEIntentConfirmationSheet: View {
     @ViewBuilder
     private var intentSection: some View {
         VStack(spacing: 10) {
+            // The "Did something different?" / "Never mind" toggle. Only
+            // shown for AI-prescribed sets — freestyle has no prescription
+            // to deviate from, so the picker is always visible and there's
+            // nothing to toggle. One tappable element, two states:
+            //   collapsed: "Did something different?" + chevron.down → reveals picker
+            //   expanded:  "Never mind" + chevron.up → collapses picker AND resets
+            //                                          resolvedIntent to prescribedIntent
+            //                                          (discards any tentative deviation)
+            if formState.prescribedIntent != nil {
+                deviationToggleLink
+            }
+
             if formState.isDeviationPickerVisible {
                 // Picker visible — either freestyle (always) or
                 // AI-prescribed after the user revealed it. Header text
@@ -1117,30 +1129,47 @@ struct RepRPEIntentConfirmationSheet: View {
                     Spacer()
                 }
                 intentChipRow
-            } else {
-                // AI-prescribed set, picker collapsed. Show a subtle
-                // "Did something different?" affordance — primary path
-                // is just to tap Log Set without touching this.
-                Button {
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        formState.revealDeviationPicker()
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text("Did something different?")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.45))
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.35))
-                        Spacer()
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Reveal the intent picker if you did a different kind of set than prescribed")
             }
         }
+    }
+
+    /// Toggle link that reveals or dismisses the deviation picker. Lives
+    /// in a stable position regardless of expansion state — same element,
+    /// two labels, two chevron orientations. Auto-discoverable: the label
+    /// flips to "Never mind" on expansion, signalling the dismiss path.
+    /// Dismissing forgives any tentative deviation (resolvedIntent resets
+    /// to prescribedIntent) per the "forgiving over strict" rule.
+    @ViewBuilder
+    private var deviationToggleLink: some View {
+        let isExpanded = formState.isDeviationPickerVisible
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.easeInOut(duration: 0.22)) {
+                if isExpanded {
+                    formState.dismissDeviationPicker()
+                } else {
+                    formState.revealDeviationPicker()
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(isExpanded ? "Never mind" : "Did something different?")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.45))
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(isExpanded
+                            ? "Never mind — collapse the deviation picker and use the prescribed intent"
+                            : "Did something different? — reveal the intent picker")
+        .accessibilityHint(isExpanded
+                           ? "Resets the intent to what was prescribed"
+                           : "Reveals chips for picking a different kind of set than prescribed")
+        .animation(.easeInOut(duration: 0.18), value: isExpanded)
     }
 
     /// Chip ordering is deliberate, not incidental. Order locks in user
@@ -1327,6 +1356,28 @@ private let previewTint = StreakResult.compute(currentStreakDays: 7, longestStre
     var seed = SetCompletionFormState(actualReps: 12, prescribedIntent: .top)
     seed.revealDeviationPicker()
     seed.selectIntent(.amrap)
+    return RepRPEIntentConfirmationSheet(
+        initialState: seed,
+        tintColor: previewTint,
+        onCommit: { _ in }
+    )
+}
+
+#Preview("Sheet — AI prescribed, deviation picked then dismissed") {
+    // The "forgiving over strict" reset path. User revealed the picker,
+    // tapped AMRAP (tentative deviation), then tapped "Never mind".
+    // Result: picker collapsed, resolvedIntent reset to prescribed
+    // (.top), isDeviation back to false. The toggle link reads
+    // "Did something different?" again, ready to re-reveal if needed.
+    //
+    // NOTE: SwiftUI #Preview blocks render the seed state — the
+    // preview shows the post-dismiss state, NOT the dismiss animation.
+    // To see the animation, tap "Did something different?" → AMRAP →
+    // "Never mind" within an interactive Xcode canvas (Live Preview).
+    var seed = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+    seed.revealDeviationPicker()
+    seed.selectIntent(.amrap)         // tentative deviation
+    seed.dismissDeviationPicker()     // → reset to prescribed, picker collapsed
     return RepRPEIntentConfirmationSheet(
         initialState: seed,
         tintColor: previewTint,

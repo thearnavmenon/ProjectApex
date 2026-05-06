@@ -81,6 +81,78 @@ final class SetCompletionFormStateTests: XCTestCase {
                       "backoff still differs from prescribed top.")
     }
 
+    // MARK: - Dismiss deviation picker (forgiving over strict)
+
+    /// Reveal then dismiss without picking → state matches the
+    /// post-init shape. The user changed their mind about deviating;
+    /// the deviation affordance must be reversible.
+    func test_aiPrescribed_revealThenDismiss_withoutPick_resetsToInitial() {
+        let initial = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        var state = initial
+        state.revealDeviationPicker()
+        XCTAssertTrue(state.isDeviationPickerVisible)
+        state.dismissDeviationPicker()
+        XCTAssertFalse(state.isDeviationPickerVisible,
+                       "Dismiss collapses the picker.")
+        XCTAssertEqual(state.resolvedIntent, .top,
+                       "Dismiss resets resolvedIntent to the prescription.")
+        XCTAssertFalse(state.isDeviation)
+        XCTAssertEqual(state, initial,
+                       "After reveal+dismiss-without-pick, state matches the init shape.")
+    }
+
+    /// Reveal, pick a deviation, dismiss → resolvedIntent resets to
+    /// prescribed; isDeviation goes back to false. Forgiving rule: a
+    /// tentative deviation pick that the user backs out of must not
+    /// persist on the SetLog.
+    func test_aiPrescribed_revealPickDeviation_dismiss_resetsResolvedIntent() {
+        var state = SetCompletionFormState(actualReps: 10, prescribedIntent: .top)
+        state.revealDeviationPicker()
+        state.selectIntent(.amrap)
+        XCTAssertEqual(state.resolvedIntent, .amrap)
+        XCTAssertTrue(state.isDeviation)
+
+        state.dismissDeviationPicker()
+        XCTAssertFalse(state.isDeviationPickerVisible)
+        XCTAssertEqual(state.resolvedIntent, .top,
+                       "Dismiss after deviation must reset to prescribed.")
+        XCTAssertFalse(state.isDeviation,
+                       "After dismiss, the set is no longer a deviation.")
+    }
+
+    /// Reveal → dismiss → reveal again. Each cycle starts from the
+    /// prescribed-intent baseline. Cycling the picker doesn't accumulate
+    /// stale state.
+    func test_aiPrescribed_revealDismissReveal_picksUpFreshFromPrescribed() {
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        state.revealDeviationPicker()
+        state.selectIntent(.warmup)            // tentative deviation
+        state.dismissDeviationPicker()         // discard it
+        state.revealDeviationPicker()          // open again
+
+        XCTAssertTrue(state.isDeviationPickerVisible)
+        XCTAssertEqual(state.resolvedIntent, .top,
+                       "After dismiss, the next reveal starts from prescribed, not from the discarded warmup.")
+        XCTAssertFalse(state.isDeviation,
+                       "Re-revealing the picker doesn't restore the discarded deviation.")
+    }
+
+    /// Freestyle has no prescribed intent to fall back to — dismiss
+    /// must be a no-op (otherwise resolvedIntent could be wiped to nil
+    /// after the user picked, stranding them in a non-submittable form).
+    /// The UI also hides the dismiss affordance for freestyle, but the
+    /// state struct guard is defence in depth.
+    func test_freestyle_dismissDeviationPicker_isNoop() {
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: nil)
+        state.selectIntent(.warmup)
+        state.dismissDeviationPicker()
+        XCTAssertTrue(state.isDeviationPickerVisible,
+                      "Freestyle picker stays visible — no dismiss path.")
+        XCTAssertEqual(state.resolvedIntent, .warmup,
+                       "Freestyle resolvedIntent is preserved on dismiss.")
+        XCTAssertTrue(state.canSubmit)
+    }
+
     // MARK: - Freestyle path (no prescription)
 
     func test_freestyle_pickerVisibleByDefault() {
