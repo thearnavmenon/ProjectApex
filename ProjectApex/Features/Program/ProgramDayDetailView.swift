@@ -906,6 +906,17 @@ struct ProgramDayDetailView: View {
 
     /// Fetches set logs for this completed day by finding the matching workout_session
     /// then querying set_logs where session_id matches.
+    ///
+    /// Slice 11 / #62 fix: query is keyed on (user_id, day_type, **week_number**) — the
+    /// missing week_number filter caused every "Pull A" / "Push A" / etc. detail page
+    /// across every week to render the same session's data, since the prior query
+    /// matched all sessions of a given day_type and `sessions.last` returned a
+    /// non-deterministic single row. Also drops the `completed = true` filter so a
+    /// session that was started and ended early (e.g. one logged set) still renders
+    /// its own real data on its own week's detail page rather than falling through
+    /// to a different week's session. Order by session_date desc + limit 1 picks
+    /// the most recent attempt deterministically when the user has re-run a
+    /// (week, day) pair.
     @MainActor
     private func loadHistoricalSetLogs() async {
         guard currentDay.status == .completed else { return }
@@ -915,26 +926,30 @@ struct ProgramDayDetailView: View {
         let supabase = deps.supabaseClient
         let userId = deps.resolvedUserId
 
-        // Find the workout session for this day (match on day_type + user_id + completed)
-        print("[ProgramDayDetailView] Querying sessions — userId: \(userId), dayLabel: '\(currentDay.dayLabel)', status: \(currentDay.status)")
+        // Find the workout session for this day. Filters: user + day_type + week_number.
+        // No `completed` filter — incomplete sessions still render their real logged
+        // sets on their own week's page (rather than mismatching to a different week).
+        print("[ProgramDayDetailView] Querying sessions — userId: \(userId), dayLabel: '\(currentDay.dayLabel)', weekNumber: \(week.weekNumber), status: \(currentDay.status)")
         let sessions: [WorkoutSessionRow]
         do {
             sessions = try await supabase.fetch(
                 WorkoutSessionRow.self,
                 table: "workout_sessions",
                 filters: [
-                    Filter(column: "user_id",  op: .eq, value: userId.uuidString),
-                    Filter(column: "day_type", op: .eq, value: currentDay.dayLabel),
-                    Filter(column: "completed", op: .eq, value: "true")
-                ]
+                    Filter(column: "user_id",     op: .eq, value: userId.uuidString),
+                    Filter(column: "day_type",    op: .eq, value: currentDay.dayLabel),
+                    Filter(column: "week_number", op: .eq, value: "\(week.weekNumber)")
+                ],
+                order: "session_date.desc",
+                limit: 1
             )
         } catch {
             print("[ProgramDayDetailView] Failed to fetch sessions: \(error.localizedDescription)")
             return
         }
 
-        print("[ProgramDayDetailView] Found \(sessions.count) session(s) for day '\(currentDay.dayLabel)'")
-        guard let sessionRow = sessions.last else {
+        print("[ProgramDayDetailView] Found \(sessions.count) session(s) for day '\(currentDay.dayLabel)' week \(week.weekNumber)")
+        guard let sessionRow = sessions.first else {
             print("[ProgramDayDetailView] No matching session — completedSessionId stays nil, prompt will not show")
             return
         }
@@ -1526,12 +1541,16 @@ private extension String {
 private struct WorkoutSessionRow: Decodable, Identifiable {
     let id: UUID
     let dayType: String
+    let weekNumber: Int
     let completed: Bool
+    let sessionDate: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
-        case dayType  = "day_type"
+        case dayType     = "day_type"
+        case weekNumber  = "week_number"
         case completed
+        case sessionDate = "session_date"
     }
 }
 
