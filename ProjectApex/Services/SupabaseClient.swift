@@ -271,6 +271,28 @@ actor SupabaseClient {
         try await perform(request)
     }
 
+    // MARK: - Edge Function Invocation
+
+    /// Invokes a Supabase Edge Function by POSTing `body` to
+    /// `/functions/v1/<functionName>` and returning the response body.
+    ///
+    /// Used by `TraineeModelUpdateJob` to post session-completion payloads
+    /// to the `update-trainee-model` function instead of a Supabase table insert.
+    ///
+    /// - Parameters:
+    ///   - functionName: Edge Function name (e.g. `"update-trainee-model"`).
+    ///   - body: Pre-encoded JSON payload.
+    /// - Returns: The raw response body on HTTP 2xx.
+    /// - Throws: `SupabaseError` on non-2xx response or URL construction failure.
+    func invokeFunction(_ functionName: String, body: Data) async throws -> Data {
+        guard let url = URL(string: "/functions/v1/\(functionName)", relativeTo: baseURL)?.absoluteURL else {
+            throw SupabaseError.invalidURL
+        }
+        var request = baseRequest(url: url, method: "POST")
+        request.httpBody = body
+        return try await performReturningData(request)
+    }
+
     // MARK: - Programs helpers
 
     /// Deactivates all currently active programs for `userId` by patching

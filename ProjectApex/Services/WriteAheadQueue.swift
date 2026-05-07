@@ -21,6 +21,7 @@
 // in a future iteration without changing the public API.
 
 import Foundation
+import OSLog
 
 // MARK: - QueuedWrite
 
@@ -53,6 +54,27 @@ nonisolated struct QueuedWrite: Codable, Identifiable, Sendable {
     }
 }
 
+// MARK: - WAQFlushOutcome
+
+/// Result of a single WAQ flush attempt, returned by both the default
+/// Supabase-insert path and any registered custom flush handlers.
+enum WAQFlushOutcome: Sendable, Equatable {
+    /// Item was accepted by the remote end — remove from queue.
+    case success
+    /// Remote end is temporarily unavailable — retain item and retry with backoff.
+    case transientFailure
+    /// Remote end rejected the item permanently — log and remove without retry.
+    case permanentFailure(String)
+
+    static func == (lhs: WAQFlushOutcome, rhs: WAQFlushOutcome) -> Bool {
+        switch (lhs, rhs) {
+        case (.success, .success), (.transientFailure, .transientFailure): return true
+        case (.permanentFailure(let l), .permanentFailure(let r)): return l == r
+        default: return false
+        }
+    }
+}
+
 // MARK: - WriteAheadQueue
 
 /// Actor that guarantees reliable Supabase writes with local queuing and
@@ -81,6 +103,13 @@ actor WriteAheadQueue {
     /// True while flush() is actively processing the queue.
     private(set) var isFlushing: Bool = false
 
+    /// Per-table flush handlers. When a table has a registered handler, the WAQ
+    /// calls it instead of the default Supabase REST insert path. Registered at
+    /// startup by job types such as TraineeModelUpdateJob.
+    private var flushHandlers: [String: @Sendable (QueuedWrite) async -> WAQFlushOutcome] = [:]
+
+    private static let logger = Logger(subsystem: "com.projectapex", category: "WriteAheadQueue")
+
     // MARK: - Dependencies
 
     private let supabase: SupabaseClient
@@ -93,6 +122,21 @@ actor WriteAheadQueue {
         self.userDefaults = userDefaults
         // Restore any persisted queue items from a previous session
         self.queue = Self.loadPersistedQueue(userDefaults: userDefaults)
+    }
+
+    // MARK: - Handler Registration
+
+    /// Registers a custom flush handler for `table`. When the WAQ encounters
+    /// a queued item targeting that table, it calls `handler` instead of the
+    /// default `supabase.insertRawJSON` path.
+    ///
+    /// Call this at app startup (before any WAQ flushes) via the job's
+    /// `register(with:)` method.
+    func registerFlushHandler(
+        forTable table: String,
+        _ handler: @escaping @Sendable (QueuedWrite) async -> WAQFlushOutcome
+    ) {
+        flushHandlers[table] = handler
     }
 
     // MARK: - Public API
@@ -118,9 +162,14 @@ actor WriteAheadQueue {
         }
     }
 
-    /// Processes all queued items in FIFO order. Each item is POSTed to
-    /// Supabase; on failure, exponential backoff is applied up to maxRetries.
-    /// Items are removed from the queue only on successful write (HTTP 2xx).
+    /// Processes all queued items in FIFO order. Each item is dispatched to
+    /// either a registered flush handler (for items whose table has a custom
+    /// handler) or the default `supabase.insertRawJSON` path.
+    ///
+    /// Outcome semantics:
+    ///   `.success`          — item removed from queue.
+    ///   `.transientFailure` — exponential backoff retry up to maxRetries, then drop.
+    ///   `.permanentFailure` — logged and removed immediately (no retry).
     ///
     /// Safe to call multiple times concurrently — the isFlushing guard
     /// ensures only one flush runs at a time.
@@ -135,20 +184,26 @@ actor WriteAheadQueue {
         while !queue.isEmpty {
             var item = queue[0]
 
-            let success = await sendToSupabase(item)
+            let outcome = await dispatch(item)
 
-            if success {
-                // Remove from front of queue (FIFO)
+            switch outcome {
+            case .success:
                 queue.removeFirst()
                 persistQueue()
-            } else {
+
+            case .permanentFailure(let reason):
+                queue.removeFirst()
+                persistQueue()
+                Self.logger.error("[WriteAheadQueue] permanent failure, item \(item.id, privacy: .public), table: \(item.table, privacy: .public) — \(reason, privacy: .public)")
+
+            case .transientFailure:
                 item.retryCount += 1
 
                 if item.retryCount > Self.maxRetries {
                     // Exhausted retries — remove and log (data loss for this item)
                     queue.removeFirst()
                     persistQueue()
-                    print("[WriteAheadQueue] DROPPED item \(item.id) after \(Self.maxRetries) retries — table: \(item.table)")
+                    Self.logger.error("[WriteAheadQueue] dropped item \(item.id, privacy: .public) after \(Self.maxRetries) retries — table: \(item.table, privacy: .public)")
                     continue
                 }
 
@@ -163,6 +218,16 @@ actor WriteAheadQueue {
                 // After the delay, loop will retry the same item
             }
         }
+    }
+
+    /// Routes a queue item to its registered handler, or falls back to the
+    /// default Supabase REST insert path for items without a custom handler.
+    private func dispatch(_ item: QueuedWrite) async -> WAQFlushOutcome {
+        if let handler = flushHandlers[item.table] {
+            return await handler(item)
+        }
+        let success = await sendToSupabase(item)
+        return success ? .success : .transientFailure
     }
 
     /// Returns the number of items currently in the queue.
