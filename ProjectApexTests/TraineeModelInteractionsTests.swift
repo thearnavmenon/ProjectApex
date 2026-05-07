@@ -132,6 +132,38 @@ struct PrescriptionAccuracyTests {
         let data = try JSONEncoder().encode(original)
         #expect(try JSONDecoder().decode(PrescriptionAccuracy.self, from: data) == original)
     }
+
+    @Test("Pre-Phase-2 JSON (no gap-bucket keys) decodes with empty dictionaries")
+    func decodesPrePhase2EmptyGapBuckets() throws {
+        let baseline = PrescriptionAccuracy(
+            pattern: .horizontalPush, intent: .top,
+            bias: 0, rmse: 0, sampleCount: 0
+        )
+        let data = try JSONEncoder().encode(baseline)
+        var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        dict.removeValue(forKey: "biasByGapBucket")
+        dict.removeValue(forKey: "rmseByGapBucket")
+        dict.removeValue(forKey: "sampleCountByGapBucket")
+        let stripped = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(PrescriptionAccuracy.self, from: stripped)
+        #expect(decoded.biasByGapBucket.isEmpty)
+        #expect(decoded.rmseByGapBucket.isEmpty)
+        #expect(decoded.sampleCountByGapBucket.isEmpty)
+    }
+
+    @Test("Round-trip preserves all three populated gap-bucket dictionaries")
+    func roundTripPreservesGapBuckets() throws {
+        let original = PrescriptionAccuracy(
+            pattern: .horizontalPush, intent: .top,
+            bias: -0.02, rmse: 0.04, sampleCount: 22,
+            biasByGapBucket: [.under48h: -0.06, .between48And72h: -0.01, .over72h: 0.01],
+            rmseByGapBucket: [.under48h: 0.08, .between48And72h: 0.03, .over72h: 0.02],
+            sampleCountByGapBucket: [.under48h: 6, .between48And72h: 10, .over72h: 6]
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PrescriptionAccuracy.self, from: data)
+        #expect(decoded == original)
+    }
 }
 
 @Suite("PrescriptionIntentMismatch")

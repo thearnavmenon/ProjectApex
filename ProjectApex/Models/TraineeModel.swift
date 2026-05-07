@@ -32,6 +32,14 @@ struct TraineeModel: Codable, Sendable, Hashable {
     /// Total completed sessions across the user's history. Drives the
     /// 6-session-window check for shouldFireGlobalPhaseAdvance.
     var totalSessionCount: Int
+    /// Watermark for the trainee-model classifier stage per ADR-0013. The
+    /// classifier processes notes WHERE created_at > this watermark; nil on
+    /// brand-new users triggers bootstrap (last 5 sessions / 20 notes).
+    var lastClassifiedNoteCreatedAt: Date?
+    /// Session-count at which the most recent global-phase-advance event
+    /// fired per ADR-0012. nil for users that have never triggered the
+    /// 6-session cooldown gate.
+    var lastGlobalPhaseAdvanceFiredAtSessionCount: Int?
 
     init(
         activeProgramId: UUID? = nil,
@@ -49,7 +57,9 @@ struct TraineeModel: Codable, Sendable, Hashable {
         bodyweight: BodyweightHistory = BodyweightHistory(),
         lifeContextEvents: [LifeContextEvent] = [],
         reassessmentRecords: [ReassessmentRecord] = [],
-        totalSessionCount: Int = 0
+        totalSessionCount: Int = 0,
+        lastClassifiedNoteCreatedAt: Date? = nil,
+        lastGlobalPhaseAdvanceFiredAtSessionCount: Int? = nil
     ) {
         self.activeProgramId = activeProgramId
         self.goal = goal
@@ -67,6 +77,8 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.lifeContextEvents = lifeContextEvents
         self.reassessmentRecords = reassessmentRecords
         self.totalSessionCount = totalSessionCount
+        self.lastClassifiedNoteCreatedAt = lastClassifiedNoteCreatedAt
+        self.lastGlobalPhaseAdvanceFiredAtSessionCount = lastGlobalPhaseAdvanceFiredAtSessionCount
     }
 
     // MARK: Major patterns (calibration / phase-advance gating)

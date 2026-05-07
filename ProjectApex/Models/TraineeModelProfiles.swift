@@ -22,6 +22,10 @@ struct ExerciseProfile: Codable, Sendable, Hashable {
     var sessionCount: Int
     var formDegradationFlag: Bool
     var confidence: AxisConfidence
+    /// Consecutive sessions on this exercise without form-degradation
+    /// evidence per Q9 PRD-internal lifecycle. Drives the "clear flag"
+    /// transition; reset to 0 on any new degradation evidence.
+    var formDegradationCleanSessions: Int
 
     init(
         exerciseId: String,
@@ -32,7 +36,8 @@ struct ExerciseProfile: Codable, Sendable, Hashable {
         e1rmPeak: Double = 0,
         sessionCount: Int = 0,
         formDegradationFlag: Bool = false,
-        confidence: AxisConfidence = .bootstrapping
+        confidence: AxisConfidence = .bootstrapping,
+        formDegradationCleanSessions: Int = 0
     ) {
         self.exerciseId = exerciseId
         self.topSets = topSets
@@ -43,6 +48,21 @@ struct ExerciseProfile: Codable, Sendable, Hashable {
         self.sessionCount = sessionCount
         self.formDegradationFlag = formDegradationFlag
         self.confidence = confidence
+        self.formDegradationCleanSessions = formDegradationCleanSessions
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.exerciseId = try c.decode(String.self, forKey: .exerciseId)
+        self.topSets = try c.decode([TopSetSnapshot].self, forKey: .topSets)
+        self.sessionSnapshots = try c.decode([ExerciseSessionSnapshot].self, forKey: .sessionSnapshots)
+        self.e1rmCurrent = try c.decode(Double.self, forKey: .e1rmCurrent)
+        self.e1rmMedian = try c.decode(Double.self, forKey: .e1rmMedian)
+        self.e1rmPeak = try c.decode(Double.self, forKey: .e1rmPeak)
+        self.sessionCount = try c.decode(Int.self, forKey: .sessionCount)
+        self.formDegradationFlag = try c.decode(Bool.self, forKey: .formDegradationFlag)
+        self.confidence = try c.decode(AxisConfidence.self, forKey: .confidence)
+        self.formDegradationCleanSessions = try c.decodeIfPresent(Int.self, forKey: .formDegradationCleanSessions) ?? 0
     }
 
     /// True while the exercise is in its first 10 sessions per ADR-0005.
@@ -103,6 +123,11 @@ struct PatternProfile: Codable, Sendable, Hashable {
     /// to retain — typically the last 7..10 to support cadence and
     /// disruption derivations without unbounded growth).
     var recentSessionDates: [Date]
+    /// Counter incremented on force-deload (plateau/declining + 2× phase
+    /// threshold per ADR-0011 §(b)); reset to 0 on natural progressing
+    /// advance. Surfaces to the LLM digest at ≥2 for exercise-rotation /
+    /// programme-rebuild meta-coaching per ADR-0011 §(d).
+    var consecutiveForceDeloadsOnPattern: Int
 
     init(
         pattern: MovementPattern,
@@ -114,7 +139,8 @@ struct PatternProfile: Codable, Sendable, Hashable {
         confidence: AxisConfidence = .bootstrapping,
         transitionModeUntil: Date? = nil,
         trend: ProgressionTrend = .progressing,
-        recentSessionDates: [Date] = []
+        recentSessionDates: [Date] = [],
+        consecutiveForceDeloadsOnPattern: Int = 0
     ) {
         self.pattern = pattern
         self.currentPhase = currentPhase
@@ -126,6 +152,22 @@ struct PatternProfile: Codable, Sendable, Hashable {
         self.transitionModeUntil = transitionModeUntil
         self.trend = trend
         self.recentSessionDates = recentSessionDates
+        self.consecutiveForceDeloadsOnPattern = consecutiveForceDeloadsOnPattern
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.pattern = try c.decode(MovementPattern.self, forKey: .pattern)
+        self.currentPhase = try c.decode(MesocyclePhase.self, forKey: .currentPhase)
+        self.sessionsInPhase = try c.decode(Int.self, forKey: .sessionsInPhase)
+        self.lastPhaseTransitionAtSessionCount = try c.decode(Int.self, forKey: .lastPhaseTransitionAtSessionCount)
+        self.rpeOffset = try c.decode(Double.self, forKey: .rpeOffset)
+        self.recovery = try c.decode(RecoveryProfile.self, forKey: .recovery)
+        self.confidence = try c.decode(AxisConfidence.self, forKey: .confidence)
+        self.transitionModeUntil = try c.decodeIfPresent(Date.self, forKey: .transitionModeUntil)
+        self.trend = try c.decode(ProgressionTrend.self, forKey: .trend)
+        self.recentSessionDates = try c.decode([Date].self, forKey: .recentSessionDates)
+        self.consecutiveForceDeloadsOnPattern = try c.decodeIfPresent(Int.self, forKey: .consecutiveForceDeloadsOnPattern) ?? 0
     }
 
     // MARK: Derived properties

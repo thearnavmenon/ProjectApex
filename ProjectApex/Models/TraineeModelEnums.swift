@@ -96,6 +96,19 @@ enum ProgressionTrend: String, Codable, Sendable, Hashable, CaseIterable {
     case declining
 }
 
+// MARK: - InterSessionGapBucket (ADR-0014)
+
+/// Gap bucket for prescription-accuracy stratification. Boundaries align
+/// with ADR-0010's NM tau (30h):
+///   under48h        → NM readiness ~0.30–0.84 ("still meaningfully fatigued")
+///   between48And72h → NM readiness ~0.84–0.94 ("mostly recovered")
+///   over72h         → NM readiness ~0.94+ ("fully fresh")
+enum InterSessionGapBucket: String, Codable, Sendable, Hashable, CaseIterable {
+    case under48h
+    case between48And72h = "between_48_and_72h"
+    case over72h
+}
+
 // MARK: - LimitationSubject (sum type — pattern | muscle | joint)
 
 /// What an ActiveLimitation / ClearedLimitation applies to. Per ADR-0005

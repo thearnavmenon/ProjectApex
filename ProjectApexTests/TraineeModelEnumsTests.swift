@@ -87,6 +87,35 @@ struct ProjectionProgressTests {
     }
 }
 
+@Suite("InterSessionGapBucket")
+struct InterSessionGapBucketTests {
+    @Test("Cases match ADR-0014 enumeration")
+    func cases() {
+        #expect(Set(InterSessionGapBucket.allCases.map(\.rawValue)) ==
+                ["under48h", "between_48_and_72h", "over72h"])
+    }
+
+    @Test("All cases round-trip through Codable")
+    func roundTrip() throws {
+        for bucket in InterSessionGapBucket.allCases {
+            let data = try JSONEncoder().encode(bucket)
+            #expect(try JSONDecoder().decode(InterSessionGapBucket.self, from: data) == bucket)
+        }
+    }
+
+    @Test("between48And72h encodes as snake_case raw value")
+    func snakeCaseEncoding() throws {
+        let data = try JSONEncoder().encode(InterSessionGapBucket.between48And72h)
+        #expect(String(data: data, encoding: .utf8) == "\"between_48_and_72h\"")
+    }
+
+    @Test("between_48_and_72h string decodes to between48And72h")
+    func snakeCaseDecoding() throws {
+        let data = Data("\"between_48_and_72h\"".utf8)
+        #expect(try JSONDecoder().decode(InterSessionGapBucket.self, from: data) == .between48And72h)
+    }
+}
+
 @Suite("LimitationSubject")
 struct LimitationSubjectTests {
     @Test("Pattern subject round-trips with kind+value discriminator")
