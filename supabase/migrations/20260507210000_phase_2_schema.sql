@@ -1,3 +1,6 @@
+-- Reverse migration: docs/migrations/down/20260507210000_phase_2_schema.sql
+-- (documentation only; not auto-applied by `supabase db push`)
+--
 -- Phase 2 schema additions
 --
 -- ADR-0008: last_applied_logged_at watermark on trainee_models — gates
