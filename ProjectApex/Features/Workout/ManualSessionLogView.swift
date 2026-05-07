@@ -362,7 +362,7 @@ struct ManualSessionLogView: View {
         }
 
         // Build and write set logs
-        var allSetLogs: [(SetLog, PlannedExercise)] = []
+        var allSetLogs: [(SetLog, PlannedExercise, SetIntent)] = []
         for entry in entries {
             for (setIndex, setEntry) in entry.sets.enumerated() {
                 // Skip empty sets (weight 0 and reps 0) unless user explicitly entered something
@@ -371,6 +371,14 @@ struct ManualSessionLogView: View {
                 guard reps > 0 || weight > 0 else { continue }
 
                 let rpe = parseRPE(setEntry.rpeString) ?? setEntry.rpe
+                // Slice 6 / #60: intent must be non-nil when writing to set_logs
+                // (NOT NULL schema constraint). Manual-entry picker is optional, so
+                // fall back to .top — the most likely intent for a manually logged
+                // set the user actually did. Documented at-the-call-site default per
+                // ADR-0005 "no silent defaults at any layer" — if the user didn't
+                // pick, the choice is visible in this code, not silently resolved
+                // inside the encoder.
+                let resolvedIntent: SetIntent = setEntry.intent ?? .top
 
                 let setLog = SetLog(
                     id: UUID(),
@@ -384,21 +392,15 @@ struct ManualSessionLogView: View {
                     aiPrescribed: nil,
                     loggedAt: sessionDate,
                     primaryMuscle: ExerciseLibrary.primaryMuscle(for: entry.exercise.exerciseId)?.rawValue ?? entry.exercise.primaryMuscle,
-                    // Slice 6 (#10): picker-captured intent threaded into
-                    // the SetLog client-side. ManualSetLogPayload encoder
-                    // does NOT serialise this in Phase 0 (γ — top-level
-                    // column doesn't exist; user-truthful intent for
-                    // pre-cutoff freestyle rows is the documented
-                    // trade-off). Phase 1+ Swift release will promote.
-                    intent: setEntry.intent
+                    intent: resolvedIntent
                 )
-                allSetLogs.append((setLog, entry.exercise))
+                allSetLogs.append((setLog, entry.exercise, resolvedIntent))
             }
         }
 
         // Write set logs to Supabase
-        for (setLog, _) in allSetLogs {
-            let payload = ManualSetLogPayload(from: setLog)
+        for (setLog, _, intent) in allSetLogs {
+            let payload = ManualSetLogPayload(from: setLog, intent: intent)
             do {
                 try await deps.supabaseClient.insert(payload, table: "set_logs")
             } catch {
@@ -412,7 +414,7 @@ struct ManualSessionLogView: View {
         let userIdStr = userId.uuidString
         let sessionIdStr = sessionId.uuidString
 
-        for (setLog, exercise) in allSetLogs {
+        for (setLog, exercise, _) in allSetLogs {
             let weight = setLog.weightKg
             let reps = setLog.repsCompleted
             let rpeStr = setLog.rpeFelt.map { ", RPE \($0)" } ?? ""
@@ -783,6 +785,8 @@ private struct ManualSetLogPayload: Encodable {
     let rirEstimated: Int?
     let loggedAt: String
     let primaryMuscle: String?
+    let localDate: String
+    let intent: String
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -795,9 +799,14 @@ private struct ManualSetLogPayload: Encodable {
         case rirEstimated  = "rir_estimated"
         case loggedAt      = "logged_at"
         case primaryMuscle = "primary_muscle"
+        case localDate     = "local_date"
+        case intent
     }
 
-    init(from log: SetLog) {
+    /// Slice 6 / #60 fix: intent and local_date are required by the schema.
+    /// intent is a required init parameter (compiler-enforced) per ADR-0005
+    /// "no silent defaults at any layer."
+    init(from log: SetLog, intent: SetIntent) {
         let formatter = ISO8601DateFormatter()
         self.id            = log.id.uuidString
         self.sessionId     = log.sessionId.uuidString
@@ -809,6 +818,8 @@ private struct ManualSetLogPayload: Encodable {
         self.rirEstimated  = log.rirEstimated
         self.loggedAt      = formatter.string(from: log.loggedAt)
         self.primaryMuscle = log.primaryMuscle
+        self.localDate     = SetLog.formatLocalDate(log.loggedAt)
+        self.intent        = intent.rawValue
     }
 }
 

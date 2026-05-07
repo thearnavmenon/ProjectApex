@@ -334,7 +334,9 @@ actor WorkoutSessionManager {
         // 1. Write to local queue then immediately flush to Supabase (P3-T06).
         //    Immediate flush ensures each set_log lands in Supabase synchronously,
         //    so killing the app between sets never loses data.
-        let setPayload = SetLogPayload(from: setLog)
+        //    intent is the function's required parameter — threaded explicitly per
+        //    Slice 6 / #60 fix so the encoder cannot silently fall back to nil.
+        let setPayload = SetLogPayload(from: setLog, intent: intent)
         try? await writeAheadQueue.enqueue(setPayload, table: "set_logs")
         print("[WAQ] Enqueued set_log — session_id: \(session.id), set: \(setNumber), exercise: \(exercise.name), weight: \(currentPrescription?.weightKg ?? 0)kg, reps: \(actualReps)")
 
@@ -1773,6 +1775,8 @@ nonisolated private struct SetLogPayload: Encodable {
     let rirEstimated: Int?
     let loggedAt: String
     let primaryMuscle: String?
+    let localDate: String
+    let intent: String
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -1785,9 +1789,17 @@ nonisolated private struct SetLogPayload: Encodable {
         case rirEstimated  = "rir_estimated"
         case loggedAt      = "logged_at"
         case primaryMuscle = "primary_muscle"
+        case localDate     = "local_date"
+        case intent
     }
 
-    init(from log: SetLog) {
+    /// Slice 6 / #60 fix: intent is required by the schema (NOT NULL, no
+    /// default). local_date is required by the schema (NOT NULL with a
+    /// backfill-only sentinel default that this writer must not rely on,
+    /// per #63). Intent is a required parameter (compiler-enforced) rather
+    /// than read off the SetLog optional, so callers cannot silently fall
+    /// back to nil — ADR-0005 "no silent defaults at any layer."
+    init(from log: SetLog, intent: SetIntent) {
         let formatter = ISO8601DateFormatter()
         self.id = log.id.uuidString
         self.sessionId = log.sessionId.uuidString
@@ -1799,6 +1811,8 @@ nonisolated private struct SetLogPayload: Encodable {
         self.rirEstimated = log.rirEstimated
         self.loggedAt = formatter.string(from: log.loggedAt)
         self.primaryMuscle = log.primaryMuscle
+        self.localDate = SetLog.formatLocalDate(log.loggedAt)
+        self.intent = intent.rawValue
     }
 }
 
