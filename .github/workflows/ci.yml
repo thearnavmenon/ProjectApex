@@ -5,10 +5,15 @@
 # Builds the project and executes the full unit-test suite (mock-only tests).
 # Real-API integration tests are excluded via the absence of APEX_INTEGRATION_TESTS=1.
 #
-# TDD Section 14.6 compliance:
-#   • macOS 15 runner
-#   • Xcode 16
-#   • iPhone 16 Pro simulator
+# Toolchain pin (closes #28):
+#   • macOS 15 runner (hosted macos-15 image)
+#   • Xcode 26.3 — newest Xcode on the runner image. Xcode 16.x ships iOS 18 SDK
+#     and cannot build the project (IPHONEOS_DEPLOYMENT_TARGET=26.2 needs iOS 26 SDK).
+#   • iPhone 17 Pro / iOS 26.2 simulator — iOS 26.2 is the only simulator runtime
+#     on the macos-15 image that meets the deployment target (iOS 26.0 and 26.1
+#     are below it; iOS 26.3 is not yet shipped on the runner).
+#   • OS pinned explicitly (no OS=latest) so the runner image's catalog rotation
+#     can't silently break this workflow again.
 #   • Test results uploaded as artifact on failure
 
 name: CI
@@ -28,11 +33,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16
-        run: sudo xcode-select -s /Applications/Xcode_16.app/Contents/Developer
+      - name: Select Xcode 26.3
+        run: sudo xcode-select -s /Applications/Xcode_26.3.app/Contents/Developer
 
       - name: Show Xcode version
         run: xcodebuild -version
+
+      - name: Initialise CoreSimulator under selected Xcode
+        # Load-bearing: xcode-select to a non-default Xcode leaves xcodebuild's
+        # destination resolver blind to pre-baked simulators until simctl is
+        # invoked under the new selection. Without this ping, the Build & Test
+        # step below fails at destination matching ("Unable to find a device
+        # matching ..." with only placeholder destinations enumerated).
+        # Verified empirically on PR #57.
+        run: xcrun simctl list devices "com.apple.CoreSimulator.SimRuntime.iOS-26-2" available
 
       - name: Resolve Swift packages
         run: |
@@ -47,7 +61,7 @@ jobs:
             -project ProjectApex.xcodeproj \
             -scheme ProjectApex \
             -testPlan ProjectApex \
-            -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest' \
+            -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.2' \
             -resultBundlePath TestResults.xcresult \
             | xcpretty --color --report junit --output test-results.xml \
             ; exit ${PIPESTATUS[0]}
