@@ -38,7 +38,13 @@ final class LateArrivalNotificationQueueTests: XCTestCase {
     /// Single enqueue → dequeueAll yields the exact notification, queue
     /// becomes empty afterwards. The minimum contract the post-session
     /// summary surface depends on.
-    func test_enqueueThenDequeueAll_returnsTheNotification_andEmptiesQueue() {
+    ///
+    /// `async throws` is load-bearing: XCTest dispatches sync test methods
+    /// on a background thread by default, which trips the @MainActor
+    /// isolation on `LateArrivalNotificationQueue` (SIGABRT under Swift 6
+    /// strict concurrency on iOS 26.2 CI runner). Marking the method async
+    /// forces XCTest to run it on the main actor.
+    func test_enqueueThenDequeueAll_returnsTheNotification_andEmptiesQueue() async throws {
         let queue        = LateArrivalNotificationQueue.makeInMemory()
         let notification = makeFixture()
 
@@ -60,7 +66,7 @@ final class LateArrivalNotificationQueueTests: XCTestCase {
     /// Multiple enqueues are preserved in FIFO order, all returned in one
     /// dequeueAll call. This is the contract the UI relies on when
     /// rendering the banner stack.
-    func test_multipleEnqueues_dequeueAllReturnsAllInOrder() {
+    func test_multipleEnqueues_dequeueAllReturnsAllInOrder() async throws {
         let queue = LateArrivalNotificationQueue.makeInMemory()
         let n1    = makeFixture()
         let n2    = makeFixture()
@@ -78,7 +84,7 @@ final class LateArrivalNotificationQueueTests: XCTestCase {
     /// Two queues with different in-memory backing stores must NOT see
     /// each other's notifications — verifies makeInMemory()'s isolation
     /// guarantee so concurrent tests don't leak state.
-    func test_makeInMemory_isolatesQueuesAcrossInstances() {
+    func test_makeInMemory_isolatesQueuesAcrossInstances() async throws {
         let q1 = LateArrivalNotificationQueue.makeInMemory()
         let q2 = LateArrivalNotificationQueue.makeInMemory()
 
