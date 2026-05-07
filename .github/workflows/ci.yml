@@ -40,12 +40,8 @@ jobs:
         run: xcodebuild -version
 
       - name: Initialise CoreSimulator under selected Xcode
-        # Load-bearing: xcode-select to a non-default Xcode leaves xcodebuild's
-        # destination resolver blind to pre-baked simulators until simctl is
-        # invoked under the new selection. Without this ping, the Build & Test
-        # step below fails at destination matching ("Unable to find a device
-        # matching ..." with only placeholder destinations enumerated).
-        # Verified empirically on PR #57.
+        # Initialises CoreSimulator under non-default Xcode — required before xcodebuild
+        # can resolve simulator destinations (see PR #57). Do not remove.
         run: xcrun simctl list devices "com.apple.CoreSimulator.SimRuntime.iOS-26-2" available
 
       - name: Resolve Swift packages
