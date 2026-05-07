@@ -236,7 +236,11 @@ struct ProgramDayDetailView: View {
                                         setLogs: historicalSetLogs[exercise.exerciseId] ?? [],
                                         editedIds: editedSetLogIds,
                                         onTapSet: { log in editingSetLog = log },
-                                        onAddSet: { newLog in Task { await addNewSetLog(newLog) } }
+                                        // Slice 6 / #60: intent defaults to .backoff for retroactively-added
+                                        // sets. AddSet sheet doesn't yet expose an intent picker — UI
+                                        // follow-up tracked separately. .backoff is the sensible default
+                                        // (typical for extra working sets added after the fact).
+                                        onAddSet: { newLog in Task { await addNewSetLog(newLog, intent: .backoff) } }
                                     )
                                 }
                             }
@@ -1060,8 +1064,10 @@ struct ProgramDayDetailView: View {
 
     /// Inserts a new set_log row for an exercise on this completed session,
     /// then refreshes local state so the new row appears immediately.
+    /// Slice 6 / #60 fix: intent is required by the schema; passed explicitly
+    /// by the caller (no silent defaults at the encoder layer per ADR-0005).
     @MainActor
-    private func addNewSetLog(_ newLog: SetLog) async {
+    private func addNewSetLog(_ newLog: SetLog, intent: SetIntent) async {
         guard let sessionId = completedSessionId else { return }
         let supabase = deps.supabaseClient
 
@@ -1078,12 +1084,15 @@ struct ProgramDayDetailView: View {
             let weightKg: Double
             let rpeFelt, rirEstimated: Int?
             let primaryMuscle: String?
+            let localDate: String
+            let intent: String
             enum CodingKeys: String, CodingKey {
                 case id; case sessionId = "session_id"; case exerciseId = "exercise_id"
                 case setNumber = "set_number"; case weightKg = "weight_kg"
                 case repsCompleted = "reps_completed"; case rpeFelt = "rpe_felt"
                 case rirEstimated = "rir_estimated"; case loggedAt = "logged_at"
                 case primaryMuscle = "primary_muscle"
+                case localDate = "local_date"; case intent
             }
         }
         let exerciseForLog = currentDay.exercises.first(where: { $0.exerciseId == newLog.exerciseId })
@@ -1097,7 +1106,9 @@ struct ProgramDayDetailView: View {
             weightKg: newLog.weightKg,
             rpeFelt: newLog.rpeFelt,
             rirEstimated: newLog.rpeFelt.map { max(0, 10 - $0) },
-            primaryMuscle: ExerciseLibrary.primaryMuscle(for: newLog.exerciseId)?.rawValue ?? exerciseForLog?.primaryMuscle
+            primaryMuscle: ExerciseLibrary.primaryMuscle(for: newLog.exerciseId)?.rawValue ?? exerciseForLog?.primaryMuscle,
+            localDate: SetLog.formatLocalDate(newLog.loggedAt),
+            intent: intent.rawValue
         )
 
         do {
@@ -1107,7 +1118,8 @@ struct ProgramDayDetailView: View {
             return
         }
 
-        // Update local state immediately
+        // Update local state immediately. intent mirrors the value just persisted
+        // to set_logs so the in-memory model is consistent with the row on the server.
         let inserted = SetLog(
             id: newLog.id,
             sessionId: sessionId,
@@ -1119,7 +1131,8 @@ struct ProgramDayDetailView: View {
             rirEstimated: newLog.rpeFelt.map { max(0, 10 - $0) },
             aiPrescribed: nil,
             loggedAt: newLog.loggedAt,
-            primaryMuscle: ExerciseLibrary.primaryMuscle(for: newLog.exerciseId)?.rawValue ?? exerciseForLog?.primaryMuscle
+            primaryMuscle: ExerciseLibrary.primaryMuscle(for: newLog.exerciseId)?.rawValue ?? exerciseForLog?.primaryMuscle,
+            intent: intent
         )
         var newGroups = historicalSetLogs
         newGroups[newLog.exerciseId, default: []].append(inserted)

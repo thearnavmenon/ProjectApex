@@ -200,6 +200,21 @@ nonisolated struct SetLog: Codable, Identifiable, Sendable {
     }
 }
 
+extension SetLog {
+    /// Pre-bucketed local-date string (yyyy-MM-dd) for set_logs.local_date.
+    /// Same formatter shape as TopSetSnapshot.make per ADR-0005's
+    /// timezone-immune day-boundary policy (Slice 5 / #4). Pinned to
+    /// en_US_POSIX so the format is interpreted as ISO-8601 calendar fields
+    /// regardless of host locale; timezone is explicit (default .current).
+    static func formatLocalDate(_ date: Date, in tz: TimeZone = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = tz
+        return formatter.string(from: date)
+    }
+}
+
 // MARK: - SessionNote
 
 /// A voice or text note logged during a session. Mirrors the `session_notes` table.
