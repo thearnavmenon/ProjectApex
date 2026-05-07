@@ -11,6 +11,16 @@
 // `trainee_model` (rule outcomes routed to the model update path) and
 // `recovery` (curve-evaluation edge cases per ADR-0010).
 
+/**
+ * Single emit primitive. Public typed wrappers below funnel through
+ * here so that the envelope shape and sink choice live in one place —
+ * future migrations (e.g., routing to a dedicated observability table
+ * per ADR-0006's "v2.x may add a table" note) change one function body.
+ */
+function emit(channel: string, event: unknown): void {
+  console.log(JSON.stringify({ channel, event }));
+}
+
 // ─── emitLateArrival (ADR-0008) ─────────────────────────────────────────────
 
 export interface LateArrivalEvent {
@@ -22,7 +32,7 @@ export interface LateArrivalEvent {
 }
 
 export function emitLateArrival(event: LateArrivalEvent): void {
-  console.log(JSON.stringify({ channel: "trainee_model.late_arrival", event }));
+  emit("trainee_model.late_arrival", event);
 }
 
 // ─── emitClassifierFailed (ADR-0013) ────────────────────────────────────────
@@ -36,7 +46,7 @@ export interface ClassifierFailedEvent {
 }
 
 export function emitClassifierFailed(event: ClassifierFailedEvent): void {
-  console.log(JSON.stringify({ channel: "trainee_model.classifier_failed", event }));
+  emit("trainee_model.classifier_failed", event);
 }
 
 // ─── emitClockSkew (ADR-0010) ───────────────────────────────────────────────
@@ -49,5 +59,5 @@ export interface ClockSkewEvent {
 }
 
 export function emitClockSkew(event: ClockSkewEvent): void {
-  console.log(JSON.stringify({ channel: "recovery.clock_skew", event }));
+  emit("recovery.clock_skew", event);
 }
