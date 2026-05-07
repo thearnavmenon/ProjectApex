@@ -111,6 +111,7 @@ final class TraineeModelUpdateJobTests: XCTestCase {
 
     private var store: TraineeModelLocalStore!
     private var supabase: SupabaseClient!
+    private var notificationQueue: LateArrivalNotificationQueue!
     private var job: TraineeModelUpdateJob!
 
     private let userId    = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
@@ -121,15 +122,21 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         TMUJMockURLProtocol.capturedRequests = []
         TMUJMockURLProtocol.requestHandler   = nil
         UserDefaults.standard.removeObject(forKey: "com.projectapex.writeAheadQueue")
-        store    = try TraineeModelLocalStore.makeInMemory()
-        supabase = makeMockSupabase()
-        job      = TraineeModelUpdateJob(supabase: supabase, store: store)
+        store             = try TraineeModelLocalStore.makeInMemory()
+        supabase          = makeMockSupabase()
+        notificationQueue = LateArrivalNotificationQueue.makeInMemory()
+        job               = TraineeModelUpdateJob(
+            supabase: supabase,
+            store: store,
+            notificationQueue: notificationQueue
+        )
     }
 
     override func tearDown() async throws {
-        job      = nil
-        supabase = nil
-        store    = nil
+        job               = nil
+        notificationQueue = nil
+        supabase          = nil
+        store             = nil
         UserDefaults.standard.removeObject(forKey: "com.projectapex.writeAheadQueue")
     }
 
@@ -333,6 +340,85 @@ final class TraineeModelUpdateJobTests: XCTestCase {
                        "permanentFailure must remove the item from the WAQ immediately (no retry)")
     }
 
+    // MARK: ─── ADR-0008 late_arrival branch (slice A3 / #74) ────────────────
+
+    /// Builds a 200 response body with the late_arrival flag set. The
+    /// trainee_model field still carries the cached snapshot per ADR-0008
+    /// ("return the cached snapshot with a `late_arrival: true` flag in the
+    /// JSON body") — the WAQ adapter must NOT propagate it to the local store.
+    private func makeLateArrivalResponse(model: TraineeModel, late: Bool) throws -> Data {
+        struct Wrapper: Encodable {
+            let traineeModel: TraineeModel
+            let lateArrival: Bool
+            enum CodingKeys: String, CodingKey {
+                case traineeModel = "trainee_model"
+                case lateArrival  = "late_arrival"
+            }
+        }
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        return try enc.encode(Wrapper(traineeModel: model, lateArrival: late))
+    }
+
+    /// ADR-0008 §"Late arrival": the Edge Function returns 200 with
+    /// `late_arrival: true` and the *cached* snapshot. The WAQ adapter must
+    /// dequeue identically (return .success) but skip the local snapshot
+    /// update — applying the cached snapshot would clobber any in-flight
+    /// local edit in the (unlikely) race.
+    func test_flushHandler_onLateArrivalTrue_returnsSuccess_withoutSavingStore() async throws {
+        let cachedModel = makeSimpleModel()
+        let body        = try makeLateArrivalResponse(model: cachedModel, late: true)
+        respond(status: 200, body: body)
+
+        let item    = try makeQueuedItem()
+        let handler = job.makeHandler()
+        let outcome = await handler(item)
+
+        XCTAssertEqual(outcome, .success,
+                       "late_arrival:true must dequeue identically (per ADR-0008)")
+        XCTAssertNil(store.load(),
+                     "late_arrival:true must NOT update the local snapshot — the trainee_model field is the *cached* snapshot, not a fresh write")
+    }
+
+    /// ADR-0008 locks the user-visible notification copy verbatim. A paraphrase
+    /// is a regression — the test asserts the exact string so any future edit
+    /// to the message must come back through ADR-0008.
+    func test_flushHandler_onLateArrivalTrue_enqueuesNotificationWithLockedCopy() async throws {
+        let body = try makeLateArrivalResponse(model: makeSimpleModel(), late: true)
+        respond(status: 200, body: body)
+
+        let outcome = await job.makeHandler()(try makeQueuedItem())
+
+        XCTAssertEqual(outcome, .success)
+
+        let pending = notificationQueue.dequeueAll()
+        XCTAssertEqual(pending.count, 1, "Exactly one notification per refused session")
+        XCTAssertEqual(
+            pending.first?.message,
+            "This session was logged after later sessions and won't update your training profile, but the history is preserved.",
+            "Notification copy is locked verbatim from ADR-0008 — any paraphrase is a regression"
+        )
+    }
+
+    /// ADR-0008 contract for the in-order branch: explicit `late_arrival:false`
+    /// (the shape A12 will return for accepted sessions) MUST behave identically
+    /// to the existing no-flag case — store updates, queue stays empty. Locks
+    /// in the gate so a downstream slice can't accidentally route an in-order
+    /// session through the late-arrival path by toggling the flag.
+    func test_flushHandler_onLateArrivalFalse_updatesSnapshot_andLeavesQueueEmpty() async throws {
+        let model        = makeSimpleModel()
+        let responseBody = try makeLateArrivalResponse(model: model, late: false)
+        respond(status: 200, body: responseBody)
+
+        let outcome = await job.makeHandler()(try makeQueuedItem())
+
+        XCTAssertEqual(outcome, .success)
+        XCTAssertEqual(store.load(), model,
+                       "late_arrival:false must take the normal path — store gets the fresh snapshot")
+        XCTAssertEqual(notificationQueue.pendingCount, 0,
+                       "late_arrival:false must NOT enqueue a notification — only true does")
+    }
+
     // MARK: ─── Test 14: Integration smoke (APEX_INTEGRATION_TESTS=1 only) ───
 
     func test_smoke_endToEnd_edgeFunctionReceivesCall() async throws {
@@ -343,7 +429,11 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         // Verifies: WAQ enqueues → handler invoked → Edge Function called → item removed.
         // The Phase 1 stub returns { trainee_model: {} } — store won't update, but pipeline is confirmed.
         let liveSupabase = SupabaseClient(supabaseURL: Config.supabaseURL, anonKey: "")
-        let liveJob      = TraineeModelUpdateJob(supabase: liveSupabase, store: store)
+        let liveJob      = TraineeModelUpdateJob(
+            supabase: liveSupabase,
+            store: store,
+            notificationQueue: LateArrivalNotificationQueue.makeInMemory()
+        )
         let liveWAQ      = WriteAheadQueue(supabase: liveSupabase)
         await liveJob.register(with: liveWAQ)
 

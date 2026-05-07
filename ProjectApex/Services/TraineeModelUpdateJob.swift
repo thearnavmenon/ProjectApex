@@ -59,12 +59,18 @@ final class TraineeModelUpdateJob {
 
     private let supabase: SupabaseClient
     private let store: TraineeModelLocalStore
+    private let notificationQueue: LateArrivalNotificationQueue
 
     // MARK: - Init
 
-    init(supabase: SupabaseClient, store: TraineeModelLocalStore) {
-        self.supabase = supabase
-        self.store    = store
+    init(
+        supabase: SupabaseClient,
+        store: TraineeModelLocalStore,
+        notificationQueue: LateArrivalNotificationQueue
+    ) {
+        self.supabase          = supabase
+        self.store             = store
+        self.notificationQueue = notificationQueue
     }
 
     // MARK: - Registration
@@ -82,10 +88,16 @@ final class TraineeModelUpdateJob {
     /// Returns the `@Sendable` closure that the WAQ calls for every
     /// `trainee_model_updates` item during flush.
     func makeHandler() -> @Sendable (QueuedWrite) async -> WAQFlushOutcome {
-        let supabase = self.supabase
-        let store    = self.store
+        let supabase          = self.supabase
+        let store             = self.store
+        let notificationQueue = self.notificationQueue
         return { item in
-            await TraineeModelUpdateJob.flush(item, supabase: supabase, store: store)
+            await TraineeModelUpdateJob.flush(
+                item,
+                supabase: supabase,
+                store: store,
+                notificationQueue: notificationQueue
+            )
         }
     }
 
@@ -94,7 +106,8 @@ final class TraineeModelUpdateJob {
     private static func flush(
         _ item: QueuedWrite,
         supabase: SupabaseClient,
-        store: TraineeModelLocalStore
+        store: TraineeModelLocalStore,
+        notificationQueue: LateArrivalNotificationQueue
     ) async -> WAQFlushOutcome {
         // POST item.payload (already-encoded TraineeModelUpdatePayload JSON) to Edge Function.
         let responseData: Data
@@ -107,7 +120,7 @@ final class TraineeModelUpdateJob {
             return .transientFailure
         }
 
-        return await parseResponse(responseData, item: item, store: store)
+        return await parseResponse(responseData, item: item, store: store, notificationQueue: notificationQueue)
     }
 
     // MARK: - Response Parsing
@@ -115,7 +128,8 @@ final class TraineeModelUpdateJob {
     private static func parseResponse(
         _ data: Data,
         item: QueuedWrite,
-        store: TraineeModelLocalStore
+        store: TraineeModelLocalStore,
+        notificationQueue: LateArrivalNotificationQueue
     ) async -> WAQFlushOutcome {
         // Response must be a JSON object containing a "trainee_model" key.
         guard
@@ -126,6 +140,28 @@ final class TraineeModelUpdateJob {
             logger.error("[\(callSite)] \(msg, privacy: .public) for item \(item.id, privacy: .public)")
             FallbackLogRecord(callSite: callSite, reason: msg).emit()
             return .permanentFailure(msg)
+        }
+
+        // ADR-0008 §"Late arrival": when the Edge Function returns
+        // `late_arrival: true`, the trainee_model field is the *cached*
+        // snapshot — applying it would clobber any in-flight local edit
+        // in the (unlikely) race. Dequeue identically (return .success),
+        // skip the local snapshot update, and enqueue a soft notification
+        // for the post-session summary surface.
+        if json["late_arrival"] as? Bool == true {
+            let notification = LateArrivalNotification(
+                id: UUID(),
+                message: LateArrivalNotification.lockedMessage,
+                receiptDate: Date(),
+                // sessionId / incomingLoggedAt / watermark are populated
+                // when A12 ships the richer Edge Function response shape.
+                // A3's bool-only response leaves them nil.
+                sessionId: nil,
+                incomingLoggedAt: nil,
+                watermark: nil
+            )
+            await notificationQueue.enqueue(notification)
+            return .success
         }
 
         // Try to decode the model value. Phase 1 stub returns {} — that won't

@@ -43,6 +43,8 @@ final class AppDependencies {
     let traineeModelLocalStore: TraineeModelLocalStore
     /// WAQ adapter: routes trainee_model_updates items to the Edge Function (Phase 1 / Slice 11).
     let traineeModelUpdateJob: TraineeModelUpdateJob
+    /// Pending late-arrival notifications surfaced on the post-session summary (Phase 2 / Slice A3, ADR-0008).
+    let lateArrivalNotificationQueue: LateArrivalNotificationQueue
     /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
     let workoutSessionManager: WorkoutSessionManager
 
@@ -147,7 +149,13 @@ final class AppDependencies {
         // makeShared() can fail only if SwiftData can't create the container — treat as fatal.
         let tmStore = (try? TraineeModelLocalStore.makeShared()) ?? (try! TraineeModelLocalStore.makeInMemory())
         self.traineeModelLocalStore = tmStore
-        let tmJob = TraineeModelUpdateJob(supabase: supabaseClient, store: tmStore)
+        let lateArrivalQueue = LateArrivalNotificationQueue.makeShared()
+        self.lateArrivalNotificationQueue = lateArrivalQueue
+        let tmJob = TraineeModelUpdateJob(
+            supabase: supabaseClient,
+            store: tmStore,
+            notificationQueue: lateArrivalQueue
+        )
         self.traineeModelUpdateJob = tmJob
         // Register the handler with the WAQ. Done via Task so the async WAQ actor hop
         // doesn't block the synchronous init. The Task is scheduled immediately and
