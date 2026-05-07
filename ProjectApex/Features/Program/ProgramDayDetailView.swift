@@ -1538,19 +1538,22 @@ private extension String {
 // MARK: - WorkoutSessionRow (lightweight Decodable for session query)
 
 /// Lightweight read-only row decoded from `workout_sessions` for historical set log lookup.
+/// Hotfix: `session_date` (Postgres `date` type, format "yyyy-MM-dd") is intentionally NOT
+/// decoded — the row was breaking the entire fetch when the field was typed `Date?` because
+/// the default decoder couldn't parse the bare-date format. Ordering / limit happens
+/// server-side via the `order: "session_date.desc"` query parameter, so the column never
+/// has to round-trip through Swift's decoder for this read path.
 private struct WorkoutSessionRow: Decodable, Identifiable {
     let id: UUID
     let dayType: String
     let weekNumber: Int
     let completed: Bool
-    let sessionDate: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
         case dayType     = "day_type"
         case weekNumber  = "week_number"
         case completed
-        case sessionDate = "session_date"
     }
 }
 
