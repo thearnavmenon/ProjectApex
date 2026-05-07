@@ -39,6 +39,20 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Diagnostic — simulator devices and devicetypes (for #28, will be removed)
+        # Build & Test below will still fail this run; this step exists to surface
+        # the runner's simulator inventory under Xcode 26.3 so the next commit
+        # can pin the exact iPhone device-type identifier present at iOS 26.2.
+        run: |
+          echo "===== xcrun simctl list runtimes (under selected Xcode) ====="
+          xcrun simctl list runtimes
+          echo
+          echo "===== xcrun simctl list devicetypes | grep -i 'iPhone 1[6-7]' ====="
+          xcrun simctl list devicetypes | grep -i 'iPhone 1[6-7]' || echo "(no matches)"
+          echo
+          echo "===== xcrun simctl list devices available ====="
+          xcrun simctl list devices available
+
       - name: Resolve Swift packages
         run: |
           xcodebuild -resolvePackageDependencies \
