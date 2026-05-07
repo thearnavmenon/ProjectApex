@@ -34,6 +34,14 @@ _Avoid_: user profile, user state, user data
 The one-time UI screen fired when ≥4 of 6 major patterns reach `.established` per-axis confidence; sets floor + stretch projections. See ADR-0005.
 _Avoid_: assessment, test block, week 1 test
 
+**Global phase advance event**:
+A recurring trigger that fires when ≥4 of 6 major patterns had a phase transition within the user's last 6 completed sessions. Surfaces a heavy-reassessment UI + goal renegotiation; re-derives stretch projections (floor untouched). Shares the 6-major-pattern enumeration with **calibration review** but is distinct: calibration review is one-time and confidence-triggered; global phase advance is recurring and transition-triggered. See ADR-0012.
+_Avoid_: phase-up event, mesocycle restart, calibration review (different concept)
+
+**Late-arrival session**:
+A session-completion event whose `loggedAt` is earlier than the trainee model's `last_applied_logged_at` watermark. Refused at the Edge Function tier (no model update, no WAQ retry); the underlying `set_logs` and `sessions` rows persist independently. Surfaced to the user as a soft post-session notification. See ADR-0008.
+_Avoid_: out-of-order session (overloaded — ADR-0001's queue-position semantics are a different concept)
+
 **Floor projection**:
 The capability-based realistic target — immovable on goal renegotiation. See ADR-0005.
 _Avoid_: target, conservative goal
