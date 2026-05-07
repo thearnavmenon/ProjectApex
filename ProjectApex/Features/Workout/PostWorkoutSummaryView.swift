@@ -43,6 +43,15 @@ struct PostWorkoutSummaryView: View {
 
     @State private var insightsState: InsightsState = .loading
 
+    // MARK: - Late-Arrival Notifications (Slice A3 / ADR-0008)
+
+    /// Pending late-arrival notifications dequeued from
+    /// `AppDependencies.lateArrivalNotificationQueue` on appearance.
+    /// Renders a soft banner above the trophy header; dismiss-on-tap.
+    /// Preview-friendly: previews can seed this directly to verify the
+    /// banner stack without booting the WAQ.
+    @State var lateArrivalNotices: [LateArrivalNotification] = []
+
     // MARK: - Body
 
     var body: some View {
@@ -56,6 +65,13 @@ struct PostWorkoutSummaryView: View {
                     if summary.earlyExitReason != nil {
                         partialSessionBadge
                             .padding(.top, 20)
+                    }
+
+                    // Late-arrival notifications (Slice A3 / ADR-0008)
+                    if !lateArrivalNotices.isEmpty {
+                        lateArrivalNoticesSection
+                            .padding(.top, summary.earlyExitReason != nil ? 12 : 20)
+                            .padding(.horizontal, 24)
                     }
 
                     // Trophy header
@@ -123,7 +139,53 @@ struct PostWorkoutSummaryView: View {
             }
         }
         .task {
+            // Dequeue any late-arrival notifications enqueued by
+            // TraineeModelUpdateJob since this surface was last shown
+            // (per ADR-0008). Dequeue is atomic — second appearance
+            // shows nothing unless a fresh refusal happened in between.
+            lateArrivalNotices = deps.lateArrivalNotificationQueue.dequeueAll()
             await loadInsights()
+        }
+    }
+
+    // MARK: - Late-Arrival Notices
+
+    private var lateArrivalNoticesSection: some View {
+        VStack(spacing: 8) {
+            ForEach(lateArrivalNotices) { notice in
+                Button {
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        lateArrivalNotices.removeAll { $0.id == notice.id }
+                    }
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "clock.badge.exclamationmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
+                            .padding(.top, 1)
+                        Text(notice.message)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.80))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.40))
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.10),
+                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.30), lineWidth: 0.5)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -727,4 +789,37 @@ struct PostWorkoutSummaryView: View {
     )
     .environment(AppDependencies())
     .preferredColorScheme(.dark)
+}
+
+#Preview("Late-Arrival Notice") {
+    // Slice A3 / ADR-0008: fixture exercises the soft notification banner
+    // without needing the WAQ flush path. Use this preview at PR-review
+    // time to eyeball the banner's copy + spacing before merge.
+    var view = PostWorkoutSummaryView(
+        summary: SessionSummary(
+            totalVolumeKg: 4520,
+            setsCompleted: 18,
+            setsPlanned: 20,
+            personalRecords: [],
+            aiAdjustmentCount: 14,
+            notableNotes: [],
+            earlyExitReason: nil,
+            durationSeconds: 3720
+        ),
+        streak: StreakResult.compute(currentStreakDays: 7, longestStreak: 10),
+        onDone: {}
+    )
+    view.lateArrivalNotices = [
+        LateArrivalNotification(
+            id: UUID(),
+            message: LateArrivalNotification.lockedMessage,
+            receiptDate: Date(),
+            sessionId: nil,
+            incomingLoggedAt: nil,
+            watermark: nil
+        )
+    ]
+    return view
+        .environment(AppDependencies())
+        .preferredColorScheme(.dark)
 }
