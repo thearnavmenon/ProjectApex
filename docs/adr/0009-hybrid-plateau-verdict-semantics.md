@@ -1,6 +1,6 @@
 # Hybrid plateau verdict semantics on the trainee model
 
-**Status**: accepted, 2026-05-07
+**Status**: accepted, 2026-05-07; amended 2026-05-07 (muscle-level aggregation rule)
 
 ## Context
 
@@ -49,6 +49,49 @@ The trainee model populates `MuscleProfile.stagnationStatus` and `PatternProfile
 | any         | declining    | `declining`   |
 
 Where "improving" means neither plateau nor declining on that track. Plateau requires both tracks flat — not e1RM-only flat — because volume-shifted progression (e1RM stuck, working sets climbing) is real progress that the verdict must not bury.
+
+### Aggregation to `MuscleProfile.stagnationStatus` (amended 2026-05-07)
+
+The original ADR text described the e1RM track as "per-pattern, per-exercise — aggregates up to muscle" without pinning the aggregation rule. This amendment fills that hole.
+
+**Rule:** for each `MuscleGroup M`, `MuscleProfile.stagnationStatus` is the **worst** trend across the participating patterns, where worst order is `declining > plateaued > progressing`.
+
+**Participation precondition:** a pattern `P` participates in muscle `M`'s aggregation iff:
+- `∃` exercise `e` such that `ExerciseLibrary.primaryMuscle(e).muscleGroup == M` and `e.movementPattern == P`, AND
+- `PatternProfile[P].confidence > .bootstrapping` (the pattern has accumulated enough data for its trend to be evaluable).
+
+**Empty-participation case** (zero patterns above bootstrapping confidence map to `M`):
+- `stagnationStatus = .progressing` — `ProgressionTrend` has no `.bootstrapping` case; `.progressing` is the no-signal default.
+- The cold-start signal is carried by `MuscleProfile.confidence`, which stays at `.bootstrapping` independently. LLM digest consumers MUST read both fields — when `confidence == .bootstrapping`, the `stagnationStatus` value carries no actionable signal regardless of its trend value.
+
+**Why worst-across-patterns** (asymmetric-error preference per `docs/design-principles.md`):
+- Loud failure mode: muscle reads `.declining` because one pattern is declining → triggers exercise-rotation / programme-rebuild coaching cues; the user can override or RPE will quickly disconfirm if the muscle is actually fine.
+- Silent failure mode: muscle reads `.progressing` while one pattern is regressing → no coaching intervention; the regressing pattern accumulates damage.
+- Pick the loud one.
+
+**Considered alternatives:**
+- **Majority-vote with worst tiebreak** — smoother, more representative of average pattern state, but a 3-progressing/3-plateaued tie aggregates to plateaued (or progressing under a different tiebreak); the tiebreak rule is itself a decision and either direction has the asymmetric-error problem unsolved.
+- **Re-apply the hybrid verdict at muscle level** (compute muscle-level e1RM track aggregating exercises whose `primaryMuscle.muscleGroup == M`, plus the already-per-muscle volume-load track, then run the OR/AND aggregation table at muscle level) — architecturally cleaner; reuses verdict logic. Rejected for v2 because muscle-level e1RM aggregation requires a sub-decision (max-of-exercises vs mean vs primary-exercise dominance) that ducks the same grilling. Documented as the v2.x upgrade path below.
+
+**Concentration of aggregation risk on `legs` and `back`:**
+
+The "one bad pattern poisons the muscle signal" risk is concentrated on muscle groups with multiple participating patterns:
+- `legs`: 3 primary patterns (squat, hipHinge, lunge)
+- `back`: 2 primary patterns (horizontalPull, verticalPull)
+- `chest`, `shoulders`, `biceps`, `triceps`: 1 or 0 primary patterns (single-pattern muscles aggregate trivially)
+
+Squat plateaus are particularly common (squat is the most-trained lower-body lift in alpha-cohort training programmes); under worst-across-patterns, a single squat plateau forces `legs.stagnationStatus = .plateaued` even when hipHinge and lunge are progressing. **This is the right direction by asymmetric-error reasoning, but it's also the most likely place where alpha-cohort behaviour pushes toward the v2.x upgrade.**
+
+**Watch trigger** (catalogued in `docs/v2.x-watch-items.md`): if leg-muscle `stagnationStatus` reads `.plateaued` more than ~30% of the time across the alpha cohort's session-applies, that's the signal to re-apply ADR-0009's hybrid verdict at muscle level (the v2.x upgrade path) rather than aggregating from per-pattern verdicts. Until that trigger fires, worst-across-patterns is the right v2 rule.
+
+**v2.x upgrade path:**
+
+If alpha cohort surfaces the legs-aggregation problem, v2.x re-applies this ADR's verdict table at the muscle level. The required sub-decisions for that upgrade:
+1. Muscle-level e1RM aggregation rule (max-of-exercises vs mean vs primary-exercise dominance per muscle).
+2. Whether to keep per-pattern `PatternProfile.trend` as a separate signal alongside the muscle-level verdict, or derive it from the muscle-level result.
+3. Whether the volume-load track stays per-muscle (already its v2 shape) or stratifies further.
+
+The v2.x upgrade is forward-only per ADR-0006 — no auto-recompute of historical aggregations.
 
 ## Considered Options
 
