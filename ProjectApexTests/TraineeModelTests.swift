@@ -236,6 +236,39 @@ struct TraineeModelCodableTests {
         let data = try JSONEncoder().encode(model)
         #expect(try JSONDecoder().decode(TraineeModel.self, from: data) == model)
     }
+
+    @Test("Pre-Phase-2 JSON (no lastClassifiedNoteCreatedAt key) decodes with nil default")
+    func decodesPrePhase2LastClassifiedNoteCreatedAtNil() throws {
+        let model = TraineeModel(goal: defaultGoal())
+        let data = try JSONEncoder().encode(model)
+        var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        dict.removeValue(forKey: "lastClassifiedNoteCreatedAt")
+        let stripped = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(TraineeModel.self, from: stripped)
+        #expect(decoded.lastClassifiedNoteCreatedAt == nil)
+    }
+
+    @Test("Pre-Phase-2 JSON (no lastGlobalPhaseAdvanceFiredAtSessionCount key) decodes with nil default")
+    func decodesPrePhase2LastGlobalPhaseAdvanceFiredAtSessionCountNil() throws {
+        let model = TraineeModel(goal: defaultGoal())
+        let data = try JSONEncoder().encode(model)
+        var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        dict.removeValue(forKey: "lastGlobalPhaseAdvanceFiredAtSessionCount")
+        let stripped = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(TraineeModel.self, from: stripped)
+        #expect(decoded.lastGlobalPhaseAdvanceFiredAtSessionCount == nil)
+    }
+
+    @Test("Round-trip preserves both new Phase-2 watermark fields when populated")
+    func roundTripPreservesPhase2Watermarks() throws {
+        var model = TraineeModel(goal: defaultGoal(), totalSessionCount: 24)
+        model.lastClassifiedNoteCreatedAt = isoDate("2026-04-30")
+        model.lastGlobalPhaseAdvanceFiredAtSessionCount = 18
+        let data = try JSONEncoder().encode(model)
+        let decoded = try JSONDecoder().decode(TraineeModel.self, from: data)
+        #expect(decoded.lastClassifiedNoteCreatedAt == isoDate("2026-04-30"))
+        #expect(decoded.lastGlobalPhaseAdvanceFiredAtSessionCount == 18)
+    }
 }
 
 // MARK: - Helpers

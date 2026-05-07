@@ -121,19 +121,49 @@ struct FatigueInteraction: Codable, Sendable, Hashable {
 
 /// Per (pattern, intent) bias and RMSE — meta-coaching about the AI's
 /// own miscalibration, distinct from a single intent mismatch at log time.
+///
+/// Per ADR-0014, the cell additionally carries per-gap-bucket aggregations
+/// to detect ADR-0010 fatigue-stacking signals.
 struct PrescriptionAccuracy: Codable, Sendable, Hashable {
     var pattern: MovementPattern
     var intent: SetIntent
     var bias: Double
     var rmse: Double
     var sampleCount: Int
+    var biasByGapBucket: [InterSessionGapBucket: Double]
+    var rmseByGapBucket: [InterSessionGapBucket: Double]
+    var sampleCountByGapBucket: [InterSessionGapBucket: Int]
 
-    init(pattern: MovementPattern, intent: SetIntent, bias: Double, rmse: Double, sampleCount: Int) {
+    init(
+        pattern: MovementPattern,
+        intent: SetIntent,
+        bias: Double,
+        rmse: Double,
+        sampleCount: Int,
+        biasByGapBucket: [InterSessionGapBucket: Double] = [:],
+        rmseByGapBucket: [InterSessionGapBucket: Double] = [:],
+        sampleCountByGapBucket: [InterSessionGapBucket: Int] = [:]
+    ) {
         self.pattern = pattern
         self.intent = intent
         self.bias = bias
         self.rmse = rmse
         self.sampleCount = sampleCount
+        self.biasByGapBucket = biasByGapBucket
+        self.rmseByGapBucket = rmseByGapBucket
+        self.sampleCountByGapBucket = sampleCountByGapBucket
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.pattern = try c.decode(MovementPattern.self, forKey: .pattern)
+        self.intent = try c.decode(SetIntent.self, forKey: .intent)
+        self.bias = try c.decode(Double.self, forKey: .bias)
+        self.rmse = try c.decode(Double.self, forKey: .rmse)
+        self.sampleCount = try c.decode(Int.self, forKey: .sampleCount)
+        self.biasByGapBucket = try c.decodeIfPresent([InterSessionGapBucket: Double].self, forKey: .biasByGapBucket) ?? [:]
+        self.rmseByGapBucket = try c.decodeIfPresent([InterSessionGapBucket: Double].self, forKey: .rmseByGapBucket) ?? [:]
+        self.sampleCountByGapBucket = try c.decodeIfPresent([InterSessionGapBucket: Int].self, forKey: .sampleCountByGapBucket) ?? [:]
     }
 }
 

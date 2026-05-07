@@ -24,6 +24,29 @@ struct ExerciseProfileTests {
         #expect(profile.learningPhase == false)
     }
 
+    @Test("Pre-Phase-2 JSON (no formDegradationCleanSessions key) decodes with 0 default")
+    func decodesPrePhase2FormDegradationCleanSessionsZero() throws {
+        let baseline = ExerciseProfile(exerciseId: "barbell_bench_press")
+        let data = try JSONEncoder().encode(baseline)
+        var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        dict.removeValue(forKey: "formDegradationCleanSessions")
+        let stripped = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(ExerciseProfile.self, from: stripped)
+        #expect(decoded.formDegradationCleanSessions == 0)
+    }
+
+    @Test("Round-trip preserves non-default formDegradationCleanSessions")
+    func roundTripPreservesFormDegradationCleanSessions() throws {
+        let original = ExerciseProfile(
+            exerciseId: "barbell_bench_press",
+            formDegradationCleanSessions: 4
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(ExerciseProfile.self, from: data)
+        #expect(decoded.formDegradationCleanSessions == 4)
+        #expect(decoded == original)
+    }
+
     @Test("Round-trip with top sets")
     func roundTrip() throws {
         // TopSetSnapshot's memberwise init is private — route through the
@@ -199,6 +222,29 @@ struct PatternProfileCodableTests {
         )
         let data = try JSONEncoder().encode(original)
         #expect(try JSONDecoder().decode(PatternProfile.self, from: data) == original)
+    }
+
+    @Test("Pre-Phase-2 JSON (no consecutiveForceDeloadsOnPattern key) decodes with 0 default")
+    func decodesPrePhase2ConsecutiveForceDeloadsZero() throws {
+        let baseline = PatternProfile(pattern: .squat)
+        let data = try JSONEncoder().encode(baseline)
+        var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        dict.removeValue(forKey: "consecutiveForceDeloadsOnPattern")
+        let stripped = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(PatternProfile.self, from: stripped)
+        #expect(decoded.consecutiveForceDeloadsOnPattern == 0)
+    }
+
+    @Test("Round-trip preserves non-default consecutiveForceDeloadsOnPattern")
+    func roundTripPreservesConsecutiveForceDeloads() throws {
+        let original = PatternProfile(
+            pattern: .squat,
+            consecutiveForceDeloadsOnPattern: 2
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(PatternProfile.self, from: data)
+        #expect(decoded.consecutiveForceDeloadsOnPattern == 2)
+        #expect(decoded == original)
     }
 }
 

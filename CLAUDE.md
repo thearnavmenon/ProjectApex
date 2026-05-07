@@ -36,6 +36,23 @@ Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/ag
 
 Authoritative for Edge Function secret storage, service-role access list, and key rotation policy. Read before any Slice 9b+ Edge Function work — do not redo the analysis from scratch. See `docs/agents/edge-functions.md`.
 
+### Migrations workflow
+
+Forward migrations live in `supabase/migrations/`, created via `supabase migration new <name>` and applied via `supabase db push` (forward-only; the runner scans every `*.sql` under that directory and registers it against `supabase_migrations.schema_migrations`).
+
+Reverse migrations live in `docs/migrations/down/<matching-filename>.sql` — same filename as the forward migration, in a path the Supabase tooling does not scan. Documentation only, not auto-applied; intended for manual operator use (`psql -f`) when a forward migration needs to be rolled back. Living under `docs/` matches the role: rarely run at alpha-cohort scale, useful as a "here's how to roll this back" reference (same way ADRs are reference docs).
+
+Each forward migration's first lines must include the pointer comment:
+
+```sql
+-- Reverse migration: docs/migrations/down/<this-filename>.sql
+-- (documentation only; not auto-applied by `supabase db push`)
+```
+
+so a reader of the forward migration finds the reverse without needing the convention by memory. Convention established in PR #92 (slice A2).
+
+Stale references to a top-level `migrations/` directory should be removed if encountered — that path was retired in the 2026-05-06 recovery (PR #52, Step D); the canonical baseline is `supabase/migrations/20260506091314_remote_schema.sql`.
+
 ### Integration test flag
 
 `APEX_INTEGRATION_TESTS=1` — environment variable that gates live-API tests requiring real credentials and network access. Set in the Xcode scheme's environment variables for local or CI runs. Tests gated by this flag:
