@@ -1,6 +1,6 @@
 # Hybrid plateau verdict semantics on the trainee model
 
-**Status**: accepted, 2026-05-07; amended 2026-05-07 (muscle-level aggregation rule)
+**Status**: accepted, 2026-05-07; amended 2026-05-07 (muscle-level aggregation rule); amended 2026-05-09 (declining-wins precedence in conflicting verdict cells)
 
 ## Context
 
@@ -49,6 +49,21 @@ The trainee model populates `MuscleProfile.stagnationStatus` and `PatternProfile
 | any         | declining    | `declining`   |
 
 Where "improving" means neither plateau nor declining on that track. Plateau requires both tracks flat — not e1RM-only flat — because volume-shifted progression (e1RM stuck, working sets climbing) is real progress that the verdict must not bury.
+
+### Conflicting-cell precedence: declining wins (amended 2026-05-09)
+
+The aggregation table above is non-mutually-exclusive in two cells where the e1RM and volume tracks disagree directionally:
+- `{improving e1RM, declining volume}`: rows 1 (`improving + any → progressing`) and 5 (`any + declining → declining`) both apply.
+- `{declining e1RM, improving volume}`: rows 4 (`declining + any → declining`) and 2 (`any + improving → progressing`) both apply.
+
+**Rule:** in either conflicting cell, the verdict is `declining`. Equivalently: `declining` on either track yields `declining` regardless of the other track's state — the OR-into-declining rule (rows 4+5) takes precedence over the OR-into-progressing rule (rows 1+2) when both fire.
+
+**Why declining-wins** (asymmetric-error preference per `docs/design-principles.md`):
+- The `{declining e1RM, improving volume}` cell is the classic overreach signature: the lifter is grinding through more total volume but losing strength on the heaviest set — typically excessive accumulation without sufficient recovery. A top-down reading of the table that fires `progressing` here silently endorses the overreach until volume itself collapses.
+- The `{improving e1RM, declining volume}` cell can be benign (post-deload volume re-ramp) but can also be early-warning loss of capacity to maintain working volume at the prescribed intensity. Firing `declining` is loud — triggers the phase-advance plateau-block path (ADR-0011 §(c)) — and the user/RPE quickly disconfirms if it's the benign case.
+- Loud failure: false-positive `declining` triggers a deload-block or force-deload that an actually-progressing pattern recovers from in one accumulation cycle. Silent failure: false-negative `progressing` lets an overreaching pattern dig deeper.
+
+The implementation locks this in [supabase/functions/_shared/plateau-verdict.ts](../../supabase/functions/_shared/plateau-verdict.ts) (cycles 17 and 18 in PR #100/#101). This amendment closes the prose hole the implementation already filled.
 
 ### Aggregation to `MuscleProfile.stagnationStatus` (amended 2026-05-07)
 
