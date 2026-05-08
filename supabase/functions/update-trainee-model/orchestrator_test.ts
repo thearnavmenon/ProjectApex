@@ -22,7 +22,7 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import postgres from "postgres";
 import { applySession } from "./index.ts";
-import type { LateArrivalEvent } from "../_shared/observability.ts";
+import type { ApplyCompleteEvent, LateArrivalEvent } from "../_shared/observability.ts";
 
 const DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
@@ -485,6 +485,305 @@ orchestratorTest(
     // Second apply — PK conflict, cached path, Stage 2 must NOT fire.
     await applySession(payload, sql, { stage2Hook });
     assertEquals(stage2Calls, 1, "cached-snapshot return MUST NOT re-fire Stage 2 (ADR-0013 §WAQ retry idempotency)");
+  },
+);
+
+orchestratorTest(
+  "ADR-0011 §(c) + Q5: pattern in .deload at sessionsRequiredForPhase threshold → cyclic advance to .accumulation; transitionModeUntil set per cadence-aware composer; emitApplyComplete fires with the rules-fired list",
+  async () => {
+    // Synthetic deload-end fixture. Pattern is in .deload with sessionsInPhase
+    // well above any reasonable Option-B threshold. Recent session dates are
+    // spread ~4 days apart so cadence-derived daysPerWeek lands at ~1.75
+    // (sessionsRequired = max(3, 1×1) = 3 for the deload phase). The pattern
+    // crosses the threshold and the cyclic deload→accumulation rule fires;
+    // composeTransitionModeUntil sets transitionModeUntil per ADR-0015.
+    const userId = crypto.randomUUID();
+    await sql`
+      INSERT INTO public.users (id, display_name)
+      VALUES (${userId}, ${"orchestrator-test-" + userId.slice(0, 8)})
+    `;
+    const seedModel = {
+      patterns: {
+        squat: {
+          pattern: "squat",
+          currentPhase: "deload",
+          sessionsInPhase: 10,
+          lastPhaseTransitionAtSessionCount: 5,
+          rpeOffset: 0,
+          recovery: { neuromuscularReadiness: 1, metabolicReadiness: 1 },
+          confidence: "established",
+          transitionModeUntil: null,
+          trend: "progressing",
+          recentSessionDates: [
+            "2026-04-22T10:00:00.000Z",
+            "2026-04-26T10:00:00.000Z",
+            "2026-04-30T10:00:00.000Z",
+            "2026-05-04T10:00:00.000Z",
+          ],
+          consecutiveForceDeloadsOnPattern: 0,
+        },
+      },
+    };
+    await sql`
+      INSERT INTO public.trainee_models (user_id, model_json)
+      VALUES (${userId}, ${JSON.stringify(seedModel)}::jsonb)
+    `;
+
+    const sessionId = crypto.randomUUID();
+    const incomingLoggedAt = "2026-05-08T10:00:00.000Z";
+    const captured: ApplyCompleteEvent[] = [];
+
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: { logged_at: incomingLoggedAt, set_logs: [] },
+      },
+      sql,
+      {
+        emitApplyComplete: (event) => {
+          captured.push(event);
+        },
+      },
+    );
+
+    assertEquals(result.late_arrival, false);
+
+    // Pattern advanced from .deload → .accumulation per ADR-0011 §(c).
+    const patterns = (result.trainee_model as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
+    assertEquals(patterns.squat.currentPhase, "accumulation");
+    assertEquals(patterns.squat.sessionsInPhase, 0);
+    assertEquals(patterns.squat.lastPhaseTransitionAtSessionCount, 1, "lastPhaseTransitionAtSessionCount = the new session_count after this apply");
+
+    // transitionModeUntil set per Q5 / ADR-0015. Concrete value is incoming +
+    // max(14d, 3×cadence). Cadence ≈ 4d → 3×cadence = 12d → max(14, 12) = 14d.
+    // So transitionModeUntil = 2026-05-08 + 14d = 2026-05-22T10:00:00Z.
+    const until = new Date(patterns.squat.transitionModeUntil as string);
+    const expected = new Date("2026-05-22T10:00:00.000Z");
+    assertEquals(
+      until.toISOString(),
+      expected.toISOString(),
+      "transitionModeUntil must be incomingLoggedAt + max(14d, 3×cadence) per Q5 + ADR-0015",
+    );
+
+    // emitApplyComplete fires with the list of rules that ran. The architect's
+    // procedural note: per-apply summary belongs in the apply flow from cycle 10,
+    // not added later.
+    assertEquals(captured.length, 1, "emitApplyComplete must fire exactly once on first-apply success");
+    assertEquals(captured[0].user_id, userId);
+    assertEquals(captured[0].session_id, sessionId);
+    assertEquals(captured[0].rules_fired.includes("phase-advance"), true);
+    assertEquals(captured[0].rules_fired.includes("transition-mode-expiry"), true);
+  },
+);
+
+orchestratorTest(
+  "ADR-0011 §(b): pattern at 2× threshold + trend=plateaued → force-deload safety valve fires; consecutiveForceDeloadsOnPattern increments by 1; phase jumps directly to .deload (skips intensification/peaking)",
+  async () => {
+    // Synthetic force-deload fixture. Pattern in .accumulation with
+    // sessionsInPhase well above 2 × sessionsRequiredForPhase + trend
+    // already classified as plateaued (synthetic — A12 doesn't run plateau-
+    // verdict; the seed pre-sets the trend that the real pipeline will
+    // produce in a later slice). The force-deload safety valve at
+    // ≥ 2× threshold AND stuck-trend fires per ADR-0011 §(b).
+    const userId = crypto.randomUUID();
+    await sql`
+      INSERT INTO public.users (id, display_name)
+      VALUES (${userId}, ${"orchestrator-test-" + userId.slice(0, 8)})
+    `;
+    const seedModel = {
+      patterns: {
+        squat: {
+          pattern: "squat",
+          currentPhase: "accumulation",
+          // Need sessionsInPhase ≥ 2 × sessionsRequiredForPhase. With cadence
+          // ≈ 4d (daysPerWeek ≈ 1.75 → multiplier=1) and accumulation
+          // (phaseWeeks=4): sessionsRequired = max(3, 4×1) = 4. 2× = 8.
+          // Setting sessionsInPhase=20 trivially clears the boundary.
+          sessionsInPhase: 20,
+          lastPhaseTransitionAtSessionCount: 5,
+          rpeOffset: 0,
+          recovery: { neuromuscularReadiness: 0.6, metabolicReadiness: 0.9 },
+          confidence: "established",
+          transitionModeUntil: null,
+          trend: "plateaued", // synthetic — would be set by plateau-verdict in a future slice
+          recentSessionDates: [
+            "2026-04-22T10:00:00.000Z",
+            "2026-04-26T10:00:00.000Z",
+            "2026-04-30T10:00:00.000Z",
+            "2026-05-04T10:00:00.000Z",
+          ],
+          consecutiveForceDeloadsOnPattern: 0,
+        },
+      },
+    };
+    await sql`
+      INSERT INTO public.trainee_models (user_id, model_json)
+      VALUES (${userId}, ${JSON.stringify(seedModel)}::jsonb)
+    `;
+
+    const sessionId = crypto.randomUUID();
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: { logged_at: "2026-05-08T10:00:00.000Z", set_logs: [] },
+      },
+      sql,
+    );
+
+    const patterns = (result.trainee_model as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
+    assertEquals(patterns.squat.currentPhase, "deload", "force-deload jumps directly to .deload (skips intensification + peaking) per ADR-0011 §(b)");
+    assertEquals(patterns.squat.sessionsInPhase, 0);
+    assertEquals(
+      patterns.squat.consecutiveForceDeloadsOnPattern,
+      1,
+      "consecutiveForceDeloadsOnPattern must increment on force-deload (only this path increments; natural progressing-advance resets per ADR-0011 §(b))",
+    );
+  },
+);
+
+orchestratorTest(
+  "ADR-0012: 4-of-6 major patterns transitioned within last 6 sessions → globalPhaseAdvance fires; lastGlobalPhaseAdvanceFiredAtSessionCount = current session_count",
+  async () => {
+    // Synthetic 4-of-6 major-pattern transitions fixture. Pre-set
+    // lastPhaseTransitionAtSessionCount within the 6-session window for
+    // squat / hipHinge / horizontalPush / verticalPush; the remaining
+    // major patterns (horizontalPull / verticalPull) sit outside the
+    // window. session_count post-increment = 7 (above the bootstrap guard
+    // of 6). lastGlobalPhaseAdvanceFiredAtSessionCount starts null —
+    // never-fired.
+    const userId = crypto.randomUUID();
+    await sql`
+      INSERT INTO public.users (id, display_name)
+      VALUES (${userId}, ${"orchestrator-test-" + userId.slice(0, 8)})
+    `;
+    const inWindowProfile = (pattern: string) => ({
+      pattern,
+      currentPhase: "accumulation",
+      sessionsInPhase: 0,
+      lastPhaseTransitionAtSessionCount: 4, // session_count post-increment is 7, delta=3 (≤6)
+      rpeOffset: 0,
+      recovery: { neuromuscularReadiness: 1, metabolicReadiness: 1 },
+      confidence: "established",
+      transitionModeUntil: null,
+      trend: "progressing",
+      recentSessionDates: [
+        "2026-04-22T10:00:00.000Z",
+        "2026-04-26T10:00:00.000Z",
+        "2026-04-30T10:00:00.000Z",
+        "2026-05-04T10:00:00.000Z",
+      ],
+      consecutiveForceDeloadsOnPattern: 0,
+    });
+    const seedModel = {
+      patterns: {
+        squat: inWindowProfile("squat"),
+        hipHinge: inWindowProfile("hipHinge"),
+        horizontalPush: inWindowProfile("horizontalPush"),
+        verticalPush: inWindowProfile("verticalPush"),
+        // horizontalPull / verticalPull intentionally absent — they do not
+        // contribute to the count, leaving 4-of-6 satisfied.
+      },
+      lastGlobalPhaseAdvanceFiredAtSessionCount: null,
+    };
+    await sql`
+      INSERT INTO public.trainee_models (user_id, model_json, session_count)
+      VALUES (${userId}, ${JSON.stringify(seedModel)}::jsonb, 6)
+    `;
+
+    const sessionId = crypto.randomUUID();
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: { logged_at: "2026-05-08T10:00:00.000Z", set_logs: [] },
+      },
+      sql,
+    );
+
+    // Post-increment session_count = 7. ADR-0012's gate: 4-of-6 majors with
+    // (7 - 4) = 3 ≤ 6 → fires. Bootstrap guard (sessionCount ≥ 6) cleared.
+    // Cooldown gate (null lastFired) cleared.
+    const model = result.trainee_model as Record<string, unknown>;
+    assertEquals(
+      model.lastGlobalPhaseAdvanceFiredAtSessionCount,
+      7,
+      "lastGlobalPhaseAdvanceFiredAtSessionCount must equal current session_count (7) when the trigger fires per ADR-0012",
+    );
+  },
+);
+
+orchestratorTest(
+  "ADR-0006 (cross-platform JSONB shape parity): the canonical fixture at docs/fixtures/trainee-model-snapshot.json round-trips through the orchestrator unchanged on the in-order watermark-refusal path (no rule mutations) — TS side of the shape parity contract",
+  async () => {
+    // Loads the same canonical fixture that the Swift
+    // TraineeModelSnapshotsCrossValidationTests decodes. Drift on either
+    // side surfaces here (TS) or there (Swift). The fixture is the
+    // single source of expected shape — Phase 2 fields populated, enum-
+    // keyed dicts as JSON objects with rawValue keys.
+    const fixturePath = new URL(
+      "../../../docs/fixtures/trainee-model-snapshot.json",
+      import.meta.url,
+    );
+    const raw = JSON.parse(Deno.readTextFileSync(fixturePath));
+    // Strip the docs-only $comment field — Postgres jsonb doesn't care
+    // but Swift's TraineeModel decoder ignores unknown keys by default,
+    // and we keep the shape minimal-surface for the round-trip assertion.
+    delete raw.$comment;
+
+    // Seed the user + trainee_models row with the fixture as the model_json,
+    // and a watermark in the FUTURE so the orchestrator takes the late-
+    // arrival refusal path (which returns the cached snapshot unmutated).
+    // This isolates the round-trip assertion from rule-mutation effects.
+    const userId = crypto.randomUUID();
+    await sql`
+      INSERT INTO public.users (id, display_name)
+      VALUES (${userId}, ${"orchestrator-test-" + userId.slice(0, 8)})
+    `;
+    const futureWatermark = "2026-12-31T23:59:59.000Z";
+    await sql`
+      INSERT INTO public.trainee_models (user_id, model_json, last_applied_logged_at, session_count)
+      VALUES (${userId}, ${JSON.stringify(raw)}::jsonb, ${futureWatermark}::timestamptz, 24)
+    `;
+    const sessionId = crypto.randomUUID();
+
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        // earlier than watermark → refusal path → orchestrator returns the
+        // cached snapshot verbatim.
+        session_payload: { logged_at: "2026-01-15T00:00:00.000Z", set_logs: [] },
+      },
+      sql,
+      { emitLateArrival: () => {} },
+    );
+
+    assertEquals(result.late_arrival, true);
+    // Round-trip: every top-level key in the fixture must be present in
+    // the orchestrator's response with the same value. This catches TS-
+    // side regressions on the JSONB read path (parseJsonbColumn defaults,
+    // unintended field elision, type coercion).
+    const returned = result.trainee_model as Record<string, unknown>;
+    assertEquals(returned.totalSessionCount, 24);
+    assertEquals(returned.lastGlobalPhaseAdvanceFiredAtSessionCount, 18);
+    assertEquals(returned.lastClassifiedNoteCreatedAt, "2026-01-04T18:00:00.000Z");
+    // patterns must be a JSON object with rawValue keys (snake_case for the
+    // multi-word ones) — NOT Swift's default alternating-array form.
+    const patterns = returned.patterns as Record<string, unknown>;
+    assertEquals(Array.isArray(patterns), false, "patterns must be a JSON object, not an array (cross-platform shape contract)");
+    assertEquals(typeof patterns.squat, "object");
+    assertEquals(typeof patterns.horizontal_push, "object");
+    // Doubly-nested prescriptionAccuracy: outer key MovementPattern.rawValue,
+    // inner key SetIntent.rawValue — both as JSON objects.
+    const pa = returned.prescriptionAccuracy as Record<string, Record<string, Record<string, unknown>>>;
+    assertEquals(pa.squat.top.bias, 0.04);
+    assertEquals(pa.squat.top.biasByGapBucket, {
+      "under48h": -0.02,
+      "between_48_and_72h": 0.05,
+      "over72h": 0.06,
+    });
   },
 );
 

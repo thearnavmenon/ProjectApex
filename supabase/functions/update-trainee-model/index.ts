@@ -30,9 +30,23 @@
 //   - docs/agents/edge-functions.md (secrets, deploy, local dev)
 
 import {
+  emitApplyComplete as defaultEmitApplyComplete,
   emitLateArrival as defaultEmitLateArrival,
+  type ApplyCompleteEvent,
   type LateArrivalEvent,
 } from "../_shared/observability.ts";
+import {
+  advancePhase,
+  sessionsRequiredFor,
+  type MesocyclePhase,
+  type PerPatternState,
+} from "../_shared/phase-advance.ts";
+import { computeTransitionModeUntil } from "../_shared/transition-mode-expiry.ts";
+import type { ProgressionTrend } from "../_shared/plateau-verdict.ts";
+import {
+  shouldFireGlobalPhaseAdvance,
+  type PatternTransitionState,
+} from "../_shared/global-phase-advance.ts";
 
 export interface UpdateTraineeModelRequest {
   user_id: string;
@@ -170,10 +184,17 @@ type Sql = any;
 export interface ApplySessionDeps {
   emitLateArrival?: (event: LateArrivalEvent) => void;
   /**
-   * Hook called between SELECT FOR UPDATE and the UPDATE write-back. Receives
-   * the parsed model_json; returns the new model_json. Throws abort the
-   * transaction. Cycles 10-12 will replace synthetic test usage with the
-   * real rule composition pipeline.
+   * Per-apply summary observability per slice A12. Called on the in-order
+   * first-apply path (after Stage 1 commit, alongside stage2Hook). Cached
+   * returns and late-arrival refusals do NOT emit — the envelope describes
+   * a mutation, and those paths don't mutate.
+   */
+  emitApplyComplete?: (event: ApplyCompleteEvent) => void;
+  /**
+   * Synthetic-failure injection seam used by cycle 8's atomic-rollback test.
+   * When provided, runs INSTEAD of the real rule pipeline (so tests can throw
+   * without competing with real rule logic). Production omits this; the real
+   * pipeline runs unconditionally.
    */
   ruleHook?: (modelJson: Record<string, unknown>) => Record<string, unknown>;
   /**
@@ -199,6 +220,109 @@ function parseJsonbColumn(value: unknown): Record<string, unknown> {
 }
 
 /**
+ * Mean inter-session delta in days from a list of ISO-8601 session dates,
+ * or null when fewer than 2 sessions exist (long-absence-returner case).
+ * Mirrors `PatternProfile.sessionsCadenceDays` Swift derived property
+ * (TraineeModelProfiles.swift:185).
+ */
+function sessionsCadenceDays(recentSessionDates: string[]): number | null {
+  if (recentSessionDates.length < 2) return null;
+  const sorted = [...recentSessionDates].sort();
+  const ms = sorted.map((s) => new Date(s).getTime());
+  let totalDelta = 0;
+  for (let i = 1; i < ms.length; i++) {
+    totalDelta += (ms[i] - ms[i - 1]) / (24 * 60 * 60 * 1000);
+  }
+  return totalDelta / (ms.length - 1);
+}
+
+/**
+ * Per-pattern rule pipeline. Reads patterns dict from model_json, runs the
+ * rules each pattern needs, returns updated patterns dict + rule-fired list +
+ * field-change list for the per-apply observability emit.
+ *
+ * Cycles 10-12 wire only the rules with assertion-cycles in this slice:
+ * advancePhase + composeTransitionModeUntil. Other rule modules (EWMA,
+ * plateau-verdict, recovery, prescription-accuracy, transfer-regression,
+ * fatigue-interaction) ship in follow-up slices because they have no
+ * assertion-cycle here. The pipeline framework supports adding them later
+ * by extending this loop.
+ */
+function applyPerPatternRules(
+  patterns: Record<string, Record<string, unknown>>,
+  incomingLoggedAt: Date,
+  newSessionCount: number,
+): {
+  patterns: Record<string, Record<string, unknown>>;
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+  const newPatterns: Record<string, Record<string, unknown>> = {};
+
+  for (const [patternKey, raw] of Object.entries(patterns)) {
+    const profile = raw;
+    const recentDates = (profile.recentSessionDates as string[] | undefined) ?? [];
+    const cadenceDays = sessionsCadenceDays(recentDates);
+    // ADR-0011 Option-B threshold input: derive daysPerWeek from cadence.
+    // Cadence-aware (ADR-0015) — high-frequency cadence → larger daysPerWeek;
+    // null cadence (long-absence-returner) defaults to 4 (alpha-cohort
+    // typical 4×/week). The orchestrator owns this default; rule modules
+    // are pure and trust the input.
+    const daysPerWeek = cadenceDays !== null ? 7 / cadenceDays : 4;
+
+    const advanceState: PerPatternState = {
+      currentPhase: profile.currentPhase as MesocyclePhase,
+      sessionsInPhase: (profile.sessionsInPhase as number) ?? 0,
+      sessionsRequiredForPhase: sessionsRequiredFor(
+        profile.currentPhase as MesocyclePhase,
+        daysPerWeek,
+      ),
+      trend: ((profile.trend as ProgressionTrend) ?? "progressing"),
+      consecutiveForceDeloadsOnPattern:
+        (profile.consecutiveForceDeloadsOnPattern as number) ?? 0,
+      lastPhaseTransitionAtSessionCount:
+        (profile.lastPhaseTransitionAtSessionCount as number) ?? 0,
+    };
+
+    const advanced = advancePhase(advanceState, newSessionCount);
+    rulesFired.add("phase-advance");
+
+    let newTransitionModeUntil: string | null =
+      (profile.transitionModeUntil as string | null) ?? null;
+
+    if (advanced.firesDeloadEndTransitionMode) {
+      const currentUntil =
+        newTransitionModeUntil !== null ? new Date(newTransitionModeUntil) : null;
+      newTransitionModeUntil = computeTransitionModeUntil(
+        incomingLoggedAt,
+        cadenceDays,
+        currentUntil,
+      ).toISOString();
+      rulesFired.add("transition-mode-expiry");
+      fieldsChanged.push(`patterns.${patternKey}.transitionModeUntil`);
+    }
+
+    if (advanced.fired !== "no-op") {
+      fieldsChanged.push(`patterns.${patternKey}.currentPhase`);
+    }
+
+    newPatterns[patternKey] = {
+      ...profile,
+      currentPhase: advanced.newPhase,
+      sessionsInPhase: advanced.newSessionsInPhase,
+      consecutiveForceDeloadsOnPattern: advanced.newConsecutiveForceDeloads,
+      lastPhaseTransitionAtSessionCount:
+        advanced.newLastPhaseTransitionAtSessionCount,
+      transitionModeUntil: newTransitionModeUntil,
+    };
+  }
+
+  return { patterns: newPatterns, rulesFired, fieldsChanged };
+}
+
+/**
  * Stage 1 orchestrator core. Pure of HTTP concerns — accepts the validated
  * request shape and a SQL client; returns the response body. Tests bypass
  * the HTTP wrapper and call this directly against the local Supabase DB.
@@ -216,7 +340,9 @@ export async function applySession(
   sql: Sql,
   deps: ApplySessionDeps = {},
 ): Promise<ApplySessionResult> {
+  const applyStartMs = Date.now();
   const emitLateArrival = deps.emitLateArrival ?? defaultEmitLateArrival;
+  const emitApplyComplete = deps.emitApplyComplete ?? defaultEmitApplyComplete;
   // Extract logged_at from session_payload — load-bearing for watermark check
   // (ADR-0008). Fail fast at the orchestrator boundary if missing/invalid;
   // rule modules trust this is present.
@@ -232,8 +358,10 @@ export async function applySession(
   // Tracks whether Stage 1 took the in-order first-apply path — the only
   // path that fires Stage 2 per ADR-0013 §"WAQ retry idempotency". Cached
   // returns and late-arrival refusals leave this false; the post-commit
-  // stage2Hook call is gated on it.
+  // stage2Hook + emitApplyComplete calls are gated on it.
   let firedFirstApply = false;
+  let rulesFired: string[] = [];
+  let fieldsChanged: string[] = [];
 
   const result: ApplySessionResult = await sql.begin(async (tx: Sql) => {
     // Step 1: idempotency PK insert (ADR-0006 §2). RETURNING xmax=0 returns
@@ -258,15 +386,19 @@ export async function applySession(
       } satisfies ApplySessionResult;
     }
 
-    // Step 2: load current model + watermark with row lock.
+    // Step 2: load current model + watermark + session_count with row lock.
+    // session_count is read explicitly so the rule pipeline can pass the
+    // post-increment value into rules whose outputs depend on it (e.g.,
+    // advancePhase's lastPhaseTransitionAtSessionCount).
     const rows = await tx`
-      SELECT model_json, last_applied_logged_at
+      SELECT model_json, last_applied_logged_at, session_count
       FROM public.trainee_models
       WHERE user_id = ${req.user_id}
       FOR UPDATE
     `;
     const modelJson = parseJsonbColumn(rows[0]?.model_json);
     const watermark: Date | null = rows[0]?.last_applied_logged_at ?? null;
+    const newSessionCount = (rows[0]?.session_count ?? 0) + 1;
 
     // Step 3: watermark check (ADR-0008 §"Late arrival"). Strict less-than:
     // incoming === watermark is in-order (see cycle 5b). The PK insert from
@@ -296,20 +428,60 @@ export async function applySession(
       } satisfies ApplySessionResult;
     }
 
-    // Step 4: rule composition. Cycles 10-12 will replace the synthetic
-    // hook with real rule pipeline. A throw here aborts sql.begin() and
-    // rolls back the whole transaction — PK insert, watermark advance, and
-    // model_json write all revert atomically (cycle 8's contract).
-    const newModelJson = deps.ruleHook
-      ? deps.ruleHook(modelJson)
-      : modelJson;
+    // Step 4: rule composition. The synthetic ruleHook (cycle 8 atomic-
+    // rollback test) overrides the real pipeline when provided so tests can
+    // throw without competing with rule logic. A throw here — synthetic or
+    // real — aborts sql.begin() and rolls back the whole transaction (PK
+    // insert, watermark advance, and model_json write all revert).
+    //
+    // Rule scope this slice: phase-advance + transition-mode-expiry per the
+    // assertion-cycles 10-12. Other rule modules (EWMA, plateau-verdict,
+    // recovery, prescription-accuracy, transfer-regression, fatigue-
+    // interaction) ship in follow-up slices because they have no assertion-
+    // cycle in this slice; the per-pattern loop is the framework they'll
+    // extend into.
+    let newModelJson: Record<string, unknown>;
+    if (deps.ruleHook) {
+      newModelJson = deps.ruleHook(modelJson);
+    } else {
+      const patternsIn = (modelJson.patterns as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const ruled = applyPerPatternRules(patternsIn, incomingLoggedAt, newSessionCount);
+      newModelJson = { ...modelJson, patterns: ruled.patterns };
+      rulesFired = [...ruled.rulesFired];
+      fieldsChanged = ruled.fieldsChanged;
+
+      // ADR-0012: global phase-advance trigger. Reads each pattern's
+      // post-loop lastPhaseTransitionAtSessionCount (which the per-pattern
+      // loop above just updated for any pattern that transitioned this
+      // apply). Force-deload-as-transition is feature, not bug — see
+      // ADR-0012 §Consequences.
+      const patternStates: PatternTransitionState[] = Object.entries(
+        ruled.patterns,
+      ).map(([pattern, profile]) => ({
+        pattern,
+        lastPhaseTransitionAtSessionCount:
+          (profile.lastPhaseTransitionAtSessionCount as number) ?? 0,
+      }));
+      const lastFired =
+        (modelJson.lastGlobalPhaseAdvanceFiredAtSessionCount as number | null | undefined) ??
+        null;
+      if (
+        shouldFireGlobalPhaseAdvance(patternStates, newSessionCount, lastFired)
+      ) {
+        newModelJson = {
+          ...newModelJson,
+          lastGlobalPhaseAdvanceFiredAtSessionCount: newSessionCount,
+        };
+        rulesFired.push("global-phase-advance");
+        fieldsChanged.push("lastGlobalPhaseAdvanceFiredAtSessionCount");
+      }
+    }
 
     // Step 5: write back + advance watermark (ADR-0008 §"In-order").
-    // session_count drives ADR-0012's 6-session-window cooldown, so even the
-    // empty-rules path mutates it.
+    // session_count drives ADR-0012's 6-session-window cooldown.
     await tx`
       UPDATE public.trainee_models
-      SET session_count = session_count + 1,
+      SET session_count = ${newSessionCount},
           last_applied_logged_at = ${incomingLoggedAt},
           model_json = ${JSON.stringify(newModelJson)}::jsonb,
           updated_at = NOW()
@@ -323,11 +495,24 @@ export async function applySession(
     } satisfies ApplySessionResult;
   });
 
-  // Stage 2 fires AFTER Stage 1 commits, ONLY on first-apply (per ADR-0013
-  // §"WAQ retry idempotency"). Cached-snapshot returns (PK conflict) and
-  // late-arrival refusals (watermark check) leave firedFirstApply=false and
-  // skip Stage 2. A12 ships the seam + the gating contract; #A13 wires the
-  // actual classifier call through this hook.
+  // emitApplyComplete + Stage 2 BOTH fire AFTER Stage 1 commits, ONLY on
+  // first-apply (per ADR-0013 §"WAQ retry idempotency"). Cached-snapshot
+  // returns and late-arrival refusals leave firedFirstApply=false; both
+  // emit the structured apply summary and gate Stage 2 here. emitApplyComplete
+  // describes a *mutation* — the cached/refusal paths don't mutate, so
+  // they're correctly silent on this channel.
+  if (firedFirstApply) {
+    emitApplyComplete({
+      user_id: req.user_id,
+      session_id: req.session_id,
+      duration_ms: Date.now() - applyStartMs,
+      rules_fired: rulesFired,
+      fields_changed: fieldsChanged,
+    });
+  }
+
+  // Stage 2 (classifier) per ADR-0013 — A12 ships the seam + the gating
+  // contract; #A13 wires the actual classifier call through this hook.
   if (firedFirstApply && deps.stage2Hook) {
     await deps.stage2Hook();
   }

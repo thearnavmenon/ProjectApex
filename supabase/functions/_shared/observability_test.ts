@@ -15,6 +15,7 @@
 
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  emitApplyComplete,
   emitClassifierFailed,
   emitClockSkew,
   emitLateArrival,
@@ -120,5 +121,29 @@ Deno.test("Q10 (slice A10): emitTransferNegativeCoefficient emits JSON envelope 
   assertEquals(lines.length, 1, "emitTransferNegativeCoefficient must call console.log exactly once");
   const envelope = JSON.parse(lines[0]);
   assertEquals(envelope.channel, "trainee_model.transfer_negative_coefficient");
+  assertEquals(envelope.event, event);
+});
+
+// ─── emitApplyComplete (slice A12 — per-apply summary) ──────────────────────
+
+Deno.test("A12: emitApplyComplete emits JSON envelope on channel trainee_model.apply_complete with all 5 fields", () => {
+  // Per-apply observability summary scaffolded by A12 so production debugging
+  // can correlate session-applies with rule fires + duration. Call site is
+  // the orchestrator's first-apply success path (after Stage 1 commit, on the
+  // same path as stage2Hook); cached returns and late-arrival refusals do
+  // NOT emit. Required-payload-only typing keeps the envelope shape stable.
+  const event = {
+    user_id: "99999999-9999-9999-9999-999999999999",
+    session_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    duration_ms: 47,
+    rules_fired: ["phase-advance", "transition-mode-expiry"],
+    fields_changed: ["patterns.squat.currentPhase", "patterns.squat.transitionModeUntil"],
+  };
+
+  const lines = captureConsoleLog(() => emitApplyComplete(event));
+
+  assertEquals(lines.length, 1, "emitApplyComplete must call console.log exactly once");
+  const envelope = JSON.parse(lines[0]);
+  assertEquals(envelope.channel, "trainee_model.apply_complete");
   assertEquals(envelope.event, event);
 });

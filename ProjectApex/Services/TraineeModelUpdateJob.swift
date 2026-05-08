@@ -148,17 +148,29 @@ final class TraineeModelUpdateJob {
         // in the (unlikely) race. Dequeue identically (return .success),
         // skip the local snapshot update, and enqueue a soft notification
         // for the post-session summary surface.
+        //
+        // Slice A12 (#83) ships the richer response shape:
+        //   { late_arrival: true,
+        //     late_arrival_details: {
+        //       session_id: UUID,
+        //       incoming_logged_at: ISO 8601,
+        //       watermark: ISO 8601
+        //     } }
+        // The three optional fields on LateArrivalNotification are populated
+        // here when present; pre-A12 responses (bool-only) leave them nil.
         if json["late_arrival"] as? Bool == true {
+            let details = json["late_arrival_details"] as? [String: Any]
+            let parsedSessionId = (details?["session_id"] as? String).flatMap(UUID.init(uuidString:))
+            let isoFormatter = ISO8601DateFormatter()
+            let parsedIncoming = (details?["incoming_logged_at"] as? String).flatMap { isoFormatter.date(from: $0) }
+            let parsedWatermark = (details?["watermark"] as? String).flatMap { isoFormatter.date(from: $0) }
             let notification = LateArrivalNotification(
                 id: UUID(),
                 message: LateArrivalNotification.lockedMessage,
                 receiptDate: Date(),
-                // sessionId / incomingLoggedAt / watermark are populated
-                // when A12 ships the richer Edge Function response shape.
-                // A3's bool-only response leaves them nil.
-                sessionId: nil,
-                incomingLoggedAt: nil,
-                watermark: nil
+                sessionId: parsedSessionId,
+                incomingLoggedAt: parsedIncoming,
+                watermark: parsedWatermark
             )
             await notificationQueue.enqueue(notification)
             return .success
