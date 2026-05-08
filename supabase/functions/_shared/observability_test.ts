@@ -18,6 +18,7 @@ import {
   emitClassifierFailed,
   emitClockSkew,
   emitLateArrival,
+  emitTransferNegativeCoefficient,
 } from "./observability.ts";
 
 // ─── stdout capture helper ──────────────────────────────────────────────────
@@ -94,5 +95,30 @@ Deno.test("ADR-0010: emitClockSkew emits JSON envelope on channel recovery.clock
   assertEquals(lines.length, 1, "emitClockSkew must call console.log exactly once");
   const envelope = JSON.parse(lines[0]);
   assertEquals(envelope.channel, "recovery.clock_skew");
+  assertEquals(envelope.event, event);
+});
+
+// ─── emitTransferNegativeCoefficient (Q10, slice A10) ───────────────────────
+
+Deno.test("Q10 (slice A10): emitTransferNegativeCoefficient emits JSON envelope on channel trainee_model.transfer_negative_coefficient with all 6 fields", () => {
+  // Helper added in slice A10 for use by orchestrator A12 — A12 owns
+  // pair-detection (fromExerciseId/toExerciseId) and is the natural call
+  // site once it wraps fitTransfer with paired-observation orchestration.
+  // Required-payload-only typing prevents callers from accidentally
+  // dropping the pair identifier and producing un-actionable warnings.
+  const event = {
+    user_id: "66666666-6666-6666-6666-666666666666",
+    from_exercise_id: "77777777-7777-7777-7777-777777777777",
+    to_exercise_id: "88888888-8888-8888-8888-888888888888",
+    coefficient: -0.42,
+    r_squared: 0.55,
+    paired_observations: 8,
+  };
+
+  const lines = captureConsoleLog(() => emitTransferNegativeCoefficient(event));
+
+  assertEquals(lines.length, 1, "emitTransferNegativeCoefficient must call console.log exactly once");
+  const envelope = JSON.parse(lines[0]);
+  assertEquals(envelope.channel, "trainee_model.transfer_negative_coefficient");
   assertEquals(envelope.event, event);
 });

@@ -61,3 +61,33 @@ export interface ClockSkewEvent {
 export function emitClockSkew(event: ClockSkewEvent): void {
   emit("recovery.clock_skew", event);
 }
+
+// ─── emitTransferNegativeCoefficient (Q10, slice A10) ───────────────────────
+//
+// Surfaces a published transfer fit whose log-log coefficient is negative —
+// possible (rare) physiologically when fromE1RM rises while toE1RM falls,
+// often indicative of measurement noise, confounded periodization, or one
+// exercise being detrained while the other is being trained. The fit still
+// publishes per Q10 (gate is on R² and N only); this signal lets future
+// log analysis correlate negative-coefficient occurrences with user-reported
+// anomalies.
+//
+// Call site lives at the orchestrator (A12) tier per the locked slice split:
+// pair-detection (fromExerciseId/toExerciseId) is an orchestrator concern,
+// and required-payload-only typing prevents accidental loss of the pair
+// identifier. fitTransfer itself stays signature-locked + sign-agnostic.
+
+export interface TransferNegativeCoefficientEvent {
+  user_id: string;
+  from_exercise_id: string;
+  to_exercise_id: string;
+  coefficient: number;          // negative — surfaced because of the sign
+  r_squared: number;            // ≥ TRANSFER_R_SQUARED_FLOOR (else not published)
+  paired_observations: number;  // ≥ TRANSFER_MIN_PAIRED_OBSERVATIONS
+}
+
+export function emitTransferNegativeCoefficient(
+  event: TransferNegativeCoefficientEvent,
+): void {
+  emit("trainee_model.transfer_negative_coefficient", event);
+}
