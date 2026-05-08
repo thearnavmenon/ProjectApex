@@ -22,3 +22,11 @@ supabase/.temp/
 # deploy`; tracks the active local branch for preview-branch features.
 # Local-machine-only — never commit.
 supabase/.branches/
+
+# Deno's auto-generated node_modules dir (created when nodeModulesDir:"auto"
+# is set in a per-function deno.json — A12 ships this for npm:postgres@3.4.4).
+# Local-machine-only — restored by `deno install` / first `deno test` run.
+supabase/functions/*/node_modules/
+
+# Local agent state (worktrees, notes, scratch). Never commit.
+.claude/
