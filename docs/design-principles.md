@@ -39,3 +39,45 @@ Each of these decisions had two defensible options; the asymmetric-error analysi
 ### When this principle does not apply
 
 The asymmetric-error preference is a tie-breaker, not a substitute for evidence. If one option is strictly better on the data — closer to the literature, supported by alpha-cohort observations, demonstrably catches a real failure mode the other misses — choose that one regardless of detectability asymmetry. The principle resolves the case where two options are roughly equivalent on direct evidence and the choice would otherwise be arbitrary.
+
+## Authority hierarchy for spec divergences
+
+When implementation cycles surface a divergence between two artifacts that both purport to specify the same rule — e.g., a worked example in an issue body contradicts a formula stated higher up in the same issue, or an ADR's prose can't be reconciled with the table directly above it — the implementation pins behavior at the **lowest-numbered (highest-authority) artifact** the divergence reaches, and the higher-numbered artifact is amended post-merge.
+
+### The hierarchy (lowest-numbered wins)
+
+1. **Mathematical spec.** The formula or composition rule that is the rule's actual definition. If the formula says `(max − min) / mean ≤ 0.05`, that's what the verdict computes; any prose example computed under a different reading is wrong.
+2. **Grilling memory / PRD-internal lock-ins.** Decisions captured during pre-implementation grilling (Q3, Q5, Q9, Q10, Q12, etc.). These are the source of truth for design choices that didn't reach an ADR — typically because they're tactical rather than architectural.
+3. **ADR body.** The decision section's prose and tables. The durable governance contract; future maintainers reading the ADR get the rule.
+4. **ADR derived presentations.** Tables, code blocks, examples within the ADR. Should agree with the ADR body, but in practice can carry pre-decision drafts that didn't get pruned.
+5. **Issue prose.** The slice issue's worked examples and edge-case lists. Authored before the implementation cycle exposes which states are reachable; can carry mathematically unreachable cases or composition states the rule doesn't permit.
+6. **Brief / docstring.** Module headers, code comments, slice plan summaries. Lowest authority — rewritten freely as understanding improves.
+
+### Resolution rule
+
+When two artifacts at different levels conflict:
+1. The implementation pins behavior at the **lowest-numbered** artifact the divergence reaches. If issue prose (level 5) and a formula (level 1) disagree, the formula wins; the implementation pins to the formula.
+2. The test name explicitly cites both rules and the precedence — `[lower-authority]: [behavior]; [higher-authority] would have produced [other-behavior]; [reason precedence picks the lower]` — so a future maintainer reading the failing test sees that the precedence is intentional.
+3. The higher-numbered artifact gets a post-merge amendment proposal in the PR description, tracked through to either an ADR amendment, an issue body edit, or a follow-up issue if the amendment is non-trivial.
+
+### Recurring instances across the A-slice arc (Phase 2)
+
+The pattern hit seven distinct instances in seven slices. Listed in order of occurrence as evidence the hierarchy is real:
+
+- **A7 cycles 10/13 — math vs issue prose** ([PR #100/#101](https://github.com/thearnavmenon/ProjectApex/pull/101)). Issue #78's "drop 9.9% → flat" + "volume 114.9% → flat" cases are mathematically unreachable under Q1's `(max − min) / mean` spread formula at the 5% / 10% thresholds. Implementation pinned to the formula (level 1); issue prose flagged for amendment.
+- **A7 cycles 17/18 — ADR table conflict resolved by design principle** ([PR #100/#101](https://github.com/thearnavmenon/ProjectApex/pull/101)). ADR-0009's verdict table (level 4) had two cells (`{improving e1RM, declining volume}`, `{declining e1RM, improving volume}`) where multiple rows fire and the prose (level 3) didn't pin precedence. Implementation locked declining-wins per `docs/design-principles.md` (asymmetric-error preference); ADR-0009 amended 2026-05-09.
+- **A8 C8 — composition rule vs issue prose** ([PR #102](https://github.com/thearnavmenon/ProjectApex/pull/102)). Issue #79's C8 edge-case described `currentPhase=.deload ∧ sessionsInPhase=2×threshold ∧ trend=plateaued → no-op` as a state the rule had to handle. Under ADR-0011's §(b)+(c) composition (level 3 ADR body), the cyclic-deload-end rule fires first and the force-deload trigger never reaches the in-deload pattern — the state is unreachable. Implementation pinned to the composition rule; issue prose flagged for amendment.
+- **A9 C16 — ADR text vs issue prose** ([PR #103](https://github.com/thearnavmenon/ProjectApex/pull/103)). ADR-0014's bucket-boundary text pinned strict-`>` partition (level 3); issue #80's C16 ("72h00m → over72h") parenthesized "verify whether ADR-0014 means strict > or >=" without resolving. Implementation pinned to the strict-`>` partition; issue prose flagged for amendment.
+- **A11 cycle 9 — math reality vs issue prose** ([PR #105](https://github.com/thearnavmenon/ProjectApex/pull/105)). Issue #82's cycle 9 claimed `[0.0001, -0.0001]` produces "consistencyFactor near zero." Mean-guard fires (preventing NaN), but the small stddev keeps consistencyFactor at ~0.9 — guard-fires and clamp-to-zero are distinct properties. Implementation split cycle 9 into 9a (guard-fires fixture, consistency=0.9) + 9b (clamp-to-zero fixture, stddev > absMean); issue prose flagged for amendment.
+- **A12 cycle 13 — Swift Codable wire-format vs JSONB shape contract** ([PR #106](https://github.com/thearnavmenon/ProjectApex/pull/106)). ADR-0006 (level 3) pinned the JSONB column shape as the contract between Edge Function writer and Swift reader. Swift's synthesized `Dictionary<EnumKey, V>` Codable encodes as a flat alternating array (`["squat", {...}, ...]`), incompatible with the TS-side JSON-object emit. Implementation pinned to ADR-0006's shape contract via custom `init(from:)`/`encode(to:)` on `TraineeModel` + a `JSONBCodable` helper; the Swift default behavior was overridden, not the ADR.
+- **A13 Q6 — asymmetric-error analysis vs Q9 lock-in language** ([PR #107](https://github.com/thearnavmenon/ProjectApex/pull/107)). Q9 grilling memory (level 2) pinned the joint→pattern map for shoulder/elbow as "push + pull patterns (incl. isolation)". Asymmetric-error analysis (per the principle above) showed isolation inclusion produces silent premature limitation clearing on incidental accessory work. Implementation excluded isolation per the principle; Q9 lock-in flagged for amendment.
+
+### Issue-authoring discipline
+
+The recurrence of issue-prose-vs-implementation-reality divergences (5 of 7 instances above) suggests the cheapest place to catch them is at issue-creation time, not implementation time. When drafting a slice issue:
+
+- Worked examples should be hand-computed against the formula, not paraphrased from the ADR's intent.
+- Edge-case bullets that name a state should be checked against the composition rule that produces it — if no path exists from `currentPhase=accumulation` (initial) to the state described, the bullet is describing an unreachable case.
+- ADR table cells where the rule's prose and the table both purport to specify behavior should be cross-checked for internal precedence; mark explicit `(precedence: X wins)` rather than assume top-down reading.
+
+The audit follow-up issue tracking the closed-issue-body amendments from this pattern is [#108](https://github.com/thearnavmenon/ProjectApex/issues/108).
