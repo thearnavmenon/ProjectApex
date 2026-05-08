@@ -93,6 +93,25 @@ final class TraineeModelSnapshotsCrossValidationTests: XCTestCase {
         XCTAssertGreaterThan(interaction.confidence, 0)
     }
 
+    /// ActiveLimitation gained `sessionsWithoutReMention` in slice A13 (#84)
+    /// per Q9 PRD-internal — the per-AI-inferred-limitation auto-clear counter.
+    /// Pre-A13 rows have no such key; the Swift Codable's `decodeIfPresent`
+    /// defaults to 0. The fixture exercises a populated value (1) so a
+    /// round-trip through both TS orchestrator and Swift decoder pins the
+    /// shape.
+    func test_activeLimitation_a13SessionsWithoutReMention_decodesCorrectly() {
+        XCTAssertEqual(Self.model.activeLimitations.count, 1)
+        let lim = Self.model.activeLimitations[0]
+        XCTAssertEqual(lim.subject, .joint(.shoulder))
+        XCTAssertEqual(lim.severity, .mild)
+        XCTAssertEqual(lim.userConfirmed, false)
+        XCTAssertEqual(lim.evidenceCount, 2)
+        XCTAssertEqual(
+            lim.sessionsWithoutReMention, 1,
+            "A13 additive Codable: sessionsWithoutReMention must round-trip from JSONB"
+        )
+    }
+
     /// PrescriptionAccuracy gained gap-bucket fields in slice A9 (#80) per
     /// ADR-0014. The fixture exercises the populated dictionaries; verify
     /// the Swift Codable's `decodeIfPresent` defaults to empty-dict on
