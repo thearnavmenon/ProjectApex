@@ -29,6 +29,12 @@ import {
   LIMITATION_AI_INFERRED_MIN_EVIDENCE,
   LIMITATION_AUTO_CLEAR_SESSIONS,
 } from "./constants.ts";
+import {
+  classifyHttpStatus,
+  LLMPermanentError,
+  LLMTransientError,
+  withLLMRetry,
+} from "./llm-retry.ts";
 
 // ─── Shared types (mirror Swift TraineeModelInteractions.swift) ─────────────
 
@@ -81,6 +87,20 @@ export interface NoteToClassify {
   exerciseId: string | null;
   createdAt: Date;
   sessionId: string | null;
+}
+
+export interface ClassifierOutput {
+  formDegradationMentions: Array<{ exerciseId: string; noteId: string }>;
+  limitationMentions: LimitationMention[];
+}
+
+export interface RunClassifierDeps {
+  /** Test seam: returns the raw JSON string Haiku would produce for the prompt+notes.
+   *  Production omits → uses the real Anthropic Haiku call.
+   *  Throw `LLMTransientError` to exercise retry; throw `LLMPermanentError` for fast-fail. */
+  llmCall?: (prompt: string) => Promise<string>;
+  /** Test seam for the retry helper's sleep — bypasses real timers. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 // ─── Form-degradation lifecycle (Q9 PRD-internal) ───────────────────────────
@@ -383,4 +403,137 @@ function pruneClearedLimitations(
       new Date(a.clearedDate).getTime() - new Date(b.clearedDate).getTime(),
   );
   return sorted.slice(sorted.length - CLEARED_LIMITATION_MAX_ENTRIES);
+}
+
+// ─── runClassifier driver (Anthropic Haiku via withLLMRetry) ────────────────
+
+/**
+ * Build the Haiku prompt by concatenating the locked prompt asset with the
+ * input notes. Production: reads the prompt asset from disk once. Tests
+ * inject `llmCall` so the prompt content doesn't have to be valid for the
+ * test's mock to ignore it.
+ */
+function buildPrompt(notes: NoteToClassify[]): string {
+  const noteBlock = notes
+    .map((n) =>
+      `noteId: ${n.id}\nexerciseId: ${n.exerciseId ?? "null"}\nsessionId: ${n.sessionId ?? "null"}\nrawTranscript: ${n.rawTranscript}`
+    )
+    .join("\n\n---\n\n");
+  // The locked prompt asset lives at note-classifier-prompt.txt; in production
+  // the Edge Function reads it once at module load. Tests don't depend on the
+  // prompt content (mock llmCall returns hand-authored output); this builder
+  // just shapes the user-message portion.
+  return `INPUT NOTES:\n\n${noteBlock}`;
+}
+
+/**
+ * Parse Haiku's JSON response into a typed `ClassifierOutput`. Per
+ * ADR-0007's permanent-error category, malformed JSON is `LLMPermanentError`
+ * (does NOT consume retry budget; orchestrator emits `classifier_failed`
+ * and watermark stays unchanged).
+ */
+function parseClassifierResponse(rawJson: string): ClassifierOutput {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch (err) {
+    throw new LLMPermanentError(
+      `classifier returned non-JSON response: ${err instanceof Error ? err.message : String(err)}`,
+      "malformed_response",
+      err,
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new LLMPermanentError(
+      "classifier response is not a JSON object",
+      "malformed_response",
+    );
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (!Array.isArray(obj.formDegradationMentions) || !Array.isArray(obj.limitationMentions)) {
+    throw new LLMPermanentError(
+      "classifier response missing formDegradationMentions or limitationMentions arrays",
+      "malformed_response",
+    );
+  }
+  // Trust the shapes inside the arrays (the prompt locks the structure; if
+  // Haiku deviates within an entry, downstream consumers may reject — surface
+  // those as permanent errors at the consumer site rather than here).
+  return obj as unknown as ClassifierOutput;
+}
+
+/**
+ * Default LLM call site. Production reads ANTHROPIC_API_KEY from env, builds
+ * the prompt, posts to Anthropic's /v1/messages endpoint, and returns the
+ * assistant message text. HTTP-status-driven classification per ADR-0007:
+ *   transient (429/502/503/504/529)  → LLMTransientError → withLLMRetry retries
+ *   permanent (4xx other than 429)   → LLMPermanentError → no retry
+ *
+ * Tests inject `deps.llmCall` to bypass this entirely.
+ */
+async function defaultLLMCall(prompt: string): Promise<string> {
+  const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
+  if (apiKey === undefined || apiKey === "") {
+    throw new LLMPermanentError(
+      "ANTHROPIC_API_KEY env var missing — Stage 2 cannot run",
+      "missing_api_key",
+    );
+  }
+  const systemPrompt = await Deno.readTextFile(
+    new URL("./note-classifier-prompt.txt", import.meta.url),
+  );
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const klass = classifyHttpStatus(response.status);
+  if (klass === "transient") {
+    throw new LLMTransientError(`Anthropic returned ${response.status}`);
+  }
+  if (klass === "permanent") {
+    const body = await response.text().catch(() => "");
+    throw new LLMPermanentError(
+      `Anthropic returned ${response.status}: ${body}`,
+      `http_${response.status}`,
+    );
+  }
+  const json = await response.json() as { content?: Array<{ type: string; text?: string }> };
+  const text = json.content?.[0]?.text;
+  if (typeof text !== "string") {
+    throw new LLMPermanentError(
+      "Anthropic response missing content[0].text",
+      "malformed_response",
+    );
+  }
+  return text;
+}
+
+/**
+ * Stage 2 classifier driver per ADR-0013.
+ *
+ * Empty input → empty output (no LLM call). Caller (orchestrator) is
+ * responsible for the bootstrap selection (`selectBootstrapNotes`) and the
+ * watermark advance after this returns.
+ */
+export async function runClassifier(
+  notes: NoteToClassify[],
+  deps: RunClassifierDeps = {},
+): Promise<ClassifierOutput> {
+  if (notes.length === 0) {
+    return { formDegradationMentions: [], limitationMentions: [] };
+  }
+  const llmCall = deps.llmCall ?? defaultLLMCall;
+  const prompt = buildPrompt(notes);
+  const rawJson = await withLLMRetry(() => llmCall(prompt), { sleep: deps.sleep });
+  return parseClassifierResponse(rawJson);
 }

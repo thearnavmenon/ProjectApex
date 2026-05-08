@@ -31,8 +31,10 @@
 
 import {
   emitApplyComplete as defaultEmitApplyComplete,
+  emitClassifierFailed as defaultEmitClassifierFailed,
   emitLateArrival as defaultEmitLateArrival,
   type ApplyCompleteEvent,
+  type ClassifierFailedEvent,
   type LateArrivalEvent,
 } from "../_shared/observability.ts";
 import {
@@ -47,6 +49,22 @@ import {
   shouldFireGlobalPhaseAdvance,
   type PatternTransitionState,
 } from "../_shared/global-phase-advance.ts";
+import {
+  CLASSIFIER_BOOTSTRAP_MAX_NOTES,
+  CLASSIFIER_BOOTSTRAP_MAX_SESSIONS,
+} from "../_shared/constants.ts";
+import {
+  derivedTrainedJoints,
+  runClassifier,
+  selectBootstrapNotes,
+  updateFormDegradationLifecycle,
+  updateLimitationLifecycle,
+  type ActiveLimitation,
+  type ClearedLimitation,
+  type LimitationMention,
+  type NoteToClassify,
+} from "../_shared/note-classifier.ts";
+import { LLMPermanentError, LLMTransientError } from "../_shared/llm-retry.ts";
 
 export interface UpdateTraineeModelRequest {
   user_id: string;
@@ -200,11 +218,27 @@ export interface ApplySessionDeps {
   /**
    * Stage 2 (classifier) seam per ADR-0013. Fires AFTER Stage 1 commits, and
    * ONLY when Stage 1 took the in-order first-apply path — never on cached-
-   * snapshot returns (PK conflict) or late-arrival refusals. Issue #A13
-   * wires the actual classifier call through this hook; this slice ships
-   * the seam + the contract.
+   * snapshot returns (PK conflict) or late-arrival refusals.
+   *
+   * A13 wires production behavior: when stage2Hook is unset, the orchestrator
+   * runs the real Stage 2 driver (`runStage2`) using the classifier* deps
+   * below. Tests that want to spy on the firing pattern (e.g., A12 cycle 9
+   * cached-return gate) inject a no-arg stage2Hook to override; tests that
+   * want to exercise runStage2 directly omit stage2Hook and inject only the
+   * classifier* deps.
    */
   stage2Hook?: () => Promise<void> | void;
+  /**
+   * A13 — Stage 2 LLM call test seam. When unset, runStage2 invokes the
+   * real Anthropic Haiku endpoint via `_shared/note-classifier.ts`'s
+   * default. Tests inject a deterministic mock that returns the JSON
+   * Haiku would produce (or throws to exercise the failure path).
+   */
+  classifierLLMCall?: (prompt: string) => Promise<string>;
+  /** A13 — retry-helper sleep test seam (skip real timers in unit tests). */
+  classifierSleep?: (ms: number) => Promise<void>;
+  /** A13 — classifier_failed observability test seam. */
+  emitClassifierFailed?: (event: ClassifierFailedEvent) => void;
 }
 
 /**
@@ -511,13 +545,285 @@ export async function applySession(
     });
   }
 
-  // Stage 2 (classifier) per ADR-0013 — A12 ships the seam + the gating
-  // contract; #A13 wires the actual classifier call through this hook.
-  if (firedFirstApply && deps.stage2Hook) {
-    await deps.stage2Hook();
+  // Stage 2 (classifier) per ADR-0013. Synthetic test seam (stage2Hook) wins
+  // when provided — keeps A12 cycle 9's gating-contract spy intact. Otherwise
+  // production runs the real Stage 2 driver. Stage 1 has already committed,
+  // so a Stage 2 failure does NOT roll back Stage 1 (per ADR-0013 §"Failure
+  // mode") — runStage2's catch block emits classifier_failed and swallows.
+  if (firedFirstApply) {
+    if (deps.stage2Hook) {
+      await deps.stage2Hook();
+    } else {
+      const trainedSets = derivedTrainedSets(req.session_payload);
+      await runStage2({
+        sql,
+        userId: req.user_id,
+        sessionId: req.session_id,
+        trainedExercises: trainedSets.exercises,
+        trainedPatterns: trainedSets.patterns,
+        trainedMuscleGroups: trainedSets.muscleGroups,
+        now: incomingLoggedAt,
+        classifierLLMCall: deps.classifierLLMCall,
+        classifierSleep: deps.classifierSleep,
+        emitClassifierFailed: deps.emitClassifierFailed ?? defaultEmitClassifierFailed,
+      });
+    }
   }
 
   return result;
+}
+
+/**
+ * Extract per-session training sets from `session_payload.set_logs[]`.
+ *
+ * Stage 2's auto-clear gate (Q9 §"3 sessions where (a) subject was trained,
+ * (b) classifier processed notes, (c) no re-mention") needs to know which
+ * patterns / muscles / exercises were actually trained this session. We
+ * derive these from the logged set entries — each set carries `exercise_id`
+ * and (optionally) `pattern` and `primary_muscle` per the v2 set-log shape.
+ *
+ * Pragmatic for v2 alpha: trust the client-supplied per-set fields. Server-
+ * side derivation via ExerciseLibrary lookup is a future tightening if the
+ * alpha cohort surfaces stale or missing fields. The Q9 lifecycle gates
+ * fail-safe in either direction (under-detect → slower auto-clear, silent;
+ * over-detect → premature clearing, also silent in the AI-inferred path
+ * which caps at .mild).
+ */
+function derivedTrainedSets(
+  sessionPayload: Record<string, unknown>,
+): {
+  exercises: Set<string>;
+  patterns: Set<string>;
+  muscleGroups: Set<string>;
+} {
+  const exercises = new Set<string>();
+  const patterns = new Set<string>();
+  const muscleGroups = new Set<string>();
+  const setLogs = sessionPayload.set_logs;
+  if (Array.isArray(setLogs)) {
+    for (const entry of setLogs) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const e = entry as Record<string, unknown>;
+      if (typeof e.exercise_id === "string") exercises.add(e.exercise_id);
+      if (typeof e.pattern === "string") patterns.add(e.pattern);
+      if (typeof e.primary_muscle === "string") {
+        // PrimaryMuscle → MuscleGroup mapping (per CONTEXT.md two-level taxonomy).
+        // Quads/hamstrings/glutes/calves all collapse to "legs"; upper-body
+        // muscles map 1:1.
+        const m = e.primary_muscle;
+        if (["quads", "hamstrings", "glutes", "calves"].includes(m)) {
+          muscleGroups.add("legs");
+        } else {
+          muscleGroups.add(m);
+        }
+      }
+    }
+  }
+  return { exercises, patterns, muscleGroups };
+}
+
+/**
+ * Stage 2 driver per ADR-0013 + Q9.
+ *
+ * Runs in a SECOND transaction (separate from Stage 1's). Per ADR-0013:
+ * "Stage 2 runs separate-after Stage 1 commit; classifier failure does NOT
+ * roll back Stage 1." On any error, emits `trainee_model.classifier_failed`,
+ * watermark stays at the prior value (notes remain un-processed for the next
+ * session-apply), and the error is swallowed (orchestrator's HTTP response
+ * has already returned per ADR-0013's "HTTP returns after Stage 1").
+ *
+ * Architectural choice (locked at slice plan): a SINGLE second transaction
+ * wrapping form-degradation + limitation lifecycle + watermark advance.
+ * Atomicity here means the watermark advances iff every output is written;
+ * partial-success states (watermark advanced without outputs, or vice versa)
+ * are impossible. ADR-0013's Stage 1/Stage 2 isolation is preserved because
+ * the boundary is between the two transactions, not within either.
+ */
+async function runStage2(args: {
+  sql: Sql;
+  userId: string;
+  sessionId: string;
+  trainedExercises: Set<string>;
+  trainedPatterns: Set<string>;
+  trainedMuscleGroups: Set<string>;
+  now: Date;
+  classifierLLMCall?: (prompt: string) => Promise<string>;
+  classifierSleep?: (ms: number) => Promise<void>;
+  emitClassifierFailed: (event: ClassifierFailedEvent) => void;
+}): Promise<void> {
+  let notesAttempted = 0;
+  try {
+    await args.sql.begin(async (tx: Sql) => {
+      // Step 1: read model_json + the classifier watermark.
+      const rows = await tx`
+        SELECT model_json
+        FROM public.trainee_models
+        WHERE user_id = ${args.userId}
+        FOR UPDATE
+      `;
+      if (rows.length === 0) return; // user gone — nothing to do
+      const modelJson = parseJsonbColumn(rows[0].model_json);
+      const watermarkRaw = modelJson.lastClassifiedNoteCreatedAt as string | null | undefined;
+      const watermark: Date | null = watermarkRaw ? new Date(watermarkRaw) : null;
+
+      // Step 2: select notes since watermark (or bootstrap on null).
+      let notes: NoteToClassify[];
+      if (watermark === null) {
+        const rows = await tx`
+          SELECT id, raw_transcript, exercise_id, created_at, session_id
+          FROM public.memory_embeddings
+          WHERE user_id = ${args.userId}
+          ORDER BY created_at DESC
+        `;
+        const allNotes = rows.map(mapNoteRow);
+        notes = selectBootstrapNotes(
+          allNotes,
+          CLASSIFIER_BOOTSTRAP_MAX_NOTES,
+          CLASSIFIER_BOOTSTRAP_MAX_SESSIONS,
+        );
+      } else {
+        const rows = await tx`
+          SELECT id, raw_transcript, exercise_id, created_at, session_id
+          FROM public.memory_embeddings
+          WHERE user_id = ${args.userId} AND created_at > ${watermark}
+          ORDER BY created_at
+        `;
+        notes = rows.map(mapNoteRow);
+      }
+      notesAttempted = notes.length;
+
+      // Step 3: no notes → no-op (no Haiku call, no watermark advance).
+      if (notes.length === 0) return;
+
+      // Step 4: run classifier. Throws LLMTransientError on retry exhaustion
+      // or LLMPermanentError on malformed response — caught below.
+      const result = await runClassifier(notes, {
+        llmCall: args.classifierLLMCall,
+        sleep: args.classifierSleep,
+      });
+
+      // Step 5: apply form-degradation lifecycle + limitation lifecycle to
+      // the model_json. Both are pure functions from cycles 6-21.
+      const newModelJson = applyClassifierOutputs(modelJson, result, args);
+
+      // Step 6: advance the classifier watermark to the max created_at of
+      // the processed notes.
+      const maxCreatedAt = notes.reduce(
+        (m, n) => (n.createdAt.getTime() > m.getTime() ? n.createdAt : m),
+        new Date(0),
+      );
+      newModelJson.lastClassifiedNoteCreatedAt = maxCreatedAt.toISOString();
+
+      // Step 7: write back.
+      await tx`
+        UPDATE public.trainee_models
+        SET model_json = ${JSON.stringify(newModelJson)}::jsonb,
+            updated_at = NOW()
+        WHERE user_id = ${args.userId}
+      `;
+    });
+  } catch (err) {
+    // ADR-0013 §"Failure mode": emit + swallow. Watermark stays at prior
+    // value (the Update did not commit). Next session-apply re-runs the
+    // classifier on the same un-processed batch + any new notes.
+    let errorClass = "unexpected_error";
+    if (err instanceof LLMTransientError) {
+      errorClass = "transient_retry_exhausted";
+    } else if (err instanceof LLMPermanentError) {
+      errorClass = err.errorClass;
+    }
+    args.emitClassifierFailed({
+      user_id: args.userId,
+      session_id: args.sessionId,
+      error_class: errorClass,
+      notes_attempted_count: notesAttempted,
+    });
+    // do NOT re-throw: Stage 1 already committed; orchestrator's caller
+    // received its HTTP response after Stage 1.
+  }
+}
+
+/**
+ * Map a `memory_embeddings` row to the classifier's `NoteToClassify` shape.
+ * postgres.js gives us `created_at` as a Date already and snake_case column
+ * names as object keys; we adapt to camelCase for the TS rule modules.
+ */
+function mapNoteRow(row: Record<string, unknown>): NoteToClassify {
+  return {
+    id: row.id as string,
+    rawTranscript: (row.raw_transcript as string) ?? "",
+    exerciseId: (row.exercise_id as string | null) ?? null,
+    createdAt: row.created_at instanceof Date
+      ? row.created_at
+      : new Date(row.created_at as string),
+    sessionId: (row.session_id as string | null) ?? null,
+  };
+}
+
+/**
+ * Apply the classifier's outputs to a model_json snapshot. Combines the Q9
+ * form-degradation lifecycle with the ActiveLimitation lifecycle from
+ * `note-classifier.ts`. Pure: no I/O. The orchestrator wraps the write-back
+ * in the Stage 2 transaction.
+ */
+function applyClassifierOutputs(
+  modelJson: Record<string, unknown>,
+  classifierOut: { formDegradationMentions: Array<{ exerciseId: string; noteId: string }>; limitationMentions: LimitationMention[] },
+  ctx: {
+    trainedExercises: Set<string>;
+    trainedPatterns: Set<string>;
+    trainedMuscleGroups: Set<string>;
+    now: Date;
+  },
+): Record<string, unknown> {
+  // Form-degradation: for each exercise in model_json.exercises, run the
+  // lifecycle helper. isCleanSession is true iff classifier processed notes
+  // (always true here — we got past the empty-notes guard) AND no mention
+  // for this exercise AND exercise was trained this session.
+  const exercises = (modelJson.exercises as Record<string, Record<string, unknown>> | undefined) ?? {};
+  const mentionedExercises = new Set(
+    classifierOut.formDegradationMentions.map((m) => m.exerciseId),
+  );
+  const updatedExercises: Record<string, Record<string, unknown>> = {};
+  for (const [exId, profile] of Object.entries(exercises)) {
+    const wasMentioned = mentionedExercises.has(exId);
+    const wasTrained = ctx.trainedExercises.has(exId);
+    const lifecycleOut = updateFormDegradationLifecycle({
+      exerciseId: exId,
+      currentFlag: (profile.formDegradationFlag as boolean) ?? false,
+      currentCleanSessions: (profile.formDegradationCleanSessions as number) ?? 0,
+      classifierMentioned: wasMentioned,
+      isCleanSession: !wasMentioned && wasTrained,
+    });
+    updatedExercises[exId] = {
+      ...profile,
+      formDegradationFlag: lifecycleOut.flag,
+      formDegradationCleanSessions: lifecycleOut.cleanSessions,
+    };
+  }
+
+  // Limitation lifecycle: build input from current model + classifier output,
+  // call the helper, take output. The helper handles evidence accumulation,
+  // .mild capping, auto-clear, user-reported persistence, merge-on-coexistence,
+  // and cleared retention pruning.
+  const trainedJoints = derivedTrainedJoints(ctx.trainedPatterns);
+  const limitationOut = updateLimitationLifecycle({
+    active: ((modelJson.activeLimitations as ActiveLimitation[]) ?? []),
+    cleared: ((modelJson.clearedLimitations as ClearedLimitation[]) ?? []),
+    classifierMentions: classifierOut.limitationMentions,
+    trainedPatterns: ctx.trainedPatterns,
+    trainedMuscleGroups: ctx.trainedMuscleGroups,
+    trainedJoints,
+    notesProcessed: true,
+    now: ctx.now,
+  });
+
+  return {
+    ...modelJson,
+    exercises: updatedExercises,
+    activeLimitations: limitationOut.active,
+    clearedLimitations: limitationOut.cleared,
+  };
 }
 
 // Phase 1 stub — always returns false (every apply treated as fresh).

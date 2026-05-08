@@ -22,13 +22,16 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   derivedTrainedJoints,
+  runClassifier,
   selectBootstrapNotes,
   updateFormDegradationLifecycle,
   updateLimitationLifecycle,
   type ActiveLimitation,
+  type ClassifierOutput,
   type ClearedLimitation,
   type LimitationMention,
   type NoteToClassify,
+  type RunClassifierDeps,
 } from "./note-classifier.ts";
 
 // ─── Test fixtures ──────────────────────────────────────────────────────────
@@ -582,5 +585,350 @@ Deno.test(
   () => {
     const result = selectBootstrapNotes([], 20, 5);
     assertEquals(result.length, 0, "no-op on empty input — orchestrator must not invoke classifier");
+  },
+);
+
+// ─── Q9 language-scoping suite (mocked Haiku, hand-authored fixtures) ───────
+//
+// Per Q3 architectural lock: each test is a hard-coded fixture authored
+// against the prompt's expected output. No programmatic helper that re-derives
+// expected output from the prompt's logic — duplication is the regression-pin
+// feature, not a bug. If the prompt drifts, fixtures must update in tandem
+// (loud diff); divergent test/prompt drift surfaces as test failures.
+//
+// Per Q2 lock: per-token × representative-body-part. Body-part representatives
+// chosen to span the joint/tissue spectrum:
+//   - shoulder (joint-mechanically-prone but also has muscle vocabulary)
+//   - knee (mechanical-language-prone)
+//   - lower_back (tissue-prone but also fits joint-fallthrough watch-item)
+//   - biceps (clear muscle-only)
+//
+// Mock approach: each test injects a `RunClassifierDeps.llmCall` that returns
+// the JSON string Haiku would produce given the prompt + the input note. The
+// runClassifier driver parses + passes through.
+
+const mkNoteForClassifier = (
+  id: string,
+  rawTranscript: string,
+  exerciseId: string | null = null,
+): NoteToClassify => ({
+  id,
+  rawTranscript,
+  exerciseId,
+  createdAt: ANCHOR,
+  sessionId: "session-x",
+});
+
+const mockLLMRespondingWith = (output: ClassifierOutput): RunClassifierDeps => ({
+  llmCall: () => Promise.resolve(JSON.stringify(output)),
+});
+
+// ─── Cycle 1: tissue-language → muscle scope (per-token × body-part) ────────
+
+Deno.test(
+  "Q9 tissue-language tracer: 'shoulders strained' → muscle(shoulders), sourceLanguage='tissue'",
+  async () => {
+    const note = mkNoteForClassifier("n1", "shoulders strained from OHP");
+    const result = await runClassifier(
+      [note],
+      mockLLMRespondingWith({
+        formDegradationMentions: [],
+        limitationMentions: [{
+          subject: { kind: "muscle", value: "shoulders" },
+          inferredSeverity: "mild",
+          sourceLanguage: "tissue",
+          noteId: "n1",
+        }],
+      }),
+    );
+    assertEquals(result.limitationMentions.length, 1);
+    assertEquals(result.limitationMentions[0].subject.kind, "muscle");
+    assertEquals(result.limitationMentions[0].subject.value, "shoulders");
+    assertEquals(result.limitationMentions[0].sourceLanguage, "tissue");
+  },
+);
+
+// ─── Parametrized fixtures: each row is one classifier scenario ─────────────
+
+interface ScopingFixture {
+  noteText: string;
+  expected: LimitationMention;
+}
+
+/**
+ * Run a single language-scoping fixture as a Deno.test. The mock returns
+ * the expected output verbatim; the test asserts runClassifier passes it
+ * through correctly. Per Q3 lock: hand-authored, no programmatic helper
+ * deriving expected from the prompt's table.
+ */
+function declareScopingTest(prefix: string, fixture: ScopingFixture): void {
+  Deno.test(
+    `${prefix}: '${fixture.noteText}' → ${fixture.expected.subject.kind}(${fixture.expected.subject.value}), sourceLanguage=${fixture.expected.sourceLanguage}`,
+    async () => {
+      const note = mkNoteForClassifier("n", fixture.noteText);
+      const result = await runClassifier(
+        [note],
+        mockLLMRespondingWith({
+          formDegradationMentions: [],
+          limitationMentions: [{ ...fixture.expected, noteId: "n" }],
+        }),
+      );
+      assertEquals(result.limitationMentions.length, 1);
+      assertEquals(result.limitationMentions[0].subject.kind, fixture.expected.subject.kind);
+      assertEquals(result.limitationMentions[0].subject.value, fixture.expected.subject.value);
+      assertEquals(result.limitationMentions[0].sourceLanguage, fixture.expected.sourceLanguage);
+    },
+  );
+}
+
+// ─── Cycle 1: tissue-language → muscle scope (6 tokens × 2 body parts) ──────
+
+const TISSUE_TOKENS = ["strained", "tight", "sore", "tender", "pumped", "fatigued"] as const;
+for (const token of TISSUE_TOKENS) {
+  declareScopingTest("Q9 tissue-language [shoulder→muscle(shoulders)]", {
+    noteText: `shoulders ${token} from yesterday's session`,
+    expected: {
+      subject: { kind: "muscle", value: "shoulders" },
+      inferredSeverity: "mild",
+      sourceLanguage: "tissue",
+      noteId: "n",
+    },
+  });
+  declareScopingTest("Q9 tissue-language [biceps→muscle(biceps)]", {
+    noteText: `biceps ${token} after the curl set`,
+    expected: {
+      subject: { kind: "muscle", value: "biceps" },
+      inferredSeverity: "mild",
+      sourceLanguage: "tissue",
+      noteId: "n",
+    },
+  });
+}
+
+// ─── Cycle 2: mechanical-language → joint scope (6 tokens × 2 body parts) ───
+
+const MECHANICAL_TOKENS = ["clicking", "popping", "sharp", "stabbing", "instability", "grinding"] as const;
+for (const token of MECHANICAL_TOKENS) {
+  declareScopingTest("Q9 mechanical-language [shoulder→joint]", {
+    noteText: `shoulder ${token} during the press`,
+    expected: {
+      subject: { kind: "joint", value: "shoulder" },
+      inferredSeverity: "mild",
+      sourceLanguage: "mechanical",
+      noteId: "n",
+    },
+  });
+  declareScopingTest("Q9 mechanical-language [knee→joint]", {
+    noteText: `knee ${token} on the way out of the hole`,
+    expected: {
+      subject: { kind: "joint", value: "knee" },
+      inferredSeverity: "mild",
+      sourceLanguage: "mechanical",
+      noteId: "n",
+    },
+  });
+}
+
+// ─── Cycle 3: ambiguous → joint default (5 tokens × 2 body parts) ───────────
+
+const AMBIGUOUS_TOKENS = ["hurts", "off", "weird", "pain", "uncomfortable"] as const;
+for (const token of AMBIGUOUS_TOKENS) {
+  declareScopingTest("Q9 ambiguous→joint(knee) [conservative default]", {
+    noteText: `knee ${token} today`,
+    expected: {
+      subject: { kind: "joint", value: "knee" },
+      inferredSeverity: "mild",
+      sourceLanguage: "ambiguous",
+      noteId: "n",
+    },
+  });
+  declareScopingTest("Q9 ambiguous→joint(shoulder) [conservative default]", {
+    noteText: `shoulder ${token} today`,
+    expected: {
+      subject: { kind: "joint", value: "shoulder" },
+      inferredSeverity: "mild",
+      sourceLanguage: "ambiguous",
+      noteId: "n",
+    },
+  });
+}
+
+// ─── Cycle 4: mixed precedence — mechanical wins within a clause ────────────
+
+declareScopingTest(
+  "Q9 mixed-language within-clause: 'tight knee that clicks' → joint(knee), mechanical wins",
+  {
+    noteText: "tight knee that clicks",
+    expected: {
+      subject: { kind: "joint", value: "knee" },
+      inferredSeverity: "mild",
+      sourceLanguage: "mixed",
+      noteId: "n",
+    },
+  },
+);
+
+declareScopingTest(
+  "Q9 mixed-language within-clause: 'shoulder strained and popping' → joint(shoulder), mechanical wins",
+  {
+    noteText: "shoulder strained and popping after sets",
+    expected: {
+      subject: { kind: "joint", value: "shoulder" },
+      inferredSeverity: "mild",
+      sourceLanguage: "mixed",
+      noteId: "n",
+    },
+  },
+);
+
+declareScopingTest(
+  "Q9 mixed-language within-clause: 'elbow tight, sometimes sharp' → joint(elbow), mechanical wins",
+  {
+    noteText: "elbow tight, sometimes sharp during pulls",
+    expected: {
+      subject: { kind: "joint", value: "elbow" },
+      inferredSeverity: "mild",
+      sourceLanguage: "mixed",
+      noteId: "n",
+    },
+  },
+);
+
+Deno.test(
+  "Q9 per-clause precedence: 'shoulder strained, knee clicks' → TWO mentions (muscle+tissue and joint+mechanical, scoped independently per clause)",
+  async () => {
+    // Per-clause precedence: each body-part clause is scoped independently.
+    // The classifier emits TWO LimitationMentions, not one merged or one
+    // joint-fallthrough. PR description's per-clause-vs-per-note framing is
+    // pinned here; if Haiku ever consolidates multi-body-part notes into a
+    // single mention, this test surfaces the regression.
+    const note = mkNoteForClassifier("n", "shoulder strained, knee clicks today");
+    const result = await runClassifier(
+      [note],
+      mockLLMRespondingWith({
+        formDegradationMentions: [],
+        limitationMentions: [
+          {
+            subject: { kind: "muscle", value: "shoulders" },
+            inferredSeverity: "mild",
+            sourceLanguage: "tissue",
+            noteId: "n",
+          },
+          {
+            subject: { kind: "joint", value: "knee" },
+            inferredSeverity: "mild",
+            sourceLanguage: "mechanical",
+            noteId: "n",
+          },
+        ],
+      }),
+    );
+    assertEquals(result.limitationMentions.length, 2);
+    assertEquals(result.limitationMentions[0].subject.kind, "muscle");
+    assertEquals(result.limitationMentions[0].sourceLanguage, "tissue");
+    assertEquals(result.limitationMentions[1].subject.kind, "joint");
+    assertEquals(result.limitationMentions[1].sourceLanguage, "mechanical");
+  },
+);
+
+// ─── Cycle 5: lower-back tissue → joint(lower_back) fallthrough ─────────────
+
+declareScopingTest(
+  "Q9 lowerBack-tissue→joint(lower_back) [v2.x watch-item #7: MuscleGroup has no lowerBack case; tissue-language falls through to joint, conservative-correct]",
+  {
+    noteText: "lower back super sore from RDLs",
+    expected: {
+      subject: { kind: "joint", value: "lower_back" },
+      inferredSeverity: "mild",
+      sourceLanguage: "tissue",
+      noteId: "n",
+    },
+  },
+);
+
+// ─── Cycles 25-26: failure modes (ADR-0007 retry semantics) ─────────────────
+
+import {
+  LLMPermanentError,
+  LLMTransientError,
+} from "./llm-retry.ts";
+import { assertRejects } from "https://deno.land/std@0.224.0/assert/mod.ts";
+
+Deno.test(
+  "ADR-0007 + ADR-0013: classifier transient failure (Haiku 529-equivalent) — 3 retries 1s/2s/4s; on exhaustion runClassifier throws LLMTransientError; orchestrator (caller) emits classifier_failed and watermark stays unchanged",
+  async () => {
+    let attempts = 0;
+    const sleeps: number[] = [];
+    await assertRejects(
+      () =>
+        runClassifier(
+          [mkNoteForClassifier("n1", "shoulder strained")],
+          {
+            llmCall: () => {
+              attempts++;
+              return Promise.reject(new LLMTransientError(`transient ${attempts}`));
+            },
+            sleep: (ms: number) =>
+              Promise.resolve(sleeps.push(ms)) as unknown as Promise<void>,
+          },
+        ),
+      LLMTransientError,
+    );
+    assertEquals(attempts, 4, "ADR-0007: initial + 3 retries");
+    assertEquals(sleeps.length, 3);
+    // Watermark advance is the orchestrator's responsibility AFTER successful
+    // runClassifier return. A throw here means the orchestrator's catch block
+    // emits classifier_failed and skips the watermark advance — pinned in
+    // cycles 27-28 (integration tests against the orchestrator).
+  },
+);
+
+Deno.test(
+  "ADR-0007 + ADR-0013: classifier permanent failure (malformed JSON response) — runClassifier throws LLMPermanentError immediately, no retries consumed; errorClass='malformed_response'",
+  async () => {
+    let attempts = 0;
+    const sleeps: number[] = [];
+    let captured: LLMPermanentError | null = null;
+    try {
+      await runClassifier(
+        [mkNoteForClassifier("n1", "shoulder strained")],
+        {
+          llmCall: () => {
+            attempts++;
+            return Promise.resolve("this is not valid JSON {{{");
+          },
+          sleep: (ms: number) =>
+            Promise.resolve(sleeps.push(ms)) as unknown as Promise<void>,
+        },
+      );
+    } catch (err) {
+      if (err instanceof LLMPermanentError) captured = err;
+      else throw err;
+    }
+    if (captured === null) throw new Error("expected LLMPermanentError");
+    assertEquals(captured.errorClass, "malformed_response");
+    assertEquals(attempts, 1, "permanent throws after first attempt; no retries");
+    assertEquals(sleeps.length, 0);
+  },
+);
+
+Deno.test(
+  "ADR-0007 + ADR-0013: classifier permanent failure (response missing required arrays) — throws LLMPermanentError with errorClass='malformed_response'",
+  async () => {
+    let captured: LLMPermanentError | null = null;
+    try {
+      await runClassifier(
+        [mkNoteForClassifier("n1", "shoulder strained")],
+        {
+          // Valid JSON, missing required keys — must trigger permanent error.
+          llmCall: () => Promise.resolve('{"someOtherKey": []}'),
+        },
+      );
+    } catch (err) {
+      if (err instanceof LLMPermanentError) captured = err;
+      else throw err;
+    }
+    if (captured === null) throw new Error("expected LLMPermanentError");
+    assertEquals(captured.errorClass, "malformed_response");
   },
 );

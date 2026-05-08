@@ -23,6 +23,7 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import postgres from "postgres";
 import { applySession } from "./index.ts";
 import type { ApplyCompleteEvent, LateArrivalEvent } from "../_shared/observability.ts";
+import { LLMTransientError } from "../_shared/llm-retry.ts";
 
 const DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
@@ -69,6 +70,14 @@ const orchestratorTest = (
     sanitizeResources: false,
   });
 };
+
+// All orchestrator tests that DON'T explicitly inject `stage2Hook` will now
+// run the real A13 Stage 2 driver. To keep the existing A12 tests' apply
+// paths from also kicking off a real Anthropic Haiku call, the empty-payload
+// tests (no set_logs[], no notes seeded) trigger the no-notes branch of
+// runStage2 (no-op → no LLM call). For tests that DO need to short-circuit
+// Stage 2 entirely, a no-op stage2Hook is the simplest mechanism.
+const noopStage2: () => Promise<void> = () => Promise.resolve();
 
 orchestratorTest(
   "ADR-0006: first-ever apply on a fresh trainee_models row inserts the applied_sessions PK and increments session_count (tracer)",
@@ -354,6 +363,160 @@ function parseJsonb(value: unknown): Record<string, unknown> {
   if (typeof value === "string") return JSON.parse(value);
   return value as Record<string, unknown>;
 }
+
+// ─── Cycles 27-28: Stage 2 fires-once + watermark recovery (A13 / #84) ──────
+//
+// Cycle 27 mirrors A12 cycle 9's gate test, but with the REAL Stage 2 driver
+// wired in (not a synthetic hook). Cycle 28 is the unique A13 contract:
+// classifier failure leaves the watermark at its prior value, and the next
+// session's Stage 2 picks up the un-processed batch joined with new notes.
+//
+// Both tests seed `memory_embeddings` so Stage 2 actually invokes the LLM
+// (otherwise the no-notes branch short-circuits).
+
+const seedNote = async (
+  userId: string,
+  noteId: string,
+  rawTranscript: string,
+  createdAtIso: string,
+  sessionId: string | null = null,
+): Promise<void> => {
+  await sql`
+    INSERT INTO public.memory_embeddings
+      (id, user_id, raw_transcript, created_at, session_id, exercise_id)
+    VALUES
+      (${noteId}::uuid, ${userId}, ${rawTranscript}, ${createdAtIso}::timestamptz,
+       ${sessionId}, NULL)
+  `;
+};
+
+orchestratorTest(
+  "ADR-0013 (A13 cycle 27): WAQ retry of session that ran Stage 2 successfully — Stage 1 returns cached snapshot via PK conflict; Stage 2 NOT re-fired (first-apply-fires-once contract preserved with real classifier driver)",
+  async () => {
+    const userId = await seedFreshUser();
+    await seedNote(userId, crypto.randomUUID(), "shoulder strained today", "2026-05-08T08:00:00.000Z");
+
+    let llmCalls = 0;
+    let classifierFailedCalls = 0;
+    const llmCall = (_prompt: string) => {
+      llmCalls += 1;
+      return Promise.resolve(JSON.stringify({
+        formDegradationMentions: [],
+        limitationMentions: [],
+      }));
+    };
+    const sessionId = crypto.randomUUID();
+    const payload = {
+      user_id: userId,
+      session_id: sessionId,
+      session_payload: { logged_at: "2026-05-08T10:00:00Z", set_logs: [] },
+    };
+
+    // First apply — runs Stage 1 + Stage 2 (real driver). LLM called once.
+    await applySession(payload, sql, {
+      classifierLLMCall: llmCall,
+      emitClassifierFailed: () => { classifierFailedCalls++; },
+    });
+    assertEquals(llmCalls, 1, "first apply triggers Stage 2 → classifier called once");
+
+    // Second apply (same session_id) — PK conflict → cached return → Stage 2 NOT fired.
+    await applySession(payload, sql, {
+      classifierLLMCall: llmCall,
+      emitClassifierFailed: () => { classifierFailedCalls++; },
+    });
+    assertEquals(
+      llmCalls,
+      1,
+      "cached-snapshot return MUST NOT re-fire Stage 2 (ADR-0013 §WAQ retry idempotency); classifier remains at 1 call total",
+    );
+    assertEquals(classifierFailedCalls, 0, "no failures emitted");
+  },
+);
+
+orchestratorTest(
+  "ADR-0013 (A13 cycle 28): Stage 2 mid-flight failure leaves watermark unchanged; next session-apply picks up the un-processed batch joined with newer notes",
+  async () => {
+    const userId = await seedFreshUser();
+    // Seed two notes BEFORE the first apply.
+    await seedNote(userId, crypto.randomUUID(), "shoulder sore", "2026-05-08T08:00:00.000Z");
+    await seedNote(userId, crypto.randomUUID(), "knee clicks", "2026-05-08T08:30:00.000Z");
+
+    // ATTEMPT 1: classifier throws transient on every retry → exhausts.
+    let attempt1Calls = 0;
+    let classifierFailedCalls = 0;
+    const failingLlmCall = () => {
+      attempt1Calls += 1;
+      return Promise.reject(new LLMTransientError(`mock 529 #${attempt1Calls}`));
+    };
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: { logged_at: "2026-05-08T10:00:00Z", set_logs: [] },
+      },
+      sql,
+      {
+        classifierLLMCall: failingLlmCall,
+        classifierSleep: () => Promise.resolve(),
+        emitClassifierFailed: () => { classifierFailedCalls++; },
+      },
+    );
+    assertEquals(attempt1Calls, 4, "ADR-0007: 4 total attempts (initial + 3 retries) before exhaustion");
+    assertEquals(classifierFailedCalls, 1, "classifier_failed emitted exactly once on retry exhaustion");
+
+    // Verify watermark is STILL null (first apply failed, no advance).
+    const afterFail = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelAfterFail = parseJsonb(afterFail[0].model_json);
+    assertEquals(
+      modelAfterFail.lastClassifiedNoteCreatedAt ?? null,
+      null,
+      "watermark MUST stay at prior value (null) when classifier exhausts retries (ADR-0013 §Failure mode)",
+    );
+
+    // Seed a third (newer) note.
+    await seedNote(userId, crypto.randomUUID(), "elbow popping", "2026-05-08T11:00:00.000Z");
+
+    // ATTEMPT 2: classifier succeeds. Capture the prompt to verify it
+    // includes ALL three noteIds (un-processed batch + new note).
+    let capturedPrompt = "";
+    const successLlmCall = (prompt: string) => {
+      capturedPrompt = prompt;
+      return Promise.resolve(JSON.stringify({
+        formDegradationMentions: [],
+        limitationMentions: [],
+      }));
+    };
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: { logged_at: "2026-05-08T12:00:00Z", set_logs: [] },
+      },
+      sql,
+      { classifierLLMCall: successLlmCall },
+    );
+
+    // The recovered apply MUST process all 3 notes — n1, n2 (un-processed
+    // from attempt 1) plus n3 (new). The prompt's note block lists each
+    // raw_transcript on its own line; assert all three appear.
+    assertEquals(capturedPrompt.includes("shoulder sore"), true, "n1 in batch");
+    assertEquals(capturedPrompt.includes("knee clicks"), true, "n2 in batch");
+    assertEquals(capturedPrompt.includes("elbow popping"), true, "n3 in batch");
+
+    // After successful classification, watermark must advance to max(notes.createdAt) = n3 = 2026-05-08T11:00:00Z.
+    const afterSuccess = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelAfterSuccess = parseJsonb(afterSuccess[0].model_json);
+    assertEquals(
+      new Date(modelAfterSuccess.lastClassifiedNoteCreatedAt as string).toISOString(),
+      "2026-05-08T11:00:00.000Z",
+      "watermark advances to max(notes.createdAt) on classifier success",
+    );
+  },
+);
 
 orchestratorTest(
   "ADR-0008: emitLateArrival invoked with correct delta_seconds — incoming 7 days before watermark → delta_seconds = -604800",

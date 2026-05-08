@@ -18,6 +18,15 @@ struct ActiveLimitation: Codable, Sendable, Hashable {
     var evidenceCount: Int
     var userConfirmed: Bool
     var notes: String?
+    /// Q9 PRD-internal (slice A13 / #84): AI-inferred limitations auto-clear
+    /// after `LIMITATION_AUTO_CLEAR_SESSIONS` (=3) sessions where the subject
+    /// was trained AND the classifier processed notes AND no re-mention was
+    /// found. User-reported limitations (`userConfirmed=true`) ignore this
+    /// counter — only user-confirmed UI clear removes them.
+    ///
+    /// Decoded with `decodeIfPresent ?? 0` for forward-compat with pre-A13
+    /// rows (additive Codable migration).
+    var sessionsWithoutReMention: Int
 
     init(
         subject: LimitationSubject,
@@ -25,7 +34,8 @@ struct ActiveLimitation: Codable, Sendable, Hashable {
         onsetDate: Date,
         evidenceCount: Int,
         userConfirmed: Bool,
-        notes: String? = nil
+        notes: String? = nil,
+        sessionsWithoutReMention: Int = 0
     ) {
         self.subject = subject
         self.severity = severity
@@ -33,6 +43,18 @@ struct ActiveLimitation: Codable, Sendable, Hashable {
         self.evidenceCount = evidenceCount
         self.userConfirmed = userConfirmed
         self.notes = notes
+        self.sessionsWithoutReMention = sessionsWithoutReMention
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.subject = try c.decode(LimitationSubject.self, forKey: .subject)
+        self.severity = try c.decode(Severity.self, forKey: .severity)
+        self.onsetDate = try c.decode(Date.self, forKey: .onsetDate)
+        self.evidenceCount = try c.decode(Int.self, forKey: .evidenceCount)
+        self.userConfirmed = try c.decode(Bool.self, forKey: .userConfirmed)
+        self.notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        self.sessionsWithoutReMention = try c.decodeIfPresent(Int.self, forKey: .sessionsWithoutReMention) ?? 0
     }
 }
 
