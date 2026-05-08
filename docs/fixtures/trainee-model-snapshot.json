@@ -1,0 +1,101 @@
+{
+  "$comment": "Cross-platform shape-parity fixture for Phase 2 TraineeModel. Loaded by both the TS orchestrator round-trip test and the Swift TraineeModelSnapshotsCrossValidationTests. Drift on either side surfaces via these tests. Anchor date 2026-01-01T00:00:00Z is deterministic (no Date.now() in tests). Keys use Swift's MovementPattern rawValues (snake_case) and SetIntent rawValues (lowercase) so the JSON decodes cleanly via the synthesized Codable on TraineeModel.",
+  "goal": {
+    "statement": "Build broad strength and hypertrophy across the lower and upper body.",
+    "focusAreas": ["legs", "back"],
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "projections": null,
+  "patterns": {
+    "squat": {
+      "pattern": "squat",
+      "currentPhase": "deload",
+      "sessionsInPhase": 2,
+      "lastPhaseTransitionAtSessionCount": 18,
+      "rpeOffset": 0.3,
+      "recovery": {
+        "lastNeuromuscularStimulusAt": "2026-01-04T18:00:00.000Z",
+        "lastMetabolicStimulusAt": "2026-01-04T18:00:00.000Z",
+        "neuromuscularReadiness": 0.74,
+        "metabolicReadiness": 0.94
+      },
+      "confidence": "established",
+      "transitionModeUntil": "2026-01-15T00:00:00.000Z",
+      "trend": "plateaued",
+      "recentSessionDates": [
+        "2025-12-23T18:00:00.000Z",
+        "2025-12-26T18:00:00.000Z",
+        "2025-12-29T18:00:00.000Z",
+        "2026-01-01T18:00:00.000Z",
+        "2026-01-04T18:00:00.000Z"
+      ],
+      "consecutiveForceDeloadsOnPattern": 1
+    },
+    "horizontal_push": {
+      "pattern": "horizontal_push",
+      "currentPhase": "accumulation",
+      "sessionsInPhase": 0,
+      "lastPhaseTransitionAtSessionCount": 22,
+      "rpeOffset": 0.0,
+      "recovery": {
+        "lastNeuromuscularStimulusAt": null,
+        "lastMetabolicStimulusAt": null,
+        "neuromuscularReadiness": 1.0,
+        "metabolicReadiness": 1.0
+      },
+      "confidence": "calibrating",
+      "transitionModeUntil": null,
+      "trend": "progressing",
+      "recentSessionDates": [],
+      "consecutiveForceDeloadsOnPattern": 0
+    }
+  },
+  "muscles": {},
+  "exercises": {},
+  "activeLimitations": [],
+  "clearedLimitations": [],
+  "fatigueInteractions": [
+    {
+      "fromPattern": "squat",
+      "toPattern": "horizontal_push",
+      "observations": [-0.05, -0.06, -0.04, -0.05, -0.07, -0.05, -0.06, -0.05, -0.05, -0.04],
+      "totalCount": 22
+    }
+  ],
+  "prescriptionAccuracy": {
+    "squat": {
+      "top": {
+        "pattern": "squat",
+        "intent": "top",
+        "bias": 0.04,
+        "rmse": 0.08,
+        "sampleCount": 12,
+        "biasByGapBucket": {
+          "under48h": -0.02,
+          "between_48_and_72h": 0.05,
+          "over72h": 0.06
+        },
+        "rmseByGapBucket": {
+          "under48h": 0.07,
+          "between_48_and_72h": 0.08,
+          "over72h": 0.09
+        },
+        "sampleCountByGapBucket": {
+          "under48h": 4,
+          "between_48_and_72h": 5,
+          "over72h": 3
+        }
+      }
+    }
+  },
+  "prescriptionIntentMismatches": [],
+  "transfers": [],
+  "bodyweight": {
+    "entries": []
+  },
+  "lifeContextEvents": [],
+  "reassessmentRecords": [],
+  "totalSessionCount": 24,
+  "lastClassifiedNoteCreatedAt": "2026-01-04T18:00:00.000Z",
+  "lastGlobalPhaseAdvanceFiredAtSessionCount": 18
+}

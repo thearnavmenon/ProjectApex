@@ -91,3 +91,31 @@ export function emitTransferNegativeCoefficient(
 ): void {
   emit("trainee_model.transfer_negative_coefficient", event);
 }
+
+// ─── emitApplyComplete (slice A12 — per-apply summary) ──────────────────────
+//
+// Per-apply observability scaffolded by A12 so production debugging can
+// correlate session-applies with which rules fired, what changed on the
+// snapshot, and how long Stage 1 took. Three named-event channels above
+// cover specific failure modes (late arrival, classifier fail, clock skew);
+// this helper covers normal operations.
+//
+// Call site: orchestrator's first-apply success path, after Stage 1 commit
+// and alongside stage2Hook (ADR-0013 §"Stage sequencing"). Cached-snapshot
+// returns and late-arrival refusals do NOT emit — the envelope describes a
+// *mutation*, and those paths don't mutate.
+
+export interface ApplyCompleteEvent {
+  user_id: string;
+  session_id: string;
+  /** Wall-clock duration of Stage 1 (PK insert through COMMIT). */
+  duration_ms: number;
+  /** Names of rules that fired this apply, in invocation order. */
+  rules_fired: string[];
+  /** Dot-paths into model_json that mutated this apply. */
+  fields_changed: string[];
+}
+
+export function emitApplyComplete(event: ApplyCompleteEvent): void {
+  emit("trainee_model.apply_complete", event);
+}

@@ -154,6 +154,11 @@ struct PrescriptionAccuracy: Codable, Sendable, Hashable {
         self.sampleCountByGapBucket = sampleCountByGapBucket
     }
 
+    enum CodingKeys: String, CodingKey {
+        case pattern, intent, bias, rmse, sampleCount
+        case biasByGapBucket, rmseByGapBucket, sampleCountByGapBucket
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.pattern = try c.decode(MovementPattern.self, forKey: .pattern)
@@ -161,9 +166,25 @@ struct PrescriptionAccuracy: Codable, Sendable, Hashable {
         self.bias = try c.decode(Double.self, forKey: .bias)
         self.rmse = try c.decode(Double.self, forKey: .rmse)
         self.sampleCount = try c.decode(Int.self, forKey: .sampleCount)
-        self.biasByGapBucket = try c.decodeIfPresent([InterSessionGapBucket: Double].self, forKey: .biasByGapBucket) ?? [:]
-        self.rmseByGapBucket = try c.decodeIfPresent([InterSessionGapBucket: Double].self, forKey: .rmseByGapBucket) ?? [:]
-        self.sampleCountByGapBucket = try c.decodeIfPresent([InterSessionGapBucket: Int].self, forKey: .sampleCountByGapBucket) ?? [:]
+        // Gap-bucket dicts are enum-keyed (InterSessionGapBucket) — encoded as
+        // JSON objects to match the TS orchestrator's idiomatic shape per the
+        // ADR-0006 JSONB contract (slice A12 / #83). See JSONBCodable.swift.
+        self.biasByGapBucket = try c.decodeEnumKeyedDictIfPresent(Double.self, forKey: .biasByGapBucket)
+        self.rmseByGapBucket = try c.decodeEnumKeyedDictIfPresent(Double.self, forKey: .rmseByGapBucket)
+        self.sampleCountByGapBucket = try c.decodeEnumKeyedDictIfPresent(Int.self, forKey: .sampleCountByGapBucket)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(pattern, forKey: .pattern)
+        try c.encode(intent, forKey: .intent)
+        try c.encode(bias, forKey: .bias)
+        try c.encode(rmse, forKey: .rmse)
+        try c.encode(sampleCount, forKey: .sampleCount)
+        // Mirror the decode path — gap-bucket dicts encode as JSON objects.
+        try c.encodeEnumKeyedDict(biasByGapBucket, forKey: .biasByGapBucket)
+        try c.encodeEnumKeyedDict(rmseByGapBucket, forKey: .rmseByGapBucket)
+        try c.encodeEnumKeyedDict(sampleCountByGapBucket, forKey: .sampleCountByGapBucket)
     }
 }
 

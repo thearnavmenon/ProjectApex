@@ -81,6 +81,142 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.lastGlobalPhaseAdvanceFiredAtSessionCount = lastGlobalPhaseAdvanceFiredAtSessionCount
     }
 
+    // MARK: Custom Codable for JSONB shape parity (slice A12 / #83)
+
+    // Per ADR-0006 §"Implementation consequences", the trainee-model JSONB
+    // column is a contract between the TS Edge Function orchestrator (writer)
+    // and the Swift client (reader for digest assembly). Swift's synthesized
+    // Dictionary Codable encodes enum-keyed dicts as flat alternating arrays
+    // (`["squat", {...}, "horizontal_push", {...}]`), which the TS orchestrator
+    // can't produce idiomatically and which makes JSONB unintelligible to
+    // Studio inspection. This custom Codable encodes `patterns`, `muscles`,
+    // and `prescriptionAccuracy` as JSON objects keyed by enum rawValue; the
+    // shape parity is locked by docs/fixtures/trainee-model-snapshot.json and
+    // its cross-platform tests on both TS and Swift sides.
+
+    enum CodingKeys: String, CodingKey {
+        case activeProgramId
+        case goal
+        case projections
+        case patterns
+        case muscles
+        case exercises
+        case activeLimitations
+        case clearedLimitations
+        case fatigueInteractions
+        case prescriptionAccuracy
+        case prescriptionIntentMismatches
+        case transfers
+        case bodyweight
+        case lifeContextEvents
+        case reassessmentRecords
+        case totalSessionCount
+        case lastClassifiedNoteCreatedAt
+        case lastGlobalPhaseAdvanceFiredAtSessionCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.activeProgramId = try c.decodeIfPresent(UUID.self, forKey: .activeProgramId)
+        self.goal = try c.decode(GoalState.self, forKey: .goal)
+        self.projections = try c.decodeIfPresent(ProjectionState.self, forKey: .projections)
+        self.patterns = try c.decodeEnumKeyedDictIfPresent(
+            PatternProfile.self, forKey: .patterns
+        )
+        self.muscles = try c.decodeEnumKeyedDictIfPresent(
+            MuscleProfile.self, forKey: .muscles
+        )
+        self.exercises = try c.decodeIfPresent(
+            [String: ExerciseProfile].self, forKey: .exercises
+        ) ?? [:]
+        self.activeLimitations = try c.decodeIfPresent(
+            [ActiveLimitation].self, forKey: .activeLimitations
+        ) ?? []
+        self.clearedLimitations = try c.decodeIfPresent(
+            [ClearedLimitation].self, forKey: .clearedLimitations
+        ) ?? []
+        self.fatigueInteractions = try c.decodeIfPresent(
+            [FatigueInteraction].self, forKey: .fatigueInteractions
+        ) ?? []
+        // Doubly-nested dict: outer key MovementPattern (rawValue), inner key
+        // SetIntent (rawValue). Both layers must decode as JSON objects so the
+        // shape matches the TS orchestrator's per-pattern × per-intent table.
+        if c.contains(.prescriptionAccuracy) {
+            let outer = try c.nestedContainer(keyedBy: AnyCodingKey.self, forKey: .prescriptionAccuracy)
+            var prescriptionAccuracy: [MovementPattern: [SetIntent: PrescriptionAccuracy]] = [:]
+            for outerKey in outer.allKeys {
+                guard let pattern = MovementPattern(rawValue: outerKey.stringValue) else { continue }
+                let inner = try outer.nestedContainer(keyedBy: AnyCodingKey.self, forKey: outerKey)
+                var byIntent: [SetIntent: PrescriptionAccuracy] = [:]
+                for innerKey in inner.allKeys {
+                    guard let intent = SetIntent(rawValue: innerKey.stringValue) else { continue }
+                    byIntent[intent] = try inner.decode(PrescriptionAccuracy.self, forKey: innerKey)
+                }
+                prescriptionAccuracy[pattern] = byIntent
+            }
+            self.prescriptionAccuracy = prescriptionAccuracy
+        } else {
+            self.prescriptionAccuracy = [:]
+        }
+        self.prescriptionIntentMismatches = try c.decodeIfPresent(
+            [PrescriptionIntentMismatch].self, forKey: .prescriptionIntentMismatches
+        ) ?? []
+        self.transfers = try c.decodeIfPresent(
+            [ExerciseTransfer].self, forKey: .transfers
+        ) ?? []
+        self.bodyweight = try c.decodeIfPresent(
+            BodyweightHistory.self, forKey: .bodyweight
+        ) ?? BodyweightHistory()
+        self.lifeContextEvents = try c.decodeIfPresent(
+            [LifeContextEvent].self, forKey: .lifeContextEvents
+        ) ?? []
+        self.reassessmentRecords = try c.decodeIfPresent(
+            [ReassessmentRecord].self, forKey: .reassessmentRecords
+        ) ?? []
+        self.totalSessionCount = try c.decodeIfPresent(
+            Int.self, forKey: .totalSessionCount
+        ) ?? 0
+        self.lastClassifiedNoteCreatedAt = try c.decodeIfPresent(
+            Date.self, forKey: .lastClassifiedNoteCreatedAt
+        )
+        self.lastGlobalPhaseAdvanceFiredAtSessionCount = try c.decodeIfPresent(
+            Int.self, forKey: .lastGlobalPhaseAdvanceFiredAtSessionCount
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(activeProgramId, forKey: .activeProgramId)
+        try c.encode(goal, forKey: .goal)
+        try c.encodeIfPresent(projections, forKey: .projections)
+        try c.encodeEnumKeyedDict(patterns, forKey: .patterns)
+        try c.encodeEnumKeyedDict(muscles, forKey: .muscles)
+        try c.encode(exercises, forKey: .exercises)
+        try c.encode(activeLimitations, forKey: .activeLimitations)
+        try c.encode(clearedLimitations, forKey: .clearedLimitations)
+        try c.encode(fatigueInteractions, forKey: .fatigueInteractions)
+        // Doubly-nested encode mirroring the decoder above. Outer + inner
+        // sorted by rawValue for deterministic output.
+        var pac = c.nestedContainer(keyedBy: AnyCodingKey.self, forKey: .prescriptionAccuracy)
+        for (pattern, byIntent) in prescriptionAccuracy.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            var inner = pac.nestedContainer(
+                keyedBy: AnyCodingKey.self,
+                forKey: AnyCodingKey(pattern.rawValue)
+            )
+            for (intent, accuracy) in byIntent.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+                try inner.encode(accuracy, forKey: AnyCodingKey(intent.rawValue))
+            }
+        }
+        try c.encode(prescriptionIntentMismatches, forKey: .prescriptionIntentMismatches)
+        try c.encode(transfers, forKey: .transfers)
+        try c.encode(bodyweight, forKey: .bodyweight)
+        try c.encode(lifeContextEvents, forKey: .lifeContextEvents)
+        try c.encode(reassessmentRecords, forKey: .reassessmentRecords)
+        try c.encode(totalSessionCount, forKey: .totalSessionCount)
+        try c.encodeIfPresent(lastClassifiedNoteCreatedAt, forKey: .lastClassifiedNoteCreatedAt)
+        try c.encodeIfPresent(lastGlobalPhaseAdvanceFiredAtSessionCount, forKey: .lastGlobalPhaseAdvanceFiredAtSessionCount)
+    }
+
     // MARK: Major patterns (calibration / phase-advance gating)
 
     static let majorPatterns: Set<MovementPattern> = [

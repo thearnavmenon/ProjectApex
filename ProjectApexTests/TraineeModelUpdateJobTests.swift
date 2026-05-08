@@ -400,6 +400,105 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         )
     }
 
+    /// Slice A12 (#83) richer response shape: when the orchestrator refuses a
+    /// late arrival, it returns `late_arrival_details: { session_id,
+    /// incoming_logged_at, watermark }` alongside the bool flag. The WAQ
+    /// adapter must populate the corresponding optional fields on the queued
+    /// LateArrivalNotification so the post-session UI can show details (e.g.,
+    /// "logged X minutes ago" or the gap delta).
+    func test_flushHandler_onLateArrivalTrue_populatesRicherNotificationFields_fromA12Response() async throws {
+        // Construct a response body matching the A12 contract: the bool flag
+        // PLUS the late_arrival_details object. The WAQ adapter is expected
+        // to parse the nested fields and stash them on LateArrivalNotification.
+        struct A12Wrapper: Encodable {
+            let traineeModel: TraineeModel
+            let lateArrival: Bool
+            let lateArrivalDetails: Details
+            struct Details: Encodable {
+                let sessionId: String
+                let incomingLoggedAt: String
+                let watermark: String
+                enum CodingKeys: String, CodingKey {
+                    case sessionId       = "session_id"
+                    case incomingLoggedAt = "incoming_logged_at"
+                    case watermark
+                }
+            }
+            enum CodingKeys: String, CodingKey {
+                case traineeModel       = "trainee_model"
+                case lateArrival        = "late_arrival"
+                case lateArrivalDetails = "late_arrival_details"
+            }
+        }
+        let sessionId        = UUID()
+        let incomingLoggedAt = "2026-05-01T08:00:00.000Z"
+        let watermark        = "2026-05-08T10:00:00.000Z"
+        let wrapper = A12Wrapper(
+            traineeModel: makeSimpleModel(),
+            lateArrival: true,
+            lateArrivalDetails: .init(
+                sessionId: sessionId.uuidString.lowercased(),
+                incomingLoggedAt: incomingLoggedAt,
+                watermark: watermark
+            )
+        )
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        let body = try enc.encode(wrapper)
+        respond(status: 200, body: body)
+
+        let outcome = await job.makeHandler()(try makeQueuedItem())
+        XCTAssertEqual(outcome, .success)
+
+        let pending = notificationQueue.dequeueAll()
+        XCTAssertEqual(pending.count, 1)
+        let notification = pending[0]
+        XCTAssertEqual(
+            notification.sessionId, sessionId,
+            "A12 response shape: sessionId must round-trip from late_arrival_details.session_id"
+        )
+        XCTAssertEqual(
+            notification.incomingLoggedAt,
+            ISO8601DateFormatter().date(from: incomingLoggedAt),
+            "incomingLoggedAt must decode as ISO-8601"
+        )
+        XCTAssertEqual(
+            notification.watermark,
+            ISO8601DateFormatter().date(from: watermark),
+            "watermark must decode as ISO-8601"
+        )
+    }
+
+    /// Slice A12 (#83) cached-snapshot path: when the orchestrator's PK
+    /// constraint short-circuits a duplicate session (WAQ retry replay), the
+    /// response is `late_arrival: false` with the cached snapshot in
+    /// `trainee_model`. From the WAQ adapter's perspective this is
+    /// indistinguishable from a fresh in-order apply — same path, same
+    /// `.success` outcome, same store update with whatever shape `trainee_model`
+    /// carries. ADR-0006 §"Idempotency at the DB layer" + ADR-0013 §"WAQ
+    /// retry idempotency": Stage 2 doesn't re-fire here, but the *client*
+    /// doesn't need to know that. This test pins that the WAQ adapter does
+    /// NOT distinguish the cached-snapshot case from a fresh apply (no third
+    /// branch beyond late_arrival:true / late_arrival:false).
+    func test_flushHandler_onCachedSnapshotReturn_treatedAsLateArrivalFalse() async throws {
+        // Construct two responses for two consecutive flushes of the same
+        // session_id. First apply: late_arrival:false + fresh snapshot. Second
+        // apply (PK conflict simulating WAQ retry): late_arrival:false + the
+        // *same* cached snapshot. From the WAQ's POV both responses look
+        // identical — they take the same flushHandler path.
+        let cachedSnapshot = makeSimpleModel()
+        let cachedBody = try makeLateArrivalResponse(model: cachedSnapshot, late: false)
+        respond(status: 200, body: cachedBody)
+
+        let outcome = await job.makeHandler()(try makeQueuedItem())
+        XCTAssertEqual(outcome, .success,
+                       "Cached-snapshot return MUST yield .success identically to a fresh apply (ADR-0006 §2)")
+        XCTAssertEqual(store.load(), cachedSnapshot,
+                       "Cached snapshot lands in the local store on this path — the client doesn't differentiate cached vs fresh writes")
+        XCTAssertEqual(notificationQueue.pendingCount, 0,
+                       "Cached-snapshot return MUST NOT enqueue a late-arrival notification (only late_arrival:true does)")
+    }
+
     /// ADR-0008 contract for the in-order branch: explicit `late_arrival:false`
     /// (the shape A12 will return for accepted sessions) MUST behave identically
     /// to the existing no-flag case — store updates, queue stays empty. Locks
