@@ -44,6 +44,7 @@
 		73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */; };
 		7D8C4E6ADC8DEDCA31B72B1D /* ManualLogIntentGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED8AB93C545B445971A78F14 /* ManualLogIntentGateTests.swift */; };
 		81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */; };
+		A11FA719C0DE0001CAFE0001 /* FatigueInteractionCrossValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11FA719C0DE0002CAFE0002 /* FatigueInteractionCrossValidationTests.swift */; };
 		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
 		8A28FF4A9DE063DFA4183B29 /* SetPrescriptionIntentValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* TopSetSnapshotFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */; };
@@ -103,6 +104,7 @@
 		70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentRounderTests.swift; sourceTree = "<group>"; };
 		7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelDigestTests.swift; sourceTree = "<group>"; };
 		85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelInteractionsTests.swift; sourceTree = "<group>"; };
+		A11FA719C0DE0002CAFE0002 /* FatigueInteractionCrossValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FatigueInteractionCrossValidationTests.swift; sourceTree = "<group>"; };
 		862D553D94F677C0BB009B74 /* TraineeModelUpdateJobTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelUpdateJobTests.swift; sourceTree = "<group>"; };
 		A3741A0001CAFE0001CAFE02 /* LateArrivalNotificationQueueTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LateArrivalNotificationQueueTests.swift; sourceTree = "<group>"; };
 		878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelProfilesTests.swift; sourceTree = "<group>"; };
@@ -238,6 +240,7 @@
 				993DDBFBA2750C9A2D659E12 /* TraineeModelSnapshotsTests.swift */,
 				B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */,
 				85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */,
+				A11FA719C0DE0002CAFE0002 /* FatigueInteractionCrossValidationTests.swift */,
 				878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */,
 				DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */,
 				4422DE7829C0C124138BB4B0 /* WeekFatigueSignalsHelperAgreementTests.swift */,
@@ -385,6 +388,7 @@
 				73406DCD1E0EE68C2B81616E /* TraineeModelSnapshotsTests.swift in Sources */,
 				A1B2C3D4E5F6A7B8C9D0E1F2 /* TopSetSnapshotFactoryTests.swift in Sources */,
 				81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */,
+				A11FA719C0DE0001CAFE0001 /* FatigueInteractionCrossValidationTests.swift in Sources */,
 				6ECE420C1031E80360FF1EFE /* TraineeModelProfilesTests.swift in Sources */,
 				B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */,
 				5DE94F8F1D136C65C96FCAD1 /* WeekFatigueSignalsHelperAgreementTests.swift in Sources */,
