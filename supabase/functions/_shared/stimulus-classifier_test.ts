@@ -14,10 +14,17 @@ import { classifyStimulus } from "./stimulus-classifier.ts";
 
 Deno.test("Q3 / ADR-0005: warmup intent honoured even with high-load rep shape → null", () => {
   assertEquals(classifyStimulus("warmup", 5, 8), null);
+  // Spans rep/RPE space so the "regardless of reps/RPE" claim has breadth:
+  // a different rep band + the null-RPE path. Implementation is intent-first,
+  // so any one point is sufficient evidence; broader assertions guard against
+  // a future refactor that reorders rep/RPE checks ahead of intent on some path.
+  assertEquals(classifyStimulus("warmup", 12, null), null);
 });
 
 Deno.test("Q3 / ADR-0005: technique intent → null regardless of reps/RPE", () => {
   assertEquals(classifyStimulus("technique", 5, 8), null);
+  // Different rep band + a high-RPE point — same breadth rationale as above.
+  assertEquals(classifyStimulus("technique", 3, 10), null);
 });
 
 Deno.test("Q3: top set in 3–5 rep band → neuromuscular", () => {
