@@ -29,6 +29,7 @@
 //   - ADR-0013 (Stage 2 separation)
 //   - docs/agents/edge-functions.md (secrets, deploy, local dev)
 
+import postgres from "postgres";
 import {
   emitApplyComplete as defaultEmitApplyComplete,
   emitClassifierFailed as defaultEmitClassifierFailed,
@@ -513,13 +514,31 @@ export async function applySession(
 
     // Step 5: write back + advance watermark (ADR-0008 §"In-order").
     // session_count drives ADR-0012's 6-session-window cooldown.
+    //
+    // UPSERT (not plain UPDATE): a fresh user has no trainee_models row,
+    // and there is no separate bootstrap path in production — the row is
+    // created on first session-apply. Plain UPDATE would no-op on the
+    // first apply and silently leave the model un-persisted (caught by
+    // G1 verification gate). ON CONFLICT (user_id) preserves the
+    // semantics for the common case (row exists) while letting the
+    // first-ever apply create it.
+    // Use tx.json(...) — postgres.js's typed JSONB parameter helper. The
+    // older `${JSON.stringify(obj)}::jsonb` pattern double-encodes (the
+    // driver re-quotes the string as a JSON value), storing the model
+    // as a scalar JSON string instead of an object. The bug was latent
+    // in this slice's predecessor UPDATE because no production HTTP path
+    // exercised the write step until G1.
     await tx`
-      UPDATE public.trainee_models
-      SET session_count = ${newSessionCount},
-          last_applied_logged_at = ${incomingLoggedAt},
-          model_json = ${JSON.stringify(newModelJson)}::jsonb,
-          updated_at = NOW()
-      WHERE user_id = ${req.user_id}
+      INSERT INTO public.trainee_models
+        (user_id, session_count, last_applied_logged_at, model_json, updated_at)
+      VALUES
+        (${req.user_id}, ${newSessionCount}, ${incomingLoggedAt},
+         ${tx.json(newModelJson)}, NOW())
+      ON CONFLICT (user_id) DO UPDATE
+        SET session_count = EXCLUDED.session_count,
+            last_applied_logged_at = EXCLUDED.last_applied_logged_at,
+            model_json = EXCLUDED.model_json,
+            updated_at = EXCLUDED.updated_at
     `;
 
     firedFirstApply = true;
@@ -826,15 +845,23 @@ function applyClassifierOutputs(
   };
 }
 
-// Phase 1 stub — always returns false (every apply treated as fresh).
-// Phase 2 (#83 / A12) replaced this with applySession's PK insert above.
-// Retained as a callable boundary so handleRequest's existing structure
-// can route through applySession without restructuring.
-async function checkAlreadyApplied(
-  _userId: string,
-  _sessionId: string,
-): Promise<boolean> {
-  return false;
+// Lazy module-level postgres client per ADR-0006. Edge Functions cold-start;
+// production deploy uses Supabase's pgbouncer endpoint via SUPABASE_DB_URL
+// (see docs/agents/edge-functions.md §Decisions for connection-string
+// policy). Tests bypass this by injecting an Sql client directly into
+// `applySession` via deps.
+let cachedSql: Sql | undefined;
+function getSql(): Sql {
+  if (cachedSql) return cachedSql;
+  const url = Deno.env.get("SUPABASE_DB_URL");
+  if (!url) {
+    throw new Error(
+      "SUPABASE_DB_URL env var must be set to invoke applySession from " +
+        "the HTTP path (see docs/agents/edge-functions.md)",
+    );
+  }
+  cachedSql = postgres(url);
+  return cachedSql;
 }
 
 export async function handleRequest(req: Request): Promise<Response> {
@@ -854,23 +881,26 @@ export async function handleRequest(req: Request): Promise<Response> {
     return jsonResponse({ error: validated.error }, 400);
   }
 
-  const { user_id, session_id } = validated;
-
-  if (await checkAlreadyApplied(user_id, session_id)) {
-    // Phase 2: SELECT model_json FROM trainee_models WHERE user_id = $1
-    //          and return that snapshot rather than the empty default.
-    return jsonResponse({ trainee_model: {} }, 200);
+  let sql: Sql;
+  try {
+    sql = getSql();
+  } catch (e) {
+    return jsonResponse(
+      { error: e instanceof Error ? e.message : "DB unavailable" },
+      500,
+    );
   }
 
-  // Phase 2: rule logic plugs in here.
-  // Reads previous trainee_models.model_json + session_payload, runs the
-  // update routine (EWMA, transition mode, two-dimensional recovery,
-  // fatigue-interaction confidence, prescription accuracy, transfer
-  // regression, etc. — see ADR-0005), writes the updated row + the
-  // idempotency record in a single transaction (see ADR-0006 §2),
-  // returns the updated snapshot.
-
-  return jsonResponse({ trainee_model: {} }, 200);
+  try {
+    const result = await applySession(validated, sql, {});
+    return jsonResponse(result, 200);
+  } catch (e) {
+    console.error("[update-trainee-model] applySession failed:", e);
+    return jsonResponse(
+      { error: e instanceof Error ? e.message : "internal error" },
+      500,
+    );
+  }
 }
 
 // Only boot the server when this module is invoked as the entrypoint —

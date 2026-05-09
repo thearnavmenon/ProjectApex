@@ -117,6 +117,51 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "first apply against empty trainee_models bootstraps the row (UPSERT) — production HTTP path drives the orchestrator without a separate bootstrap step",
+  async () => {
+    // Seed users row only — DO NOT pre-INSERT trainee_models. Mirrors the
+    // production case where handleRequest receives the first-ever apply.
+    const userId = crypto.randomUUID();
+    await sql`
+      INSERT INTO public.users (id, display_name)
+      VALUES (${userId}, ${"orchestrator-bootstrap-" + userId.slice(0, 8)})
+    `;
+
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-08T10:00:00Z";
+
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: { logged_at: loggedAt, set_logs: [] },
+      },
+      sql,
+    );
+
+    assertEquals(result.late_arrival, false);
+
+    // The row was created by the UPSERT.
+    const model = await sql`
+      SELECT user_id, session_count, last_applied_logged_at, model_json,
+             jsonb_typeof(model_json) AS model_json_type
+      FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    assertEquals(model.length, 1);
+    assertEquals(model[0].session_count, 1);
+    assertEquals(
+      (model[0].last_applied_logged_at as Date).toISOString(),
+      new Date(loggedAt).toISOString(),
+    );
+    // model_json must round-trip as an object, not a scalar JSON string.
+    // (The pre-fix `${JSON.stringify(...)}::jsonb` pattern stored
+    // `"{\"patterns\":{}}"` — a scalar — which would silently break every
+    // downstream consumer that calls `model_json -> 'patterns'`.)
+    assertEquals(model[0].model_json_type, "object");
+  },
+);
+
+orchestratorTest(
   "ADR-0006 §2: second apply with same (user_id, session_id) returns cached snapshot — model_json unchanged, session_count unchanged",
   async () => {
     const userId = await seedFreshUser();
