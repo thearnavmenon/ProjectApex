@@ -190,6 +190,89 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "A18 / #118: stimulus-classifier wired — first apply with mixed-intent sets bootstraps RecoveryProfile + bumps last*StimulusAt per Q3 mapping",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T10:00:00Z";
+
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            // warmup → null dim, no timestamp bump
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 60, reps_completed: 5, intent: "warmup" },
+            // top reps=5 → "neuromuscular" (BACKOFF_NM_REP_MAX is 5)
+            { exercise_id: "barbell_bench_press", set_number: 2, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
+            // top reps=8 RPE=8 → "metabolic" (no RPE bump under threshold)
+            { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    assertEquals(result.late_arrival, false);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const recovery = modelJson.recovery as Record<string, unknown>;
+
+    // RecoveryProfile bootstrapped with ADR-0005 defaults...
+    assertEquals(recovery.neuromuscularReadiness, 1.0);
+    assertEquals(recovery.metabolicReadiness, 1.0);
+
+    // ...both timestamps bumped to loggedAt: NM (top×5) + metabolic (top×8)
+    const expectedIso = new Date(loggedAt).toISOString();
+    assertEquals(recovery.lastNeuromuscularStimulusAt, expectedIso);
+    assertEquals(recovery.lastMetabolicStimulusAt, expectedIso);
+  },
+);
+
+orchestratorTest(
+  "A18 / #118: warmup-only session leaves RecoveryProfile bootstrapped with null timestamps (no stimulus bump from low-stimulus sets)",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T11:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 40, reps_completed: 5, intent: "warmup" },
+            { exercise_id: "barbell_bench_press", set_number: 2, weight_kg: 60, reps_completed: 5, intent: "warmup" },
+            { exercise_id: "barbell_bench_press", set_number: 3, weight_kg: 70, reps_completed: 8, intent: "technique" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const recovery = (rows[0].model_json as Record<string, unknown>).recovery as Record<string, unknown>;
+
+    // Bootstrapped (the field exists)...
+    assertEquals(recovery.neuromuscularReadiness, 1.0);
+    // ...but no stimulus → both timestamps stay null (ADR-0005 §"low-stimulus exclusion via Optional return")
+    assertEquals(recovery.lastNeuromuscularStimulusAt, null);
+    assertEquals(recovery.lastMetabolicStimulusAt, null);
+  },
+);
+
+orchestratorTest(
   "A15 / #110: first apply with set_logs across 3 movement patterns bootstraps each PatternProfile with ADR-0011 defaults + sessionsInPhase=1 + recentSessionDates=[loggedAt]",
   async () => {
     const userId = await seedFreshUser();
