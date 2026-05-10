@@ -224,14 +224,112 @@ orchestratorTest(
     const modelJson = rows[0].model_json as Record<string, unknown>;
     const recovery = modelJson.recovery as Record<string, unknown>;
 
-    // RecoveryProfile bootstrapped with ADR-0005 defaults...
-    assertEquals(recovery.neuromuscularReadiness, 1.0);
-    assertEquals(recovery.metabolicReadiness, 1.0);
-
-    // ...both timestamps bumped to loggedAt: NM (top×5) + metabolic (top×8)
+    // Both timestamps bumped to loggedAt: NM (top×5) + metabolic (top×8).
     const expectedIso = new Date(loggedAt).toISOString();
     assertEquals(recovery.lastNeuromuscularStimulusAt, expectedIso);
     assertEquals(recovery.lastMetabolicStimulusAt, expectedIso);
+
+    // Readinesses computed via A19's recovery-curve at t=0 → residual floor 0.3.
+    assertEquals(
+      Number((recovery.neuromuscularReadiness as number).toFixed(4)),
+      0.3,
+    );
+    assertEquals(
+      Number((recovery.metabolicReadiness as number).toFixed(4)),
+      0.3,
+    );
+  },
+);
+
+orchestratorTest(
+  "A19 / #120: recovery-curve wired — same-instant stimulus (lastStimulusAt === loggedAt) sets bumped axes to residual floor 0.3; null-timestamp axis stays at 1.0",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T12:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            // top×5 → NM; nothing else → metabolic stays null/1.0
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const recovery = (rows[0].model_json as Record<string, unknown>).recovery as Record<string, unknown>;
+
+    // NM stimulus at loggedAt, computed at loggedAt → t=0 → readiness = floor 0.3
+    assertEquals(
+      Number((recovery.neuromuscularReadiness as number).toFixed(4)),
+      0.3,
+    );
+    // Metabolic never stimulated → null timestamp → readiness = 1.0
+    assertEquals(recovery.lastMetabolicStimulusAt, null);
+    assertEquals(recovery.metabolicReadiness, 1.0);
+  },
+);
+
+orchestratorTest(
+  "A19 / #120: recovery-curve wired — second session 24h after stimulus produces partially-recovered readiness per ADR-0010 curve (NM ~0.78, metabolic ~0.69 if re-stimulated then 0.3)",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId1 = crypto.randomUUID();
+    const sessionId2 = crypto.randomUUID();
+    const loggedAt1 = "2026-05-08T10:00:00Z";
+    const loggedAt2 = "2026-05-09T10:00:00Z"; // exactly 24h later
+
+    // Session 1: heavy bench top×5 (NM only)
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId1,
+        session_payload: {
+          logged_at: loggedAt1,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    // Session 2: empty (no stimulus). Tests "readiness recomputes from now-loggedAt
+    // even when no new stimulus arrives."
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId2,
+        session_payload: { logged_at: loggedAt2, set_logs: [] },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const recovery = (rows[0].model_json as Record<string, unknown>).recovery as Record<string, unknown>;
+
+    // NM: 24h since stimulus, tau=30h → 0.3 + 0.7 × (1 - exp(-24/30)) ≈ 0.7853
+    const expectedNm = 0.3 + 0.7 * (1 - Math.exp(-24 / 30));
+    assertEquals(
+      Number((recovery.neuromuscularReadiness as number).toFixed(4)),
+      Number(expectedNm.toFixed(4)),
+    );
+    // Metabolic never stimulated → readiness still 1.0
+    assertEquals(recovery.metabolicReadiness, 1.0);
   },
 );
 

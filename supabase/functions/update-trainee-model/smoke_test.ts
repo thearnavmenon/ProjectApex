@@ -184,15 +184,22 @@ smokeTest(
     // RecoveryProfile.last*StimulusAt populated (A18 / #118). The synthetic
     // fixture has top sets at reps 5 (NM) and reps 8 with RPE 8 (metabolic),
     // plus a backoff at reps 8 RPE 7 (metabolic) — so both timestamps must
-    // bump to loggedAt. Readinesses bootstrap to 1.0 (A19 wires the curve).
+    // bump to loggedAt. Readinesses computed via ADR-0010 curve at t=0 →
+    // residual floor 0.3 (A19 / #120).
     const recovery = modelJson.recovery as Record<string, unknown>;
     assertEquals(recovery.lastNeuromuscularStimulusAt, expectedLoggedAtIso);
     assertEquals(recovery.lastMetabolicStimulusAt, expectedLoggedAtIso);
-    assertEquals(recovery.neuromuscularReadiness, 1.0);
-    assertEquals(recovery.metabolicReadiness, 1.0);
+    // Readiness curve: 0.3 + 0.7 × (1 - exp(-0/tau)) = 0.3
+    assertEquals(
+      Number((recovery.neuromuscularReadiness as number).toFixed(4)),
+      0.3,
+    );
+    assertEquals(
+      Number((recovery.metabolicReadiness as number).toFixed(4)),
+      0.3,
+    );
 
     // INTENTIONALLY NOT ASSERTED YET (extended by subsequent slices):
-    //   - RecoveryProfile.*Readiness moves off 1.0 once curve wires (A19)
     //   - PatternProfile.trend populated (A20)
     //   - prescriptionAccuracy cells populated (A21)
     //   - transferRegressions populated (A22)
