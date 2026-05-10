@@ -381,6 +381,95 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "A23 / #128: fatigue-interaction wired — first session populates lastSessionPatternPerformance; fatigueInteractions stays empty (no prior session to pair against)",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T19:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const interactions = modelJson.fatigueInteractions as unknown[];
+    const lastPerf = modelJson.lastSessionPatternPerformance as Array<Record<string, unknown>>;
+    assertEquals(interactions.length, 0);
+    assertEquals(lastPerf.length, 1);
+    assertEquals(lastPerf[0].pattern, "horizontalPush");
+    // First-ever pattern → priorEwma = 0 → performanceDeltaPct = 0
+    assertEquals(lastPerf[0].performanceDeltaPct, 0);
+  },
+);
+
+orchestratorTest(
+  "A23 / #128: fatigue-interaction — second session with different pattern records (prior → current) pair observation; totalCount === 1",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId1 = crypto.randomUUID();
+    const sessionId2 = crypto.randomUUID();
+    const loggedAt1 = "2026-05-09T10:00:00Z";
+    const loggedAt2 = "2026-05-10T10:00:00Z";
+
+    // Session 1: bench (horizontalPush)
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId1,
+        session_payload: {
+          logged_at: loggedAt1,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    // Session 2: row (horizontalPull)
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId2,
+        session_payload: {
+          logged_at: loggedAt2,
+          set_logs: [
+            { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const interactions = (rows[0].model_json as Record<string, unknown>).fatigueInteractions as Array<Record<string, unknown>>;
+    assertEquals(interactions.length, 1);
+    assertEquals(interactions[0].fromPattern, "horizontalPush");
+    assertEquals(interactions[0].toPattern, "horizontalPull");
+    assertEquals(interactions[0].totalCount, 1);
+    assertEquals((interactions[0].observations as number[]).length, 1);
+  },
+);
+
+orchestratorTest(
   "A22 / #126: transfer-regression — session with one top-intent exercise records no pairs (single-exercise sessions can't pair)",
   async () => {
     const userId = await seedFreshUser();
