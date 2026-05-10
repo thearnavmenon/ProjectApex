@@ -1,0 +1,16 @@
+{
+  "version": "5",
+  "specifiers": {
+    "npm:postgres@3.4.4": "3.4.4"
+  },
+  "npm": {
+    "postgres@3.4.4": {
+      "integrity": "sha512-IbyN+9KslkqcXa8AO9fxpk97PA4pzewvpi2B3Dwy9u4zpV32QicaEdgmF3eSQUzdRk7ttDHQejNgAEr4XoeH4A=="
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "npm:postgres@3.4.4"
+    ]
+  }
+}
