@@ -117,6 +117,60 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "A15 / #110: first apply with set_logs across 3 movement patterns bootstraps each PatternProfile with ADR-0011 defaults + sessionsInPhase=1 + recentSessionDates=[loggedAt]",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T10:00:00Z";
+
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" },
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top" },
+            { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    assertEquals(result.late_arrival, false);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const patterns = modelJson.patterns as Record<string, Record<string, unknown>>;
+
+    // Three patterns bootstrapped — server-side derived from exercise_id
+    // via the ExerciseLibrary port (#110 / A15).
+    assertEquals(
+      Object.keys(patterns).sort(),
+      ["horizontalPull", "horizontalPush", "squat"],
+    );
+
+    // Each profile carries ADR-0011 defaults + the just-trained-this-session state.
+    const expectedLoggedAtIso = new Date(loggedAt).toISOString();
+    for (const patternKey of ["horizontalPush", "squat", "horizontalPull"]) {
+      const profile = patterns[patternKey];
+      assertEquals(profile.currentPhase, "accumulation");
+      assertEquals(profile.sessionsInPhase, 1);
+      assertEquals(profile.trend, "progressing");
+      assertEquals(profile.consecutiveForceDeloadsOnPattern, 0);
+      assertEquals(profile.lastPhaseTransitionAtSessionCount, 0);
+      assertEquals(profile.transitionModeUntil, null);
+      assertEquals(profile.recentSessionDates, [expectedLoggedAtIso]);
+    }
+  },
+);
+
+orchestratorTest(
   "first apply against empty trainee_models bootstraps the row (UPSERT) — production HTTP path drives the orchestrator without a separate bootstrap step",
   async () => {
     // Seed users row only — DO NOT pre-INSERT trainee_models. Mirrors the

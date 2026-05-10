@@ -30,6 +30,7 @@
 //   - docs/agents/edge-functions.md (secrets, deploy, local dev)
 
 import postgres from "postgres";
+import { lookupPattern } from "../_shared/exercise-library.ts";
 import {
   emitApplyComplete as defaultEmitApplyComplete,
   emitClassifierFailed as defaultEmitClassifierFailed,
@@ -285,6 +286,7 @@ function sessionsCadenceDays(recentSessionDates: string[]): number | null {
  */
 function applyPerPatternRules(
   patterns: Record<string, Record<string, unknown>>,
+  trainedPatterns: Set<string>,
   incomingLoggedAt: Date,
   newSessionCount: number,
 ): {
@@ -296,9 +298,46 @@ function applyPerPatternRules(
   const fieldsChanged: string[] = [];
   const newPatterns: Record<string, Record<string, unknown>> = {};
 
-  for (const [patternKey, raw] of Object.entries(patterns)) {
+  // Bootstrap missing trained-this-session patterns with ADR-0011 defaults
+  // per #110 (A15). The orchestrator owns first-touch profile creation
+  // because there is no production bootstrap path elsewhere — production
+  // users start with `model_json.patterns = {}` and only get pattern
+  // profiles when they actually train a pattern.
+  const merged: Record<string, Record<string, unknown>> = { ...patterns };
+  for (const pattern of trainedPatterns) {
+    if (!(pattern in merged)) {
+      merged[pattern] = {
+        currentPhase: "accumulation",
+        sessionsInPhase: 0,
+        consecutiveForceDeloadsOnPattern: 0,
+        lastPhaseTransitionAtSessionCount: 0,
+        recentSessionDates: [],
+        transitionModeUntil: null,
+        trend: "progressing",
+      };
+      fieldsChanged.push(`patterns.${pattern}.bootstrapped`);
+    }
+  }
+
+  for (const [patternKey, raw] of Object.entries(merged)) {
     const profile = raw;
-    const recentDates = (profile.recentSessionDates as string[] | undefined) ?? [];
+    const wasTrainedThisSession = trainedPatterns.has(patternKey);
+
+    // Increment sessionsInPhase + append loggedAt for patterns trained
+    // this session. Per ADR-0011 §(a) intro: "Caller increments
+    // sessionsInPhase before calling advancePhase". Untrained patterns
+    // retain their state until their next session-apply.
+    const baseSessionsInPhase = (profile.sessionsInPhase as number) ?? 0;
+    const sessionsInPhase = wasTrainedThisSession
+      ? baseSessionsInPhase + 1
+      : baseSessionsInPhase;
+
+    const baseRecentDates =
+      (profile.recentSessionDates as string[] | undefined) ?? [];
+    const recentDates = wasTrainedThisSession
+      ? [...baseRecentDates, incomingLoggedAt.toISOString()]
+      : baseRecentDates;
+
     const cadenceDays = sessionsCadenceDays(recentDates);
     // ADR-0011 Option-B threshold input: derive daysPerWeek from cadence.
     // Cadence-aware (ADR-0015) — high-frequency cadence → larger daysPerWeek;
@@ -309,7 +348,7 @@ function applyPerPatternRules(
 
     const advanceState: PerPatternState = {
       currentPhase: profile.currentPhase as MesocyclePhase,
-      sessionsInPhase: (profile.sessionsInPhase as number) ?? 0,
+      sessionsInPhase,
       sessionsRequiredForPhase: sessionsRequiredFor(
         profile.currentPhase as MesocyclePhase,
         daysPerWeek,
@@ -351,6 +390,7 @@ function applyPerPatternRules(
       lastPhaseTransitionAtSessionCount:
         advanced.newLastPhaseTransitionAtSessionCount,
       transitionModeUntil: newTransitionModeUntil,
+      recentSessionDates: recentDates,
     };
   }
 
@@ -475,12 +515,19 @@ export async function applySession(
     // interaction) ship in follow-up slices because they have no assertion-
     // cycle in this slice; the per-pattern loop is the framework they'll
     // extend into.
+    // Derive trained-this-session patterns/exercises/muscleGroups from
+    // session_payload. Hoisted out of Stage 2 (used to be computed only
+    // for the classifier's auto-clear gate) so applyPerPatternRules can
+    // bootstrap pattern profiles for first-time-trained patterns per
+    // #110 (A15). Stage 2 below reuses the same result.
+    const trainedSets = derivedTrainedSets(req.session_payload);
+
     let newModelJson: Record<string, unknown>;
     if (deps.ruleHook) {
       newModelJson = deps.ruleHook(modelJson);
     } else {
       const patternsIn = (modelJson.patterns as Record<string, Record<string, unknown>> | undefined) ?? {};
-      const ruled = applyPerPatternRules(patternsIn, incomingLoggedAt, newSessionCount);
+      const ruled = applyPerPatternRules(patternsIn, trainedSets.patterns, incomingLoggedAt, newSessionCount);
       newModelJson = { ...modelJson, patterns: ruled.patterns };
       rulesFired = [...ruled.rulesFired];
       fieldsChanged = ruled.fieldsChanged;
@@ -573,6 +620,9 @@ export async function applySession(
     if (deps.stage2Hook) {
       await deps.stage2Hook();
     } else {
+      // Re-derive trainedSets here rather than threading it out of
+      // sql.begin's closure scope — derivedTrainedSets is pure over
+      // session_payload, so two calls produce identical results.
       const trainedSets = derivedTrainedSets(req.session_payload);
       await runStage2({
         sql,
@@ -623,8 +673,24 @@ function derivedTrainedSets(
     for (const entry of setLogs) {
       if (typeof entry !== "object" || entry === null) continue;
       const e = entry as Record<string, unknown>;
-      if (typeof e.exercise_id === "string") exercises.add(e.exercise_id);
-      if (typeof e.pattern === "string") patterns.add(e.pattern);
+      if (typeof e.exercise_id === "string") {
+        exercises.add(e.exercise_id);
+        // Server-side pattern derivation per #110 (A15). production
+        // set_logs has no `pattern` column; client-supplied `e.pattern`
+        // (forward-compat seam) takes precedence when present, else
+        // fall through to ExerciseLibrary lookup. Unknown exercise IDs
+        // produce no pattern — caller skips, matching asymmetric-error
+        // preference (under-bootstrap silent; over-bootstrap creates
+        // phantom profiles).
+        const fromExercise = lookupPattern(e.exercise_id);
+        if (typeof e.pattern === "string") {
+          patterns.add(e.pattern);
+        } else if (fromExercise) {
+          patterns.add(fromExercise);
+        }
+      } else if (typeof e.pattern === "string") {
+        patterns.add(e.pattern);
+      }
       if (typeof e.primary_muscle === "string") {
         // PrimaryMuscle → MuscleGroup mapping (per CONTEXT.md two-level taxonomy).
         // Quads/hamstrings/glutes/calves all collapse to "legs"; upper-body
