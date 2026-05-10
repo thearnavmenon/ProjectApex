@@ -341,6 +341,76 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "A22 / #126: transfer-regression wired — single session with 2 top-intent exercises records both ordered pairs (candidate state, n=1, no NaN)",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T17:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
+            { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const tr = (rows[0].model_json as Record<string, unknown>).transferRegressions as Record<string, Record<string, Record<string, unknown>>>;
+    const benchToRow = tr["barbell_bench_press"]["barbell_row"];
+    const rowToBench = tr["barbell_row"]["barbell_bench_press"];
+    assertEquals((benchToRow.observations as unknown[]).length, 1);
+    assertEquals((rowToBench.observations as unknown[]).length, 1);
+    const benchToRowFit = benchToRow.fit as Record<string, unknown>;
+    assertEquals(benchToRowFit.state, "candidate");
+    // Placeholder fit values — n<2 path returns zeroed coefficients (no NaN).
+    assertEquals(benchToRowFit.coefficient, 0);
+    assertEquals(benchToRowFit.rSquared, 0);
+    assertEquals(benchToRowFit.pairedObservations, 1);
+  },
+);
+
+orchestratorTest(
+  "A22 / #126: transfer-regression — session with one top-intent exercise records no pairs (single-exercise sessions can't pair)",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T18:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const tr = (rows[0].model_json as Record<string, unknown>).transferRegressions as Record<string, unknown>;
+    assertEquals(Object.keys(tr).length, 0);
+  },
+);
+
+orchestratorTest(
   "A21 / #124: prescription-accuracy filter — user_corrected_weight=true is rejected by shouldContribute; cell stays absent",
   async () => {
     const userId = await seedFreshUser();
