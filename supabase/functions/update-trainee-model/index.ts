@@ -69,6 +69,11 @@ import {
   type SetObservation,
 } from "../_shared/prescription-accuracy.ts";
 import {
+  fitTransfer,
+  type PairedObservation,
+  type TransferFit,
+} from "../_shared/transfer-regression.ts";
+import {
   shouldFireGlobalPhaseAdvance,
   type PatternTransitionState,
 } from "../_shared/global-phase-advance.ts";
@@ -1008,6 +1013,113 @@ function applyPrescriptionAccuracy(
 }
 
 /**
+ * Per #126 (A22): wire transfer-regression. v1 alpha-cohort pair-detection
+ * rule = "trained in the same session": for each pair of exercises with
+ * top-intent sets in the current session, record a directional
+ * `PairedObservation` for both `(from, to)` orderings.
+ *
+ * Per-exercise session e1rm: `max(weight × (1 + reps/30))` over the
+ * session's top-intent sets. Sets without numeric weight/reps or with
+ * reps outside ADR-0005's 3..10 validity window are skipped (mirrors
+ * `applyPerExerciseRules`'s topSets filter).
+ *
+ * Fit recomputation: only when `observations.length >= 2`. n=1 yields
+ * sxx=0 → `coefficient = NaN`, which would break JSONB serialisation; the
+ * placeholder fit (zeroed coefficients, state=candidate) keeps storage
+ * clean while still tracking the observation.
+ */
+function applyTransferRegressions(
+  transferRegressions: Record<string, Record<string, {
+    observations: PairedObservation[];
+    fit: TransferFit;
+  }>>,
+  setLogs: Array<Record<string, unknown>>,
+  incomingLoggedAt: Date,
+): {
+  transferRegressions: Record<string, Record<string, {
+    observations: PairedObservation[];
+    fit: TransferFit;
+  }>>;
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+
+  // Compute per-exercise session-max e1rm over top-intent valid-reps sets.
+  const sessionE1rmByExercise = new Map<string, number>();
+  for (const set of setLogs) {
+    if (typeof set.exercise_id !== "string") continue;
+    if (set.intent !== "top") continue;
+    const w = typeof set.weight_kg === "number" ? set.weight_kg : null;
+    const r = typeof set.reps_completed === "number" ? set.reps_completed : null;
+    if (w === null || r === null) continue;
+    if (r < 3 || r > 10) continue;
+    const e1rm = w * (1 + r / 30);
+    const prior = sessionE1rmByExercise.get(set.exercise_id);
+    if (prior === undefined || e1rm > prior) {
+      sessionE1rmByExercise.set(set.exercise_id, e1rm);
+    }
+  }
+
+  if (sessionE1rmByExercise.size < 2) {
+    return { transferRegressions, rulesFired, fieldsChanged };
+  }
+
+  // Clone storage shape so updates remain immutable from caller's POV.
+  const next: Record<string, Record<string, {
+    observations: PairedObservation[];
+    fit: TransferFit;
+  }>> = {};
+  for (const [from, m] of Object.entries(transferRegressions)) {
+    next[from] = { ...m };
+  }
+
+  const exercises = Array.from(sessionE1rmByExercise.keys());
+  for (const fromEx of exercises) {
+    for (const toEx of exercises) {
+      if (fromEx === toEx) continue;
+      const fromE1RM = sessionE1rmByExercise.get(fromEx)!;
+      const toE1RM = sessionE1rmByExercise.get(toEx)!;
+      const fromMap = next[fromEx] ?? {};
+      const cell = fromMap[toEx] ?? {
+        observations: [],
+        fit: {
+          coefficient: 0,
+          intercept: 0,
+          rSquared: 0,
+          pairedObservations: 0,
+          spearmanFlagged: false,
+          seWidening: 0,
+          state: "candidate" as const,
+        },
+      };
+      const newObservations: PairedObservation[] = [
+        ...cell.observations,
+        { fromE1RM, toE1RM, observedAt: incomingLoggedAt },
+      ];
+      const newFit: TransferFit = newObservations.length >= 2
+        ? fitTransfer(newObservations)
+        : {
+            coefficient: 0,
+            intercept: 0,
+            rSquared: 0,
+            pairedObservations: newObservations.length,
+            spearmanFlagged: false,
+            seWidening: 0,
+            state: "candidate",
+          };
+      fromMap[toEx] = { observations: newObservations, fit: newFit };
+      next[fromEx] = fromMap;
+      rulesFired.add("transfer-regression");
+      fieldsChanged.push(`transferRegressions.${fromEx}.${toEx}`);
+    }
+  }
+
+  return { transferRegressions: next, rulesFired, fieldsChanged };
+}
+
+/**
  * Stage 1 orchestrator core. Pure of HTTP concerns — accepts the validated
  * request shape and a SQL client; returns the response body. Tests bypass
  * the HTTP wrapper and call this directly against the local Supabase DB.
@@ -1189,6 +1301,28 @@ export async function applySession(
       };
       rulesFired.push(...accuracyRuled.rulesFired);
       fieldsChanged.push(...accuracyRuled.fieldsChanged);
+
+      // Transfer-regression pipeline per #126 (A22). Pair-detects within
+      // the current session and recomputes the log-log fit per ordered
+      // exercise pair.
+      const transferIn =
+        (modelJson.transferRegressions as
+          | Record<string, Record<string, {
+              observations: PairedObservation[];
+              fit: TransferFit;
+            }>>
+          | undefined) ?? {};
+      const transferRuled = applyTransferRegressions(
+        transferIn,
+        setLogsArr,
+        incomingLoggedAt,
+      );
+      newModelJson = {
+        ...newModelJson,
+        transferRegressions: transferRuled.transferRegressions,
+      };
+      rulesFired.push(...transferRuled.rulesFired);
+      fieldsChanged.push(...transferRuled.fieldsChanged);
 
       // Per-set stimulus pipeline per #118 (A18). Wires stimulus-classifier
       // into RecoveryProfile.last*StimulusAt. Readiness scalars wire in A19.
