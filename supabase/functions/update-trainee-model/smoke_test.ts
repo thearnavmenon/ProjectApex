@@ -167,8 +167,21 @@ smokeTest(
       assertEquals(profile.recentSessionDates, [expectedLoggedAtIso]);
     }
 
+    // ExerciseProfile.e1rmCurrent populated for each top-intent exercise
+    // (#116 / A17). The fixture's bench/squat/row carry top sets with
+    // valid reps (3..10), so EWMA should produce non-zero values.
+    const exercises = modelJson.exercises as Record<string, Record<string, unknown>>;
+    for (const exerciseId of ["barbell_bench_press", "barbell_back_squat", "barbell_row"]) {
+      const profile = exercises[exerciseId];
+      assertExists(profile, `exercise ${exerciseId} should have a profile`);
+      const e1rm = profile.e1rmCurrent as number;
+      if (!(e1rm > 0)) {
+        throw new Error(`expected ${exerciseId}.e1rmCurrent > 0, got ${e1rm}`);
+      }
+      assertEquals(profile.sessionCount, 1);
+    }
+
     // INTENTIONALLY NOT ASSERTED YET (extended by subsequent slices):
-    //   - PatternProfile.e1RMEwma populated (A17)
     //   - RecoveryProfile.last*StimulusAt populated (A18)
     //   - RecoveryProfile.*Readiness populated (A19)
     //   - PatternProfile.trend populated (A20)
