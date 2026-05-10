@@ -36,6 +36,10 @@ import {
   type TopSet as EwmaTopSet,
 } from "../_shared/ewma-engine.ts";
 import {
+  classifyStimulus,
+  type SetIntent,
+} from "../_shared/stimulus-classifier.ts";
+import {
   emitApplyComplete as defaultEmitApplyComplete,
   emitClassifierFailed as defaultEmitClassifierFailed,
   emitLateArrival as defaultEmitLateArrival,
@@ -403,6 +407,78 @@ function applyPerExerciseRules(
   return { exercises: newExercises, rulesFired, fieldsChanged };
 }
 
+/**
+ * Per-set stimulus pipeline per #118 (A18). Each set's (intent, reps, rpeFelt)
+ * triple maps to a `StimulusDimension | null` via `classifyStimulus`; sets
+ * that drive a dimension bump the corresponding `last*StimulusAt` timestamp
+ * to the session's `incomingLoggedAt`.
+ *
+ * Bootstrap: missing `model_json.recovery` gets ADR-0005 defaults — null
+ * timestamps + 1.0 readinesses. Readiness scalars are owned by A19; this
+ * slice only updates the timestamps.
+ *
+ * Monotonicity: the orchestrator's watermark check rejects late arrivals
+ * before this helper runs, so `incomingLoggedAt >= last_applied_logged_at >=
+ * any prior last*StimulusAt`. The assignment is therefore monotonic — no
+ * `max()` guard needed.
+ */
+function applyPerSetStimulusRules(
+  recovery: Record<string, unknown> | undefined,
+  setLogs: Array<Record<string, unknown>>,
+  incomingLoggedAt: Date,
+): {
+  recovery: Record<string, unknown>;
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+  const wasBootstrapped = recovery === undefined;
+  const newRecovery: Record<string, unknown> = wasBootstrapped
+    ? {
+        lastNeuromuscularStimulusAt: null,
+        lastMetabolicStimulusAt: null,
+        neuromuscularReadiness: 1.0,
+        metabolicReadiness: 1.0,
+      }
+    : { ...recovery };
+  if (wasBootstrapped) {
+    fieldsChanged.push("recovery.bootstrapped");
+  }
+
+  const loggedAtIso = incomingLoggedAt.toISOString();
+  let bumpedNm = false;
+  let bumpedMet = false;
+
+  for (const set of setLogs) {
+    const intent = set.intent;
+    if (typeof intent !== "string") continue;
+    if (typeof set.reps_completed !== "number") continue;
+    const rpeFelt = typeof set.rpe_felt === "number" ? set.rpe_felt : null;
+    const dim = classifyStimulus(
+      intent as SetIntent,
+      set.reps_completed,
+      rpeFelt,
+    );
+    if (dim === null) continue;
+    if (dim === "neuromuscular" || dim === "both") bumpedNm = true;
+    if (dim === "metabolic" || dim === "both") bumpedMet = true;
+  }
+
+  if (bumpedNm) {
+    newRecovery.lastNeuromuscularStimulusAt = loggedAtIso;
+    rulesFired.add("stimulus-classifier");
+    fieldsChanged.push("recovery.lastNeuromuscularStimulusAt");
+  }
+  if (bumpedMet) {
+    newRecovery.lastMetabolicStimulusAt = loggedAtIso;
+    rulesFired.add("stimulus-classifier");
+    fieldsChanged.push("recovery.lastMetabolicStimulusAt");
+  }
+
+  return { recovery: newRecovery, rulesFired, fieldsChanged };
+}
+
 function applyPerPatternRules(
   patterns: Record<string, Record<string, unknown>>,
   trainedPatterns: Set<string>,
@@ -665,6 +741,20 @@ export async function applySession(
       newModelJson = { ...newModelJson, exercises: exerciseRuled.exercises };
       rulesFired.push(...exerciseRuled.rulesFired);
       fieldsChanged.push(...exerciseRuled.fieldsChanged);
+
+      // Per-set stimulus pipeline per #118 (A18). Wires stimulus-classifier
+      // into RecoveryProfile.last*StimulusAt. Readiness scalars wire in A19.
+      const recoveryIn = modelJson.recovery as
+        | Record<string, unknown>
+        | undefined;
+      const stimulusRuled = applyPerSetStimulusRules(
+        recoveryIn,
+        setLogsArr,
+        incomingLoggedAt,
+      );
+      newModelJson = { ...newModelJson, recovery: stimulusRuled.recovery };
+      rulesFired.push(...stimulusRuled.rulesFired);
+      fieldsChanged.push(...stimulusRuled.fieldsChanged);
 
       // ADR-0012: global phase-advance trigger. Reads each pattern's
       // post-loop lastPhaseTransitionAtSessionCount (which the per-pattern
