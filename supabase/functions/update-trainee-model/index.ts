@@ -39,6 +39,7 @@ import {
   classifyStimulus,
   type SetIntent,
 } from "../_shared/stimulus-classifier.ts";
+import { readiness } from "../_shared/recovery-curve.ts";
 import {
   emitApplyComplete as defaultEmitApplyComplete,
   emitClassifierFailed as defaultEmitClassifierFailed,
@@ -479,6 +480,60 @@ function applyPerSetStimulusRules(
   return { recovery: newRecovery, rulesFired, fieldsChanged };
 }
 
+/**
+ * Recovery readiness pipeline per #120 (A19). Reads the just-bumped
+ * `last*StimulusAt` timestamps from `recovery` and computes the per-axis
+ * readiness scalars via ADR-0010's curve:
+ *
+ *   readiness(t) = clamp(0, 1, 0.3 + 0.7 × (1 - exp(-t / tau)))
+ *
+ * with `tau_NM = 30h` and `tau_metabolic = 12h`. `now` is the session's
+ * `incomingLoggedAt` — deterministic, watermark-bound, and consistent with
+ * A18's "as of session-apply" convention. A null timestamp means
+ * "never stimulated this axis" → readiness = 1.0 per ADR-0010 §"edge cases".
+ *
+ * Clock-skew: a future-dated `lastStimulusAt` (relative to `incomingLoggedAt`)
+ * clamps `t` to 0 and emits `recovery.clock_skew` via the recovery-curve
+ * module's existing helper. Stage 1's watermark check should preclude this
+ * on the in-order path (lastStimulusAt was set during a prior session-apply
+ * whose loggedAt is <= current watermark <= incomingLoggedAt), but defense-
+ * in-depth catches any path that bypasses the watermark.
+ */
+function applyRecoveryReadiness(
+  recovery: Record<string, unknown>,
+  incomingLoggedAt: Date,
+  userId: string,
+): {
+  recovery: Record<string, unknown>;
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+
+  const nmRaw = recovery.lastNeuromuscularStimulusAt;
+  const metRaw = recovery.lastMetabolicStimulusAt;
+  const lastNm = typeof nmRaw === "string" ? new Date(nmRaw) : null;
+  const lastMet = typeof metRaw === "string" ? new Date(metRaw) : null;
+
+  const ctx = { userId };
+  const newNmReadiness = readiness("neuromuscular", lastNm, incomingLoggedAt, ctx);
+  const newMetReadiness = readiness("metabolic", lastMet, incomingLoggedAt, ctx);
+
+  const newRecovery = { ...recovery };
+  if (newRecovery.neuromuscularReadiness !== newNmReadiness) {
+    newRecovery.neuromuscularReadiness = newNmReadiness;
+    fieldsChanged.push("recovery.neuromuscularReadiness");
+  }
+  if (newRecovery.metabolicReadiness !== newMetReadiness) {
+    newRecovery.metabolicReadiness = newMetReadiness;
+    fieldsChanged.push("recovery.metabolicReadiness");
+  }
+  rulesFired.add("recovery-curve");
+
+  return { recovery: newRecovery, rulesFired, fieldsChanged };
+}
+
 function applyPerPatternRules(
   patterns: Record<string, Record<string, unknown>>,
   trainedPatterns: Set<string>,
@@ -755,6 +810,18 @@ export async function applySession(
       newModelJson = { ...newModelJson, recovery: stimulusRuled.recovery };
       rulesFired.push(...stimulusRuled.rulesFired);
       fieldsChanged.push(...stimulusRuled.fieldsChanged);
+
+      // Recovery readiness compute per #120 (A19). Reads the just-bumped
+      // last*StimulusAt timestamps from stimulusRuled.recovery and writes
+      // *Readiness scalars per ADR-0010's curve.
+      const readinessRuled = applyRecoveryReadiness(
+        stimulusRuled.recovery,
+        incomingLoggedAt,
+        req.user_id,
+      );
+      newModelJson = { ...newModelJson, recovery: readinessRuled.recovery };
+      rulesFired.push(...readinessRuled.rulesFired);
+      fieldsChanged.push(...readinessRuled.fieldsChanged);
 
       // ADR-0012: global phase-advance trigger. Reads each pattern's
       // post-loop lastPhaseTransitionAtSessionCount (which the per-pattern
