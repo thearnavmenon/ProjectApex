@@ -287,6 +287,105 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "A21 / #124: prescription-accuracy wired — set with valid ai_prescribed accumulates one observation in (pattern, intent) cell with rep-error ≈ 0.0",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T15:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            {
+              exercise_id: "barbell_back_squat",
+              set_number: 1,
+              weight_kg: 130,
+              reps_completed: 5,
+              intent: "top",
+              rpe_felt: 8,
+              ai_prescribed: {
+                weight_kg: 130,
+                reps: 5,
+                intent: "top",
+                user_corrected_weight: false,
+              },
+              completion_flags: [],
+            },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const acc = (rows[0].model_json as Record<string, unknown>)
+      .prescriptionAccuracy as Record<string, Record<string, Record<string, unknown>>>;
+    const cell = acc["squat"]["top"];
+    const observations = cell.observations as number[];
+    assertEquals(observations.length, 1);
+    // Prescribed 5, completed 5 → rep-error = 0
+    assertEquals(observations[0], 0);
+    // First-ever pattern session → priorSessionLoggedAt = null → over72h
+    const buckets = cell.observationsByGapBucket as Record<string, number[]>;
+    assertEquals(buckets.over72h.length, 1);
+    assertEquals(buckets.under48h.length, 0);
+    assertEquals(buckets.between48And72h.length, 0);
+  },
+);
+
+orchestratorTest(
+  "A21 / #124: prescription-accuracy filter — user_corrected_weight=true is rejected by shouldContribute; cell stays absent",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T16:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            {
+              exercise_id: "barbell_back_squat",
+              set_number: 1,
+              weight_kg: 130,
+              reps_completed: 5,
+              intent: "top",
+              ai_prescribed: {
+                weight_kg: 125,
+                reps: 5,
+                intent: "top",
+                user_corrected_weight: true,
+              },
+              completion_flags: [],
+            },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const acc = (rows[0].model_json as Record<string, unknown>)
+      .prescriptionAccuracy as Record<string, unknown>;
+    // No cell created — set was filtered out by criterion 4
+    assertEquals(Object.keys(acc).length, 0);
+  },
+);
+
+orchestratorTest(
   "A20 / #122: warmup-only session contributes nothing to weeklyVolumeLoadHistory (warmup excluded, pattern not trained for plateau purposes)",
   async () => {
     const userId = await seedFreshUser();

@@ -206,6 +206,12 @@ smokeTest(
       0.3,
     );
 
+    // A21 / #124: prescription-accuracy bootstrapped to {} (synthetic
+    // fixture has no ai_prescribed → no contributions accumulate).
+    const accuracy = modelJson.prescriptionAccuracy as Record<string, unknown>;
+    assertEquals(typeof accuracy, "object");
+    assertEquals(Object.keys(accuracy).length, 0);
+
     // INTENTIONALLY NOT ASSERTED YET (extended by subsequent slices):
     //   - PatternProfile.trend populated (A20)
     //   - prescriptionAccuracy cells populated (A21)
