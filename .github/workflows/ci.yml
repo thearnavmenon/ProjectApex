@@ -71,3 +71,67 @@ jobs:
             TestResults.xcresult
             test-results.xml
           retention-days: 7
+
+  # Edge Function tests — Deno integration suite + end-to-end HTTP smoke.
+  # Closes the test-coverage gap surfaced by the Phase 2 integration audit
+  # (docs/phase-2-integration-audit-2026-05-10.md): existing tests covered
+  # rule modules in isolation with hand-fed preconditions; production
+  # callers don't satisfy them. The smoke test exercises the full
+  # HTTP → orchestrator → DB pipeline against a fresh user. As subsequent
+  # Phase 3 wiring slices (A17–A23) extend the smoke's assertion set, this
+  # job catches integration-debt regrowth before merge.
+  ef-test:
+    name: Edge Function Tests (Deno)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase (applies migrations on first start)
+        run: supabase start
+
+      - name: Serve Edge Function in background
+        run: |
+          nohup supabase functions serve update-trainee-model --no-verify-jwt > ef.log 2>&1 &
+
+      - name: Wait for Edge Function ready
+        # Empty-body POST yields HTTP 400 from validateRequest's
+        # "request body must be a JSON object" check — confirms the
+        # function process is up and routing.
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+              http://127.0.0.1:54321/functions/v1/update-trainee-model \
+              -H "Content-Type: application/json" -d '{}' || true)
+            if [ "$code" = "400" ]; then
+              echo "EF ready (HTTP 400 on empty body — validateRequest)"
+              exit 0
+            fi
+            echo "attempt $i: code=$code"
+            sleep 2
+          done
+          echo "EF did not become ready within 120s"
+          cat ef.log || true
+          exit 1
+
+      - name: Run EF tests (orchestrator + smoke)
+        working-directory: supabase/functions/update-trainee-model
+        run: deno test --allow-net --allow-env --allow-read --no-check
+
+      - name: Show EF log on failure
+        if: failure()
+        run: cat ef.log || true
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop || true
