@@ -74,6 +74,12 @@ import {
   type TransferFit,
 } from "../_shared/transfer-regression.ts";
 import {
+  appendObservations as appendFatigueObservations,
+  detectFatigueObservations,
+  type FatigueState,
+  type SessionPatternPerformance,
+} from "../_shared/fatigue-interaction.ts";
+import {
   shouldFireGlobalPhaseAdvance,
   type PatternTransitionState,
 } from "../_shared/global-phase-advance.ts";
@@ -1120,6 +1126,115 @@ function applyTransferRegressions(
 }
 
 /**
+ * Per #128 (A23): wire fatigue-interaction. Builds the current session's
+ * SessionPatternPerformance[] from set_logs + the PRE-A17 exercises
+ * snapshot, runs the rule's pair detector against the prior session's
+ * stored performance, and accumulates pair observations.
+ *
+ * `performanceDeltaPct` per pattern P:
+ *   sessionMaxE1RM(P) = max Epley over current session's top-intent
+ *                       valid-reps (3..10) sets in P's exercises
+ *   priorEwma(P)      = max e1rmCurrent across P's exercises from the
+ *                       PRE-A17 snapshot (so the delta isn't artificially
+ *                       zeroed by A17's just-applied EWMA update)
+ *   deltaPct = priorEwma > 0 ? (sessionMaxE1RM - priorEwma) / priorEwma : 0
+ *
+ * On first-ever pattern P session: priorEwma = 0 → deltaPct = 0. Pair
+ * detection still runs (P appears in currentSession with deltaPct=0); the
+ * rule's first-session-no-observations rule fires via the priorSession===null
+ * gate, not via the deltaPct value.
+ */
+function applyFatigueInteractions(
+  fatigueInteractions: FatigueState[],
+  lastSessionPatternPerformance: SessionPatternPerformance[],
+  setLogs: Array<Record<string, unknown>>,
+  exercisesPreA17: Record<string, Record<string, unknown>>,
+  trainedPatterns: Set<string>,
+  sessionId: string,
+  incomingLoggedAt: Date,
+): {
+  fatigueInteractions: FatigueState[];
+  lastSessionPatternPerformance: SessionPatternPerformance[];
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+
+  // Per pattern, gather (1) this session's max Epley and (2) prior EWMA.
+  const sessionMaxByPattern = new Map<string, number>();
+  for (const set of setLogs) {
+    if (typeof set.exercise_id !== "string") continue;
+    const patternKey = lookupPattern(set.exercise_id);
+    if (!patternKey) continue;
+    if (set.intent !== "top") continue;
+    const w = typeof set.weight_kg === "number" ? set.weight_kg : null;
+    const r = typeof set.reps_completed === "number" ? set.reps_completed : null;
+    if (w === null || r === null) continue;
+    if (r < 3 || r > 10) continue;
+    const e1rm = w * (1 + r / 30);
+    const prior = sessionMaxByPattern.get(patternKey);
+    if (prior === undefined || e1rm > prior) {
+      sessionMaxByPattern.set(patternKey, e1rm);
+    }
+  }
+
+  const priorEwmaByPattern = new Map<string, number>();
+  for (const [exId, profile] of Object.entries(exercisesPreA17)) {
+    const patternKey = lookupPattern(exId);
+    if (!patternKey) continue;
+    const e = (profile.e1rmCurrent as number | undefined) ?? 0;
+    const prior = priorEwmaByPattern.get(patternKey) ?? 0;
+    if (e > prior) priorEwmaByPattern.set(patternKey, e);
+  }
+
+  const currentSession: SessionPatternPerformance[] = [];
+  for (const patternKey of trainedPatterns) {
+    const sessionMax = sessionMaxByPattern.get(patternKey);
+    if (sessionMax === undefined) continue; // pattern trained without valid top sets
+    const priorEwma = priorEwmaByPattern.get(patternKey) ?? 0;
+    const performanceDeltaPct = priorEwma > 0
+      ? (sessionMax - priorEwma) / priorEwma
+      : 0;
+    currentSession.push({
+      sessionId,
+      loggedAt: incomingLoggedAt,
+      pattern: patternKey,
+      performanceDeltaPct,
+    });
+  }
+
+  // Hydrate prior session timestamps (JSONB stores them as ISO strings).
+  const priorSession = lastSessionPatternPerformance.length > 0
+    ? lastSessionPatternPerformance.map((p) => ({
+        ...p,
+        loggedAt: p.loggedAt instanceof Date ? p.loggedAt : new Date(p.loggedAt as unknown as string),
+      }))
+    : null;
+
+  const observations = detectFatigueObservations(currentSession, priorSession);
+  const newStates = appendFatigueObservations(
+    fatigueInteractions,
+    observations,
+  );
+
+  if (observations.length > 0) {
+    rulesFired.add("fatigue-interaction");
+    fieldsChanged.push("fatigueInteractions");
+  }
+  if (currentSession.length > 0) {
+    fieldsChanged.push("lastSessionPatternPerformance");
+  }
+
+  return {
+    fatigueInteractions: newStates,
+    lastSessionPatternPerformance: currentSession,
+    rulesFired,
+    fieldsChanged,
+  };
+}
+
+/**
  * Stage 1 orchestrator core. Pure of HTTP concerns — accepts the validated
  * request shape and a SQL client; returns the response body. Tests bypass
  * the HTTP wrapper and call this directly against the local Supabase DB.
@@ -1253,6 +1368,11 @@ export async function applySession(
       // verdict (which derives per-pattern e1rm history from post-A17
       // exercise.topSets).
       const exercisesIn = (modelJson.exercises as Record<string, Record<string, unknown>> | undefined) ?? {};
+      // A23 (#128): preserve the pre-A17 exercises snapshot so
+      // applyFatigueInteractions can compute performanceDeltaPct against
+      // the prior EWMA (not the just-updated EWMA that already absorbed
+      // this session's contribution).
+      const exercisesPreA17 = exercisesIn;
       const setLogsArr = ((req.session_payload as Record<string, unknown>).set_logs as Array<Record<string, unknown>> | undefined) ?? [];
       const exerciseRuled = applyPerExerciseRules(
         exercisesIn,
@@ -1323,6 +1443,32 @@ export async function applySession(
       };
       rulesFired.push(...transferRuled.rulesFired);
       fieldsChanged.push(...transferRuled.fieldsChanged);
+
+      // Fatigue-interaction pipeline per #128 (A23). Pair-detects against
+      // the immediately-prior session's stored performance and accumulates.
+      const fatigueIn =
+        (modelJson.fatigueInteractions as FatigueState[] | undefined) ?? [];
+      const lastSessionPerfIn =
+        (modelJson.lastSessionPatternPerformance as
+          | SessionPatternPerformance[]
+          | undefined) ?? [];
+      const fatigueRuled = applyFatigueInteractions(
+        fatigueIn,
+        lastSessionPerfIn,
+        setLogsArr,
+        exercisesPreA17,
+        trainedSets.patterns,
+        req.session_id,
+        incomingLoggedAt,
+      );
+      newModelJson = {
+        ...newModelJson,
+        fatigueInteractions: fatigueRuled.fatigueInteractions,
+        lastSessionPatternPerformance:
+          fatigueRuled.lastSessionPatternPerformance,
+      };
+      rulesFired.push(...fatigueRuled.rulesFired);
+      fieldsChanged.push(...fatigueRuled.fieldsChanged);
 
       // Per-set stimulus pipeline per #118 (A18). Wires stimulus-classifier
       // into RecoveryProfile.last*StimulusAt. Readiness scalars wire in A19.

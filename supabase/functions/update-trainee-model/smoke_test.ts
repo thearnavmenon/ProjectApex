@@ -229,12 +229,19 @@ smokeTest(
       }
     }
 
-    // INTENTIONALLY NOT ASSERTED YET (extended by subsequent slices):
-    //   - PatternProfile.trend populated (A20)
-    //   - prescriptionAccuracy cells populated (A21)
-    //   - transferRegressions populated (A22)
-    //   - fatigueInteractions populated (A23)
-    // Each Phase 3 wiring slice MUST extend the assertion set here.
+    // A23 / #128: fatigue-interaction — first-ever session has no prior
+    // to pair against, so fatigueInteractions stays empty.
+    // lastSessionPatternPerformance gets one entry per trained pattern.
+    const fatigueInteractions = modelJson.fatigueInteractions as unknown[];
+    assertEquals(fatigueInteractions.length, 0);
+    const lastSessionPerf =
+      modelJson.lastSessionPatternPerformance as Array<Record<string, unknown>>;
+    assertEquals(lastSessionPerf.length, 3);
+    const perfPatterns = lastSessionPerf.map((p) => p.pattern as string).sort();
+    assertEquals(perfPatterns, ["horizontalPull", "horizontalPush", "squat"]);
+
+    // All 7 G1-audit unwired modules now have orchestrator-side wiring +
+    // smoke coverage. Phase 4 (G1 redefinition) closes #85.
   },
 );
 
