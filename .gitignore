@@ -27,6 +27,14 @@ supabase/.branches/
 # is set in a per-function deno.json — A12 ships this for npm:postgres@3.4.4).
 # Local-machine-only — restored by `deno install` / first `deno test` run.
 supabase/functions/*/node_modules/
+scripts/phase2-verification-gate/node_modules/
 
 # Local agent state (worktrees, notes, scratch). Never commit.
 .claude/
+
+# Phase 2 verification gate (G1 / #85) — local-machine-only fixtures.
+# Production training data dump + device-extracted legacy verdicts.
+# Per scripts/phase2-verification-gate/README.md, delete after the gate
+# report is reviewed and the PR merges. .gitkeep retained for directory.
+scripts/phase2-verification-gate/fixtures/*
+!scripts/phase2-verification-gate/fixtures/.gitkeep
