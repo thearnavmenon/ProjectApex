@@ -62,6 +62,13 @@ import {
   type VolumeLoadSession,
 } from "../_shared/plateau-verdict.ts";
 import {
+  appendObservation,
+  shouldContribute,
+  type InterSessionGapBucket,
+  type PerCellAccumulator,
+  type SetObservation,
+} from "../_shared/prescription-accuracy.ts";
+import {
   shouldFireGlobalPhaseAdvance,
   type PatternTransitionState,
 } from "../_shared/global-phase-advance.ts";
@@ -850,6 +857,157 @@ function applyPerPatternRules(
 }
 
 /**
+ * Bootstrap an empty per-cell accumulator. Used by A21 (#124) when a
+ * (pattern, intent) cell first receives a contributing observation.
+ * Shape mirrors PerCellAccumulator (see _shared/prescription-accuracy.ts).
+ */
+function emptyAccuracyCell(
+  patternKey: string,
+  intent: string,
+): PerCellAccumulator {
+  return {
+    pattern: patternKey,
+    intent,
+    observations: [],
+    observationsByGapBucket: {
+      under48h: [],
+      between48And72h: [],
+      over72h: [],
+    },
+    observationBuckets: [],
+  };
+}
+
+/**
+ * Per #124 (A21): wire prescription-accuracy aggregator into the per-apply
+ * path. For each set_log carrying `ai_prescribed`, build a `SetObservation`
+ * and pass through `shouldContribute`. Contributing observations
+ * accumulate into per-cell windows (30 obs each per ADR-0014).
+ *
+ * Inputs:
+ *   - `oldPatterns`: pre-`applyPerPatternRules` snapshot — used for
+ *     `patternPhaseAtPrescription` (the prescription was issued at session
+ *     start, before this apply ran phase advance).
+ *   - `newPatterns`: post-`applyPerPatternRules` snapshot — used for
+ *     `priorSessionLoggedAt`. The just-appended `recentSessionDates`
+ *     end with the current session, so `priorSessionLoggedAt =
+ *     recentSessionDates[len-2]` (or null on first-ever pattern session).
+ *
+ * Stored shape (JSONB-friendly): `prescriptionAccuracy[pattern][intent] =
+ * PerCellAccumulator`. Mirrors the rule module's interface exactly so the
+ * accumulator object can be passed to `appendObservation` directly.
+ */
+function applyPrescriptionAccuracy(
+  prescriptionAccuracy: Record<string, Record<string, PerCellAccumulator>>,
+  setLogs: Array<Record<string, unknown>>,
+  oldPatterns: Record<string, Record<string, unknown>>,
+  newPatterns: Record<string, Record<string, unknown>>,
+  incomingLoggedAt: Date,
+): {
+  prescriptionAccuracy: Record<string, Record<string, PerCellAccumulator>>;
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+  const next: Record<string, Record<string, PerCellAccumulator>> = {};
+  for (const [p, m] of Object.entries(prescriptionAccuracy)) {
+    next[p] = { ...m };
+  }
+
+  for (const set of setLogs) {
+    const exerciseId = set.exercise_id;
+    if (typeof exerciseId !== "string") continue;
+    const patternKey = lookupPattern(exerciseId);
+    if (!patternKey) continue;
+
+    const aiPrescribed = set.ai_prescribed as
+      | Record<string, unknown>
+      | undefined;
+    if (!aiPrescribed || typeof aiPrescribed !== "object") continue;
+
+    const prescribedIntent = typeof aiPrescribed.intent === "string"
+      ? aiPrescribed.intent
+      : null;
+    const prescribedReps = typeof aiPrescribed.reps === "number"
+      ? aiPrescribed.reps
+      : null;
+    if (prescribedIntent === null || prescribedReps === null) continue;
+    if (prescribedReps <= 0) continue;
+
+    const loggedIntent = typeof set.intent === "string" ? set.intent : "";
+    const repsCompleted = typeof set.reps_completed === "number"
+      ? set.reps_completed
+      : 0;
+    const userCorrectedWeight =
+      aiPrescribed.user_corrected_weight === true;
+    const completionFlags = Array.isArray(set.completion_flags)
+      ? (set.completion_flags as unknown[]).filter(
+          (x): x is string => typeof x === "string",
+        )
+      : [];
+
+    const oldProfile = oldPatterns[patternKey];
+    const phaseRaw = (oldProfile?.currentPhase as string | undefined) ??
+      "accumulation";
+    const patternPhase = (phaseRaw === "accumulation" ||
+      phaseRaw === "intensification" ||
+      phaseRaw === "peaking" ||
+      phaseRaw === "deload")
+      ? phaseRaw
+      : "accumulation";
+
+    const newProfile = newPatterns[patternKey];
+    const recentDates = (newProfile?.recentSessionDates as string[] | undefined) ?? [];
+    const priorSessionLoggedAt = recentDates.length >= 2
+      ? new Date(recentDates[recentDates.length - 2])
+      : null;
+
+    const observation: SetObservation = {
+      pattern: patternKey,
+      prescribedIntent,
+      loggedIntent,
+      prescribedReps,
+      repsCompleted,
+      userCorrectedWeight,
+      completionFlags,
+      patternPhaseAtPrescription: patternPhase,
+      loggedAt: incomingLoggedAt,
+      priorSessionLoggedAt,
+    };
+
+    if (!shouldContribute(observation)) continue;
+
+    const cellByIntent = next[patternKey] ?? {};
+    const cell = cellByIntent[prescribedIntent] ??
+      emptyAccuracyCell(patternKey, prescribedIntent);
+    // appendObservation mutates the cell in place — clone first to keep
+    // newPatterns referentially distinct from any prior reference (defense-
+    // in-depth; the rest of the pipeline treats prescriptionAccuracy as
+    // immutable updates).
+    const cellClone: PerCellAccumulator = {
+      ...cell,
+      observations: [...cell.observations],
+      observationBuckets: [...cell.observationBuckets],
+      observationsByGapBucket: {
+        under48h: [...cell.observationsByGapBucket.under48h],
+        between48And72h: [...cell.observationsByGapBucket.between48And72h],
+        over72h: [...cell.observationsByGapBucket.over72h],
+      },
+    };
+    appendObservation(cellClone, observation);
+    cellByIntent[prescribedIntent] = cellClone;
+    next[patternKey] = cellByIntent;
+    rulesFired.add("prescription-accuracy");
+    fieldsChanged.push(
+      `prescriptionAccuracy.${patternKey}.${prescribedIntent}`,
+    );
+  }
+
+  return { prescriptionAccuracy: next, rulesFired, fieldsChanged };
+}
+
+/**
  * Stage 1 orchestrator core. Pure of HTTP concerns — accepts the validated
  * request shape and a SQL client; returns the response body. Tests bypass
  * the HTTP wrapper and call this directly against the local Supabase DB.
@@ -1008,6 +1166,29 @@ export async function applySession(
       newModelJson = { ...newModelJson, patterns: ruled.patterns };
       rulesFired.push(...ruled.rulesFired);
       fieldsChanged.push(...ruled.fieldsChanged);
+
+      // Prescription-accuracy pipeline per #124 (A21). Runs after pattern
+      // rules so newPatterns has the appended recentSessionDates (for
+      // priorSessionLoggedAt). Reads the PRE-update patternsIn for
+      // patternPhaseAtPrescription (the prescription was issued at session
+      // start, before phase advance).
+      const accuracyIn =
+        (modelJson.prescriptionAccuracy as
+          | Record<string, Record<string, PerCellAccumulator>>
+          | undefined) ?? {};
+      const accuracyRuled = applyPrescriptionAccuracy(
+        accuracyIn,
+        setLogsArr,
+        patternsIn,
+        ruled.patterns,
+        incomingLoggedAt,
+      );
+      newModelJson = {
+        ...newModelJson,
+        prescriptionAccuracy: accuracyRuled.prescriptionAccuracy,
+      };
+      rulesFired.push(...accuracyRuled.rulesFired);
+      fieldsChanged.push(...accuracyRuled.fieldsChanged);
 
       // Per-set stimulus pipeline per #118 (A18). Wires stimulus-classifier
       // into RecoveryProfile.last*StimulusAt. Readiness scalars wire in A19.
