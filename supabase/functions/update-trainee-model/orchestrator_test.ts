@@ -117,6 +117,79 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "A17 / #116: ewma-engine wired — first apply with valid top sets bootstraps ExerciseProfile + populates e1rmCurrent via Epley × EWMA",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T10:00:00Z";
+
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            // bench: 100kg × 5 reps → e1rm = 100 × (1 + 5/30) = 116.666...
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" },
+            // squat: 130kg × 5 reps → e1rm = 130 × (1 + 5/30) = 151.666...
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top" },
+            // row: 70kg × 8 reps → e1rm = 70 × (1 + 8/30) = 88.666...
+            { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    assertEquals(result.late_arrival, false);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const exercises = modelJson.exercises as Record<string, Record<string, unknown>>;
+
+    // Three exercises bootstrapped + populated.
+    assertEquals(
+      Object.keys(exercises).sort(),
+      ["barbell_back_squat", "barbell_bench_press", "barbell_row"],
+    );
+
+    // EWMA over a single valid top set = the e1rm of that set (no smoothing).
+    // Allow small floating-point tolerance via fixed-precision compare.
+    const bench = exercises["barbell_bench_press"];
+    const squat = exercises["barbell_back_squat"];
+    const row = exercises["barbell_row"];
+
+    assertEquals(
+      Number((bench.e1rmCurrent as number).toFixed(4)),
+      Number((100 * (1 + 5 / 30)).toFixed(4)),
+    );
+    assertEquals(
+      Number((squat.e1rmCurrent as number).toFixed(4)),
+      Number((130 * (1 + 5 / 30)).toFixed(4)),
+    );
+    assertEquals(
+      Number((row.e1rmCurrent as number).toFixed(4)),
+      Number((70 * (1 + 8 / 30)).toFixed(4)),
+    );
+
+    // sessionCount increments by 1 per apply per exercise (counts sessions,
+    // not sets — see applyPerExerciseRules comment).
+    assertEquals(bench.sessionCount, 1);
+    assertEquals(squat.sessionCount, 1);
+    assertEquals(row.sessionCount, 1);
+
+    // topSets appended once per valid top-intent set.
+    assertEquals((bench.topSets as unknown[]).length, 1);
+    assertEquals((squat.topSets as unknown[]).length, 1);
+    assertEquals((row.topSets as unknown[]).length, 1);
+  },
+);
+
+orchestratorTest(
   "A15 / #110: first apply with set_logs across 3 movement patterns bootstraps each PatternProfile with ADR-0011 defaults + sessionsInPhase=1 + recentSessionDates=[loggedAt]",
   async () => {
     const userId = await seedFreshUser();

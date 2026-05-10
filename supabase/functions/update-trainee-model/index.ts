@@ -32,6 +32,10 @@
 import postgres from "postgres";
 import { lookupPattern } from "../_shared/exercise-library.ts";
 import {
+  computeE1RM,
+  type TopSet as EwmaTopSet,
+} from "../_shared/ewma-engine.ts";
+import {
   emitApplyComplete as defaultEmitApplyComplete,
   emitClassifierFailed as defaultEmitClassifierFailed,
   emitLateArrival as defaultEmitLateArrival,
@@ -284,6 +288,121 @@ function sessionsCadenceDays(recentSessionDates: string[]): number | null {
  * assertion-cycle here. The pipeline framework supports adding them later
  * by extending this loop.
  */
+/**
+ * Per-exercise rule pipeline per #116 (A17). Each ExerciseProfile carries
+ * its own top-set history + EWMA estimate per ADR-0005's ExerciseProfile
+ * shape. Production bootstrap (no separate path elsewhere): create a fresh
+ * profile when the user trains an exercise for the first time.
+ *
+ * Slice scope: A17 ships ewma-engine wiring. Other ExerciseProfile fields
+ * (e1rmMedian, e1rmPeak, formDegradationFlag, confidence) are owned by
+ * subsequent slices that extend this loop.
+ */
+function applyPerExerciseRules(
+  exercises: Record<string, Record<string, unknown>>,
+  setLogs: Array<Record<string, unknown>>,
+  incomingLoggedAt: Date,
+  sessionId: string,
+): {
+  exercises: Record<string, Record<string, unknown>>;
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+
+  // Group sets by exercise_id; keep a single Map<exerciseId, sets> in
+  // session_payload order so multi-set sessions (5×5 etc.) iterate the
+  // hardest top set last (per ADR-0005's heaviest-per-session convention).
+  const setsByExercise = new Map<string, Array<Record<string, unknown>>>();
+  for (const entry of setLogs) {
+    const exerciseId = entry.exercise_id;
+    if (typeof exerciseId !== "string") continue;
+    const list = setsByExercise.get(exerciseId) ?? [];
+    list.push(entry);
+    setsByExercise.set(exerciseId, list);
+  }
+
+  const merged: Record<string, Record<string, unknown>> = { ...exercises };
+
+  // Bootstrap any exercise trained this session that doesn't yet have a
+  // profile. ADR-0005 ExerciseProfile defaults — only the fields A17 owns
+  // are meaningful here; other fields populate as their slices wire.
+  for (const exerciseId of setsByExercise.keys()) {
+    if (!(exerciseId in merged)) {
+      merged[exerciseId] = {
+        exerciseId,
+        topSets: [],
+        sessionSnapshots: [],
+        e1rmCurrent: 0,
+        e1rmMedian: 0,
+        e1rmPeak: 0,
+        sessionCount: 0,
+        formDegradationFlag: false,
+        confidence: "bootstrapping",
+        formDegradationCleanSessions: 0,
+      };
+      fieldsChanged.push(`exercises.${exerciseId}.bootstrapped`);
+    }
+  }
+
+  const newExercises: Record<string, Record<string, unknown>> = {};
+
+  for (const [exerciseId, profile] of Object.entries(merged)) {
+    const newProfile: Record<string, unknown> = { ...profile };
+    const trainedSets = setsByExercise.get(exerciseId);
+
+    if (trainedSets && trainedSets.length > 0) {
+      // sessionCount increments by 1 per session-apply, regardless of how
+      // many sets land — counts sessions, not sets (ADR-0005 ExerciseProfile.sessionCount).
+      newProfile.sessionCount = ((profile.sessionCount as number) ?? 0) + 1;
+
+      // Append top-intent sets with reps in the validity range. The
+      // ewma-engine's filter would skip out-of-range sets internally, but
+      // appending out-of-range to topSets bloats the array uselessly.
+      const baseTopSets = (profile.topSets as Array<Record<string, unknown>> | undefined) ?? [];
+      const newTopSets = [...baseTopSets];
+      for (const set of trainedSets) {
+        if (set.intent !== "top") continue;
+        const weight = typeof set.weight_kg === "number" ? set.weight_kg : null;
+        const reps = typeof set.reps_completed === "number" ? set.reps_completed : null;
+        if (weight === null || reps === null) continue;
+        // ADR-0005 validity window: 3..10 reps. ewma-engine filters again
+        // internally, but skipping at append-time keeps topSets lean.
+        if (reps < 3 || reps > 10) continue;
+        newTopSets.push({
+          weight,
+          reps,
+          loggedAt: incomingLoggedAt.toISOString(),
+          sessionId,
+        });
+      }
+
+      newProfile.topSets = newTopSets;
+
+      // Compute EWMA over the full topSets list (ewma-engine windows the
+      // last 5 valid internally per ADR-0005). Standard branch — transition
+      // mode wires when transition triggers ship.
+      const ewmaInput: EwmaTopSet[] = newTopSets.map((s) => ({
+        weight: s.weight as number,
+        reps: s.reps as number,
+        loggedAt: new Date(s.loggedAt as string),
+        sessionId: s.sessionId as string,
+      }));
+      const newE1RM = computeE1RM(ewmaInput, false);
+      if (newE1RM !== null) {
+        newProfile.e1rmCurrent = newE1RM;
+        rulesFired.add("ewma");
+        fieldsChanged.push(`exercises.${exerciseId}.e1rmCurrent`);
+      }
+    }
+
+    newExercises[exerciseId] = newProfile;
+  }
+
+  return { exercises: newExercises, rulesFired, fieldsChanged };
+}
+
 function applyPerPatternRules(
   patterns: Record<string, Record<string, unknown>>,
   trainedPatterns: Set<string>,
@@ -531,6 +650,21 @@ export async function applySession(
       newModelJson = { ...modelJson, patterns: ruled.patterns };
       rulesFired = [...ruled.rulesFired];
       fieldsChanged = ruled.fieldsChanged;
+
+      // Per-exercise rule pipeline per #116 (A17). Wires ewma-engine into
+      // ExerciseProfile.e1rmCurrent. Other ExerciseProfile fields land
+      // with subsequent slices.
+      const exercisesIn = (modelJson.exercises as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const setLogsArr = ((req.session_payload as Record<string, unknown>).set_logs as Array<Record<string, unknown>> | undefined) ?? [];
+      const exerciseRuled = applyPerExerciseRules(
+        exercisesIn,
+        setLogsArr,
+        incomingLoggedAt,
+        req.session_id,
+      );
+      newModelJson = { ...newModelJson, exercises: exerciseRuled.exercises };
+      rulesFired.push(...exerciseRuled.rulesFired);
+      fieldsChanged.push(...exerciseRuled.fieldsChanged);
 
       // ADR-0012: global phase-advance trigger. Reads each pattern's
       // post-loop lastPhaseTransitionAtSessionCount (which the per-pattern
