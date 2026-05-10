@@ -242,6 +242,84 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "A20 / #122: plateau-verdict wired — first apply with trained patterns leaves trend='progressing' (insufficient history) and seeds weeklyVolumeLoadHistory with one entry per pattern",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T13:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top", rpe_felt: 8 },
+            { exercise_id: "barbell_back_squat", set_number: 2, weight_kg: 110, reps_completed: 8, intent: "backoff", rpe_felt: 7 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
+    const squat = patterns["squat"];
+
+    // Single session — no plateau possible. Trend explicitly written by
+    // plateau-verdict (rule fired), value = "progressing".
+    assertEquals(squat.trend, "progressing");
+
+    // weeklyVolumeLoadHistory seeded with one ISO-week entry. Volume-load
+    // = 130×5 + 110×8 = 650 + 880 = 1530. avgRPE = simple mean of
+    // rpe_felt across the session's contributing sets = (8 + 7) / 2 = 7.5.
+    // (Volume-weighted aggregation kicks in only when rolling new sessions
+    // into an existing same-week bucket.)
+    const history = squat.weeklyVolumeLoadHistory as Array<Record<string, unknown>>;
+    assertEquals(history.length, 1);
+    assertEquals(history[0].weeklyVolumeLoad, 1530);
+    assertEquals(history[0].avgRPE, 7.5);
+  },
+);
+
+orchestratorTest(
+  "A20 / #122: warmup-only session contributes nothing to weeklyVolumeLoadHistory (warmup excluded, pattern not trained for plateau purposes)",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T14:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 40, reps_completed: 5, intent: "warmup" },
+            { exercise_id: "barbell_bench_press", set_number: 2, weight_kg: 60, reps_completed: 5, intent: "warmup" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
+    const push = patterns["horizontalPush"];
+    assertEquals((push.weeklyVolumeLoadHistory as unknown[]).length, 0);
+    assertEquals(push.trend, "progressing");
+  },
+);
+
+orchestratorTest(
   "A19 / #120: recovery-curve wired — same-instant stimulus (lastStimulusAt === loggedAt) sets bumped axes to residual floor 0.3; null-timestamp axis stays at 1.0",
   async () => {
     const userId = await seedFreshUser();

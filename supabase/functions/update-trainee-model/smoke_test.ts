@@ -163,8 +163,15 @@ smokeTest(
       const profile = patterns[patternKey];
       assertEquals(profile.currentPhase, "accumulation");
       assertEquals(profile.sessionsInPhase, 1);
+      // A20 / #122: plateau-verdict explicitly written. Single session →
+      // insufficient history → trend stays "progressing".
       assertEquals(profile.trend, "progressing");
       assertEquals(profile.recentSessionDates, [expectedLoggedAtIso]);
+      // A20 / #122: weeklyVolumeLoadHistory seeded with one entry per
+      // trained pattern (this fixture's single session contributes one
+      // ISO-week bucket).
+      const history = profile.weeklyVolumeLoadHistory as Array<Record<string, unknown>>;
+      assertEquals(history.length, 1);
     }
 
     // ExerciseProfile.e1rmCurrent populated for each top-intent exercise
