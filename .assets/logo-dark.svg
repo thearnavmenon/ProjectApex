@@ -1,0 +1,9 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Project Apex">
+  <polyline points="35,170 100,40 165,170"
+            stroke="#F5F5F5"
+            stroke-width="22"
+            fill="none"
+            stroke-linejoin="round"
+            stroke-linecap="round"/>
+  <circle cx="100" cy="40" r="14" fill="#E4B062"/>
+</svg>
