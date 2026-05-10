@@ -55,7 +55,12 @@ import {
   type PerPatternState,
 } from "../_shared/phase-advance.ts";
 import { computeTransitionModeUntil } from "../_shared/transition-mode-expiry.ts";
-import type { ProgressionTrend } from "../_shared/plateau-verdict.ts";
+import {
+  plateauVerdict,
+  type E1RMSession,
+  type ProgressionTrend,
+  type VolumeLoadSession,
+} from "../_shared/plateau-verdict.ts";
 import {
   shouldFireGlobalPhaseAdvance,
   type PatternTransitionState,
@@ -534,11 +539,167 @@ function applyRecoveryReadiness(
   return { recovery: newRecovery, rulesFired, fieldsChanged };
 }
 
+/**
+ * UTC ISO week start (Monday) as a YYYY-MM-DD string. Used by A20's
+ * weekly-volume-load bucketing — a session whose loggedAt falls in the same
+ * ISO week as the most-recent history entry rolls into that entry; otherwise
+ * a new entry is appended. UTC-based bucketing avoids timezone drift; the
+ * v1 alpha cohort is single-user / single-timezone so this is safe (v2.x
+ * watch-item if multi-timezone surfaces).
+ */
+function isoWeekStartUtc(date: Date): string {
+  const d = new Date(date.getTime());
+  const day = d.getUTCDay(); // 0=Sun..6=Sat
+  const daysToMon = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + daysToMon);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Per #122 (A20): derive E1RM session history for a movement pattern from
+ * the per-exercise `topSets[]` produced by A17. For each exercise in the
+ * pattern (resolved via `lookupPattern`), join its topSets, group by
+ * sessionId, take the heaviest e1rm per session. avgRPE = null in v1 —
+ * topSets shape doesn't carry RPE; the plateau-verdict rule handles null
+ * correctly per ADR-0009 §"manual-log defence".
+ */
+function patternE1RMSessions(
+  patternKey: string,
+  exercises: Record<string, Record<string, unknown>>,
+): E1RMSession[] {
+  const bySession = new Map<string, { loggedAt: Date; e1rm: number }>();
+  for (const [exerciseId, profile] of Object.entries(exercises)) {
+    if (lookupPattern(exerciseId) !== patternKey) continue;
+    const topSets = (profile.topSets as Array<Record<string, unknown>> | undefined) ?? [];
+    for (const ts of topSets) {
+      const weight = ts.weight as number | undefined;
+      const reps = ts.reps as number | undefined;
+      const loggedAtRaw = ts.loggedAt as string | undefined;
+      const sessionId = ts.sessionId as string | undefined;
+      if (
+        typeof weight !== "number" ||
+        typeof reps !== "number" ||
+        typeof loggedAtRaw !== "string" ||
+        typeof sessionId !== "string"
+      ) continue;
+      const e1rm = weight * (1 + reps / 30); // Epley
+      const prev = bySession.get(sessionId);
+      if (!prev || e1rm > prev.e1rm) {
+        bySession.set(sessionId, { loggedAt: new Date(loggedAtRaw), e1rm });
+      }
+    }
+  }
+  const sessions = Array.from(bySession.values()).map((s) => ({
+    loggedAt: s.loggedAt,
+    e1rm: s.e1rm,
+    avgRPE: null as number | null,
+  }));
+  sessions.sort((a, b) => a.loggedAt.getTime() - b.loggedAt.getTime());
+  return sessions;
+}
+
+/**
+ * Per #122 (A20): update the pattern's `weeklyVolumeLoadHistory` with the
+ * current session's contribution. Volume-load = Σ weight × reps over
+ * non-warmup sets in the pattern. ISO-week bucketing per `isoWeekStartUtc`:
+ * sets within the same ISO week as the most-recent entry roll into that
+ * entry; sets in a new week start a new entry. avgRPE is the simple mean
+ * of `rpe_felt` across the contributing sets in the bucket (null when no
+ * RPE values are present).
+ *
+ * Storage shape (JSONB-friendly): `{ loggedAtIso, weeklyVolumeLoad,
+ * avgRPE }`. The first set of the bucket fixes the bucket's `loggedAtIso`
+ * to its session's loggedAt; later same-week sessions update the entry's
+ * total without changing the loggedAtIso anchor.
+ */
+function updateWeeklyVolumeLoadHistory(
+  history: Array<Record<string, unknown>>,
+  setLogs: Array<Record<string, unknown>>,
+  patternKey: string,
+  incomingLoggedAt: Date,
+): Array<Record<string, unknown>> {
+  let sessionVl = 0;
+  let rpeSum = 0;
+  let rpeN = 0;
+  for (const set of setLogs) {
+    const exerciseId = set.exercise_id;
+    if (typeof exerciseId !== "string") continue;
+    if (lookupPattern(exerciseId) !== patternKey) continue;
+    if (set.intent === "warmup") continue;
+    const w = typeof set.weight_kg === "number" ? set.weight_kg : 0;
+    const r = typeof set.reps_completed === "number" ? set.reps_completed : 0;
+    if (w <= 0 || r <= 0) continue;
+    sessionVl += w * r;
+    if (typeof set.rpe_felt === "number") {
+      rpeSum += set.rpe_felt;
+      rpeN++;
+    }
+  }
+  if (sessionVl === 0) return history; // pattern not trained
+
+  const sessionAvgRpe = rpeN > 0 ? rpeSum / rpeN : null;
+  const incomingWeek = isoWeekStartUtc(incomingLoggedAt);
+  const last = history[history.length - 1];
+
+  if (last) {
+    const lastIso = last.loggedAtIso as string | undefined;
+    if (typeof lastIso === "string" && isoWeekStartUtc(new Date(lastIso)) === incomingWeek) {
+      // Roll into the existing bucket. avgRPE = mean of bucket-mean and
+      // session-mean weighted by their non-null counts. Last bucket may
+      // have null avgRPE if its prior contributors had none — propagate
+      // the session value when it carries RPE.
+      const lastVl = (last.weeklyVolumeLoad as number) ?? 0;
+      const lastAvg = (last.avgRPE as number | null) ?? null;
+      const newVl = lastVl + sessionVl;
+      let newAvg: number | null;
+      if (lastAvg === null) {
+        newAvg = sessionAvgRpe;
+      } else if (sessionAvgRpe === null) {
+        newAvg = lastAvg;
+      } else {
+        // Weighted by volume-load contribution (proxy for set count).
+        newAvg = (lastAvg * lastVl + sessionAvgRpe * sessionVl) / newVl;
+      }
+      return [
+        ...history.slice(0, -1),
+        { ...last, weeklyVolumeLoad: newVl, avgRPE: newAvg },
+      ];
+    }
+  }
+
+  return [
+    ...history,
+    {
+      loggedAtIso: incomingLoggedAt.toISOString(),
+      weeklyVolumeLoad: sessionVl,
+      avgRPE: sessionAvgRpe,
+    },
+  ];
+}
+
+function readVolumeLoadHistoryAsSessions(
+  history: Array<Record<string, unknown>>,
+): VolumeLoadSession[] {
+  return history
+    .map((entry) => {
+      const iso = entry.loggedAtIso as string | undefined;
+      if (typeof iso !== "string") return null;
+      return {
+        loggedAt: new Date(iso),
+        weeklyVolumeLoad: (entry.weeklyVolumeLoad as number) ?? 0,
+        avgRPE: (entry.avgRPE as number | null) ?? null,
+      };
+    })
+    .filter((v): v is VolumeLoadSession => v !== null);
+}
+
 function applyPerPatternRules(
   patterns: Record<string, Record<string, unknown>>,
   trainedPatterns: Set<string>,
   incomingLoggedAt: Date,
   newSessionCount: number,
+  exercises: Record<string, Record<string, unknown>>,
+  setLogs: Array<Record<string, unknown>>,
 ): {
   patterns: Record<string, Record<string, unknown>>;
   rulesFired: Set<string>;
@@ -564,6 +725,10 @@ function applyPerPatternRules(
         recentSessionDates: [],
         transitionModeUntil: null,
         trend: "progressing",
+        // A20 (#122): persisted track input for plateau-verdict's volume-load
+        // dimension. Each entry buckets a session's pattern volume-load
+        // (Σ weight × reps over non-warmup sets) by ISO week.
+        weeklyVolumeLoadHistory: [],
       };
       fieldsChanged.push(`patterns.${pattern}.bootstrapped`);
     }
@@ -632,6 +797,41 @@ function applyPerPatternRules(
       fieldsChanged.push(`patterns.${patternKey}.currentPhase`);
     }
 
+    // A20 (#122): plateau-verdict wiring. Volume-load history updates for
+    // patterns trained this session (untrained patterns retain prior
+    // history). Trend recomputes for every pattern each apply — a long-
+    // absence-returner whose untrained patterns slid into "declining"
+    // territory should still surface that trend on the apply that
+    // re-touches an adjacent pattern.
+    const baseVolumeHistory =
+      (profile.weeklyVolumeLoadHistory as Array<Record<string, unknown>> | undefined) ??
+      [];
+    const newVolumeHistory = wasTrainedThisSession
+      ? updateWeeklyVolumeLoadHistory(
+          baseVolumeHistory,
+          setLogs,
+          patternKey,
+          incomingLoggedAt,
+        )
+      : baseVolumeHistory;
+    if (newVolumeHistory !== baseVolumeHistory) {
+      rulesFired.add("volume-load-history");
+      fieldsChanged.push(`patterns.${patternKey}.weeklyVolumeLoadHistory`);
+    }
+
+    const e1rmSessionsForPattern = patternE1RMSessions(patternKey, exercises);
+    const volumeSessionsForPattern =
+      readVolumeLoadHistoryAsSessions(newVolumeHistory);
+    const newTrend: ProgressionTrend = plateauVerdict(
+      e1rmSessionsForPattern,
+      volumeSessionsForPattern,
+      cadenceDays,
+    );
+    rulesFired.add("plateau-verdict");
+    if (((profile.trend as ProgressionTrend) ?? "progressing") !== newTrend) {
+      fieldsChanged.push(`patterns.${patternKey}.trend`);
+    }
+
     newPatterns[patternKey] = {
       ...profile,
       currentPhase: advanced.newPhase,
@@ -641,6 +841,8 @@ function applyPerPatternRules(
         advanced.newLastPhaseTransitionAtSessionCount,
       transitionModeUntil: newTransitionModeUntil,
       recentSessionDates: recentDates,
+      weeklyVolumeLoadHistory: newVolumeHistory,
+      trend: newTrend,
     };
   }
 
@@ -776,15 +978,10 @@ export async function applySession(
     if (deps.ruleHook) {
       newModelJson = deps.ruleHook(modelJson);
     } else {
-      const patternsIn = (modelJson.patterns as Record<string, Record<string, unknown>> | undefined) ?? {};
-      const ruled = applyPerPatternRules(patternsIn, trainedSets.patterns, incomingLoggedAt, newSessionCount);
-      newModelJson = { ...modelJson, patterns: ruled.patterns };
-      rulesFired = [...ruled.rulesFired];
-      fieldsChanged = ruled.fieldsChanged;
-
-      // Per-exercise rule pipeline per #116 (A17). Wires ewma-engine into
-      // ExerciseProfile.e1rmCurrent. Other ExerciseProfile fields land
-      // with subsequent slices.
+      // Per-exercise rule pipeline per #116 (A17). Runs FIRST in the
+      // pipeline so its appended topSets are visible to A20's plateau-
+      // verdict (which derives per-pattern e1rm history from post-A17
+      // exercise.topSets).
       const exercisesIn = (modelJson.exercises as Record<string, Record<string, unknown>> | undefined) ?? {};
       const setLogsArr = ((req.session_payload as Record<string, unknown>).set_logs as Array<Record<string, unknown>> | undefined) ?? [];
       const exerciseRuled = applyPerExerciseRules(
@@ -793,9 +990,24 @@ export async function applySession(
         incomingLoggedAt,
         req.session_id,
       );
-      newModelJson = { ...newModelJson, exercises: exerciseRuled.exercises };
-      rulesFired.push(...exerciseRuled.rulesFired);
-      fieldsChanged.push(...exerciseRuled.fieldsChanged);
+      newModelJson = { ...modelJson, exercises: exerciseRuled.exercises };
+      rulesFired = [...exerciseRuled.rulesFired];
+      fieldsChanged = [...exerciseRuled.fieldsChanged];
+
+      // Per-pattern rule pipeline. Reads the post-A17 exercises for
+      // plateau-verdict's e1rm history derivation (#122 / A20).
+      const patternsIn = (modelJson.patterns as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const ruled = applyPerPatternRules(
+        patternsIn,
+        trainedSets.patterns,
+        incomingLoggedAt,
+        newSessionCount,
+        exerciseRuled.exercises,
+        setLogsArr,
+      );
+      newModelJson = { ...newModelJson, patterns: ruled.patterns };
+      rulesFired.push(...ruled.rulesFired);
+      fieldsChanged.push(...ruled.fieldsChanged);
 
       // Per-set stimulus pipeline per #118 (A18). Wires stimulus-classifier
       // into RecoveryProfile.last*StimulusAt. Readiness scalars wire in A19.
