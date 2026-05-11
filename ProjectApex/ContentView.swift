@@ -83,7 +83,8 @@ struct ContentView: View {
                 if let vm = programViewModel {
                     ProgramOverviewView(
                         viewModel: vm,
-                        gymProfile: confirmedProfile
+                        gymProfile: confirmedProfile,
+                        onSwitchToWorkoutTab: { selectedTab = 1 }
                     )
                 } else {
                     loadingPlaceholder
@@ -392,7 +393,8 @@ struct ContentView: View {
                                 mesocycleCreatedAt: mesocycle.createdAt,
                                 programId: mesocycle.id,
                                 viewModel: vm,
-                                gymProfile: confirmedProfile
+                                gymProfile: confirmedProfile,
+                                onSwitchToWorkoutTab: { selectedTab = 1 }
                             )
                             .environment(deps)
                         }
