@@ -25,6 +25,9 @@ struct ProgramOverviewView: View {
     @Bindable var viewModel: ProgramViewModel
     /// The confirmed gym profile passed in from ContentView.
     let gymProfile: GymProfile?
+    /// Switches the root TabView to the Workout tab. Forwarded to ProgramDayDetailView
+    /// so its "Continue Workout" CTA can reuse Tab 1 instead of pushing a duplicate.
+    var onSwitchToWorkoutTab: (() -> Void)? = nil
 
     /// Controls the collapsed/expanded state of the pattern progress section.
     @State private var isPatternProgressExpanded = false
@@ -272,7 +275,8 @@ struct ProgramOverviewView: View {
                             phaseWeekNumber: phaseWeekNum,
                             phaseWeekTotal: phaseWeekTot,
                             liveTrainingDayId: liveTrainingDayId,
-                            liveSetSummary: liveSetSummary
+                            liveSetSummary: liveSetSummary,
+                            onSwitchToWorkoutTab: onSwitchToWorkoutTab
                         )
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
@@ -481,6 +485,9 @@ private struct WeekRowView: View {
     var liveTrainingDayId: UUID? = nil
     /// Aggregated set progress for the live session (nil when no session active).
     var liveSetSummary: LiveSetSummary? = nil
+    /// Forwarded to ProgramDayDetailView so the "Continue Workout" CTA can route
+    /// back to Tab 1's WorkoutView instead of pushing a duplicate under this stack.
+    var onSwitchToWorkoutTab: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -528,7 +535,8 @@ private struct WeekRowView: View {
                                 mesocycleCreatedAt: mesocycleCreatedAt,
                                 programId: mesocycleId,
                                 viewModel: viewModel,
-                                gymProfile: gymProfile
+                                gymProfile: gymProfile,
+                                onSwitchToWorkoutTab: onSwitchToWorkoutTab
                             )
                         } label: {
                             DayCardView(
