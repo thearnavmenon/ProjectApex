@@ -64,11 +64,6 @@ struct ContentView: View {
     /// True when crash recovery's paused day cannot be found anywhere in the mesocycle.
     @State private var showOrphanedRecoveryAlert: Bool = false
 
-    // MARK: - Tab badge state
-
-    @State private var sessionIsLive: Bool = false
-    @State private var pausedSessionExists: Bool = false
-
     // MARK: - Paused-session banner navigation
 
     /// True when the user taps "Resume" on PausedSessionBannerView — pushes
@@ -199,21 +194,6 @@ struct ContentView: View {
                 }
             }
         }
-        // Badge polling — drives the Tab 1 live/paused indicator.
-        // Runs as a separate .task so it is never short-circuited by the main setup task's
-        // early returns (isLive guard, onboarding skip, etc.).
-        .task {
-            while true {
-                let state = await deps.workoutSessionManager.sessionState
-                switch state {
-                case .idle, .sessionComplete, .error: sessionIsLive = false
-                default: sessionIsLive = true
-                }
-                pausedSessionExists = UserDefaults.standard.data(forKey: PausedSessionState.v2PersistenceKey) != nil
-                    || UserDefaults.standard.data(forKey: PausedSessionState.legacyPersistenceKey) != nil
-                try? await Task.sleep(nanoseconds: 500_000_000)
-            }
-        }
         .alert("Unfinished Workout", isPresented: $showCrashRecoveryAlert) {
             Button("Resume") {
                 guard let saved = crashRecoveryState,
@@ -298,9 +278,9 @@ struct ContentView: View {
     /// Returns nil (no badge) when idle. SwiftUI renders foregroundStyle on Text badges
     /// on iOS 16+; if the tint does not render the badge defaults to the system colour.
     private var workoutTabBadge: Text? {
-        if sessionIsLive {
+        if deps.liveSessionWatcher.isLive {
             return Text("●").foregroundStyle(Color(red: 0.25, green: 0.72, blue: 1.0))
-        } else if pausedSessionExists {
+        } else if deps.liveSessionWatcher.pausedSessionExists {
             return Text("●").foregroundStyle(Color(red: 1.0, green: 0.65, blue: 0.0))
         }
         return nil
@@ -369,7 +349,7 @@ struct ContentView: View {
                     // Paused-session banner — shown when a different day is paused and no
                     // session is currently live (i.e. user is on the PreWorkoutView screen).
                     .safeAreaInset(edge: .top) {
-                        if !sessionIsLive,
+                        if !deps.liveSessionWatcher.isLive,
                            let saved = PausedSessionState.load(),
                            saved.trainingDayId != day.id,
                            let found = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {

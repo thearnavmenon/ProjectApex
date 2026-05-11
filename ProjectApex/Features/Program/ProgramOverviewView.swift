@@ -28,10 +28,6 @@ struct ProgramOverviewView: View {
 
     /// Controls the collapsed/expanded state of the pattern progress section.
     @State private var isPatternProgressExpanded = false
-    /// The training day ID that has an active live session, nil when idle.
-    @State private var liveTrainingDayId: UUID? = nil
-    /// Aggregated set progress for the live session, updated every poll cycle.
-    @State private var liveSetSummary: LiveSetSummary? = nil
 
     var body: some View {
         ZStack {
@@ -71,32 +67,9 @@ struct ProgramOverviewView: View {
         .task {
             await viewModel.loadProgram()
         }
-        .task {
-            // Poll the actor every 2 seconds so the live-session card highlight
-            // and set-progress numbers update without requiring view navigation.
-            while !Task.isCancelled {
-                let activeId = await deps.workoutSessionManager.currentTrainingDayId
-                let state    = await deps.workoutSessionManager.sessionState
-                let isLive: Bool
-                switch state {
-                case .idle, .sessionComplete, .error: isLive = false
-                default: isLive = true
-                }
-                liveTrainingDayId = isLive ? activeId : nil
-                if isLive {
-                    let sets = await deps.workoutSessionManager.completedSets
-                    let last = sets.max(by: { $0.loggedAt < $1.loggedAt })
-                    liveSetSummary = LiveSetSummary(
-                        setsCompleted: sets.count,
-                        lastWeightKg: last?.weightKg,
-                        lastRepsCompleted: last?.repsCompleted
-                    )
-                } else {
-                    liveSetSummary = nil
-                }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
-        }
+        // Live-session highlight + set-progress now come from
+        // deps.liveSessionWatcher (a single 500ms poll owned by AppDependencies)
+        // so this view no longer runs its own loop against the manager actor.
     }
 
     // MARK: - Loading
@@ -271,8 +244,8 @@ struct ProgramOverviewView: View {
                             gymProfile: gymProfile,
                             phaseWeekNumber: phaseWeekNum,
                             phaseWeekTotal: phaseWeekTot,
-                            liveTrainingDayId: liveTrainingDayId,
-                            liveSetSummary: liveSetSummary
+                            liveTrainingDayId: deps.liveSessionWatcher.currentTrainingDayId,
+                            liveSetSummary: deps.liveSessionWatcher.liveSetSummary
                         )
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
