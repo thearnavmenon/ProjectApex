@@ -186,3 +186,54 @@ Incident-driven fixes following FB-012 (Anthropic 529 outage, 22 Apr 2026). All 
 - [x] P3-MR-F05: `FallbackLogRecord` — new `nonisolated struct FallbackLogRecord: Codable, Sendable` in `ProjectApex/Services/FallbackLogRecord.swift`; fields: `callSite`, `httpStatus`, `anthropicRequestId`, `reason`, `sessionId`, `timestamp`; emits via `os.Logger(subsystem: "com.projectapex", category: "Fallback")`; static call-site constants for all 5 LLM entry points; factory methods `from(callSite:error:sessionId:)` and `from(callSite:fallbackReason:sessionId:)` parse bracket-prefix metadata from `LLMProviderError.httpError` body; `AnthropicProvider.complete()` now encodes `[request-id:xxx][retry-after:N]` prefixes on non-2xx error bodies; emitted at every `.fallback` / error path in `AIInferenceService`, `SessionPlanService`, `ExerciseSwapService`, and `MemoryService`
 - [x] P3-MR-F06: Swap chat error classification — `ExerciseSwapService.sendMessage()` catch block replaced with three classified branches: `URLError.notConnectedToInternet / .networkConnectionLost` → "You appear to be offline…"; `LLMProviderError.httpError` with transient code → "The AI service is temporarily busy…"; all other errors → "Something went wrong…"; private `appendAssistantError(_:)` helper DRYs the `messages.append` pattern; `FallbackLogRecord` emitted in each branch
 - [x] P3-MR-DOC: Documentation — ARCHITECTURE.md §7.5 "Mid-Session Resilience" added (6 subsections: TransientRetryPolicy backoff schedule, 3-case resume routing, WAQ+Supabase merge strategy, RAG latency instrumentation, FallbackLogRecord schema, swap chat error classification); §13.4 Retry Policies table updated with new rows for all LLM retry scenarios
+
+---
+
+## Phase 5 — Trainee Model in Production
+
+[PRD #71](https://github.com/thearnavmenon/ProjectApex/issues/71). Persistent structured behavioural model per user, server-side, consulted on every prescription. Supersedes the Phase 1 service trio (StagnationService, VolumeValidationService, PatternPhaseService) and the per-inference reconstruction of user state from raw set logs. ADR-0005 is the architectural anchor; ADR-0006 (server-side idempotency), ADR-0008 (late-arrival watermark), ADR-0013 (two-stage classifier isolation) are the load-bearing companions.
+
+### 2A — Rule modules + orchestrator (server-side)
+
+- [x] P5-T01: `supabase/functions/_shared/*` — pure rule modules. ewma-engine (Epley × EWMA per exercise, ADR-0005), stimulus-classifier (Q3 intent/reps/rpe → NM/metabolic dimension), recovery-curve (ADR-0010 tau curves with clock-skew clamp), plateau-verdict (hybrid two-track e1RM × volume-load, ADR-0009), prescription-accuracy (rep-error + gap-bucket stratification, ADR-0014), transfer-regression (log-log fit + Spearman flag SE-widening, Q10), fatigue-interaction (cross-pattern session-pair confidence, ADR-0005), phase-advance (per-pattern plateau-aware cyclic advance, ADR-0011), transition-mode-expiry (cadence-aware composition, ADR-0015), global-phase-advance (ADR-0012), note-classifier (ADR-0013 Stage 2 LLM-driven form-degradation + limitation lifecycle). Each module is unit-tested in isolation in its `*_test.ts`
+- [x] P5-T02: A12 (#83) — Stage 1 orchestrator — `applySession` in `supabase/functions/update-trainee-model/index.ts`. Single transaction: idempotency PK insert → load + FOR UPDATE → watermark check → rule pipeline → UPSERT. Cached snapshot return on PK conflict; late-arrival refusal with event emit on watermark fail
+- [x] P5-T03: A13 (#84) — Stage 2 classifier driver — `runStage2` second transaction. Failure-isolated per ADR-0013 ("HTTP returns after Stage 1 commits; Stage 2 failure emits `classifier_failed` and swallows"). Composes form-degradation lifecycle + limitation lifecycle from `note-classifier`
+
+### 2 wiring — integration audit recovery (2026-05-09 → 2026-05-10)
+
+First end-to-end replay attempt for G1 surfaced 7 unwired rule modules: the HTTP path was a Phase 1 stub, unit tests passed locally, production silently no-op'd. Audit doc + 10 wiring slices closed the gap.
+
+- [x] P5-W01: A14 (#109) — wire `handleRequest` → `applySession`; bootstrap UPSERT on first apply (replaces UPDATE that silently no-op'd on empty `trainee_models`); JSONB encoding via `tx.json()` (replaces `${JSON.stringify(obj)}::jsonb` double-encoding pattern)
+- [x] P5-W02: Phase 2 integration audit doc (#112) — `docs/phase-2-integration-audit-2026-05-10.md` cataloguing the 7 cold paths + revised slice plan
+- [x] P5-W03: A15 (#110) — pattern profile bootstrap from `session_payload.set_logs[]`; `_shared/exercise-library.ts` port (71-entry exercise_id → MovementPattern mirror of Swift `ExerciseLibrary.swift`)
+- [x] P5-W04: A16 (#113) — end-to-end smoke test (`smoke_test.ts` POSTs over HTTP, reads back via SQL) + CI Edge Function Tests (Deno) job in `.github/workflows/ci.yml`. Growing-oracle pattern: each subsequent wiring slice extends the smoke's assertion set
+- [x] P5-W05: A17 (#116) — wire `ewma-engine` → `ExerciseProfile.e1rmCurrent`; `applyPerExerciseRules` helper bootstraps missing exercises with ADR-0005 defaults
+- [x] P5-W06: A18 (#118) — wire `stimulus-classifier` → `RecoveryProfile.last*StimulusAt`; per-set timestamp bump on neuromuscular / metabolic / both classifications
+- [x] P5-W07: A19 (#120) — wire `recovery-curve` → `RecoveryProfile.*Readiness`; reads bumped timestamps, computes curve at `incomingLoggedAt`; null timestamp → readiness 1.0
+- [x] P5-W08: A20 (#122) — wire `plateau-verdict` → `PatternProfile.trend`; new `weeklyVolumeLoadHistory: []` bootstrap field; ISO-week bucketing for volume-load track; per-pattern e1rm history derived on-the-fly from post-A17 `topSets`
+- [x] P5-W09: A21 (#124) — wire `prescription-accuracy` aggregator → `prescriptionAccuracy[pattern][intent]` per-cell accumulators; `shouldContribute` 6-criteria filter; sliding 30-obs window with per-bucket sub-array sync
+- [x] P5-W10: A22 (#126) — wire `transfer-regression` → `transferRegressions[from][to]`; v1 alpha-cohort same-session pair detection; NaN-guard for n<2 placeholder fit
+- [x] P5-W11: A23 (#128) — wire `fatigue-interaction` → `fatigueInteractions[]` + `lastSessionPatternPerformance[]`; pre-A17 exercises snapshot preserved for performanceDeltaPct compute
+
+### Verification gate
+
+- [x] P5-G01: G1 verification gate (#85) — replay scaffold preserved at `scripts/phase2-verification-gate/` as v2.x reference artifact (replay.ts, run-comparisons.ts, extract-legacy-outputs.py, README); fixtures gitignored + deleted locally per cleanup obligation. Verdict report at `docs/phase-2-verification-gate-report.md`: **PASS-CONDITIONAL** — Phase 2 production HTTP path wired + smoke-tested end-to-end; the literal cross-cohort comparison gate (3 automated comparisons + 5 manual coaching-judgment items) reframed as 10 v2.x watch-items contingent on alpha cohort growing beyond n=1
+
+### Post-G1 hygiene
+
+- [x] P5-H01: Stage 2 JSONB double-encoding fix (`runStage2` writeback) — same pattern A14 fixed in main UPSERT, still latent in Stage 2; swapped to `tx.json()`; 5 test-seed sites in `orchestrator_test.ts` converted in tandem (were masking the production bug via `parseJsonbColumn` defensive parse)
+- [x] P5-H02: Stale "Phase 1 stub returns {}" comments in `TraineeModelUpdateJob.swift` — A14 removed the stub; comments updated to post-A14 behavior
+- [x] P5-H03: `FallbackLogRecord` WAQ-enqueue TODO clarified — WAQ now generally available; reframed as a slice candidate when centralised diagnostics surface is needed
+- [x] P5-H04: Flaky `test_retryPath_permanentErrors_failsFastWithoutRetry` — wall-clock `elapsed < 0.5s` assertion (flaked at ~1.0s on loaded CI runners) replaced with provider call-count assertion. Mock provider converted to thread-safe class with `callCount: Int`
+- [x] P5-H05: ARCHITECTURE.md staleness banner (last reviewed 2026-03-25, pre-Phase-2) — directs readers to current Phase 2 sources (README, ADRs, audit doc, G1 report); old content preserved as Phase 1 reference
+- [x] P5-H06: Repo presentation pass — first-time README, charcoal + signal-yellow visual identity, ASCII architecture diagram, ADR-anchored architecture notes, status table; `NOTICE.md` (all rights reserved); `gh repo edit` description + 9 topics; 3 top-level orphan ruby script duplicates removed
+- [x] P5-H07: `.DS_Store` removed from disk (gitignored but lingering)
+
+### 2B — Legacy → trainee cutover (pending — gated on alpha cohort training data accrual)
+
+Trainee model now populates on every session-apply; iOS prompts still consume the legacy services. B1–B4 swap the consumers, then delete legacy. Empirically gated: plateau-verdict needs ≥3 e1RM sessions per pattern + 4 weekly volume-load aggregates before it can produce `.plateaued`/`.declining`. With n=1 alpha, ~3 weeks of consistent training before non-progressing trend values exist to validate against.
+
+- [ ] P5-B01: B1 (#86) — stagnation cutover — replace `stagnation_signals` consumption in `SystemPrompt_Inference.txt` (v4.9 → v5.0) + `SystemPrompt_SessionPlan.txt` (v1.x → v2.0) with `trainee_model_digest.per_pattern_summary[].trend` + `per_muscle_summary[].stagnation_status`; surface `consecutiveForceDeloadsOnPattern` ≥ 2 coaching cue; delete `StagnationService.swift` + `StagnationServiceTests.swift`; remove call sites in `WorkoutSessionManager` + `SessionPlanService`; clean `apex.stagnation_signals` UserDefaults key on app launch; add prompt-regression golden suite
+- [ ] P5-B02: B2 (#87) — volume cutover — replace `volume_deficits` consumption with `per_muscle_summary[].volume_deficit`; delete `VolumeValidationService.swift`; same prompt-version-bump pattern as B1
+- [ ] P5-B03: B3 (#88) — pattern phase cutover — replace `pattern_phase_states` consumption with `per_pattern_summary[].current_phase` + `current_phase_session_count`; delete `PatternPhaseService.swift`; preserve force-deload-as-transition signal per ADR-0011
+- [ ] P5-B04: B4 (#89) — full digest collapse + final prompt v5.0/v2.0 cleanup — WorkoutContext payload restructuring around the digest projection; prescription-accuracy gap-bucket-divergence prompt rule; transfer-coefficient consumption rule; `lastGlobalPhaseAdvanceFiredAtSessionCount` detection; calibration review UI (separate slice, may defer)
