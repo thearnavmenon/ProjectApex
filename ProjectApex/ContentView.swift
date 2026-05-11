@@ -344,7 +344,15 @@ struct ContentView: View {
                             // Persistent skip — advances programme_day_index, records skippedAt.
                             programViewModel?.markDaySkipped(dayId: day.id, weekId: week.id)
                         },
-                        onCloseToTab0: { selectedTab = 0 }
+                        onCloseToTab0: { selectedTab = 0 },
+                        onResumeStateConsumed: {
+                            // One-shot — clear so subsequent tab swaps into Tab 1 don't re-apply
+                            // the same paused state on top of the now-live (or post-error)
+                            // session. crashResumeDay stays valid until the session ends
+                            // (cleared in onSessionDismissed above) because workoutTab still
+                            // needs it to select the correct trainingDay parameter.
+                            crashResumeToPass = nil
+                        }
                     )
                     // Paused-session banner — shown when a different day is paused and no
                     // session is currently live (i.e. user is on the PreWorkoutView screen).

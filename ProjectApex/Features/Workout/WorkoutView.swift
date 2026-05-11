@@ -80,6 +80,11 @@ struct WorkoutView: View {
     /// Called when the user taps the × close button on the Tab 1 entry path (idle only).
     /// Switches the tab bar to Tab 0 without touching actor state.
     var onCloseToTab0: (() -> Void)? = nil
+    /// Fires after WorkoutView has applied `resumeState` (success or error). ContentView
+    /// uses this to clear its `crashResumeToPass` one-shot so a later Tab 1 re-entry
+    /// (e.g. after the user pauses, swaps to Tab 0, then back) doesn't re-apply the
+    /// same resume on top of an already-recovered session.
+    var onResumeStateConsumed: (() -> Void)? = nil
 
     // MARK: - Body
 
@@ -153,9 +158,11 @@ struct WorkoutView: View {
                     await deps.workoutSessionManager.flushWriteAheadQueue()
                     await deps.workoutSessionManager.abandonSession(sessionId: resume.sessionId)
                     vm.sessionState = .error("We couldn't find your previous session — it may have been reset. Your logged sets have been saved.")
+                    onResumeStateConsumed?()
                     return
                 }
                 performResume(resume, vm: vm)
+                onResumeStateConsumed?()
             } else if let saved = PausedSessionState.load() {
                 guard saved.trainingDayId == trainingDay.id else {
                     // Mismatch: a paused session exists but doesn't match this training day.
