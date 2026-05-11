@@ -83,8 +83,7 @@ struct ContentView: View {
                 if let vm = programViewModel {
                     ProgramOverviewView(
                         viewModel: vm,
-                        gymProfile: confirmedProfile,
-                        onSwitchToWorkoutTab: { selectedTab = 1 }
+                        gymProfile: confirmedProfile
                     )
                 } else {
                     loadingPlaceholder
@@ -122,6 +121,7 @@ struct ContentView: View {
             }
             .tag(3)
         }
+        .environment(\.switchToTab, { selectedTab = $0 })
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView { completedProfile in
@@ -393,8 +393,7 @@ struct ContentView: View {
                                 mesocycleCreatedAt: mesocycle.createdAt,
                                 programId: mesocycle.id,
                                 viewModel: vm,
-                                gymProfile: confirmedProfile,
-                                onSwitchToWorkoutTab: { selectedTab = 1 }
+                                gymProfile: confirmedProfile
                             )
                             .environment(deps)
                         }
@@ -576,6 +575,25 @@ struct ContentView: View {
             // Success — switch to Program tab so user sees the new program
             selectedTab = 0
         }
+    }
+}
+
+// MARK: - Cross-tab navigation environment
+
+/// Closure that switches the root TabView's selection. Injected by ContentView so
+/// any descendant view can request a tab change (e.g. ProgramDayDetailView routing
+/// a live-session "Continue Workout" CTA back to Tab 1) without prop-drilling a
+/// dedicated callback through every intermediate view. Tab indices follow the
+/// declaration order in ContentView (0 = Program, 1 = Workout, 2 = Progress,
+/// 3 = Settings). Defaults to a no-op so previews and tests work without setup.
+private struct SwitchToTabKey: EnvironmentKey {
+    static let defaultValue: (Int) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var switchToTab: (Int) -> Void {
+        get { self[SwitchToTabKey.self] }
+        set { self[SwitchToTabKey.self] = newValue }
     }
 }
 
