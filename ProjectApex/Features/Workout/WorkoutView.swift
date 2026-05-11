@@ -155,30 +155,25 @@ struct WorkoutView: View {
                     vm.sessionState = .error("We couldn't find your previous session — it may have been reset. Your logged sets have been saved.")
                     return
                 }
-                vm.resumeSession(
-                    pausedState: resume,
-                    trainingDay: trainingDay,
-                    supabase: deps.supabaseClient
-                )
+                performResume(resume, vm: vm)
             } else if let saved = PausedSessionState.load() {
-                if saved.trainingDayId == trainingDay.id {
-                    // Crash recovery path — user accepted the recovery alert in ContentView.
-                    // The PausedSessionState is still present (ContentView only clears it on Abandon).
-                    // Silently resume so the user lands directly in the active session.
-                    let isIdle = await deps.workoutSessionManager.sessionState == .idle
-                    if isIdle {
-                        vm.resumeSession(
-                            pausedState: saved,
-                            trainingDay: trainingDay,
-                            supabase: deps.supabaseClient
-                        )
-                    }
-                } else {
+                guard saved.trainingDayId == trainingDay.id else {
                     // Mismatch: a paused session exists but doesn't match this training day.
                     // ContentView normally handles this via its routing logic (Path A);
                     // this branch is a safety net for edge cases ContentView didn't catch.
                     mismatchSavedState = saved
                     showMismatchRecoveryAlert = true
+                    return
+                }
+                // Crash recovery path — user accepted the recovery alert in ContentView.
+                // The PausedSessionState is still present (ContentView only clears it on Abandon).
+                // Silently resume so the user lands directly in the active session. The
+                // isIdle gate prevents double-resumption when the actor was already revived
+                // by an earlier path (e.g. ContentView's crash-recovery alert fired Path A
+                // and the .task here is now re-firing post-navigation).
+                let isIdle = await deps.workoutSessionManager.sessionState == .idle
+                if isIdle {
+                    performResume(saved, vm: vm)
                 }
             }
         }
@@ -419,6 +414,21 @@ struct WorkoutView: View {
 
     private var setCompleteTransition: AnyTransition {
         reduceMotion ? .opacity : .apexSetComplete
+    }
+
+    // MARK: - Resume helper
+
+    /// Single resume call so the two resume paths (explicit `resumeState` from
+    /// ContentView's crash-recovery alert, and the fallback `PausedSessionState.load()`
+    /// branch) can't drift apart on the argument list. Failure handling stays
+    /// per-path because the two flows surface different UI (error state vs.
+    /// mismatch alert).
+    private func performResume(_ state: PausedSessionState, vm: WorkoutViewModel) {
+        vm.resumeSession(
+            pausedState: state,
+            trainingDay: trainingDay,
+            supabase: deps.supabaseClient
+        )
     }
 
     // MARK: - Current exercise (for SessionPlanSheet highlight)
