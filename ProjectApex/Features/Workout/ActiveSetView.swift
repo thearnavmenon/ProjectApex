@@ -217,6 +217,17 @@ struct ActiveSetView: View {
                     .tracking(0.8)
                     .lineLimit(1)
                 Spacer()
+                Button {
+                    viewModel.showSessionPlanSheet = true
+                } label: {
+                    Image(systemName: "list.bullet.clipboard")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Today's plan")
+                .accessibilityHint("Shows the planned exercises and what you've logged so far")
                 Menu {
                     Button {
                         viewModel.requestExerciseSwap()

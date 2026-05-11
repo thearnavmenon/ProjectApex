@@ -74,6 +74,11 @@ final class WorkoutViewModel {
     /// Controls the exercise swap chat sheet (P3-T10).
     var showExerciseSwapSheet: Bool = false
 
+    /// Controls the session-plan sheet — shown when the user wants planned reps
+    /// alongside what they've logged so far. Toggled from ActiveSetView and
+    /// RestTimerView via the clipboard icon next to the ellipsis menu.
+    var showSessionPlanSheet: Bool = false
+
     /// Available weight hint for the current exercise's equipment type.
     /// Non-nil only when GymFactStore has at least one confirmed correction for that equipment type.
     /// Format: "Available: 40kg · 42.5kg · 45kg · 47.5kg · 50kg"

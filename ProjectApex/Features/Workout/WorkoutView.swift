@@ -237,6 +237,20 @@ struct WorkoutView: View {
                     .presentationCornerRadius(24)
             }
         }
+        .sheet(isPresented: Binding(
+            get: { viewModel?.showSessionPlanSheet ?? false },
+            set: { viewModel?.showSessionPlanSheet = $0 }
+        )) {
+            if let vm = viewModel {
+                SessionPlanSheet(
+                    trainingDay: trainingDay,
+                    completedSets: vm.completedSets,
+                    currentExerciseId: currentExerciseId(in: vm.sessionState)
+                )
+                .presentationDetents([.medium, .large])
+                .presentationCornerRadius(24)
+            }
+        }
         .alert("Session Mismatch", isPresented: $showMismatchRecoveryAlert) {
             Button("Start Fresh") {
                 // Clear the orphaned sentinel so the user can start a new session.
@@ -405,6 +419,17 @@ struct WorkoutView: View {
 
     private var setCompleteTransition: AnyTransition {
         reduceMotion ? .opacity : .apexSetComplete
+    }
+
+    // MARK: - Current exercise (for SessionPlanSheet highlight)
+
+    private func currentExerciseId(in state: SessionState) -> String? {
+        switch state {
+        case .active(let exercise, _):           return exercise.exerciseId
+        case .resting(let nextExercise, _):      return nextExercise.exerciseId
+        case .exerciseComplete(let exercise, _): return exercise.exerciseId
+        case .idle, .preflight, .sessionComplete, .error: return nil
+        }
     }
 
     // MARK: - State identity for animation transitions
