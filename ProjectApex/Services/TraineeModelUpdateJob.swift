@@ -20,8 +20,10 @@
 //     FallbackLogRecord + os.Logger; item removed from WAQ).
 //   • HTTP 200 with decodable TraineeModel → snapshot saved to local
 //     store; .success returned.
-//   • HTTP 200 with undecodable model (Phase 1 stub returns {}) →
-//     snapshot not updated; .success returned (server acknowledged).
+//   • HTTP 200 with undecodable model → snapshot not updated; .success
+//     returned (server acknowledged). Defensive: rare path post-A14
+//     since the Phase 1 stub no longer returns {} — applySession now
+//     produces a populated model_json on every in-order apply.
 //   • HTTP 200 with missing trainee_model key → .permanentFailure
 //     (unexpected response shape; item removed to avoid replay loop).
 //
@@ -176,9 +178,10 @@ final class TraineeModelUpdateJob {
             return .success
         }
 
-        // Try to decode the model value. Phase 1 stub returns {} — that won't
-        // decode as a TraineeModel (required fields missing), which is expected.
-        // Either way the server returned 200, so treat as success.
+        // Try to decode the model value. Post-A14 the server returns a
+        // populated trainee_model on every in-order apply; an undecodable
+        // model is defensive cover for unexpected shapes. Either way the
+        // server returned 200, so treat as success.
         if let modelData = try? JSONSerialization.data(withJSONObject: modelRaw) {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601

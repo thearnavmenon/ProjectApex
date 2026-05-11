@@ -880,7 +880,7 @@ orchestratorTest(
     };
     await sql`
       INSERT INTO public.trainee_models (user_id, model_json)
-      VALUES (${userId}, ${JSON.stringify(partialBlob)}::jsonb)
+      VALUES (${userId}, ${sql.json(partialBlob)})
     `;
     const sessionId = crypto.randomUUID();
 
@@ -1378,7 +1378,7 @@ orchestratorTest(
     };
     await sql`
       INSERT INTO public.trainee_models (user_id, model_json)
-      VALUES (${userId}, ${JSON.stringify(seedModel)}::jsonb)
+      VALUES (${userId}, ${sql.json(seedModel)})
     `;
 
     const sessionId = crypto.randomUUID();
@@ -1471,7 +1471,7 @@ orchestratorTest(
     };
     await sql`
       INSERT INTO public.trainee_models (user_id, model_json)
-      VALUES (${userId}, ${JSON.stringify(seedModel)}::jsonb)
+      VALUES (${userId}, ${sql.json(seedModel)})
     `;
 
     const sessionId = crypto.randomUUID();
@@ -1541,7 +1541,7 @@ orchestratorTest(
     };
     await sql`
       INSERT INTO public.trainee_models (user_id, model_json, session_count)
-      VALUES (${userId}, ${JSON.stringify(seedModel)}::jsonb, 6)
+      VALUES (${userId}, ${sql.json(seedModel)}, 6)
     `;
 
     const sessionId = crypto.randomUUID();
@@ -1596,7 +1596,7 @@ orchestratorTest(
     const futureWatermark = "2026-12-31T23:59:59.000Z";
     await sql`
       INSERT INTO public.trainee_models (user_id, model_json, last_applied_logged_at, session_count)
-      VALUES (${userId}, ${JSON.stringify(raw)}::jsonb, ${futureWatermark}::timestamptz, 24)
+      VALUES (${userId}, ${sql.json(raw)}, ${futureWatermark}::timestamptz, 24)
     `;
     const sessionId = crypto.randomUUID();
 

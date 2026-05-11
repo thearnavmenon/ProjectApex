@@ -5,8 +5,10 @@
 // (non-AI) result, either due to a transient error, timeout, or encoding failure.
 //
 // Emission target: os.Logger (subsystem: "com.projectapex", category: "Fallback").
-// TODO: Also enqueue to Supabase `fallback_logs` table via WriteAheadQueue once
-//       WAQ is injected into the relevant services.
+// Future: also enqueue to a Supabase `fallback_logs` table via WriteAheadQueue
+// for centralised observability. WAQ is now generally available across the
+// app; the table + flush handler are the remaining work. File as a slice
+// when the centralised diagnostics surface is needed.
 //
 // ISOLATION NOTE: nonisolated struct — callable from any actor context.
 

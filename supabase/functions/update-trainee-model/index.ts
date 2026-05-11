@@ -1763,10 +1763,14 @@ async function runStage2(args: {
       );
       newModelJson.lastClassifiedNoteCreatedAt = maxCreatedAt.toISOString();
 
-      // Step 7: write back.
+      // Step 7: write back. Use tx.json(...) per A14's fix — the older
+      // `${JSON.stringify(obj)}::jsonb` pattern double-encodes via
+      // postgres.js, storing the model as a scalar JSON string instead
+      // of a JSONB object. parseJsonbColumn masks this on read, but the
+      // storage shape is wrong and external tooling sees garbage.
       await tx`
         UPDATE public.trainee_models
-        SET model_json = ${JSON.stringify(newModelJson)}::jsonb,
+        SET model_json = ${tx.json(newModelJson)},
             updated_at = NOW()
         WHERE user_id = ${args.userId}
       `;

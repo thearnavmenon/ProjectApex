@@ -4,6 +4,17 @@
 
 ---
 
+> **⚠ Staleness notice (2026-05-11).** This document was last reviewed pre Phase 2. Sections describing the Phase 1 service trio — `StagnationService`, `VolumeValidationService`, `PatternPhaseService` — and the in-app derivation of trends from raw set logs are superseded by the persistent trainee model architecture (ADR-0005 and the Phase 2 rule modules). For the current shape, read these in order:
+>
+> - [`README.md`](README.md) — current architecture summary
+> - [`docs/adr/`](docs/adr/) — 16 architectural decision records (ADR-0005 onwards is Phase 2)
+> - [`docs/phase-2-integration-audit-2026-05-10.md`](docs/phase-2-integration-audit-2026-05-10.md) — the cold path audit that re-scoped Phase 2 wiring
+> - [`docs/phase-2-verification-gate-report.md`](docs/phase-2-verification-gate-report.md) — G1 verdict and v2.x watch-items
+>
+> The pre Phase 2 contents below remain useful as a Phase 1 reference (legacy services, UI/UX spec, gym scanner module). A full rewrite is a separate piece of work.
+
+---
+
 # PART 1: TECHNICAL DESIGN DOCUMENT
 
 ## Table of Contents

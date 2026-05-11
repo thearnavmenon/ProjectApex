@@ -63,9 +63,17 @@ private struct TransientThrowingMockProvider: LLMProvider {
 
 /// Always throws a permanent HTTP error (401 auth). Per ADR-0007 this
 /// classifies as permanent so the retry policy fails fast without consuming
-/// the backoff schedule.
-private struct PermanentThrowingMockProvider: LLMProvider {
+/// the backoff schedule. Exposes `callCount` so tests can assert no retry
+/// occurred without depending on wall-clock thresholds (which flake on
+/// loaded CI runners).
+private final class PermanentThrowingMockProvider: LLMProvider, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "PermanentThrowingMockProvider.callCount")
+    private var _callCount: Int = 0
+    var callCount: Int {
+        queue.sync { _callCount }
+    }
     func complete(systemPrompt: String, userPayload: String) async throws -> String {
+        queue.sync { _callCount += 1 }
         throw LLMProviderError.httpError(statusCode: 401, body: "Invalid API key")
     }
 }
@@ -257,15 +265,14 @@ final class AIInferenceSpikeTests: XCTestCase {
             maxRetries: 2
         )
 
-        let start = Date()
         let result = await service.prescribe(context: InferenceSpike.minimalWorkoutContext())
-        let elapsed = Date().timeIntervalSince(start)
 
-        // No retry sleep — the first retry sleep is 1 s base + up to 0.5 s
-        // jitter. A correctly classified permanent error skips all sleeps;
-        // budget 0.5 s for encode + provider call + decode + dispatch.
-        XCTAssertLessThan(elapsed, 0.5,
-            "Permanent errors must fail fast without retry backoff; elapsed=\(elapsed)s suggests retry happened.")
+        // Assert no retry happened via call count rather than wall-clock
+        // elapsed. CI runners are loaded and dispatch overhead can push
+        // wall-clock thresholds across the line; the invariant we actually
+        // care about is "the provider was called exactly once."
+        XCTAssertEqual(provider.callCount, 1,
+            "Permanent errors must fail fast without retry; provider was called \(provider.callCount) times.")
 
         switch result {
         case .success:
