@@ -103,6 +103,10 @@ struct PatternSummary: Codable, Sendable, Hashable {
     /// doesn't need to re-derive transition-mode state at prompt-assembly
     /// time.
     var inTransitionMode: Bool
+    /// Per ADR-0011 §(d): counter increments on force-deload, resets on
+    /// natural progressing-advance. Surfaced so the LLM can emit exercise-
+    /// rotation / programme-rebuild cues when the counter reaches 2.
+    var consecutiveForceDeloadsOnPattern: Int
 
     init(profile: PatternProfile, asOf reference: Date = Date()) {
         self.pattern         = profile.pattern
@@ -111,6 +115,7 @@ struct PatternSummary: Codable, Sendable, Hashable {
         self.rpeOffset       = profile.rpeOffset
         self.trend           = profile.trend
         self.inTransitionMode = profile.inTransitionMode(asOf: reference)
+        self.consecutiveForceDeloadsOnPattern = profile.consecutiveForceDeloadsOnPattern
     }
 }
 

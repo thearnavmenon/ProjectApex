@@ -301,6 +301,39 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(digest.disruptedPatterns, [.squat])
     }
 
+    // MARK: ─── B1: PatternSummary surfaces consecutiveForceDeloadsOnPattern ──
+    //
+    // Per ADR-0011 §(d), the digest exposes a per-pattern counter that
+    // increments on force-deload and resets on natural progressing-advance.
+    // The system prompts read it to surface exercise-rotation / programme-
+    // rebuild coaching cues when the counter reaches 2 (ADR-0011 watch-item).
+
+    func test_digest_perPatternSummary_includesConsecutiveForceDeloadsOnPattern() {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.consecutiveForceDeloadsOnPattern = 2
+        model.patterns[.squat] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let summary = try! XCTUnwrap(digest.perPatternSummary.first { $0.pattern == .squat })
+
+        XCTAssertEqual(summary.consecutiveForceDeloadsOnPattern, 2)
+    }
+
+    func test_digest_perPatternSummary_consecutiveForceDeloadsOnPattern_roundTrips() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.consecutiveForceDeloadsOnPattern = 3
+        model.patterns[.squat] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let encoded = try JSONEncoder().encode(digest)
+        let decoded = try JSONDecoder().decode(TraineeModelDigest.self, from: encoded)
+        let summary = try XCTUnwrap(decoded.perPatternSummary.first { $0.pattern == .squat })
+
+        XCTAssertEqual(summary.consecutiveForceDeloadsOnPattern, 3)
+    }
+
     // MARK: ─── Cycle 8: empty-input edge cases ───────────────────────────────
 
     func test_digest_emptyModel_yieldsEmptyCollections() {
