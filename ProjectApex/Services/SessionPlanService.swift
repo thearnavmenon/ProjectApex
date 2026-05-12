@@ -324,6 +324,10 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
     /// Phase-1-Skip: gap-awareness context. Nil only if assembly fails unexpectedly;
     /// in practice this is always provided for every session generation call.
     let temporalContext: TemporalContext?
+    /// Trainee-model projection (B1 / #86). Carries per-pattern trend +
+    /// consecutiveForceDeloadsOnPattern that supersede stagnationSignals.
+    /// Nil when the local store has no model for this user yet.
+    let traineeModelDigest: TraineeModelDigest?
 
     enum CodingKeys: String, CodingKey {
         case userId              = "user_id"
@@ -341,6 +345,7 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
         case stagnationSignals   = "stagnation_signals"
         case volumeDeficits      = "volume_deficits"
         case temporalContext     = "temporal_context"
+        case traineeModelDigest  = "trainee_model_digest"
     }
 }
 
@@ -439,16 +444,19 @@ actor SessionPlanService {
     private let provider: any LLMProvider
     private let memoryService: MemoryService
     private let supabaseClient: SupabaseClient
+    private let traineeModelService: TraineeModelService?
     private(set) var isGenerating: Bool = false
 
     init(
         provider: any LLMProvider,
         memoryService: MemoryService,
-        supabaseClient: SupabaseClient
+        supabaseClient: SupabaseClient,
+        traineeModelService: TraineeModelService? = nil
     ) {
         self.provider = provider
         self.memoryService = memoryService
         self.supabaseClient = supabaseClient
+        self.traineeModelService = traineeModelService
     }
 
     // MARK: - Public API
@@ -543,9 +551,12 @@ actor SessionPlanService {
             volumeLandmark: weekVolumeLandmark(for: week.phase, weekNumber: week.weekNumber)
         )
 
-        // Load persisted signals from UserDefaults (written post-session by WorkoutSessionManager)
-        let stagnationSignals = StagnationService.load()
-        let volumeDeficits    = VolumeValidationService.load()
+        // Load persisted signals from UserDefaults (written post-session by WorkoutSessionManager).
+        // stagnationSignals is starved here (B1 / #86) — the prompt now consumes
+        // traineeModelDigest.per_pattern_summary[].trend instead. Field is removed
+        // entirely in B1.24; passing [] keeps the build green during the cutover.
+        let volumeDeficits = VolumeValidationService.load()
+        let traineeModelDigest = await traineeModelService?.digest()
 
         let request = SessionPlanRequest(
             userId: userId.uuidString,
@@ -560,9 +571,10 @@ actor SessionPlanService {
             liftHistory: liftHistory,
             weekFatigue: fatigue,
             ragMemory: ragMemory,
-            stagnationSignals: stagnationSignals,
+            stagnationSignals: [],
             volumeDeficits: volumeDeficits,
-            temporalContext: temporalContext
+            temporalContext: temporalContext,
+            traineeModelDigest: traineeModelDigest
         )
 
         let encoder = JSONEncoder()
