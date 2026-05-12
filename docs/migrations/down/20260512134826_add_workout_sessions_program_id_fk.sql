@@ -1,0 +1,27 @@
+-- Reverse migration documentation for 20260512134826_add_workout_sessions_program_id_fk.sql
+-- (documentation only; not auto-applied — operator runs manually if needed)
+--
+-- Rollback for the workout_sessions.program_id FK + orphan-null cleanup.
+--
+-- Step 1: Drop the FK constraint.
+--
+--   ALTER TABLE public.workout_sessions
+--     DROP CONSTRAINT IF EXISTS workout_sessions_program_id_fkey;
+--
+-- The forward migration was idempotent (CREATE-IF-NOT-EXISTS), so DROP-IF-
+-- EXISTS is the symmetric reverse.
+--
+-- Step 2: Restoring null'd orphan program_ids is NOT recoverable from the
+-- database alone. If a future operator wants the pre-migration state back
+-- with the original (dangling) program_ids in place, they need a backup of
+-- workout_sessions taken BEFORE the forward migration ran. Sketch:
+--
+--   UPDATE public.workout_sessions ws
+--   SET program_id = bk.program_id
+--   FROM <backup_table> bk
+--   WHERE ws.id = bk.id AND ws.program_id IS NULL AND bk.program_id IS NOT NULL;
+--
+-- In practice the orphan-null'ing is a forward-only safety improvement: the
+-- session row stays intact, only its dangling reference is cleared. Rolling
+-- the null'ing back would re-introduce the data-integrity gap that motivated
+-- this migration in the first place — not recommended.
