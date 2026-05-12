@@ -1,0 +1,126 @@
+// Project Apex — update-trainee-goal Edge Function — validator tests.
+//
+// #147: validates the request shape before the SQL write runs. Integration
+// tests against a real DB are covered separately (the orchestrator_test.ts
+// pattern from update-trainee-model could be ported when needed); this
+// file exercises the validator in isolation.
+//
+// Run locally:
+//   deno test supabase/functions/update-trainee-goal/index_test.ts
+
+import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { validateRequest } from "./index.ts";
+
+const VALID_USER_ID = "11111111-1111-4111-8111-111111111111";
+const VALID_GOAL = {
+  statement: "Hypertrophy (muscle size)",
+  focusAreas: [],
+  updatedAt: "2026-05-12T10:00:00.000Z",
+};
+
+function baseRequest(overrides: Record<string, unknown> = {}) {
+  return { user_id: VALID_USER_ID, goal: VALID_GOAL, ...overrides };
+}
+
+Deno.test("validateRequest_happy_path_returns_ok", () => {
+  const result = validateRequest(baseRequest());
+  assertEquals("error" in result, false);
+});
+
+Deno.test("validateRequest_non_object_body_returns_400", () => {
+  const r1 = validateRequest(null);
+  const r2 = validateRequest([1, 2, 3]);
+  const r3 = validateRequest("string");
+  assertEquals("error" in r1, true);
+  assertEquals("error" in r2, true);
+  assertEquals("error" in r3, true);
+});
+
+Deno.test("validateRequest_missing_user_id_returns_400", () => {
+  const result = validateRequest({ goal: VALID_GOAL });
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("user_id"), true);
+});
+
+Deno.test("validateRequest_invalid_user_id_uuid_returns_400", () => {
+  const result = validateRequest({ user_id: "not-a-uuid", goal: VALID_GOAL });
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("user_id"), true);
+});
+
+Deno.test("validateRequest_missing_goal_returns_400", () => {
+  const result = validateRequest({ user_id: VALID_USER_ID });
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("goal"), true);
+});
+
+Deno.test("validateRequest_goal_missing_statement_returns_400", () => {
+  const result = validateRequest({
+    user_id: VALID_USER_ID,
+    goal: { focusAreas: [], updatedAt: "2026-05-12T10:00:00Z" },
+  });
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("statement"), true);
+});
+
+Deno.test("validateRequest_goal_focusAreas_not_array_returns_400", () => {
+  const result = validateRequest({
+    user_id: VALID_USER_ID,
+    goal: {
+      statement: "x",
+      focusAreas: "not-an-array",
+      updatedAt: "2026-05-12T10:00:00Z",
+    },
+  });
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("focusAreas"), true);
+});
+
+Deno.test("validateRequest_goal_focusAreas_non_string_entry_returns_400", () => {
+  const result = validateRequest({
+    user_id: VALID_USER_ID,
+    goal: {
+      statement: "x",
+      focusAreas: ["legs", 42, "back"],
+      updatedAt: "2026-05-12T10:00:00Z",
+    },
+  });
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("focusAreas[1]"), true);
+});
+
+Deno.test("validateRequest_goal_updatedAt_not_iso_returns_400", () => {
+  const result = validateRequest({
+    user_id: VALID_USER_ID,
+    goal: {
+      statement: "x",
+      focusAreas: [],
+      updatedAt: "not-a-date",
+    },
+  });
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("updatedAt"), true);
+});
+
+Deno.test("validateRequest_empty_statement_accepted", () => {
+  // GoalState.placeholder shape — empty statement is valid input. The
+  // sentinel pattern is used by digest-side cold-start detection, not
+  // rejected at the write boundary.
+  const result = validateRequest({
+    user_id: VALID_USER_ID,
+    goal: { statement: "", focusAreas: [], updatedAt: "2026-05-12T10:00:00Z" },
+  });
+  assertEquals("error" in result, false);
+});
+
+Deno.test("validateRequest_focusAreas_with_muscle_groups_accepted", () => {
+  const result = validateRequest({
+    user_id: VALID_USER_ID,
+    goal: {
+      statement: "Build broad strength",
+      focusAreas: ["legs", "back"],
+      updatedAt: "2026-05-12T10:00:00Z",
+    },
+  });
+  assertEquals("error" in result, false);
+});
