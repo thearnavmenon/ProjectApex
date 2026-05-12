@@ -7,7 +7,10 @@
 
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  canonicalizeExerciseId,
   EXERCISE_LIBRARY_ENTRY_COUNT,
+  EXERCISE_NORMALIZATION_ENTRY_COUNT,
+  EXERCISE_NORMALIZATION_MAP,
   EXERCISE_PATTERN_MAP,
   lookupPattern,
 } from "./exercise-library.ts";
@@ -37,6 +40,73 @@ Deno.test("exercise-library: lookupPattern returns undefined for unknown IDs", (
   // over-bootstrap would create phantom pattern profiles.
   assertEquals(lookupPattern("not_an_exercise"), undefined);
   assertEquals(lookupPattern(""), undefined);
+});
+
+// MARK: ─── canonicalizeExerciseId + normalizationMap drift detector ────────
+
+Deno.test("normalizationMap: entry count matches the pinned constant", () => {
+  assertEquals(
+    Object.keys(EXERCISE_NORMALIZATION_MAP).length,
+    EXERCISE_NORMALIZATION_ENTRY_COUNT,
+  );
+});
+
+Deno.test("normalizationMap: keys must NOT be canonical IDs", () => {
+  // A legacy alias key MUST NOT collide with a canonical ID — otherwise
+  // canonicalizeExerciseId would short-circuit on the canonical branch
+  // and silently skip the alias mapping. Catches the case where someone
+  // adds a new canonical exercise whose ID was previously a legacy alias.
+  for (const key of Object.keys(EXERCISE_NORMALIZATION_MAP)) {
+    assertEquals(
+      key in EXERCISE_PATTERN_MAP,
+      false,
+      `normalizationMap key "${key}" collides with a canonical ID in EXERCISE_PATTERN_MAP`,
+    );
+  }
+});
+
+Deno.test("normalizationMap: values must all be canonical IDs", () => {
+  // The alias-resolution target must be a real canonical ID so downstream
+  // lookupPattern resolves cleanly.
+  for (const [key, value] of Object.entries(EXERCISE_NORMALIZATION_MAP)) {
+    assertEquals(
+      value in EXERCISE_PATTERN_MAP,
+      true,
+      `normalizationMap value "${value}" (alias for "${key}") is not a canonical ID in EXERCISE_PATTERN_MAP`,
+    );
+  }
+});
+
+Deno.test("canonicalizeExerciseId: returns canonical IDs unchanged", () => {
+  assertEquals(canonicalizeExerciseId("barbell_bench_press"), "barbell_bench_press");
+  assertEquals(canonicalizeExerciseId("lat_pulldown_wide"), "lat_pulldown_wide");
+  assertEquals(canonicalizeExerciseId("leg_press"), "leg_press");
+});
+
+Deno.test("canonicalizeExerciseId: resolves live-data legacy aliases", () => {
+  // The two aliases observed in the alpha user's set_logs that motivated
+  // this port. Pinning here prevents future Swift renamings from breaking
+  // the canonical resolution silently.
+  assertEquals(canonicalizeExerciseId("lat_pulldown_wide_grip"), "lat_pulldown_wide");
+  assertEquals(canonicalizeExerciseId("dumbbell_flat_press"), "dumbbell_bench_press");
+  assertEquals(canonicalizeExerciseId("cable_pulldown_neutral_grip"), "lat_pulldown_close");
+});
+
+Deno.test("canonicalizeExerciseId: passes unknown IDs through unchanged", () => {
+  // Unknown IDs are not normalized — callers handle them (skip with no
+  // bootstrap, log, etc.). Asymmetric-error: silent under-bootstrap is
+  // preferred to phantom rewrites.
+  assertEquals(canonicalizeExerciseId("not_an_exercise"), "not_an_exercise");
+  assertEquals(canonicalizeExerciseId(""), "");
+});
+
+Deno.test("lookupPattern: resolves legacy aliases to the canonical pattern", () => {
+  // Pre-port behavior: lookupPattern("lat_pulldown_wide_grip") returned
+  // undefined, dropping the set from pattern-bootstrap. Post-port: it
+  // resolves via canonicalizeExerciseId → lat_pulldown_wide → vertical_pull.
+  assertEquals(lookupPattern("lat_pulldown_wide_grip"), "vertical_pull");
+  assertEquals(lookupPattern("dumbbell_flat_press"), "horizontal_push");
+  assertEquals(lookupPattern("cable_pulldown_neutral_grip"), "vertical_pull");
 });
 
 Deno.test("exercise-library: every value is a valid MovementPattern (8-enum)", () => {

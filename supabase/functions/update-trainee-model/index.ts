@@ -30,7 +30,7 @@
 //   - docs/agents/edge-functions.md (secrets, deploy, local dev)
 
 import postgres from "postgres";
-import { lookupPattern } from "../_shared/exercise-library.ts";
+import { canonicalizeExerciseId, lookupPattern } from "../_shared/exercise-library.ts";
 import {
   computeE1RM,
   type TopSet as EwmaTopSet,
@@ -342,10 +342,17 @@ function applyPerExerciseRules(
   // Group sets by exercise_id; keep a single Map<exerciseId, sets> in
   // session_payload order so multi-set sessions (5×5 etc.) iterate the
   // hardest top set last (per ADR-0005's heaviest-per-session convention).
+  //
+  // Bucket key is the *canonical* exercise_id so historical legacy aliases
+  // (e.g. lat_pulldown_wide_grip → lat_pulldown_wide) accumulate against
+  // the same model_json.exercises entry. Prevents the post-B1 alias-drift
+  // failure mode where today's canonical IDs created a second entry
+  // orphaned from the legacy-aliased history.
   const setsByExercise = new Map<string, Array<Record<string, unknown>>>();
   for (const entry of setLogs) {
-    const exerciseId = entry.exercise_id;
-    if (typeof exerciseId !== "string") continue;
+    const rawExerciseId = entry.exercise_id;
+    if (typeof rawExerciseId !== "string") continue;
+    const exerciseId = canonicalizeExerciseId(rawExerciseId);
     const list = setsByExercise.get(exerciseId) ?? [];
     list.push(entry);
     setsByExercise.set(exerciseId, list);
