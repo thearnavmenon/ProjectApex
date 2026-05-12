@@ -561,6 +561,42 @@ final class TraineeModelDigestTests: XCTestCase {
                       "Inference must include the asymmetric-error override clause")
     }
 
+    // MARK: ─── B2 (#87): VOLUME DEFICIT block — prompt-shape anchors ──────────
+
+    func test_sessionPlanPrompt_containsVolumeDeficitBlock_andLacksLegacyVolumeDeficitsPhrases() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Positive anchors: new VOLUME DEFICIT block — MEV-calibrated per
+        // #156's Q1 lock (supabase/functions/_shared/per-muscle-rules.ts:7-11),
+        // queue-event-windowed per ADR-0002, consuming the digest path.
+        XCTAssertTrue(prompt.contains("VOLUME DEFICIT\n"),
+                      "SessionPlan must include the VOLUME DEFICIT section header (new form, not legacy …SIGNALS)")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_muscle_summary[].volume_deficit"),
+                      "SessionPlan must reference the digest volume_deficit JSON path")
+        XCTAssertTrue(prompt.contains("MEV"),
+                      "SessionPlan must frame the deficit as MEV-relative (matches #156 Q1 semantic lock)")
+        XCTAssertTrue(prompt.contains("growth threshold"),
+                      "SessionPlan must use the growth-threshold framing per Q1 MEV semantic")
+        XCTAssertTrue(prompt.contains("last 7 training events"),
+                      "SessionPlan must surface the queue-event-windowed semantic per ADR-0002")
+        XCTAssertTrue(prompt.contains("+3 sets"),
+                      "SessionPlan must preserve the +3-sets cap from the legacy block")
+        XCTAssertTrue(prompt.contains("day_focus"),
+                      "SessionPlan must preserve the day_focus respect rule")
+
+        // Header bullet (cycle 3): version header records B2's cumulative change.
+        XCTAssertTrue(prompt.contains("Replaced legacy volume_deficits consumption"),
+                      "SessionPlan v2.0 header must record the B2 cumulative change")
+
+        // Negative anchors: legacy VOLUME DEFICIT SIGNALS phrasing removed.
+        XCTAssertFalse(prompt.contains("VOLUME DEFICIT SIGNALS"),
+                       "Legacy VOLUME DEFICIT SIGNALS section header must not reappear")
+        XCTAssertFalse(prompt.contains("volume_deficits flags muscle groups"),
+                       "Legacy volume_deficits interpretation prose must not reappear")
+        XCTAssertFalse(prompt.contains("≥20% below the"),
+                       "Legacy 20%-below-target framing must not reappear (replaced with MEV-relative integer count)")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {
