@@ -14,6 +14,7 @@ import {
   aggregateMuscleSetCounts,
   aggregateStagnationStatus,
   bootstrapMuscleProfile,
+  computeFocusWeight,
   computeVolumeDeficit,
 } from "./per-muscle-rules.ts";
 
@@ -168,4 +169,14 @@ Deno.test("aggregateStagnationStatus: worst-across-patterns with bootstrapping-c
 
   // Empty patterns dict (cold-start) → progressing.
   assertEquals(aggregateStagnationStatus("chest", {}), "progressing");
+});
+
+Deno.test("computeFocusWeight: 1.0 iff muscleGroup ∈ goal.focusAreas (Q4 binary lock)", () => {
+  // Alpha-cohort baseline: GoalState.placeholder has empty focusAreas →
+  // every muscle gets 0.0 until onboarding hydrates focusAreas.
+  assertEquals(computeFocusWeight("legs", []), 0.0);
+  // Membership → 1.0.
+  assertEquals(computeFocusWeight("legs", ["legs", "back"]), 1.0);
+  // Non-membership → 0.0.
+  assertEquals(computeFocusWeight("chest", ["legs", "back"]), 0.0);
 });
