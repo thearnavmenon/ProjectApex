@@ -33,6 +33,19 @@ nonisolated struct EquipmentViolation: Sendable, Equatable {
     let requiredEquipment: EquipmentType
 }
 
+// MARK: - EmptyTrainingDayViolation
+
+/// A training day in the generated mesocycle that has no exercises.
+/// Surfaced post-B1 when the alpha user's Week 4 Full_Body and Lower days
+/// were observed empty — the LLM produced training_day stubs without
+/// populating their `exercises` arrays, and `expandTemplate` propagated
+/// the empty state across all 4 weeks of the phase.
+nonisolated struct EmptyTrainingDayViolation: Sendable, Equatable {
+    let dayLabel: String
+    let weekNumber: Int
+    let phase: MesocyclePhase
+}
+
 // MARK: - ProgramGenerationError
 
 nonisolated enum ProgramGenerationError: LocalizedError {
@@ -41,6 +54,7 @@ nonisolated enum ProgramGenerationError: LocalizedError {
     case llmProviderError(String)
     case decodingFailed(String)
     case equipmentConstraintViolation([EquipmentViolation])
+    case emptyTrainingDay([EmptyTrainingDayViolation])
 
     var errorDescription: String? {
         switch self {
@@ -55,6 +69,9 @@ nonisolated enum ProgramGenerationError: LocalizedError {
         case .equipmentConstraintViolation(let violations):
             let names = violations.map { "\($0.exerciseName) (week \($0.weekNumber))" }.joined(separator: ", ")
             return "Program contains equipment violations that could not be corrected: \(names)"
+        case .emptyTrainingDay(let violations):
+            let names = violations.map { "\($0.dayLabel) (week \($0.weekNumber))" }.joined(separator: ", ")
+            return "Program contains training days with no exercises that could not be corrected: \(names)"
         }
     }
 }
@@ -265,9 +282,34 @@ actor ProgramGenerationService {
 
         // Stage 2: Client expands templates into 12 weeks
         let userId = UUID(uuidString: userProfile.userId) ?? UUID()
-        let mesocycle = Self.expandTemplate(template, userId: userId)
+        var mesocycle = Self.expandTemplate(template, userId: userId)
 
-        // Equipment constraint validation
+        // Stage 2.5: Empty-training-day validation.
+        // The LLM occasionally produces training_day stubs with no exercises;
+        // `expandTemplate` propagates that empty state across all 4 weeks of
+        // the phase, leaving the user with no plan on those days. Catch it
+        // here with one corrective re-prompt before the equipment pass —
+        // empty days have a different failure mode than equipment violations,
+        // so they need a dedicated correction payload.
+        let emptyDays = Self.validateNonEmptyTrainingDays(mesocycle: mesocycle)
+        if !emptyDays.isEmpty {
+            let emptyDayCorrection = Self.buildEmptyDayCorrectionPayload(
+                originalRequest: requestJSON,
+                emptyDays: emptyDays
+            )
+            let correctedTemplate = try await callAndDecodeTemplate(
+                systemPrompt: systemPrompt,
+                userPayload: emptyDayCorrection
+            )
+            mesocycle = Self.expandTemplate(correctedTemplate, userId: userId)
+
+            let remainingEmpty = Self.validateNonEmptyTrainingDays(mesocycle: mesocycle)
+            if !remainingEmpty.isEmpty {
+                throw ProgramGenerationError.emptyTrainingDay(remainingEmpty)
+            }
+        }
+
+        // Stage 3: Equipment constraint validation
         let violations = Self.validateEquipmentConstraints(mesocycle: mesocycle, gymProfile: gymProfile)
         if violations.isEmpty { return mesocycle }
 
@@ -291,6 +333,29 @@ actor ProgramGenerationService {
             throw ProgramGenerationError.equipmentConstraintViolation(remainingViolations)
         }
         return correctedMesocycle
+    }
+
+    // MARK: Empty-Training-Day Validation
+
+    /// Returns every TrainingDay in the mesocycle whose `exercises` array is empty.
+    /// Empty days are surfaced as soon as `expandTemplate` runs — the LLM's
+    /// template can include `training_day` stubs with `exercises: []`, and the
+    /// expansion faithfully propagates the emptiness across the phase's weeks.
+    /// Caller fires a corrective re-prompt; persistent empties throw.
+    static func validateNonEmptyTrainingDays(
+        mesocycle: Mesocycle
+    ) -> [EmptyTrainingDayViolation] {
+        var violations: [EmptyTrainingDayViolation] = []
+        for week in mesocycle.weeks {
+            for day in week.trainingDays where day.exercises.isEmpty {
+                violations.append(EmptyTrainingDayViolation(
+                    dayLabel: day.dayLabel,
+                    weekNumber: week.weekNumber,
+                    phase: week.phase
+                ))
+            }
+        }
+        return violations
     }
 
     // MARK: Equipment Constraint Validation
@@ -488,7 +553,44 @@ actor ProgramGenerationService {
         )
     }
 
-    // MARK: - Private: Correction payload
+    // MARK: - Private: Correction payloads
+
+    /// Builds a corrective payload pointing the LLM at training days whose
+    /// `exercises` array came back empty. Each violation lists (phase, day_label)
+    /// — the LLM is asked to regenerate the phase with at least one exercise
+    /// per day. Different shape from the equipment-correction payload because
+    /// the failure mode is different (template malformation vs. equipment
+    /// availability mismatch).
+    private static func buildEmptyDayCorrectionPayload(
+        originalRequest: String,
+        emptyDays: [EmptyTrainingDayViolation]
+    ) -> String {
+        // Deduplicate by (phase, dayLabel) — expandTemplate replicates the
+        // template day across the phase's weeks, so an empty template day
+        // surfaces as N violations (one per week). The LLM corrects the
+        // template once.
+        var seen = Set<String>()
+        let uniqueLines: [String] = emptyDays.compactMap { v in
+            let key = "\(v.phase.rawValue)::\(v.dayLabel)"
+            guard !seen.contains(key) else { return nil }
+            seen.insert(key)
+            return "- phase: \(v.phase.rawValue), day_label: \(v.dayLabel) — exercises array was empty"
+        }
+        let violationLines = uniqueLines.joined(separator: "\n")
+
+        return """
+        \(originalRequest)
+
+        --- EMPTY-TRAINING-DAY CORRECTION REQUIRED ---
+        The following training_day stubs in the previous response had an empty `exercises` array.
+        Every training_day MUST include at least one exercise. Regenerate the affected phase
+        templates with a complete `exercises` list per day.
+        Return the corrected full mesocycle_template JSON — do NOT return only the changed days.
+
+        EMPTY DAYS:
+        \(violationLines)
+        """
+    }
 
     private static func buildCorrectionPayload(
         originalRequest: String,
