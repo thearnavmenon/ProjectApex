@@ -1,0 +1,28 @@
+-- Reverse migration documentation for 20260512092929_canonicalize_trainee_model_exercise_keys.sql
+-- (documentation only; not auto-applied — operator runs manually if needed)
+--
+-- This migration renamed legacy-aliased exercise_id keys in
+-- trainee_models.model_json.exercises to their canonical equivalents and
+-- merged colliding entries field-by-field. It is destructive to the
+-- legacy-keyed shape: once applied, the legacy keys no longer exist in
+-- model_json and the merged profile's component identities are not
+-- recoverable from the database alone.
+--
+-- "Rolling back" therefore requires a backup of model_json from before
+-- the forward migration ran. Sketch of the recovery procedure:
+--
+--   1. Restore the trainee_models row's model_json to its pre-migration
+--      state from your backup. Example (one user):
+--
+--        UPDATE public.trainee_models
+--        SET model_json = '<json blob from backup>'::jsonb
+--        WHERE user_id = '<uuid>';
+--
+--   2. Redeploy the prior Edge Function build (without
+--      `canonicalizeExerciseId` in the bootstrap path). Otherwise the
+--      next session-apply will re-canonicalise the bucket key for any
+--      legacy-aliased set_logs that arrive.
+--
+-- If no backup is available the rollback is not feasible; the merged
+-- canonical-keyed shape is the new ground truth and forward-only work
+-- (per ADR-0006) should rebuild from there.
