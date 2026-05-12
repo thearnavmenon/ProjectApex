@@ -235,6 +235,19 @@ const MUSCLE_PARTICIPATING_PATTERNS: Record<MuscleGroup, Set<MovementPattern>> =
  * participation returns `.progressing` — the no-signal default; cold-start
  * is carried separately by `MuscleProfile.confidence`.
  */
+/**
+ * Per Q4 lock (2026-05-13): binary `focusWeight` derived from
+ * `GoalState.focusAreas` enum-membership. Returns 1.0 when the muscle is
+ * in the user's focus areas, 0.0 otherwise. Continuous-weight follow-up is
+ * scoped post-#156.
+ */
+export function computeFocusWeight(
+  muscleGroup: MuscleGroup,
+  focusAreas: readonly string[],
+): number {
+  return focusAreas.includes(muscleGroup) ? 1.0 : 0.0;
+}
+
 export function aggregateStagnationStatus(
   muscleGroup: MuscleGroup,
   patternProfiles: Record<
