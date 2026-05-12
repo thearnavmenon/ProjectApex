@@ -156,6 +156,7 @@ actor WorkoutSessionManager {
     private let gymFactStore: GymFactStore
     private let writeAheadQueue: WriteAheadQueue
     private let gymStreakService: GymStreakService
+    private let traineeModelService: TraineeModelService?
 
     // MARK: - Init
 
@@ -166,7 +167,8 @@ actor WorkoutSessionManager {
         supabase: SupabaseClient,
         gymFactStore: GymFactStore,
         writeAheadQueue: WriteAheadQueue? = nil,
-        gymStreakService: GymStreakService? = nil
+        gymStreakService: GymStreakService? = nil,
+        traineeModelService: TraineeModelService? = nil
     ) {
         self.aiInference = aiInference
         self.healthKit = healthKit
@@ -176,6 +178,7 @@ actor WorkoutSessionManager {
         let waq = writeAheadQueue ?? WriteAheadQueue(supabase: supabase)
         self.writeAheadQueue = waq
         self.gymStreakService = gymStreakService ?? GymStreakService(supabase: supabase)
+        self.traineeModelService = traineeModelService
     }
 
     // MARK: - Public API
@@ -1441,6 +1444,15 @@ actor WorkoutSessionManager {
             // If the blocking write fails, enqueue it for retry
             print("[WorkoutSessionManager] Session completion write failed: \(error.localizedDescription) — enqueueing for retry")
             try? await writeAheadQueue.enqueue(patch, table: "workout_sessions")
+        }
+
+        // Producer side of the trainee-model update pipeline (#135). Only fire
+        // on real completion — early exit leaves completed=false, which the
+        // digest pipeline treats as a non-event. Must run AFTER the PATCH so
+        // the session row exists when the WAQ flush dispatches this item to
+        // the Edge Function.
+        if finalSession.completed, let traineeModelService {
+            try? await traineeModelService.enqueueUpdate(forSession: finalSession, setLogs: completedSets)
         }
 
         // Queue early-exit memory event (TDD §9.3 / P4-T07)

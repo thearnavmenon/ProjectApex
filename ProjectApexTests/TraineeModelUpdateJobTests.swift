@@ -146,7 +146,7 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         let payload = TraineeModelUpdatePayload(
             userId: userId,
             sessionId: sessionId,
-            sessionPayload: SessionUpdatePayload()
+            sessionPayload: SessionUpdatePayload(loggedAt: "2026-05-10T10:00:00Z", setLogs: [])
         )
         return try QueuedWrite(table: TraineeModelUpdateJob.waqTable, item: payload)
     }
@@ -300,7 +300,7 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         let item = TraineeModelUpdatePayload(
             userId: userId,
             sessionId: sessionId,
-            sessionPayload: SessionUpdatePayload()
+            sessionPayload: SessionUpdatePayload(loggedAt: "2026-05-10T10:00:00Z", setLogs: [])
         )
         try await waq.enqueue(item, table: TraineeModelUpdateJob.waqTable)
 
@@ -329,7 +329,7 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         let item = TraineeModelUpdatePayload(
             userId: userId,
             sessionId: sessionId,
-            sessionPayload: SessionUpdatePayload()
+            sessionPayload: SessionUpdatePayload(loggedAt: "2026-05-10T10:00:00Z", setLogs: [])
         )
         try await waq.enqueue(item, table: TraineeModelUpdateJob.waqTable)
 
@@ -539,7 +539,7 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         let payload = TraineeModelUpdatePayload(
             userId: userId,
             sessionId: UUID(), // fresh UUID so idempotency key is fresh each run
-            sessionPayload: SessionUpdatePayload()
+            sessionPayload: SessionUpdatePayload(loggedAt: "2026-05-10T10:00:00Z", setLogs: [])
         )
         try await liveWAQ.enqueue(payload, table: TraineeModelUpdateJob.waqTable)
 

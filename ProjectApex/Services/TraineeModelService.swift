@@ -7,7 +7,7 @@
 // Three async public methods:
 //   • read()                    -> TraineeModel?         — cached snapshot or nil
 //   • digest()                  -> TraineeModelDigest?   — narrow prompt projection
-//   • enqueueUpdate(forSession:)                         — WAQ enqueue (Phase 1 storage path)
+//   • enqueueUpdate(forSession:setLogs:)                 — WAQ enqueue (#135)
 //
 // Returning Optional from digest() rather than the issue-specified
 // `TraineeModelDigest` is a deliberate Phase-1 choice: the digest carries a
@@ -93,23 +93,31 @@ actor TraineeModelService {
         return TraineeModelDigest(from: model, asOf: now())
     }
 
-    // MARK: - Write — enqueue path only (Phase 1)
+    // MARK: - Write — enqueue path
 
     /// Enqueues a `trainee_model_update` item carrying the session-
     /// completion shape expected by the update-trainee-model Edge
     /// Function:
     ///
-    ///     { "user_id": <uuid>, "session_id": <uuid>, "session_payload": { … } }
+    ///     { "user_id": <uuid>, "session_id": <uuid>,
+    ///       "session_payload": { "logged_at": "...", "set_logs": [...] } }
     ///
-    /// Phase 1 sends an empty `session_payload` object — the
-    /// shape is the contract; the contents are filled in by Phase 2
-    /// when rule logic ships and the Edge Function actually consumes
-    /// session data.
-    func enqueueUpdate(forSession session: WorkoutSession) async throws {
+    /// `loggedAt` is generated at call time — it represents the moment the
+    /// session was applied, and is the watermark the Edge Function uses for
+    /// in-order / late-arrival classification (ADR-0008). Set logs without
+    /// an `intent` value are skipped: the Edge Function rejects the entire
+    /// payload if any element is missing intent (validateRequest in
+    /// supabase/functions/update-trainee-model/index.ts).
+    func enqueueUpdate(forSession session: WorkoutSession, setLogs: [SetLog]) async throws {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
         let payload = TraineeModelUpdatePayload(
             userId: session.userId,
             sessionId: session.id,
-            sessionPayload: SessionUpdatePayload()
+            sessionPayload: SessionUpdatePayload(
+                loggedAt: formatter.string(from: now()),
+                setLogs: setLogs.compactMap(TraineeModelSetLogPayload.init(from:))
+            )
         )
         try await writeAheadQueue.enqueue(payload, table: Self.waqTable)
     }
@@ -134,10 +142,54 @@ nonisolated struct TraineeModelUpdatePayload: Codable, Sendable {
     }
 }
 
-/// Phase 1 placeholder — encodes as an empty JSON object `{}`. Phase 2
-/// extends this struct with set_logs, session notes, and any other fields
-/// the Edge Function rule logic needs. Keeping it as a dedicated type
-/// (rather than `[String: String]()`) means Phase 2 changes are additive
-/// — the empty object remains valid against any future fields-all-optional
-/// shape.
-nonisolated struct SessionUpdatePayload: Codable, Sendable {}
+/// Session-level payload consumed by update-trainee-model Edge Function.
+/// `logged_at` is the watermark (ADR-0008) and is required — missing/invalid
+/// fails applySession before any model mutation. `set_logs` may be empty
+/// (the apply still records an idempotency row in `trainee_model_applied_sessions`).
+nonisolated struct SessionUpdatePayload: Codable, Sendable {
+    let loggedAt: String
+    let setLogs: [TraineeModelSetLogPayload]
+
+    enum CodingKeys: String, CodingKey {
+        case loggedAt = "logged_at"
+        case setLogs  = "set_logs"
+    }
+}
+
+/// Per-set entry inside `session_payload.set_logs`. Mirrors the fields the
+/// Edge Function's rule pipelines consume (per-exercise EWMA, plateau-verdict,
+/// stimulus classifier, prescription-accuracy). `intent` is required and must
+/// be one of warmup/top/backoff/technique/amrap — Swift `SetLog.intent` is
+/// Optional for backwards-compatibility with pre-Phase-2 rows, so sets without
+/// intent are filtered out before enqueue.
+///
+/// Named distinctly from `SetLogPayload` (WorkoutSessionManager's private wire
+/// type for direct `set_logs` table inserts) to avoid the module-level
+/// redeclaration clash that would otherwise surface.
+nonisolated struct TraineeModelSetLogPayload: Codable, Sendable {
+    let exerciseId: String
+    let setNumber: Int
+    let weightKg: Double
+    let repsCompleted: Int
+    let rpeFelt: Int?
+    let intent: String
+
+    enum CodingKeys: String, CodingKey {
+        case exerciseId    = "exercise_id"
+        case setNumber     = "set_number"
+        case weightKg      = "weight_kg"
+        case repsCompleted = "reps_completed"
+        case rpeFelt       = "rpe_felt"
+        case intent
+    }
+
+    init?(from setLog: SetLog) {
+        guard let intent = setLog.intent else { return nil }
+        self.exerciseId    = setLog.exerciseId
+        self.setNumber     = setLog.setNumber
+        self.weightKg      = setLog.weightKg
+        self.repsCompleted = setLog.repsCompleted
+        self.rpeFelt       = setLog.rpeFelt
+        self.intent        = intent.rawValue
+    }
+}
