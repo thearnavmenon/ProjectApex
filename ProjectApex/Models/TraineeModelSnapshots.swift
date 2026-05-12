@@ -197,4 +197,16 @@ struct GoalState: Codable, Sendable, Hashable {
         self.focusAreas = focusAreas
         self.updatedAt = updatedAt
     }
+
+    /// Sentinel used by TraineeModel's defensive decode when the server's
+    /// model_json lacks a `goal` field per #146. The Edge Function's
+    /// applySession has no write path for `goal` (onboarding owns goal
+    /// hydration in a separate flow that isn't wired yet — see spinoff).
+    /// Detect downstream via `statement.isEmpty`; digest assembly should
+    /// fall back to cold-start coaching when goal has not been hydrated.
+    static let placeholder = GoalState(
+        statement: "",
+        focusAreas: [],
+        updatedAt: .distantPast
+    )
 }
