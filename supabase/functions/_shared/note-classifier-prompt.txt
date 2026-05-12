@@ -50,8 +50,8 @@ tissue language.
 # Subject value vocabulary
 
 For `pattern` subjects, use exactly one of:
-  hipHinge, horizontalPull, horizontalPush, isolation, lunge, squat,
-  verticalPull, verticalPush
+  hip_hinge, horizontal_pull, horizontal_push, isolation, lunge, squat,
+  vertical_pull, vertical_push
 
 For `muscle` subjects, use exactly one of:
   back, chest, biceps, shoulders, triceps, legs

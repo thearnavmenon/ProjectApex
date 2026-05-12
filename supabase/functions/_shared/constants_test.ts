@@ -192,12 +192,12 @@ Deno.test(
   "ADR-0012: major patterns are exactly the 6 push/pull/squat/hinge axes (lunge + isolation excluded)",
   () => {
     assertEquals(MAJOR_PATTERNS, [
-      "horizontalPush",
-      "verticalPush",
-      "horizontalPull",
-      "verticalPull",
+      "horizontal_push",
+      "vertical_push",
+      "horizontal_pull",
+      "vertical_pull",
       "squat",
-      "hipHinge",
+      "hip_hinge",
     ]);
   },
 );

@@ -136,12 +136,12 @@ export const GLOBAL_PHASE_ADVANCE_BOOTSTRAP_GUARD = 6;
  * (auxiliary patterns whose phase transitions don't reflect macro readiness).
  */
 export const MAJOR_PATTERNS = [
-  "horizontalPush",
-  "verticalPush",
-  "horizontalPull",
-  "verticalPull",
+  "horizontal_push",
+  "vertical_push",
+  "horizontal_pull",
+  "vertical_pull",
   "squat",
-  "hipHinge",
+  "hip_hinge",
 ] as const;
 
 // ─── Cadence-aware translation (ADR-0015, Q5) ────────────────────────────────

@@ -18,12 +18,12 @@ import {
 
 // All 6 major patterns per ADR-0012 / MAJOR_PATTERNS in constants.ts.
 const ALL_SIX_MAJORS = [
-  "horizontalPush",
-  "verticalPush",
-  "horizontalPull",
-  "verticalPull",
+  "horizontal_push",
+  "vertical_push",
+  "horizontal_pull",
+  "vertical_pull",
   "squat",
-  "hipHinge",
+  "hip_hinge",
 ];
 
 // Build a state covering all 6 majors. Patterns with `lastAt=0` are treated
@@ -39,9 +39,9 @@ const allMajorsWithLastAt = (
 Deno.test("ADR-0012: 3 of 6 majors transitioned in last 6 sessions → does NOT fire (under threshold)", () => {
   // Threshold is 4 majors per ADR-0012; 3 is the under-threshold case.
   const states = allMajorsWithLastAt({
-    horizontalPush: 13,
-    verticalPush: 14,
-    horizontalPull: 15,
+    horizontal_push: 13,
+    vertical_push: 14,
+    horizontal_pull: 15,
     // remaining 3 majors: lastAt=0 (never transitioned)
   });
   assertEquals(
@@ -56,11 +56,11 @@ Deno.test("ADR-0012 §Edge cases: ≥4 majors transitioned but sessionCount=5 (u
   // training history. Constants: GLOBAL_PHASE_ADVANCE_BOOTSTRAP_GUARD=6, so
   // sessionCount<6 blocks. sessionCount=5 sits just under.
   const states = allMajorsWithLastAt({
-    horizontalPush: 1,
-    verticalPush: 2,
-    horizontalPull: 3,
-    verticalPull: 4,
-    // squat, hipHinge: lastAt=0 (never)
+    horizontal_push: 1,
+    vertical_push: 2,
+    horizontal_pull: 3,
+    vertical_pull: 4,
+    // squat, hip_hinge: lastAt=0 (never)
   });
   assertEquals(
     shouldFireGlobalPhaseAdvance(states, /* sessionCount */ 5, /* lastFired */ null),
@@ -74,11 +74,11 @@ Deno.test("ADR-0012 §Cooldown: ≥4 majors but cooldown active (lastFired=4, se
   // pattern threshold is met. Boundary-inclusive on the "fires" side: 6
   // fires (C18 below), 5 blocks (this test).
   const states = allMajorsWithLastAt({
-    horizontalPush: 5,
-    verticalPush: 6,
-    horizontalPull: 7,
-    verticalPull: 8,
-    // squat, hipHinge: lastAt=0
+    horizontal_push: 5,
+    vertical_push: 6,
+    horizontal_pull: 7,
+    vertical_pull: 8,
+    // squat, hip_hinge: lastAt=0
   });
   assertEquals(
     shouldFireGlobalPhaseAdvance(states, /* sessionCount */ 9, /* lastFired */ 4),
@@ -92,11 +92,11 @@ Deno.test("ADR-0012 §Cooldown: ≥4 majors with cooldown just expired (lastFire
   // so delta=6 fires. Boundary semantics consistent with the §"Window
   // semantics" `delta <= 6` — both inclusive on the firing side.
   const states = allMajorsWithLastAt({
-    horizontalPush: 5,
-    verticalPush: 6,
-    horizontalPull: 7,
-    verticalPull: 8,
-    // squat, hipHinge: lastAt=0
+    horizontal_push: 5,
+    vertical_push: 6,
+    horizontal_pull: 7,
+    vertical_pull: 8,
+    // squat, hip_hinge: lastAt=0
   });
   assertEquals(
     shouldFireGlobalPhaseAdvance(states, /* sessionCount */ 10, /* lastFired */ 4),
@@ -121,10 +121,10 @@ Deno.test("ADR-0012 §Edge cases: lastPhaseTransitionAtSessionCount=0 (never tra
   // `lastAt > 0` guard added; the ADR's natural-exclusion claim is taken
   // at face value.
   const states = allMajorsWithLastAt({
-    horizontalPush: 2, // delta=5
-    verticalPush: 3, //   delta=4
-    horizontalPull: 4, // delta=3
-    // verticalPull, squat, hipHinge: lastAt=0 (delta=7 → excluded by window)
+    horizontal_push: 2, // delta=5
+    vertical_push: 3, //   delta=4
+    horizontal_pull: 4, // delta=3
+    // vertical_pull, squat, hip_hinge: lastAt=0 (delta=7 → excluded by window)
   });
   assertEquals(
     shouldFireGlobalPhaseAdvance(states, /* sessionCount */ 7, /* lastFired */ null),
@@ -146,11 +146,11 @@ Deno.test("ADR-0012 §Consequences: force-deload-as-transition is a feature — 
   // deloaded; the rule is agnostic to the transition kind). 2 majors at
   // lastAt=0 are excluded by the window check at sessionCount=12.
   const states = allMajorsWithLastAt({
-    horizontalPush: 7, // delta=5 (recent force-deload)
-    verticalPush: 8, //   delta=4
-    horizontalPull: 9, // delta=3
-    verticalPull: 10, //  delta=2
-    // squat, hipHinge: lastAt=0 (delta=12 → excluded)
+    horizontal_push: 7, // delta=5 (recent force-deload)
+    vertical_push: 8, //   delta=4
+    horizontal_pull: 9, // delta=3
+    vertical_pull: 10, //  delta=2
+    // squat, hip_hinge: lastAt=0 (delta=12 → excluded)
   });
   assertEquals(
     shouldFireGlobalPhaseAdvance(states, /* sessionCount */ 12, /* lastFired */ null),
@@ -169,12 +169,12 @@ Deno.test("ADR-0012 §Major patterns: lunge and isolation transitions do NOT cou
   // Correct behaviour: only 3 majors in window → does NOT fire.
   // Buggy behaviour: 5 patterns in window ≥ 4 → would erroneously fire.
   const states: PatternTransitionState[] = [
-    { pattern: "horizontalPush", lastPhaseTransitionAtSessionCount: 12 },
-    { pattern: "verticalPush", lastPhaseTransitionAtSessionCount: 13 },
-    { pattern: "horizontalPull", lastPhaseTransitionAtSessionCount: 14 },
-    { pattern: "verticalPull", lastPhaseTransitionAtSessionCount: 0 },
+    { pattern: "horizontal_push", lastPhaseTransitionAtSessionCount: 12 },
+    { pattern: "vertical_push", lastPhaseTransitionAtSessionCount: 13 },
+    { pattern: "horizontal_pull", lastPhaseTransitionAtSessionCount: 14 },
+    { pattern: "vertical_pull", lastPhaseTransitionAtSessionCount: 0 },
     { pattern: "squat", lastPhaseTransitionAtSessionCount: 0 },
-    { pattern: "hipHinge", lastPhaseTransitionAtSessionCount: 0 },
+    { pattern: "hip_hinge", lastPhaseTransitionAtSessionCount: 0 },
     { pattern: "lunge", lastPhaseTransitionAtSessionCount: 15 }, // accessory
     { pattern: "isolation", lastPhaseTransitionAtSessionCount: 14 }, // accessory
   ];
@@ -190,11 +190,11 @@ Deno.test("ADR-0012: ≥4 of 6 majors transitioned in last 6 sessions, no prior 
   // No prior global fire → cooldown trivially satisfied.
   // currentSessionCount=18 >= 6 → bootstrap guard satisfied.
   const states = allMajorsWithLastAt({
-    horizontalPush: 12,
-    verticalPush: 13,
-    horizontalPull: 14,
-    verticalPull: 15,
-    // squat, hipHinge: lastAt=0 (never)
+    horizontal_push: 12,
+    vertical_push: 13,
+    horizontal_pull: 14,
+    vertical_pull: 15,
+    // squat, hip_hinge: lastAt=0 (never)
   });
   assertEquals(
     shouldFireGlobalPhaseAdvance(

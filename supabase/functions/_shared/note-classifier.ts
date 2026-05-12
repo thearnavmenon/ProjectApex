@@ -201,17 +201,17 @@ export function selectBootstrapNotes(
 //
 // Map per Q9:
 //   - shoulder, elbow, wrist → all push + all pull (excluding isolation)
-//   - hip, knee, ankle, lowerBack → squat + hipHinge + lunge
-//   - lowerBack also → verticalPush (per Q9 push extension; OHP loads lumbar
+//   - hip, knee, ankle, lowerBack → squat + hip_hinge + lunge
+//   - lowerBack also → vertical_push (per Q9 push extension; OHP loads lumbar
 //     through bracing chain)
 //   - neck → no patterns (rare in training)
 const PATTERN_TRAINS_JOINTS: Record<string, readonly string[]> = {
-  horizontalPush: ["shoulder", "elbow", "wrist"],
-  verticalPush: ["shoulder", "elbow", "wrist", "lowerBack"],
-  horizontalPull: ["shoulder", "elbow", "wrist"],
-  verticalPull: ["shoulder", "elbow", "wrist"],
+  horizontal_push: ["shoulder", "elbow", "wrist"],
+  vertical_push: ["shoulder", "elbow", "wrist", "lowerBack"],
+  horizontal_pull: ["shoulder", "elbow", "wrist"],
+  vertical_pull: ["shoulder", "elbow", "wrist"],
   squat: ["hip", "knee", "ankle", "lowerBack"],
-  hipHinge: ["hip", "knee", "ankle", "lowerBack"],
+  hip_hinge: ["hip", "knee", "ankle", "lowerBack"],
   lunge: ["hip", "knee", "ankle", "lowerBack"],
   isolation: [],
 };

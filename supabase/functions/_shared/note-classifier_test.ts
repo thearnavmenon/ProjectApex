@@ -154,7 +154,7 @@ Deno.test(
       active: [],
       cleared: [],
       classifierMentions: [mkMention("joint", "shoulder", "n1", "mechanical")],
-      trainedPatterns: new Set(["horizontalPush"]),
+      trainedPatterns: new Set(["horizontal_push"]),
       trainedMuscleGroups: new Set(),
       trainedJoints: new Set(["shoulder"]),
       notesProcessed: true,
@@ -173,7 +173,7 @@ Deno.test(
       active: after1.active,
       cleared: [],
       classifierMentions: [mkMention("joint", "shoulder", "n2", "mechanical")],
-      trainedPatterns: new Set(["horizontalPush"]),
+      trainedPatterns: new Set(["horizontal_push"]),
       trainedMuscleGroups: new Set(),
       trainedJoints: new Set(["shoulder"]),
       notesProcessed: true,
@@ -238,7 +238,7 @@ Deno.test(
       active: [preExisting],
       cleared: [],
       classifierMentions: [], // no re-mention this session
-      trainedPatterns: new Set(["horizontalPush"]),
+      trainedPatterns: new Set(["horizontal_push"]),
       trainedMuscleGroups: new Set(),
       trainedJoints: new Set(["shoulder"]),
       notesProcessed: true, // classifier ran
@@ -274,7 +274,7 @@ Deno.test(
         active,
         cleared: [],
         classifierMentions: [],
-        trainedPatterns: new Set(["horizontalPush"]),
+        trainedPatterns: new Set(["horizontal_push"]),
         trainedMuscleGroups: new Set(),
         trainedJoints: new Set(["shoulder"]),
         notesProcessed: true,
@@ -308,7 +308,7 @@ Deno.test(
       active: [userReported],
       cleared: [],
       classifierMentions: [mkMention("joint", "shoulder", "n1", "mechanical")],
-      trainedPatterns: new Set(["horizontalPush"]),
+      trainedPatterns: new Set(["horizontal_push"]),
       trainedMuscleGroups: new Set(),
       trainedJoints: new Set(["shoulder"]),
       notesProcessed: true,
@@ -419,9 +419,9 @@ Deno.test(
 // post-merge Q9 lock-in amendment.
 
 Deno.test(
-  "Q9 joint→pattern map: shoulder is trained when horizontalPush is in the session's trained patterns",
+  "Q9 joint→pattern map: shoulder is trained when horizontal_push is in the session's trained patterns",
   () => {
-    const joints = derivedTrainedJoints(new Set(["horizontalPush"]));
+    const joints = derivedTrainedJoints(new Set(["horizontal_push"]));
     assertEquals(joints.has("shoulder"), true);
     assertEquals(joints.has("elbow"), true);
     assertEquals(joints.has("wrist"), true);
@@ -442,23 +442,23 @@ Deno.test(
 );
 
 Deno.test(
-  "Q9 joint→pattern map: lowerBack is trained on hipHinge (per Q9 lowerBack ↔ squat+hipHinge+lunge+verticalPush)",
+  "Q9 joint→pattern map: lowerBack is trained on hip_hinge (per Q9 lowerBack ↔ squat+hip_hinge+lunge+vertical_push)",
   () => {
-    const joints = derivedTrainedJoints(new Set(["hipHinge"]));
+    const joints = derivedTrainedJoints(new Set(["hip_hinge"]));
     assertEquals(joints.has("lowerBack"), true);
-    // Cross-check verticalPush also trains lowerBack per Q9 push extension.
-    const jointsVP = derivedTrainedJoints(new Set(["verticalPush"]));
-    assertEquals(jointsVP.has("lowerBack"), true, "verticalPush trains lowerBack per Q9 push extension (OHP loads lumbar through bracing chain)");
+    // Cross-check vertical_push also trains lowerBack per Q9 push extension.
+    const jointsVP = derivedTrainedJoints(new Set(["vertical_push"]));
+    assertEquals(jointsVP.has("lowerBack"), true, "vertical_push trains lowerBack per Q9 push extension (OHP loads lumbar through bracing chain)");
   },
 );
 
 Deno.test(
-  "Q9 joint→pattern map: wrist is trained on horizontalPull (per Q9 wrist ↔ all push AND all pull, extended for grip-loading)",
+  "Q9 joint→pattern map: wrist is trained on horizontal_pull (per Q9 wrist ↔ all push AND all pull, extended for grip-loading)",
   () => {
-    const joints = derivedTrainedJoints(new Set(["horizontalPull"]));
+    const joints = derivedTrainedJoints(new Set(["horizontal_pull"]));
     assertEquals(joints.has("wrist"), true, "wrist trains on all pulls per Q9 push extension");
     // And on push patterns:
-    const jointsHP = derivedTrainedJoints(new Set(["horizontalPush"]));
+    const jointsHP = derivedTrainedJoints(new Set(["horizontal_push"]));
     assertEquals(jointsHP.has("wrist"), true);
   },
 );
