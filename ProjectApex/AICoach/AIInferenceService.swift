@@ -51,6 +51,11 @@ nonisolated struct WorkoutContext: Codable, Sendable {
     /// GymFactStore. E.g. ["16.0kg not available — use 15.0kg instead"].
     /// The AI treats these as hard constraints — never prescribe the unavailable weight.
     let gymWeightFacts: [String]?
+    /// Trainee-model projection (B1 / #86). Carries per-pattern trend +
+    /// consecutiveForceDeloadsOnPattern so per-set prescriptions can adapt to
+    /// plateau / decline / programme calcification per ADR-0009 + ADR-0011.
+    /// Nil when the local store has no model for this user yet.
+    let traineeModelDigest: TraineeModelDigest?
 
     enum CodingKeys: String, CodingKey {
         case requestType                = "request_type"
@@ -69,6 +74,7 @@ nonisolated struct WorkoutContext: Codable, Sendable {
         case sessionLog                 = "session_log"
         case weeklyFatigueSummary       = "weekly_fatigue_summary"
         case gymWeightFacts             = "gym_weight_facts"
+        case traineeModelDigest         = "trainee_model_digest"
     }
 }
 
@@ -815,7 +821,8 @@ extension WorkoutContext {
                 exercisesWithMultipleMisses: [],
                 totalSetsThisWeek: 42
             ),
-            gymWeightFacts: nil
+            gymWeightFacts: nil,
+            traineeModelDigest: nil
         )
     }
 }

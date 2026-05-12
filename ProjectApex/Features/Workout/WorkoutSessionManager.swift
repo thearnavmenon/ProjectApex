@@ -1055,6 +1055,10 @@ actor WorkoutSessionManager {
         // These are injected as hard constraints so the AI never prescribes unavailable loads.
         let gymFacts = await gymFactStore.contextStrings(for: exercise.equipmentRequired)
 
+        // Trainee-model projection (B1 / #86). Nil when the local store hasn't
+        // hydrated yet — prompt rule degrades to "no trend signal" gracefully.
+        let traineeModelDigest = await traineeModelService?.digest()
+
         return WorkoutContext(
             requestType: "set_prescription",
             sessionMetadata: metadata,
@@ -1071,7 +1075,8 @@ actor WorkoutSessionManager {
             ragRetrievedMemory: cachedRAGMemory,
             sessionLog: buildSessionLog(),
             weeklyFatigueSummary: cachedWeeklyFatigueSummary,
-            gymWeightFacts: gymFacts.isEmpty ? nil : gymFacts
+            gymWeightFacts: gymFacts.isEmpty ? nil : gymFacts,
+            traineeModelDigest: traineeModelDigest
         )
     }
 

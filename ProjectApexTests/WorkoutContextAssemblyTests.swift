@@ -344,7 +344,8 @@ struct WorkoutContextAssemblyTests {
             ragRetrievedMemory: [],
             sessionLog: [],
             weeklyFatigueSummary: nil,
-            gymWeightFacts: nil
+            gymWeightFacts: nil,
+            traineeModelDigest: nil
         )
 
         let encoder = makeEncoder()
@@ -373,7 +374,8 @@ struct WorkoutContextAssemblyTests {
             ragRetrievedMemory: [],
             sessionLog: [],
             weeklyFatigueSummary: nil,
-            gymWeightFacts: nil
+            gymWeightFacts: nil,
+            traineeModelDigest: nil
         )
 
         let data = try makeEncoder().encode(ctx)
