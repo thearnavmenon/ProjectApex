@@ -10,6 +10,12 @@
 // actual sessionsPerWeek is also deferred (alpha cohort ≈ 4×/week makes this
 // adequate).
 
+import {
+  canonicalizeExerciseId,
+  EXERCISE_PRIMARY_MUSCLE_MAP,
+  type PrimaryMuscle,
+} from "./exercise-library.ts";
+
 /**
  * MuscleGroup — locked-six aggregation key for the trainee model's per-muscle
  * storage per ADR-0005 §"Two-level muscle taxonomy". Distinct from the finer
@@ -84,4 +90,65 @@ export function bootstrapMuscleProfile(
     stagnationStatus: "progressing",
     confidence: "bootstrapping",
   };
+}
+
+/**
+ * Per ADR-0005 §"Two-level muscle taxonomy": leg subgroups (quads,
+ * hamstrings, glutes, calves) collapse to MuscleGroup.legs; upper-body
+ * muscles map 1:1.
+ */
+export function primaryMuscleToGroup(pm: PrimaryMuscle): MuscleGroup {
+  switch (pm) {
+    case "back":
+    case "chest":
+    case "biceps":
+    case "shoulders":
+    case "triceps":
+      return pm;
+    case "quads":
+    case "hamstrings":
+    case "glutes":
+    case "calves":
+      return "legs";
+  }
+}
+
+/**
+ * SetIntent values that contribute to volume aggregation per ADR-0005's set-
+ * intent semantics: warmup and technique are zero-weighted (warmup builds to
+ * top-set load without contributing to hypertrophy volume; technique sets are
+ * low-load skill rehearsal). Top + backoff + amrap contribute fully.
+ */
+const VOLUME_CONTRIBUTING_INTENTS: ReadonlySet<string> = new Set([
+  "top",
+  "backoff",
+  "amrap",
+]);
+
+/**
+ * Per-set volume aggregation. Returns a partial Record keyed by
+ * `MuscleGroup` with each muscle's count of volume-contributing sets from
+ * `setLogs`. Attribution flows `exercise_id → PrimaryMuscle → MuscleGroup` via
+ * `EXERCISE_PRIMARY_MUSCLE_MAP` after canonicalising legacy aliases.
+ *
+ * Sets that fail to attribute (unknown exercise IDs, missing intent) are
+ * silently dropped per the asymmetric-error preference (under-attribute is
+ * silent; over-attribute would falsely inflate volume signals and trigger
+ * spurious AI volume-correction prompts).
+ */
+export function aggregateMuscleSetCounts(
+  setLogs: Array<Record<string, unknown>>,
+): Partial<Record<MuscleGroup, number>> {
+  const counts: Partial<Record<MuscleGroup, number>> = {};
+  for (const entry of setLogs) {
+    const exerciseId = entry.exercise_id;
+    const intent = entry.intent;
+    if (typeof exerciseId !== "string" || typeof intent !== "string") continue;
+    if (!VOLUME_CONTRIBUTING_INTENTS.has(intent)) continue;
+    const primary = EXERCISE_PRIMARY_MUSCLE_MAP[canonicalizeExerciseId(exerciseId)];
+    if (primary === undefined) continue;
+    const group = primaryMuscleToGroup(primary);
+    counts[group] = (counts[group] ?? 0) + 1;
+  }
+  return counts;
 }

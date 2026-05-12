@@ -10,7 +10,10 @@
 //   deno test --allow-all supabase/functions/_shared/per-muscle-rules_test.ts
 
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { bootstrapMuscleProfile } from "./per-muscle-rules.ts";
+import {
+  aggregateMuscleSetCounts,
+  bootstrapMuscleProfile,
+} from "./per-muscle-rules.ts";
 
 Deno.test("bootstrapMuscleProfile: legs returns ADR-0005 defaults + Q1-locked MEV threshold", () => {
   const profile = bootstrapMuscleProfile("legs");
@@ -36,4 +39,37 @@ Deno.test("bootstrapMuscleProfile: legs returns ADR-0005 defaults + Q1-locked ME
   // Q5 lock: all MuscleProfiles ship in #156 at .bootstrapping confidence.
   // Lifecycle transitions deferred to follow-up ADR.
   assertEquals(profile.confidence, "bootstrapping");
+});
+
+Deno.test("aggregateMuscleSetCounts: non-warmup non-technique sets attributed via primary-muscle → MuscleGroup", () => {
+  const setLogs = [
+    // Quads → legs (top + top = 2 contributing sets)
+    { exercise_id: "barbell_back_squat", intent: "top" },
+    { exercise_id: "barbell_back_squat", intent: "top" },
+    // Excluded: warmup
+    { exercise_id: "barbell_back_squat", intent: "warmup" },
+    // Hamstrings → legs (1 contributing set)
+    { exercise_id: "romanian_deadlift", intent: "backoff" },
+    // Chest (1 contributing set)
+    { exercise_id: "barbell_bench_press", intent: "top" },
+    // Excluded: technique
+    { exercise_id: "barbell_bench_press", intent: "technique" },
+    // Shoulders (1 contributing set, amrap counts)
+    { exercise_id: "lateral_raise", intent: "amrap" },
+    // Unknown exercise ID → silent skip (asymmetric-error: under-attribute
+    // silent; over-attribute would falsely inflate volume).
+    { exercise_id: "not_an_exercise", intent: "top" },
+  ];
+
+  const counts = aggregateMuscleSetCounts(setLogs);
+
+  // legs aggregates 2 quads + 1 hamstrings; chest 1:1; shoulders 1:1.
+  // Other muscles get no contribution; the result is partial-keyed for the
+  // caller to default missing entries to 0.
+  assertEquals(counts.legs, 3);
+  assertEquals(counts.chest, 1);
+  assertEquals(counts.shoulders, 1);
+  assertEquals(counts.back, undefined);
+  assertEquals(counts.biceps, undefined);
+  assertEquals(counts.triceps, undefined);
 });
