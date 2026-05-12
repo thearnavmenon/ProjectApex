@@ -1646,6 +1646,64 @@ orchestratorTest(
   },
 );
 
+// ─── #156: MuscleProfile producer (applyPerMuscleRules) ──────────────────────
+
+orchestratorTest(
+  "#156: first apply training quads bootstraps muscles.legs with Q1-locked MEV defaults",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T10:00:00Z";
+
+    const result = await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            // 1 contributing top set on a quads exercise — bootstraps legs
+            // with volumeDeficit = tolerance(18) − 1 = 17.
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    assertEquals(result.late_arrival, false);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const muscles = modelJson.muscles as Record<string, Record<string, unknown>>;
+
+    // Single muscle bootstrapped — quads collapses to legs per ADR-0005's
+    // two-level taxonomy; no other muscles touched.
+    assertEquals(Object.keys(muscles).sort(), ["legs"]);
+
+    const legs = muscles.legs;
+    // muscleGroup-as-field per the #146 pattern (dict key alone is invisible
+    // to Swift's inner decoder via decodeEnumKeyedDict).
+    assertEquals(legs.muscleGroup, "legs");
+    // Q1 lock: MEV midpoint at 4×/week scaled to 7-events = 18 sets.
+    assertEquals(legs.volumeTolerance, 18);
+    // Q3 lock.
+    assertEquals(legs.observedSweetSpot, null);
+    // Q4 lock: GoalState.placeholder has empty focusAreas → 0.0.
+    assertEquals(legs.focusWeight, 0);
+    // ADR-0009 empty-participation default (no patterns at confidence >
+    // .bootstrapping yet).
+    assertEquals(legs.stagnationStatus, "progressing");
+    // Q5 lock: all #156 profiles ship .bootstrapping.
+    assertEquals(legs.confidence, "bootstrapping");
+    // volumeDeficit = tolerance(18) − sum of this-session sets(1) = 17.
+    assertEquals(legs.volumeDeficit, 17);
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).
