@@ -315,15 +315,17 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
     let liftHistory: [LiftHistoryEntry]
     let weekFatigue: WeekFatigueSignals
     let ragMemory: [RAGMemoryItem]
-    /// Stagnation signals computed post-session by StagnationService.
-    /// Empty array when no stagnation data is available yet.
-    let stagnationSignals: [StagnationSignal]
     /// Volume deficit signals for the current mesocycle week.
     /// Empty array when volume is on-track or insufficient data exists.
     let volumeDeficits: [VolumeDeficit]
     /// Phase-1-Skip: gap-awareness context. Nil only if assembly fails unexpectedly;
     /// in practice this is always provided for every session generation call.
     let temporalContext: TemporalContext?
+    /// Trainee-model projection (B1 / #86). Carries per-pattern trend +
+    /// per-pattern force-deload counter, superseding the legacy per-exercise
+    /// stagnation-signal payload. Nil when the local store has no model for
+    /// this user yet.
+    let traineeModelDigest: TraineeModelDigest?
 
     enum CodingKeys: String, CodingKey {
         case userId              = "user_id"
@@ -338,9 +340,9 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
         case liftHistory         = "lift_history"
         case weekFatigue         = "week_fatigue"
         case ragMemory           = "rag_memory"
-        case stagnationSignals   = "stagnation_signals"
         case volumeDeficits      = "volume_deficits"
         case temporalContext     = "temporal_context"
+        case traineeModelDigest  = "trainee_model_digest"
     }
 }
 
@@ -439,16 +441,19 @@ actor SessionPlanService {
     private let provider: any LLMProvider
     private let memoryService: MemoryService
     private let supabaseClient: SupabaseClient
+    private let traineeModelService: TraineeModelService?
     private(set) var isGenerating: Bool = false
 
     init(
         provider: any LLMProvider,
         memoryService: MemoryService,
-        supabaseClient: SupabaseClient
+        supabaseClient: SupabaseClient,
+        traineeModelService: TraineeModelService? = nil
     ) {
         self.provider = provider
         self.memoryService = memoryService
         self.supabaseClient = supabaseClient
+        self.traineeModelService = traineeModelService
     }
 
     // MARK: - Public API
@@ -543,9 +548,11 @@ actor SessionPlanService {
             volumeLandmark: weekVolumeLandmark(for: week.phase, weekNumber: week.weekNumber)
         )
 
-        // Load persisted signals from UserDefaults (written post-session by WorkoutSessionManager)
-        let stagnationSignals = StagnationService.load()
-        let volumeDeficits    = VolumeValidationService.load()
+        // Plateau/decline signals are now sourced from the trainee-model digest
+        // below (PatternProfile.trend per ADR-0009 hybrid plateau verdict) — the
+        // legacy client-side per-set load() call was removed in B1 (#86).
+        let volumeDeficits = VolumeValidationService.load()
+        let traineeModelDigest = await traineeModelService?.digest()
 
         let request = SessionPlanRequest(
             userId: userId.uuidString,
@@ -560,9 +567,9 @@ actor SessionPlanService {
             liftHistory: liftHistory,
             weekFatigue: fatigue,
             ragMemory: ragMemory,
-            stagnationSignals: stagnationSignals,
             volumeDeficits: volumeDeficits,
-            temporalContext: temporalContext
+            temporalContext: temporalContext,
+            traineeModelDigest: traineeModelDigest
         )
 
         let encoder = JSONEncoder()

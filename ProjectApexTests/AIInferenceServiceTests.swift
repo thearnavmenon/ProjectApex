@@ -604,4 +604,235 @@ final class AIInferenceServiceTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(prescription.restSeconds, 180,
                                     "Safety gate must clamp restSeconds to ≥ 180 when painReported.")
     }
+
+    // MARK: ─── 7. B1 α — LLM steers on trainee_model_digest trend signals ──────
+    //
+    // Live-API tests that verify the LLM actually adjusts its prescription
+    // when trainee_model_digest carries a non-progressing trend. β covers
+    // wiring (the field is in the payload, the prompt block is in the
+    // system prompt); α covers behaviour (the LLM reads and steers on it).
+    //
+    // Each fixture builds a CLEAN baseline WorkoutContext — no within-session
+    // miss signals, no fatigue spike, no historical decline in RAG, recent
+    // session_log shows on-target completion — so the ONLY signal that could
+    // override PROGRESSIVE OVERLOAD defaults is the digest. A passing test
+    // proves the digest field is what steered the response.
+    //
+    // Gated behind APEX_INTEGRATION_TESTS=1 per CLAUDE.md.
+    // Token cost: ~$0.05 per fixture × 3 ≈ $0.15 per run.
+
+    /// Clean baseline WorkoutContext for α isolation. The only non-default
+    /// state that could steer the LLM away from "increase weight by one
+    /// increment" is whatever the caller injects via `digest`.
+    private func makeCleanContextForAlpha(
+        exerciseName: String,
+        primaryMuscles: [String],
+        digest: TraineeModelDigest
+    ) -> WorkoutContext {
+        let setDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let cleanSet = CompletedSet(
+            setNumber: 1, weightKg: 80.0, reps: 10, rirActual: 2, rpe: 7.0,
+            tempo: "3-1-1-0", restTakenSeconds: 120, completedAt: setDate,
+            userCorrectedWeight: nil, daysAgo: 0
+        )
+
+        return WorkoutContext(
+            requestType: "set_prescription",
+            sessionMetadata: SessionMetadata(
+                sessionId: "session-alpha-\(exerciseName)",
+                startedAt: setDate,
+                programName: "PPL Hypertrophy",
+                dayLabel: "Push A",
+                weekNumber: 3,
+                totalSessionCount: 42
+            ),
+            biometrics: Biometrics(bodyweightKg: 80.0, restingHeartRate: 52, readinessScore: 8, sleepHours: 7.5),
+            streakResult: nil,
+            userProfile: UserProfileContext(bodyweightKg: 80.0, heightCm: 178.0, age: 28, trainingAge: "Intermediate (1–3 yrs)"),
+            isFirstSession: false,
+            currentExercise: CurrentExercise(
+                name: exerciseName,
+                equipmentTypeKey: "barbell",
+                setNumber: 2,
+                plannedSets: 4,
+                planTarget: PlanTarget(minReps: 6, maxReps: 10, rirTarget: 2, intensityPercent: 75.0),
+                primaryMuscles: primaryMuscles,
+                secondaryMuscles: [],
+                bodyweightOnly: nil
+            ),
+            sessionHistoryToday: [],
+            currentExerciseSetsToday: [cleanSet],
+            withinSessionPerformance: [cleanSet],
+            historicalPerformance: HistoricalPerformance(
+                personalBest: cleanSet,
+                recentAverage: RecentAverage(sessionCount: 5, avgWeightKg: 80.0, avgReps: 10.0, avgRir: 2.0),
+                trend: "improving"
+            ),
+            qualitativeNotesToday: [],
+            ragRetrievedMemory: [],
+            sessionLog: [
+                SessionLogEntry(
+                    exercise: exerciseName, setNumber: 1,
+                    prescribedWeightKg: 80.0, prescribedReps: 10,
+                    actualReps: 10, rpe: 7.0,
+                    outcomeNote: "on_target"
+                )
+            ],
+            weeklyFatigueSummary: WeeklyFatigueSummary(
+                sessionsThisWeek: 3, avgRpeThisWeek: 7.0,
+                exercisesWithMultipleMisses: [],
+                totalSetsThisWeek: 42
+            ),
+            gymWeightFacts: nil,
+            traineeModelDigest: digest
+        )
+    }
+
+    /// Builds a TraineeModelDigest carrying a single PatternSummary with the
+    /// requested trend and consecutive_force_deloads count, plus enough
+    /// scaffolding to satisfy required fields.
+    private func makeDigestForAlpha(
+        pattern: MovementPattern,
+        trend: ProgressionTrend,
+        consecutiveForceDeloads: Int = 0
+    ) -> TraineeModelDigest {
+        var model = TraineeModel(goal: GoalState(statement: "Hypertrophy", focusAreas: [], updatedAt: Date()))
+        var profile = PatternProfile(
+            pattern: pattern,
+            currentPhase: .accumulation,
+            sessionsInPhase: 6,
+            rpeOffset: 0.0,
+            confidence: .established,
+            trend: trend
+        )
+        profile.consecutiveForceDeloadsOnPattern = consecutiveForceDeloads
+        model.patterns[pattern] = profile
+        return TraineeModelDigest(from: model, asOf: Date())
+    }
+
+    /// α plateaued — horizontal_push trend=.plateaued.
+    /// Asserts: coaching_cue OR reasoning contains one of {rep-range variation,
+    /// exercise swap/variation, intensity technique (pause/eccentric/back-off/top-set)}.
+    /// OR-match — LLM may pick any of the three valid responses; flake risk
+    /// is real if LLM rephrases ("switch up the rep scheme" instead of "vary rep range").
+    /// Term-set broadening over time is expected α maintenance.
+    func test_liveAPI_alpha_plateauedHorizontalPush_variesPrescription() async throws {
+        try requireLiveAPI()
+        let apiKey = try requireAnthropicKey()
+
+        let service = AIInferenceService(
+            provider: AnthropicProvider(apiKey: apiKey),
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 2
+        )
+        let digest = makeDigestForAlpha(pattern: .horizontalPush, trend: .plateaued)
+        let context = makeCleanContextForAlpha(
+            exerciseName: "Barbell Bench Press",
+            primaryMuscles: ["pectoralis_major", "anterior_deltoid"],
+            digest: digest
+        )
+
+        let result = await service.prescribe(context: context)
+
+        guard case .success(let prescription) = result else {
+            return XCTFail("Expected .success, got \(result)")
+        }
+
+        let haystack = (prescription.coachingCue + " " + prescription.reasoning).lowercased()
+        let plateauTerms = [
+            // Rep-range variation
+            "vary", "variation", "different rep", "rep range", "rep scheme", "switch",
+            "4-6", "10-12", "lower rep", "higher rep",
+            // Exercise swap
+            "swap", "substitute", "instead of", "different exercise", "replace",
+            // Intensity technique
+            "pause", "eccentric", "tempo", "slow", "top set", "top-set", "backoff", "back-off",
+            "intensity technique"
+        ]
+        let matched = plateauTerms.first { haystack.contains($0) }
+        XCTAssertNotNil(matched,
+            "Plateaued α: expected coaching_cue OR reasoning to contain one of \(plateauTerms). Got: \(haystack)")
+    }
+
+    /// α declining — squat trend=.declining.
+    /// Tight numeric assertion: weight_kg must be < 80.0 (last working weight in session_log).
+    /// AND coaching_cue must contain form-quality language. This is the only
+    /// α fixture in the suite with a deterministic numeric check — clean
+    /// session_log isolates "trend=.declining" as the sole weight-reduction signal.
+    func test_liveAPI_alpha_decliningSquat_reducesWeight_andCoachesForm() async throws {
+        try requireLiveAPI()
+        let apiKey = try requireAnthropicKey()
+
+        let service = AIInferenceService(
+            provider: AnthropicProvider(apiKey: apiKey),
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 2
+        )
+        let digest = makeDigestForAlpha(pattern: .squat, trend: .declining)
+        let context = makeCleanContextForAlpha(
+            exerciseName: "Barbell Back Squat",
+            primaryMuscles: ["quadriceps_femoris", "gluteus_maximus"],
+            digest: digest
+        )
+
+        let result = await service.prescribe(context: context)
+
+        guard case .success(let prescription) = result else {
+            return XCTFail("Expected .success, got \(result)")
+        }
+
+        // (a) Numeric: weight reduced from the last working weight (80kg).
+        XCTAssertLessThan(prescription.weightKg, 80.0,
+            "Declining α: expected weight reduction from last working weight 80.0kg, got \(prescription.weightKg)")
+
+        // (b) Coaching cue references form quality / tempo / control.
+        let haystack = prescription.coachingCue.lowercased()
+        let formTerms = ["form", "quality", "tempo", "control", "movement quality", "technique", "clean", "crisp"]
+        let matched = formTerms.first { haystack.contains($0) }
+        XCTAssertNotNil(matched,
+            "Declining α: expected coaching_cue to reference form/quality/tempo. Got: \(haystack)")
+    }
+
+    /// α force-deloads=2 — vertical_push consecutive_force_deloads_on_pattern=2.
+    /// Asserts: coaching_cue OR reasoning contains one of {rotation/swap/variation,
+    /// rebuild/programme-change language}. OR-match per ADR-0011 §(d).
+    func test_liveAPI_alpha_consecutiveForceDeloadsVerticalPush_surfacesRotationOrRebuild() async throws {
+        try requireLiveAPI()
+        let apiKey = try requireAnthropicKey()
+
+        let service = AIInferenceService(
+            provider: AnthropicProvider(apiKey: apiKey),
+            gymProfile: GymProfile.mockProfile(),
+            maxRetries: 2
+        )
+        // trend=.progressing so the only override signal is consecutive_force_deloads_on_pattern.
+        let digest = makeDigestForAlpha(
+            pattern: .verticalPush,
+            trend: .progressing,
+            consecutiveForceDeloads: 2
+        )
+        let context = makeCleanContextForAlpha(
+            exerciseName: "Barbell Overhead Press",
+            primaryMuscles: ["anterior_deltoid", "triceps_brachii"],
+            digest: digest
+        )
+
+        let result = await service.prescribe(context: context)
+
+        guard case .success(let prescription) = result else {
+            return XCTFail("Expected .success, got \(result)")
+        }
+
+        let haystack = (prescription.coachingCue + " " + prescription.reasoning).lowercased()
+        let rotationOrRebuildTerms = [
+            // Rotation / swap / variation
+            "rotat", "swap", "variation", "different exercise", "alternate", "switch",
+            // Programme rebuild
+            "rebuild", "programme", "program", "new pattern", "calcified", "restructure",
+            "stuck", "plateau"  // generic context the LLM may use to introduce rotation
+        ]
+        let matched = rotationOrRebuildTerms.first { haystack.contains($0) }
+        XCTAssertNotNil(matched,
+            "Force-deloads=2 α: expected coaching_cue OR reasoning to suggest rotation or rebuild. Got: \(haystack)")
+    }
 }

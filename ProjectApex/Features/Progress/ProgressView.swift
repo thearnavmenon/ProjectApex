@@ -2,7 +2,9 @@
 // ProjectApex — Features/Progress
 //
 // Four-section progress tab:
-//   1. Stagnation banners (amber = plateaued, red = declining)
+//   1. Per-pattern trend banners (amber = plateaued or force-deload cue,
+//      red = declining) — sourced from TraineeModelDigest per ADR-0009 /
+//      ADR-0011 (B1 / #86)
 //   2. Key Lifts Summary — horizontal scroll cards
 //   3. Strength Trend Chart — Swift Charts line chart, exercise picker
 //   4. Weekly Volume by Muscle Group — stacked bar chart, 8 weeks
@@ -16,8 +18,16 @@ struct ProgressTabView: View {
     @State private var vm: ProgressViewModel
     @Environment(AppDependencies.self) private var deps
 
-    init(supabaseClient: SupabaseClient, userId: UUID) {
-        _vm = State(initialValue: ProgressViewModel(supabaseClient: supabaseClient, userId: userId))
+    init(
+        supabaseClient: SupabaseClient,
+        userId: UUID,
+        traineeModelService: TraineeModelService? = nil
+    ) {
+        _vm = State(initialValue: ProgressViewModel(
+            supabaseClient: supabaseClient,
+            userId: userId,
+            traineeModelService: traineeModelService
+        ))
     }
 
     var body: some View {
@@ -31,7 +41,7 @@ struct ProgressTabView: View {
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 24) {
-                            stagnationBanners
+                            trendBanners
                             keyLiftsSummarySection
                             strengthTrendSection
                             weeklyVolumeSection
@@ -52,15 +62,19 @@ struct ProgressTabView: View {
         }
     }
 
-    // MARK: - Stagnation Banners
+    // MARK: - Trend Banners
 
     @ViewBuilder
-    private var stagnationBanners: some View {
-        let alerts = vm.stagnationSignals.filter { $0.verdict != .progressing }
+    private var trendBanners: some View {
+        // Surface plateaued/declining patterns and any pattern with the
+        // force-deload counter ≥ 2 (rotation/rebuild cue per ADR-0011 §d).
+        let alerts = vm.patternTrends.filter {
+            $0.trend != .progressing || $0.consecutiveForceDeloadsOnPattern >= 2
+        }
         if !alerts.isEmpty {
             VStack(spacing: 8) {
-                ForEach(alerts) { signal in
-                    StagnationBannerView(signal: signal)
+                ForEach(alerts, id: \.pattern) { summary in
+                    TrendBannerView(summary: summary)
                 }
             }
         }
@@ -193,54 +207,6 @@ struct ProgressTabView: View {
             ?? id.split(separator: "_")
                 .map { $0.prefix(1).uppercased() + $0.dropFirst() }
                 .joined(separator: " ")
-    }
-}
-
-// MARK: - StagnationBannerView
-
-private struct StagnationBannerView: View {
-    let signal: StagnationSignal
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: signal.verdict == .declining ? "arrow.down.circle.fill" : "minus.circle.fill")
-                .foregroundStyle(bannerIconColor)
-                .font(.system(size: 20))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(signal.exerciseName)
-                    .font(.subheadline.bold())
-                    .foregroundStyle(.white)
-                Text(bannerMessage)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.75))
-            }
-            Spacer()
-        }
-        .padding(12)
-        .background(bannerBackground, in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    private var bannerIconColor: Color {
-        signal.verdict == .declining
-            ? Color(red: 0.96, green: 0.36, blue: 0.36)
-            : Color(red: 0.96, green: 0.70, blue: 0.20)
-    }
-
-    private var bannerBackground: some ShapeStyle {
-        signal.verdict == .declining
-            ? AnyShapeStyle(Color(red: 0.96, green: 0.36, blue: 0.36).opacity(0.12))
-            : AnyShapeStyle(Color(red: 0.96, green: 0.70, blue: 0.20).opacity(0.12))
-    }
-
-    private var bannerMessage: String {
-        switch signal.verdict {
-        case .declining:
-            return "Performance declining — consider reducing weight 10% and focusing on form."
-        case .plateaued:
-            return "No new PR in \(signal.sessionsWithoutProgress) sessions — try varying rep ranges or technique."
-        case .progressing:
-            return ""
-        }
     }
 }
 

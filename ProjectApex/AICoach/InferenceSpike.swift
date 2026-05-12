@@ -260,7 +260,8 @@ enum InferenceSpike {
                 )
             ],
             weeklyFatigueSummary: nil,
-            gymWeightFacts: nil
+            gymWeightFacts: nil,
+            traineeModelDigest: nil
         )
     }
 }

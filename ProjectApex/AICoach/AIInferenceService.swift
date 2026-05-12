@@ -51,6 +51,11 @@ nonisolated struct WorkoutContext: Codable, Sendable {
     /// GymFactStore. E.g. ["16.0kg not available — use 15.0kg instead"].
     /// The AI treats these as hard constraints — never prescribe the unavailable weight.
     let gymWeightFacts: [String]?
+    /// Trainee-model projection (B1 / #86). Carries per-pattern trend +
+    /// consecutiveForceDeloadsOnPattern so per-set prescriptions can adapt to
+    /// plateau / decline / programme calcification per ADR-0009 + ADR-0011.
+    /// Nil when the local store has no model for this user yet.
+    let traineeModelDigest: TraineeModelDigest?
 
     enum CodingKeys: String, CodingKey {
         case requestType                = "request_type"
@@ -69,6 +74,7 @@ nonisolated struct WorkoutContext: Codable, Sendable {
         case sessionLog                 = "session_log"
         case weeklyFatigueSummary       = "weekly_fatigue_summary"
         case gymWeightFacts             = "gym_weight_facts"
+        case traineeModelDigest         = "trainee_model_digest"
     }
 }
 
@@ -815,7 +821,8 @@ extension WorkoutContext {
                 exercisesWithMultipleMisses: [],
                 totalSetsThisWeek: 42
             ),
-            gymWeightFacts: nil
+            gymWeightFacts: nil,
+            traineeModelDigest: nil
         )
     }
 }
@@ -964,6 +971,7 @@ actor AIInferenceService {
         }
 
         var prescription = wrapper.setPrescription
+        prescription.reasoning = String(prescription.reasoning.prefix(200))
 
         // 5. Validate
         do {
@@ -1069,6 +1077,7 @@ actor AIInferenceService {
             }
 
             var prescription = wrapper.setPrescription
+            prescription.reasoning = String(prescription.reasoning.prefix(200))
             do {
                 try prescription.validate()
             } catch {
@@ -1146,9 +1155,21 @@ actor AIInferenceService {
         return s.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    // MARK: - Private: System Prompt
+    // MARK: - System Prompt
+    //
+    // VERSION: 5.0 — 2026-05-12 — added PER-PATTERN TREND interpretation block
+    // per ADR-0009 + ADR-0011. Changing this literal invalidates the
+    // PromptCachingProvider cache on the next prescribe() call.
+    //
+    // NOTE: SystemPrompt_Inference.txt is a deprecated parallel mirror, loaded
+    // only by InferenceSpike. THIS inline string is the production authority.
+    // Track consolidation in the spinoff referenced from the file's header.
+    //
+    // Access is `internal` (not `private`) so β prompt-anchor tests can
+    // assert against the exact string production reads — a test-only
+    // accessor would be a new code path subject to drift.
 
-    private static let systemPrompt = """
+    internal static let systemPrompt = """
         You are an elite AI strength and hypertrophy coach embedded in a workout app. \
         Your sole job is to prescribe the next set for the user based on the provided WorkoutContext JSON.
 
@@ -1243,6 +1264,28 @@ actor AIInferenceService {
         PROGRESSIVE OVERLOAD (default when all reps completed):
         - ≥ 2 RIR: increase weight by one minimum increment.
         - 1–0 RIR: maintain weight, reduce RIR target.
+
+        PER-PATTERN TREND (overrides PROGRESSIVE OVERLOAD when non-progressing):
+        trainee_model_digest.per_pattern_summary[] carries a hybrid plateau verdict per pattern
+        combining e1RM EWMA flatness AND weekly-volume-load flatness (ADR-0009). When the
+        current_exercise's movement pattern shows a non-progressing trend in per_pattern_summary[],
+        adapt THIS set's prescription accordingly:
+          - "progressing" — no override; follow PROGRESSIVE OVERLOAD defaults above
+          - "plateaued"   — vary the prescription parameter from the user's last comparable set:
+                            rep range (try 4–6 instead of 8–10), intensity technique (pause reps,
+                            slow eccentric 3–4s), or back-off-after-top-set structure. Do NOT
+                            just repeat the previous prescription
+          - "declining"   — reduce weight ~10% from the last working weight in session_log; add
+                            ~1 rep to accumulate practice volume; coaching_cue focuses on
+                            movement quality and tempo, not load
+
+        When per_pattern_summary[].consecutive_force_deloads_on_pattern >= 2 for the current_exercise's
+        pattern, the user's programming on this pattern has likely calcified. Surface this in
+        coaching_cue or reasoning — recommend exercise rotation (next-session swap to a closely-
+        related variation) or programme rebuild. Do NOT continue the same prescription pattern.
+
+        Per-pattern trend takes precedence over PROGRESSIVE OVERLOAD defaults when they conflict —
+        a regressing user does not get a weight increase just because they completed all prescribed reps.
 
         FIRST-SESSION CALIBRATION: If is_first_session is true, prescribe ~60% estimated 1RM.
         Use user_profile.bodyweight_kg and training_age as anchors.

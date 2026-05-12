@@ -45,6 +45,17 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
     static let fatigueInteractionConfidenceThreshold: Double = 0.7
+
+    enum CodingKeys: String, CodingKey {
+        case goal
+        case projections
+        case perPatternSummary         = "per_pattern_summary"
+        case perMuscleSummary          = "per_muscle_summary"
+        case activeFatigueInteractions = "active_fatigue_interactions"
+        case activeLimitations         = "active_limitations"
+        case prescriptionAccuracy      = "prescription_accuracy"
+        case disruptedPatterns         = "disrupted_patterns"
+    }
 }
 
 // MARK: - Assembly
@@ -69,6 +80,7 @@ extension TraineeModelDigest {
                 byIntent
                     .sorted { $0.key.rawValue < $1.key.rawValue }
                     .map { $0.value }
+                    .filter(\.shouldSurfaceInDigest)
             }
 
         let disruptedPatterns = model.disruptedPatterns(asOf: reference)
@@ -103,6 +115,10 @@ struct PatternSummary: Codable, Sendable, Hashable {
     /// doesn't need to re-derive transition-mode state at prompt-assembly
     /// time.
     var inTransitionMode: Bool
+    /// Per ADR-0011 §(d): counter increments on force-deload, resets on
+    /// natural progressing-advance. Surfaced so the LLM can emit exercise-
+    /// rotation / programme-rebuild cues when the counter reaches 2.
+    var consecutiveForceDeloadsOnPattern: Int
 
     init(profile: PatternProfile, asOf reference: Date = Date()) {
         self.pattern         = profile.pattern
@@ -111,6 +127,17 @@ struct PatternSummary: Codable, Sendable, Hashable {
         self.rpeOffset       = profile.rpeOffset
         self.trend           = profile.trend
         self.inTransitionMode = profile.inTransitionMode(asOf: reference)
+        self.consecutiveForceDeloadsOnPattern = profile.consecutiveForceDeloadsOnPattern
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case pattern
+        case currentPhase                    = "current_phase"
+        case confidence
+        case rpeOffset                       = "rpe_offset"
+        case trend
+        case inTransitionMode                = "in_transition_mode"
+        case consecutiveForceDeloadsOnPattern = "consecutive_force_deloads_on_pattern"
     }
 }
 
@@ -135,5 +162,48 @@ struct MuscleSummary: Codable, Sendable, Hashable {
         self.focusWeight       = profile.focusWeight
         self.stagnationStatus  = profile.stagnationStatus
         self.confidence        = profile.confidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case muscleGroup       = "muscle_group"
+        case volumeTolerance   = "volume_tolerance"
+        case volumeDeficit     = "volume_deficit"
+        case focusWeight       = "focus_weight"
+        case stagnationStatus  = "stagnation_status"
+        case confidence
+    }
+}
+
+// MARK: - PrescriptionAccuracy digest surfacing rule
+//
+// Mirror of supabase/functions/_shared/prescription-accuracy.ts:shouldSurfaceInDigest
+// — keep in sync. Per ADR-0014 §"Digest exposure filter": an entry surfaces only
+// when sampleCount is sufficient AND at least one signal (bias / rmse / gap-bucket
+// divergence) exceeds its threshold. Numeric thresholds mirror the TS constants
+// from supabase/functions/_shared/constants.ts (#80).
+//
+// TODO: consolidate when JSONB shape allows a single producer-side filter.
+
+extension PrescriptionAccuracy {
+    static let digestMinSamples = 5
+    static let biasSurfaceThreshold = 0.05
+    static let rmseSurfaceThreshold = 0.10
+    static let gapBucketMinSamples = 3
+    static let gapBucketDivergenceThreshold = 0.05
+
+    var shouldSurfaceInDigest: Bool {
+        if sampleCount < Self.digestMinSamples { return false }
+        if abs(bias) > Self.biasSurfaceThreshold { return true }
+        if rmse > Self.rmseSurfaceThreshold { return true }
+
+        let under48hSamples = sampleCountByGapBucket[.under48h] ?? 0
+        let over72hSamples = sampleCountByGapBucket[.over72h] ?? 0
+        guard under48hSamples >= Self.gapBucketMinSamples,
+              over72hSamples >= Self.gapBucketMinSamples else { return false }
+
+        let under48hBias = biasByGapBucket[.under48h] ?? 0
+        let over72hBias = biasByGapBucket[.over72h] ?? 0
+        let divergence = abs(under48hBias - over72hBias)
+        return divergence > Self.gapBucketDivergenceThreshold
     }
 }

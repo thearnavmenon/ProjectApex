@@ -253,18 +253,24 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(digest.activeLimitations, [limitation])
     }
 
-    // MARK: ─── Cycle 6: prescription accuracy flattened from nested map ───────
+    // MARK: ─── Cycle 6: prescription accuracy flattened + filtered ────────────
+    //
+    // ADR-0014 §"Digest exposure filter" — entries surface only when
+    // sampleCount ≥ 5 AND ( |bias| > 0.05 OR rmse > 0.10 OR gap-bucket
+    // bias divergence > 0.05 with both buckets ≥ 3 samples ).
+    // Mirror of supabase/functions/_shared/prescription-accuracy.ts:shouldSurfaceInDigest.
 
     func test_digest_prescriptionAccuracy_flattensNestedMap() {
         var model = makeBaselineModel()
+        // All three entries use surface-worthy values (|bias| > 0.05 OR rmse > 0.10).
         let squatTop = PrescriptionAccuracy(
-            pattern: .squat, intent: .top, bias: -0.05, rmse: 0.08, sampleCount: 12
+            pattern: .squat, intent: .top, bias: -0.08, rmse: 0.06, sampleCount: 12
         )
         let squatBackoff = PrescriptionAccuracy(
-            pattern: .squat, intent: .backoff, bias: 0.02, rmse: 0.06, sampleCount: 18
+            pattern: .squat, intent: .backoff, bias: 0.02, rmse: 0.12, sampleCount: 18
         )
         let pushTop = PrescriptionAccuracy(
-            pattern: .horizontalPush, intent: .top, bias: 0.0, rmse: 0.04, sampleCount: 9
+            pattern: .horizontalPush, intent: .top, bias: 0.10, rmse: 0.04, sampleCount: 9
         )
         model.prescriptionAccuracy = [
             .squat:          [.top: squatTop, .backoff: squatBackoff],
@@ -276,6 +282,91 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(digest.prescriptionAccuracy.count, 3)
         let entries = Set(digest.prescriptionAccuracy.map { "\($0.pattern.rawValue):\($0.intent.rawValue)" })
         XCTAssertEqual(entries, ["squat:top", "squat:backoff", "horizontal_push:top"])
+    }
+
+    func test_digest_prescriptionAccuracy_excludes_belowMinSampleCount() {
+        var model = makeBaselineModel()
+        // sampleCount=4 < 5 → excluded regardless of bias/rmse.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.20, rmse: 0.30, sampleCount: 4
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
+    }
+
+    func test_digest_prescriptionAccuracy_excludes_noSignal() {
+        var model = makeBaselineModel()
+        // sampleCount ≥ 5, but |bias| ≤ 0.05, rmse ≤ 0.10, no gap-bucket data.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.04, rmse: 0.08, sampleCount: 10
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
+    }
+
+    func test_digest_prescriptionAccuracy_includes_onBiasThreshold() {
+        var model = makeBaselineModel()
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.06, rmse: 0.04, sampleCount: 10
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.prescriptionAccuracy.count, 1)
+    }
+
+    func test_digest_prescriptionAccuracy_includes_onRmseThreshold() {
+        var model = makeBaselineModel()
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.0, rmse: 0.11, sampleCount: 10
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.prescriptionAccuracy.count, 1)
+    }
+
+    func test_digest_prescriptionAccuracy_includes_onGapBucketDivergence() {
+        var model = makeBaselineModel()
+        // No primary-signal surfacing (|bias|≤0.05, rmse≤0.10), but
+        // under48h vs over72h bias diverges by 0.10 > 0.05 with both
+        // buckets ≥ 3 samples → surfaces via the gap-bucket branch.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.0, rmse: 0.04, sampleCount: 10,
+            biasByGapBucket: [.under48h: -0.05, .over72h: 0.05],
+            rmseByGapBucket: [:],
+            sampleCountByGapBucket: [.under48h: 4, .over72h: 4]
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.prescriptionAccuracy.count, 1)
+    }
+
+    func test_digest_prescriptionAccuracy_excludes_gapBucketDivergence_whenBucketsSparse() {
+        var model = makeBaselineModel()
+        // Divergence is large (0.10 > 0.05) but the under48h bucket has only
+        // 2 samples (< 3) — suppression rule fires, entry excluded.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.0, rmse: 0.04, sampleCount: 10,
+            biasByGapBucket: [.under48h: -0.05, .over72h: 0.05],
+            rmseByGapBucket: [:],
+            sampleCountByGapBucket: [.under48h: 2, .over72h: 4]
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
     }
 
     // MARK: ─── Cycle 7: disrupted patterns derived from cadence ──────────────
@@ -299,6 +390,279 @@ final class TraineeModelDigestTests: XCTestCase {
         let digest = TraineeModelDigest(from: model, asOf: ref)
 
         XCTAssertEqual(digest.disruptedPatterns, [.squat])
+    }
+
+    // MARK: ─── B1: digest wire shape locked to snake_case ──────────────────
+    //
+    // The system prompts reference fields via snake_case JSON paths
+    // (`trainee_model_digest.per_pattern_summary[].trend`,
+    //  `per_muscle_summary[].stagnation_status`,
+    //  `per_pattern_summary[].consecutive_force_deloads_on_pattern`).
+    //
+    // Without explicit CodingKeys, Codable auto-synthesis emits camelCase
+    // — the LLM reads a path that doesn't exist and silently degrades.
+    // PR #150 lesson: snake_case ↔ camelCase drift across the wire boundary
+    // must be locked at the type, not the encoder strategy.
+
+    func test_digest_jsonShape_isAllSnakeCase() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.trend = .plateaued
+        profile.consecutiveForceDeloadsOnPattern = 2
+        model.patterns[.squat] = profile
+        model.muscles[.legs] = MuscleProfile(
+            muscleGroup: .legs,
+            volumeTolerance: 14.0,
+            observedSweetSpot: 11,
+            volumeDeficit: 3,
+            focusWeight: 0.7,
+            stagnationStatus: .declining,
+            confidence: .established
+        )
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        // Top-level digest keys.
+        XCTAssertNotNil(json["per_pattern_summary"], "TraineeModelDigest must emit per_pattern_summary")
+        XCTAssertNotNil(json["per_muscle_summary"], "TraineeModelDigest must emit per_muscle_summary")
+        XCTAssertNotNil(json["active_fatigue_interactions"], "TraineeModelDigest must emit active_fatigue_interactions")
+        XCTAssertNotNil(json["active_limitations"], "TraineeModelDigest must emit active_limitations")
+        XCTAssertNotNil(json["prescription_accuracy"], "TraineeModelDigest must emit prescription_accuracy")
+        XCTAssertNotNil(json["disrupted_patterns"], "TraineeModelDigest must emit disrupted_patterns")
+
+        // PatternSummary keys the B1 prompt block references.
+        let patternSummaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let squatSummary = try XCTUnwrap(patternSummaries.first { ($0["pattern"] as? String) == "squat" })
+        XCTAssertNotNil(squatSummary["current_phase"])
+        XCTAssertNotNil(squatSummary["rpe_offset"])
+        XCTAssertNotNil(squatSummary["in_transition_mode"])
+        XCTAssertNotNil(squatSummary["consecutive_force_deloads_on_pattern"])
+        XCTAssertEqual(squatSummary["consecutive_force_deloads_on_pattern"] as? Int, 2)
+        XCTAssertEqual(squatSummary["trend"] as? String, "plateaued")
+
+        // MuscleSummary keys the B1 prompt block references.
+        let muscleSummaries = try XCTUnwrap(json["per_muscle_summary"] as? [[String: Any]])
+        let legsSummary = try XCTUnwrap(muscleSummaries.first { ($0["muscle_group"] as? String) == "legs" })
+        XCTAssertNotNil(legsSummary["volume_tolerance"])
+        XCTAssertNotNil(legsSummary["volume_deficit"])
+        XCTAssertNotNil(legsSummary["focus_weight"])
+        XCTAssertNotNil(legsSummary["stagnation_status"])
+        XCTAssertEqual(legsSummary["stagnation_status"] as? String, "declining")
+    }
+
+    // MARK: ─── B1: PatternSummary surfaces consecutiveForceDeloadsOnPattern ──
+    //
+    // Per ADR-0011 §(d), the digest exposes a per-pattern counter that
+    // increments on force-deload and resets on natural progressing-advance.
+    // The system prompts read it to surface exercise-rotation / programme-
+    // rebuild coaching cues when the counter reaches 2 (ADR-0011 watch-item).
+
+    func test_digest_perPatternSummary_includesConsecutiveForceDeloadsOnPattern() {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.consecutiveForceDeloadsOnPattern = 2
+        model.patterns[.squat] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let summary = try! XCTUnwrap(digest.perPatternSummary.first { $0.pattern == .squat })
+
+        XCTAssertEqual(summary.consecutiveForceDeloadsOnPattern, 2)
+    }
+
+    func test_digest_perPatternSummary_consecutiveForceDeloadsOnPattern_roundTrips() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.consecutiveForceDeloadsOnPattern = 3
+        model.patterns[.squat] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let encoded = try JSONEncoder().encode(digest)
+        let decoded = try JSONDecoder().decode(TraineeModelDigest.self, from: encoded)
+        let summary = try XCTUnwrap(decoded.perPatternSummary.first { $0.pattern == .squat })
+
+        XCTAssertEqual(summary.consecutiveForceDeloadsOnPattern, 3)
+    }
+
+    // MARK: ─── B1: β fixture suite — prompt anchors + payload per state ────
+    //
+    // Concern A: prompt anchors lock the production prompt text. SessionPlan
+    // reads SystemPrompt_SessionPlan.txt (loaded by SessionPlanService at
+    // runtime); Inference reads AIInferenceService.systemPrompt (inline
+    // Swift string, the production authority — see #159 for consolidation).
+    //
+    // Concern B: payload-shape tests build a TraineeModelDigest for each
+    // load-bearing state and assert the resulting JSON has the keys the
+    // prompt block tells the LLM to read.
+
+    // ─── Concern A: prompt anchors ────────────────────────────────────────
+
+    private func loadSessionPlanPrompt() throws -> String {
+        // #file resolves to this test source file; the .txt lives at
+        // ProjectApex/Resources/Prompts/ relative to the repo root.
+        let testFileURL = URL(fileURLWithPath: #file)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()  // ProjectApexTests/
+            .deletingLastPathComponent()  // <repo root>
+        let promptURL = repoRoot.appendingPathComponent(
+            "ProjectApex/Resources/Prompts/SystemPrompt_SessionPlan.txt"
+        )
+        return try String(contentsOf: promptURL, encoding: .utf8)
+    }
+
+    func test_sessionPlanPrompt_containsPerPatternTrendBlock_andLacksLegacyStagnationPhrases() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Positive anchors: new PER-PATTERN TREND block per ADR-0009 + ADR-0011.
+        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+                      "SessionPlan prompt must carry v2.0 header (cache-bust)")
+        XCTAssertTrue(prompt.contains("PER-PATTERN TREND"),
+                      "SessionPlan must include the PER-PATTERN TREND section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_pattern_summary[].trend"),
+                      "SessionPlan must reference the trend JSON path")
+        XCTAssertTrue(prompt.contains("\"plateaued\""),
+                      "SessionPlan must include the plateaued interpretation rule")
+        XCTAssertTrue(prompt.contains("\"declining\""),
+                      "SessionPlan must include the declining interpretation rule")
+        XCTAssertTrue(prompt.contains("\"progressing\""),
+                      "SessionPlan must include the progressing default rule")
+        XCTAssertTrue(prompt.contains("consecutive_force_deloads_on_pattern >= 2"),
+                      "SessionPlan must include the force-deload surfacing rule (ADR-0011 §d)")
+
+        // Negative anchors: legacy STAGNATION SIGNALS phrasing removed.
+        XCTAssertFalse(prompt.contains("STAGNATION SIGNALS"),
+                       "Legacy STAGNATION SIGNALS section header must not reappear")
+        XCTAssertFalse(prompt.contains("stagnation_signals contains exercises"),
+                       "Legacy stagnation_signals interpretation prose must not reappear")
+    }
+
+    func test_inferencePrompt_containsPerPatternTrendBlock() {
+        // Production Inference reads AIInferenceService.systemPrompt — the
+        // inline Swift string literal, not SystemPrompt_Inference.txt (which
+        // is a deprecated parallel mirror — see #159).
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("PER-PATTERN TREND"),
+                      "Inference prompt must include the PER-PATTERN TREND section header")
+        XCTAssertTrue(prompt.contains("overrides PROGRESSIVE OVERLOAD when non-progressing"),
+                      "Inference prompt must explicitly mark trend as an override on the default progression")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_pattern_summary[]"),
+                      "Inference prompt must reference the digest JSON path")
+        XCTAssertTrue(prompt.contains("\"plateaued\""),
+                      "Inference must include the plateaued interpretation rule")
+        XCTAssertTrue(prompt.contains("\"declining\""),
+                      "Inference must include the declining interpretation rule")
+        XCTAssertTrue(prompt.contains("\"progressing\""),
+                      "Inference must include the progressing default rule")
+        XCTAssertTrue(prompt.contains("consecutive_force_deloads_on_pattern >= 2"),
+                      "Inference must include the force-deload surfacing rule (ADR-0011 §d)")
+        XCTAssertTrue(prompt.contains("a regressing user does not get a weight increase"),
+                      "Inference must include the asymmetric-error override clause")
+    }
+
+    // ─── Concern B: payload values per digest state ───────────────────────
+
+    func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.horizontalPush, confidence: .calibrating)
+        profile.trend = .plateaued
+        model.patterns[.horizontalPush] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let pushSummary = try XCTUnwrap(summaries.first { ($0["pattern"] as? String) == "horizontal_push" })
+        XCTAssertEqual(pushSummary["trend"] as? String, "plateaued")
+    }
+
+    func test_betaFixture_declining_squat_encodesTrendInPayload() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.trend = .declining
+        model.patterns[.squat] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let squatSummary = try XCTUnwrap(summaries.first { ($0["pattern"] as? String) == "squat" })
+        XCTAssertEqual(squatSummary["trend"] as? String, "declining")
+    }
+
+    func test_betaFixture_consecutiveForceDeloads_verticalPush_encodesCountInPayload() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.verticalPush, confidence: .established)
+        profile.consecutiveForceDeloadsOnPattern = 2
+        model.patterns[.verticalPush] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let pushSummary = try XCTUnwrap(summaries.first { ($0["pattern"] as? String) == "vertical_push" })
+        XCTAssertEqual(pushSummary["consecutive_force_deloads_on_pattern"] as? Int, 2)
+    }
+
+    func test_betaFixture_allProgressing_encodesAllProgressingInPayload() throws {
+        var model = makeBaselineModel()
+        model.patterns = [
+            .squat:          makePattern(.squat,          confidence: .established),
+            .horizontalPush: makePattern(.horizontalPush, confidence: .established),
+            .verticalPull:   makePattern(.verticalPull,   confidence: .established),
+        ]
+        // makePattern defaults trend to .progressing — no per-test override needed.
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        XCTAssertEqual(summaries.count, 3)
+        for summary in summaries {
+            XCTAssertEqual(summary["trend"] as? String, "progressing",
+                           "All-progressing fixture must encode trend=progressing for every pattern")
+        }
+    }
+
+    // MARK: ─── B1: cleanup-reversion guards ──────────────────────────────────
+    //
+    // Source-grep tests that lock B1's deletions in place. Same shape as the
+    // β negative anchors on prompt files — they catch lexical reversion at
+    // the source level, which compile-time field deletion alone can't (e.g.,
+    // someone re-adding the legacy stagnationSignals field would change the
+    // type but if they forgot a renamed consumer they'd get a compile error;
+    // these tests give a clearer "you reverted B1's deletion" signal).
+
+    private func loadSourceFile(_ relativePath: String) throws -> String {
+        let testFileURL = URL(fileURLWithPath: #file)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()  // ProjectApexTests/
+            .deletingLastPathComponent()  // <repo root>
+        let sourceURL = repoRoot.appendingPathComponent(relativePath)
+        return try String(contentsOf: sourceURL, encoding: .utf8)
+    }
+
+    func test_sessionPlanService_doesNotReferenceLegacyStagnationField() throws {
+        let source = try loadSourceFile("ProjectApex/Services/SessionPlanService.swift")
+        XCTAssertFalse(source.contains("stagnationSignals"),
+            "SessionPlanService must not declare or reference stagnationSignals (removed in B1/#86 — read trend from traineeModelDigest instead)")
+        XCTAssertFalse(source.contains("stagnation_signals"),
+            "SessionPlanService must not emit the stagnation_signals JSON key (removed in B1/#86)")
+        XCTAssertFalse(source.contains("StagnationService"),
+            "SessionPlanService must not reference StagnationService (deleted in B1/#86)")
+    }
+
+    func test_workoutSessionManager_doesNotComputeStagnationSignals() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Workout/WorkoutSessionManager.swift")
+        XCTAssertFalse(source.contains("StagnationService.computeSignals"),
+            "WorkoutSessionManager must not invoke StagnationService.computeSignals (removed in B1/#86 — trend is computed server-side per ADR-0009)")
+        XCTAssertFalse(source.contains("StagnationService.persist"),
+            "WorkoutSessionManager must not invoke StagnationService.persist (removed in B1/#86)")
     }
 
     // MARK: ─── Cycle 8: empty-input edge cases ───────────────────────────────

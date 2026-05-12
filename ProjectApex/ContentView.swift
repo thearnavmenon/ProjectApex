@@ -100,7 +100,8 @@ struct ContentView: View {
             // ── Tab 2: Progress ────────────────────────────────────────────
             ProgressTabView(
                 supabaseClient: deps.supabaseClient,
-                userId: deps.resolvedUserId
+                userId: deps.resolvedUserId,
+                traineeModelService: deps.traineeModelService
             )
             .tabItem {
                 Label("Progress", systemImage: "chart.line.uptrend.xyaxis")

@@ -78,6 +78,12 @@ final class AppDependencies {
     // MARK: Init
 
     init() {
+        // 0. One-shot cleanup: remove the legacy StagnationService UserDefaults
+        // key. The service + key were deleted in B1 (#86); this prevents stale
+        // data from persisting on installs that upgraded across the cutover.
+        // Cheap idempotent op — removeObject is a no-op when the key is absent.
+        UserDefaults.standard.removeObject(forKey: "apex.stagnation_signals")
+
         // 1. Keychain — source of all API keys
         let keychain = KeychainService.shared
         self.keychainService = keychain
@@ -134,19 +140,9 @@ final class AppDependencies {
             provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
         )
 
-        // 8c. SessionPlanService — Sonnet per-session generation (called on "Start Workout")
-        self.sessionPlanService = SessionPlanService(
-            provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 8000, requestTimeout: 120),
-            memoryService: memoryService,
-            supabaseClient: supabaseClient
-        )
-
-        // 8d. ExerciseSwapService — mid-session exercise swap chat (P3-T10)
-        self.exerciseSwapService = ExerciseSwapService(
-            provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 1024, requestTimeout: 15)
-        )
-
         // 9. WriteAheadQueue — reliable Supabase write queue (P3-T06)
+        // Hoisted above SessionPlanService so the trainee-model stack below
+        // can be injected into SessionPlanService (B1 / #86).
         let waq = WriteAheadQueue(supabase: supabaseClient)
         self.writeAheadQueue = waq
 
@@ -171,6 +167,19 @@ final class AppDependencies {
         // item per completed session; the handler registered above dispatches them.
         let tmService = TraineeModelService(store: tmStore, writeAheadQueue: waq)
         self.traineeModelService = tmService
+
+        // 8c. SessionPlanService — Sonnet per-session generation (called on "Start Workout")
+        self.sessionPlanService = SessionPlanService(
+            provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 8000, requestTimeout: 120),
+            memoryService: memoryService,
+            supabaseClient: supabaseClient,
+            traineeModelService: tmService
+        )
+
+        // 8d. ExerciseSwapService — mid-session exercise swap chat (P3-T10)
+        self.exerciseSwapService = ExerciseSwapService(
+            provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 1024, requestTimeout: 15)
+        )
 
         // 11. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak, trainee model
         let manager = WorkoutSessionManager(
@@ -207,7 +216,8 @@ final class AppDependencies {
         sessionPlanService = SessionPlanService(
             provider: AnthropicProvider(apiKey: anthropicKey, maxTokens: 8000, requestTimeout: 120),
             memoryService: memoryService,
-            supabaseClient: supabaseClient
+            supabaseClient: supabaseClient,
+            traineeModelService: traineeModelService
         )
     }
 }

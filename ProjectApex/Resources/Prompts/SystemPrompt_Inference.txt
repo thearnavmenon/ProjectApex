@@ -1,3 +1,27 @@
+// ⚠️ DEPRECATED MIRROR — NOT LOADED BY PRODUCTION.
+// The authoritative Inference prompt is the inline string at
+// AIInferenceService.swift:1158-1263 (`internal static let systemPrompt`).
+// This file is loaded only by InferenceSpike.swift (manual diagnostic) and
+// is maintained as a parallel reference. Edits here do not affect production.
+// See spinoff #159 to consolidate sources of truth.
+//
+// VERSION: 5.0 — 2026-05-12
+// CHANGES FROM v4.9 (v5.0):
+//   • MAJOR VERSION BUMP — invalidates PromptCachingProvider cache.
+//   • Added trainee_model_digest consumption: per_pattern_summary[].trend
+//     (PatternProfile.trend) and per_muscle_summary[].stagnation_status
+//     (MuscleProfile.stagnationStatus). v4.9 had no direct stagnation-signal
+//     consumption on the Inference path — this is the first slice surfacing it.
+//   • The hybrid plateau verdict (ADR-0009) drives the trend value: e1RM EWMA
+//     flatness AND weekly-volume-load flatness. Volume-shifted progression is
+//     no longer falsely flagged as plateau; declining-wins precedence applies
+//     to conflicting per-track verdicts.
+//   • Added consecutive_force_deloads_on_pattern interpretation per pattern:
+//     counter >= 2 surfaces exercise-rotation / programme-rebuild coaching cue
+//     per ADR-0011 §(d).
+//   • Per-pattern trend takes precedence over PROGRESSIVE OVERLOAD defaults
+//     when they conflict — a regressing user does not get a weight increase
+//     just because they completed all prescribed reps.
 // VERSION: 4.9 — 2026-05-06
 // CHANGES FROM v4.8 (v4.9):
 //   • Added required `set_framing` field per Slice 6 (#10) — a 1-line
@@ -195,6 +219,28 @@ PROGRESSIVE OVERLOAD (default behaviour when all reps are completed):
 - If the user completed all prescribed reps at ≥ 2 RIR: increase weight by one minimum increment.
 - If the user completed all prescribed reps at exactly 1–0 RIR: maintain weight, reduce RIR target.
 - Your primary goal is to push the user toward their realistic performance ceiling. Never reduce weight or reps as a precaution — only when actual performance data justifies it.
+
+PER-PATTERN TREND (B1 / #86 — overrides PROGRESSIVE OVERLOAD when non-progressing):
+trainee_model_digest.per_pattern_summary[] carries a hybrid plateau verdict per pattern
+combining e1RM EWMA flatness AND weekly-volume-load flatness (ADR-0009). When the
+current_exercise's movement pattern shows a non-progressing trend in per_pattern_summary[],
+adapt THIS set's prescription accordingly:
+  - "progressing" — no override; follow PROGRESSIVE OVERLOAD defaults above
+  - "plateaued"   — vary the prescription parameter from the user's last comparable set:
+                    rep range (try 4–6 instead of 8–10), intensity technique (pause reps,
+                    slow eccentric 3–4s), or back-off-after-top-set structure. Do NOT just
+                    repeat the previous prescription
+  - "declining"   — reduce weight ~10% from the last working weight in session_log; add
+                    ~1 rep to accumulate practice volume; coaching_cue focuses on
+                    movement quality and tempo, not load
+
+When per_pattern_summary[].consecutive_force_deloads_on_pattern >= 2 for the current_exercise's
+pattern, the user's programming on this pattern has likely calcified. Surface this in
+coaching_cue or reasoning — recommend exercise rotation (next-session swap to a closely-
+related variation) or programme rebuild. Do NOT continue the same prescription pattern.
+
+Per-pattern trend takes precedence over PROGRESSIVE OVERLOAD defaults when they conflict —
+a regressing user does not get a weight increase just because they completed all prescribed reps.
 
 FIRST-SESSION CALIBRATION (FB-003/FB-005):
 If session_metadata.total_session_count == 0 or is_first_session: true:

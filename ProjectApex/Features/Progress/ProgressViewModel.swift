@@ -130,7 +130,10 @@ final class ProgressViewModel {
     var selectedTrendExercise: String?
     var weeklyVolume: [WeeklyVolumeRow] = []
     var heatmapData: [HeatmapCell] = []
-    var stagnationSignals: [StagnationSignal] = []
+    /// Per-pattern trend banners — sourced from TraineeModelDigest.perPatternSummary
+    /// (B1 / #86). Replaces the legacy stagnationSignals: [StagnationSignal] field
+    /// that consumed StagnationService output from UserDefaults.
+    var patternTrends: [PatternSummary] = []
     var isLoading = true
     var errorMessage: String?
 
@@ -138,12 +141,18 @@ final class ProgressViewModel {
 
     private let supabaseClient: SupabaseClient
     private let userId: UUID
+    private let traineeModelService: TraineeModelService?
 
     // MARK: - Init
 
-    init(supabaseClient: SupabaseClient, userId: UUID) {
+    init(
+        supabaseClient: SupabaseClient,
+        userId: UUID,
+        traineeModelService: TraineeModelService? = nil
+    ) {
         self.supabaseClient = supabaseClient
         self.userId = userId
+        self.traineeModelService = traineeModelService
     }
 
     // Prevent swift_task_deinitOnExecutorImpl crash: @MainActor deinit
@@ -225,8 +234,11 @@ final class ProgressViewModel {
                 VolumeValidationService.persist(deficits)
             }
 
-            // Step 5: load stagnation signals (persisted post-session)
-            stagnationSignals = StagnationService.load()
+            // Step 5: per-pattern trend banners from the trainee model.
+            // Replaces the legacy `StagnationService.load()` call from UserDefaults
+            // — the digest is the canonical source post-B1 (#86). Defaults to empty
+            // when the local store hasn't hydrated yet.
+            patternTrends = await traineeModelService?.digest()?.perPatternSummary ?? []
 
             // Default trend exercise to whichever exercise has the most sessions
             if selectedTrendExercise == nil {
