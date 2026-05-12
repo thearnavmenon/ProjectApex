@@ -69,12 +69,12 @@ struct ProgramDayDetailView: View {
     var viewModel: ProgramViewModel? = nil
     /// FB-008: gym profile needed for SessionPlanService equipment constraints.
     var gymProfile: GymProfile? = nil
-    /// Switches the root TabView to the Workout tab. Wired so the "Continue Workout"
-    /// CTA for a live session reuses Tab 1's existing WorkoutView instead of pushing
-    /// a second one under Tab 0's nav stack.
-    var onSwitchToWorkoutTab: (() -> Void)? = nil
 
     @Environment(AppDependencies.self) private var deps
+    /// Closure injected by the root TabView. Used by the "Continue Workout" CTA on
+    /// a live day so it reuses Tab 1's WorkoutView instead of pushing a second one
+    /// under Tab 0's nav stack. Defaults to a no-op outside the TabView (previews).
+    @Environment(\.switchToTab) private var switchToTab
 
     /// FB-008: local state tracking whether session generation is in progress for this view.
     @State private var isGeneratingSession: Bool = false
@@ -138,8 +138,7 @@ struct ProgramDayDetailView: View {
         programId: UUID = UUID(),
         devOverride: Bool = false,
         viewModel: ProgramViewModel? = nil,
-        gymProfile: GymProfile? = nil,
-        onSwitchToWorkoutTab: (() -> Void)? = nil
+        gymProfile: GymProfile? = nil
     ) {
         self.day = day
         self.week = week
@@ -148,7 +147,6 @@ struct ProgramDayDetailView: View {
         self.devOverride = devOverride
         self.viewModel = viewModel
         self.gymProfile = gymProfile
-        self.onSwitchToWorkoutTab = onSwitchToWorkoutTab
         _currentDay = State(initialValue: day)
     }
 
@@ -650,15 +648,9 @@ struct ProgramDayDetailView: View {
 
         if isSessionActiveForThisDay && !isCompleted {
             // Active session for this day — route to Tab 1's WorkoutView rather than
-            // pushing a second one under this stack. Falls back to the local push if
-            // no tab-switch closure was wired (older call sites / previews).
-            Button(action: {
-                if let onSwitchToWorkoutTab {
-                    onSwitchToWorkoutTab()
-                } else {
-                    navigateToWorkout = true
-                }
-            }) {
+            // pushing a second one under this stack. switchToTab defaults to a no-op
+            // outside the root TabView (previews), so this is safe to call unguarded.
+            Button(action: { switchToTab(1) }) {
                 HStack(spacing: 10) {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 17, weight: .semibold))

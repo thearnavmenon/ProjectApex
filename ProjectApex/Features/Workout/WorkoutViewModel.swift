@@ -235,11 +235,19 @@ final class WorkoutViewModel {
         retryFailureDescription = retryReason.map { Self.retryDescription(for: $0) }
     }
 
+    /// Token for the currently-running polling task, so a second caller (e.g.
+    /// resumeSession firing while WorkoutView.task has already begun polling)
+    /// cancels the previous loop instead of stacking a parallel one.
+    private var pollingTask: Task<Void, Never>? = nil
+
     /// Starts a Task that polls actor state on every rest-timer tick and on
-    /// state transitions. Stops automatically when the session completes or errors.
+    /// state transitions. Stops automatically when the session completes or
+    /// errors. Cancels any existing polling task first so callers never spawn
+    /// two parallel loops against the same actor.
     func beginStatePolling() {
-        Task { [weak self] in
-            while let self, await self.sessionIsLive() {
+        pollingTask?.cancel()
+        pollingTask = Task { [weak self] in
+            while let self, !Task.isCancelled, await self.sessionIsLive() {
                 await self.pullState()
                 try? await Task.sleep(nanoseconds: 500_000_000) // poll every 0.5 s
             }

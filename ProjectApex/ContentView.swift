@@ -64,11 +64,6 @@ struct ContentView: View {
     /// True when crash recovery's paused day cannot be found anywhere in the mesocycle.
     @State private var showOrphanedRecoveryAlert: Bool = false
 
-    // MARK: - Tab badge state
-
-    @State private var sessionIsLive: Bool = false
-    @State private var pausedSessionExists: Bool = false
-
     // MARK: - Paused-session banner navigation
 
     /// True when the user taps "Resume" on PausedSessionBannerView — pushes
@@ -83,8 +78,7 @@ struct ContentView: View {
                 if let vm = programViewModel {
                     ProgramOverviewView(
                         viewModel: vm,
-                        gymProfile: confirmedProfile,
-                        onSwitchToWorkoutTab: { selectedTab = 1 }
+                        gymProfile: confirmedProfile
                     )
                 } else {
                     loadingPlaceholder
@@ -122,6 +116,7 @@ struct ContentView: View {
             }
             .tag(3)
         }
+        .environment(\.switchToTab, { selectedTab = $0 })
         .preferredColorScheme(.dark)
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView { completedProfile in
@@ -197,21 +192,6 @@ struct ContentView: View {
                         showCrashRecoveryAlert = true
                     }
                 }
-            }
-        }
-        // Badge polling — drives the Tab 1 live/paused indicator.
-        // Runs as a separate .task so it is never short-circuited by the main setup task's
-        // early returns (isLive guard, onboarding skip, etc.).
-        .task {
-            while true {
-                let state = await deps.workoutSessionManager.sessionState
-                switch state {
-                case .idle, .sessionComplete, .error: sessionIsLive = false
-                default: sessionIsLive = true
-                }
-                pausedSessionExists = UserDefaults.standard.data(forKey: PausedSessionState.v2PersistenceKey) != nil
-                    || UserDefaults.standard.data(forKey: PausedSessionState.legacyPersistenceKey) != nil
-                try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
         .alert("Unfinished Workout", isPresented: $showCrashRecoveryAlert) {
@@ -298,9 +278,9 @@ struct ContentView: View {
     /// Returns nil (no badge) when idle. SwiftUI renders foregroundStyle on Text badges
     /// on iOS 16+; if the tint does not render the badge defaults to the system colour.
     private var workoutTabBadge: Text? {
-        if sessionIsLive {
+        if deps.liveSessionWatcher.isLive {
             return Text("●").foregroundStyle(Color(red: 0.25, green: 0.72, blue: 1.0))
-        } else if pausedSessionExists {
+        } else if deps.liveSessionWatcher.pausedSessionExists {
             return Text("●").foregroundStyle(Color(red: 1.0, green: 0.65, blue: 0.0))
         }
         return nil
@@ -364,12 +344,20 @@ struct ContentView: View {
                             // Persistent skip — advances programme_day_index, records skippedAt.
                             programViewModel?.markDaySkipped(dayId: day.id, weekId: week.id)
                         },
-                        onCloseToTab0: { selectedTab = 0 }
+                        onCloseToTab0: { selectedTab = 0 },
+                        onResumeStateConsumed: {
+                            // One-shot — clear so subsequent tab swaps into Tab 1 don't re-apply
+                            // the same paused state on top of the now-live (or post-error)
+                            // session. crashResumeDay stays valid until the session ends
+                            // (cleared in onSessionDismissed above) because workoutTab still
+                            // needs it to select the correct trainingDay parameter.
+                            crashResumeToPass = nil
+                        }
                     )
                     // Paused-session banner — shown when a different day is paused and no
                     // session is currently live (i.e. user is on the PreWorkoutView screen).
                     .safeAreaInset(edge: .top) {
-                        if !sessionIsLive,
+                        if !deps.liveSessionWatcher.isLive,
                            let saved = PausedSessionState.load(),
                            saved.trainingDayId != day.id,
                            let found = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {
@@ -393,8 +381,7 @@ struct ContentView: View {
                                 mesocycleCreatedAt: mesocycle.createdAt,
                                 programId: mesocycle.id,
                                 viewModel: vm,
-                                gymProfile: confirmedProfile,
-                                onSwitchToWorkoutTab: { selectedTab = 1 }
+                                gymProfile: confirmedProfile
                             )
                             .environment(deps)
                         }
@@ -576,6 +563,25 @@ struct ContentView: View {
             // Success — switch to Program tab so user sees the new program
             selectedTab = 0
         }
+    }
+}
+
+// MARK: - Cross-tab navigation environment
+
+/// Closure that switches the root TabView's selection. Injected by ContentView so
+/// any descendant view can request a tab change (e.g. ProgramDayDetailView routing
+/// a live-session "Continue Workout" CTA back to Tab 1) without prop-drilling a
+/// dedicated callback through every intermediate view. Tab indices follow the
+/// declaration order in ContentView (0 = Program, 1 = Workout, 2 = Progress,
+/// 3 = Settings). Defaults to a no-op so previews and tests work without setup.
+private struct SwitchToTabKey: EnvironmentKey {
+    static let defaultValue: (Int) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var switchToTab: (Int) -> Void {
+        get { self[SwitchToTabKey.self] }
+        set { self[SwitchToTabKey.self] = newValue }
     }
 }
 

@@ -25,16 +25,9 @@ struct ProgramOverviewView: View {
     @Bindable var viewModel: ProgramViewModel
     /// The confirmed gym profile passed in from ContentView.
     let gymProfile: GymProfile?
-    /// Switches the root TabView to the Workout tab. Forwarded to ProgramDayDetailView
-    /// so its "Continue Workout" CTA can reuse Tab 1 instead of pushing a duplicate.
-    var onSwitchToWorkoutTab: (() -> Void)? = nil
 
     /// Controls the collapsed/expanded state of the pattern progress section.
     @State private var isPatternProgressExpanded = false
-    /// The training day ID that has an active live session, nil when idle.
-    @State private var liveTrainingDayId: UUID? = nil
-    /// Aggregated set progress for the live session, updated every poll cycle.
-    @State private var liveSetSummary: LiveSetSummary? = nil
 
     var body: some View {
         ZStack {
@@ -74,32 +67,9 @@ struct ProgramOverviewView: View {
         .task {
             await viewModel.loadProgram()
         }
-        .task {
-            // Poll the actor every 2 seconds so the live-session card highlight
-            // and set-progress numbers update without requiring view navigation.
-            while !Task.isCancelled {
-                let activeId = await deps.workoutSessionManager.currentTrainingDayId
-                let state    = await deps.workoutSessionManager.sessionState
-                let isLive: Bool
-                switch state {
-                case .idle, .sessionComplete, .error: isLive = false
-                default: isLive = true
-                }
-                liveTrainingDayId = isLive ? activeId : nil
-                if isLive {
-                    let sets = await deps.workoutSessionManager.completedSets
-                    let last = sets.max(by: { $0.loggedAt < $1.loggedAt })
-                    liveSetSummary = LiveSetSummary(
-                        setsCompleted: sets.count,
-                        lastWeightKg: last?.weightKg,
-                        lastRepsCompleted: last?.repsCompleted
-                    )
-                } else {
-                    liveSetSummary = nil
-                }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-            }
-        }
+        // Live-session highlight + set-progress now come from
+        // deps.liveSessionWatcher (a single 500ms poll owned by AppDependencies)
+        // so this view no longer runs its own loop against the manager actor.
     }
 
     // MARK: - Loading
@@ -274,9 +244,8 @@ struct ProgramOverviewView: View {
                             gymProfile: gymProfile,
                             phaseWeekNumber: phaseWeekNum,
                             phaseWeekTotal: phaseWeekTot,
-                            liveTrainingDayId: liveTrainingDayId,
-                            liveSetSummary: liveSetSummary,
-                            onSwitchToWorkoutTab: onSwitchToWorkoutTab
+                            liveTrainingDayId: deps.liveSessionWatcher.currentTrainingDayId,
+                            liveSetSummary: deps.liveSessionWatcher.liveSetSummary
                         )
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)
@@ -485,9 +454,6 @@ private struct WeekRowView: View {
     var liveTrainingDayId: UUID? = nil
     /// Aggregated set progress for the live session (nil when no session active).
     var liveSetSummary: LiveSetSummary? = nil
-    /// Forwarded to ProgramDayDetailView so the "Continue Workout" CTA can route
-    /// back to Tab 1's WorkoutView instead of pushing a duplicate under this stack.
-    var onSwitchToWorkoutTab: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -535,8 +501,7 @@ private struct WeekRowView: View {
                                 mesocycleCreatedAt: mesocycleCreatedAt,
                                 programId: mesocycleId,
                                 viewModel: viewModel,
-                                gymProfile: gymProfile,
-                                onSwitchToWorkoutTab: onSwitchToWorkoutTab
+                                gymProfile: gymProfile
                             )
                         } label: {
                             DayCardView(

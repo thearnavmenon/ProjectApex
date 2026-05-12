@@ -47,6 +47,9 @@ final class AppDependencies {
     let lateArrivalNotificationQueue: LateArrivalNotificationQueue
     /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
     let workoutSessionManager: WorkoutSessionManager
+    /// Single polling source for "is a session live" + summary. Views read from
+    /// this instead of running their own .task loops against the manager actor.
+    let liveSessionWatcher: LiveSessionWatcher
 
     // MARK: - Auth (MVP)
 
@@ -163,7 +166,7 @@ final class AppDependencies {
         Task { await tmJob.register(with: waq) }
 
         // 11. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak
-        self.workoutSessionManager = WorkoutSessionManager(
+        let manager = WorkoutSessionManager(
             aiInference: inferenceService,
             healthKit: healthKitService,
             memoryService: memoryService,
@@ -172,6 +175,11 @@ final class AppDependencies {
             writeAheadQueue: waq,
             gymStreakService: gymStreakService
         )
+        self.workoutSessionManager = manager
+
+        // 12. LiveSessionWatcher — single polling source for live-session UI signals
+        // (tab badge, calendar day highlight, set summary). Starts polling on init.
+        self.liveSessionWatcher = LiveSessionWatcher(manager: manager)
     }
 
     // MARK: - Re-initialisation

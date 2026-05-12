@@ -80,6 +80,11 @@ struct WorkoutView: View {
     /// Called when the user taps the × close button on the Tab 1 entry path (idle only).
     /// Switches the tab bar to Tab 0 without touching actor state.
     var onCloseToTab0: (() -> Void)? = nil
+    /// Fires after WorkoutView has applied `resumeState` (success or error). ContentView
+    /// uses this to clear its `crashResumeToPass` one-shot so a later Tab 1 re-entry
+    /// (e.g. after the user pauses, swaps to Tab 0, then back) doesn't re-apply the
+    /// same resume on top of an already-recovered session.
+    var onResumeStateConsumed: (() -> Void)? = nil
 
     // MARK: - Body
 
@@ -153,32 +158,29 @@ struct WorkoutView: View {
                     await deps.workoutSessionManager.flushWriteAheadQueue()
                     await deps.workoutSessionManager.abandonSession(sessionId: resume.sessionId)
                     vm.sessionState = .error("We couldn't find your previous session — it may have been reset. Your logged sets have been saved.")
+                    onResumeStateConsumed?()
                     return
                 }
-                vm.resumeSession(
-                    pausedState: resume,
-                    trainingDay: trainingDay,
-                    supabase: deps.supabaseClient
-                )
+                performResume(resume, vm: vm)
+                onResumeStateConsumed?()
             } else if let saved = PausedSessionState.load() {
-                if saved.trainingDayId == trainingDay.id {
-                    // Crash recovery path — user accepted the recovery alert in ContentView.
-                    // The PausedSessionState is still present (ContentView only clears it on Abandon).
-                    // Silently resume so the user lands directly in the active session.
-                    let isIdle = await deps.workoutSessionManager.sessionState == .idle
-                    if isIdle {
-                        vm.resumeSession(
-                            pausedState: saved,
-                            trainingDay: trainingDay,
-                            supabase: deps.supabaseClient
-                        )
-                    }
-                } else {
+                guard saved.trainingDayId == trainingDay.id else {
                     // Mismatch: a paused session exists but doesn't match this training day.
                     // ContentView normally handles this via its routing logic (Path A);
                     // this branch is a safety net for edge cases ContentView didn't catch.
                     mismatchSavedState = saved
                     showMismatchRecoveryAlert = true
+                    return
+                }
+                // Crash recovery path — user accepted the recovery alert in ContentView.
+                // The PausedSessionState is still present (ContentView only clears it on Abandon).
+                // Silently resume so the user lands directly in the active session. The
+                // isIdle gate prevents double-resumption when the actor was already revived
+                // by an earlier path (e.g. ContentView's crash-recovery alert fired Path A
+                // and the .task here is now re-firing post-navigation).
+                let isIdle = await deps.workoutSessionManager.sessionState == .idle
+                if isIdle {
+                    performResume(saved, vm: vm)
                 }
             }
         }
@@ -419,6 +421,21 @@ struct WorkoutView: View {
 
     private var setCompleteTransition: AnyTransition {
         reduceMotion ? .opacity : .apexSetComplete
+    }
+
+    // MARK: - Resume helper
+
+    /// Single resume call so the two resume paths (explicit `resumeState` from
+    /// ContentView's crash-recovery alert, and the fallback `PausedSessionState.load()`
+    /// branch) can't drift apart on the argument list. Failure handling stays
+    /// per-path because the two flows surface different UI (error state vs.
+    /// mismatch alert).
+    private func performResume(_ state: PausedSessionState, vm: WorkoutViewModel) {
+        vm.resumeSession(
+            pausedState: state,
+            trainingDay: trainingDay,
+            supabase: deps.supabaseClient
+        )
     }
 
     // MARK: - Current exercise (for SessionPlanSheet highlight)
