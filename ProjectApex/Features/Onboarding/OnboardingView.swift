@@ -931,6 +931,27 @@ struct OnboardingView: View {
             trainingAge: profile.trainingAge.rawValue
         )
         try? await deps.supabaseClient.insert(userRow, table: "users")
+
+        // #147: hydrate trainee_models.model_json.goal via the
+        // update-trainee-goal Edge Function. Best-effort — failure leaves
+        // the iOS side reading GoalState.placeholder (cold-start fallback
+        // until the next onboarding retry or DeveloperSettingsView reset).
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let goalPayload = TraineeGoalUpsertPayload(
+            userId: userId,
+            goal: GoalUpsertBody(
+                statement: profile.primaryGoal.rawValue,
+                focusAreas: [],
+                updatedAt: isoFormatter.string(from: Date())
+            )
+        )
+        if let encoded = try? JSONEncoder().encode(goalPayload) {
+            _ = try? await deps.supabaseClient.invokeFunction(
+                "update-trainee-goal",
+                body: encoded
+            )
+        }
     }
 
     private func completeOnboarding() {
@@ -984,6 +1005,28 @@ private struct UserInsertRow: Codable, Sendable {
         case age
         case trainingAge  = "training_age"
     }
+}
+
+// MARK: - TraineeGoalUpsertPayload (#147: onboarding goal write)
+
+/// Request body for the `update-trainee-goal` Edge Function. Mirrors the
+/// validator contract in `supabase/functions/update-trainee-goal/index.ts`:
+/// top-level `user_id` (UUID string) and `goal` object carrying the
+/// GoalState shape (statement + focusAreas + ISO-8601 updatedAt).
+private struct TraineeGoalUpsertPayload: Codable, Sendable {
+    let userId: UUID
+    let goal: GoalUpsertBody
+
+    enum CodingKeys: String, CodingKey {
+        case userId = "user_id"
+        case goal
+    }
+}
+
+private struct GoalUpsertBody: Codable, Sendable {
+    let statement: String
+    let focusAreas: [String]
+    let updatedAt: String
 }
 
 // MARK: - Preview
