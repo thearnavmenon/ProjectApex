@@ -485,6 +485,150 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(summary.consecutiveForceDeloadsOnPattern, 3)
     }
 
+    // MARK: ─── B1: β fixture suite — prompt anchors + payload per state ────
+    //
+    // Concern A: prompt anchors lock the production prompt text. SessionPlan
+    // reads SystemPrompt_SessionPlan.txt (loaded by SessionPlanService at
+    // runtime); Inference reads AIInferenceService.systemPrompt (inline
+    // Swift string, the production authority — see #159 for consolidation).
+    //
+    // Concern B: payload-shape tests build a TraineeModelDigest for each
+    // load-bearing state and assert the resulting JSON has the keys the
+    // prompt block tells the LLM to read.
+
+    // ─── Concern A: prompt anchors ────────────────────────────────────────
+
+    private func loadSessionPlanPrompt() throws -> String {
+        // #file resolves to this test source file; the .txt lives at
+        // ProjectApex/Resources/Prompts/ relative to the repo root.
+        let testFileURL = URL(fileURLWithPath: #file)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()  // ProjectApexTests/
+            .deletingLastPathComponent()  // <repo root>
+        let promptURL = repoRoot.appendingPathComponent(
+            "ProjectApex/Resources/Prompts/SystemPrompt_SessionPlan.txt"
+        )
+        return try String(contentsOf: promptURL, encoding: .utf8)
+    }
+
+    func test_sessionPlanPrompt_containsPerPatternTrendBlock_andLacksLegacyStagnationPhrases() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Positive anchors: new PER-PATTERN TREND block per ADR-0009 + ADR-0011.
+        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+                      "SessionPlan prompt must carry v2.0 header (cache-bust)")
+        XCTAssertTrue(prompt.contains("PER-PATTERN TREND"),
+                      "SessionPlan must include the PER-PATTERN TREND section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_pattern_summary[].trend"),
+                      "SessionPlan must reference the trend JSON path")
+        XCTAssertTrue(prompt.contains("\"plateaued\""),
+                      "SessionPlan must include the plateaued interpretation rule")
+        XCTAssertTrue(prompt.contains("\"declining\""),
+                      "SessionPlan must include the declining interpretation rule")
+        XCTAssertTrue(prompt.contains("\"progressing\""),
+                      "SessionPlan must include the progressing default rule")
+        XCTAssertTrue(prompt.contains("consecutive_force_deloads_on_pattern >= 2"),
+                      "SessionPlan must include the force-deload surfacing rule (ADR-0011 §d)")
+
+        // Negative anchors: legacy STAGNATION SIGNALS phrasing removed.
+        XCTAssertFalse(prompt.contains("STAGNATION SIGNALS"),
+                       "Legacy STAGNATION SIGNALS section header must not reappear")
+        XCTAssertFalse(prompt.contains("stagnation_signals contains exercises"),
+                       "Legacy stagnation_signals interpretation prose must not reappear")
+    }
+
+    func test_inferencePrompt_containsPerPatternTrendBlock() {
+        // Production Inference reads AIInferenceService.systemPrompt — the
+        // inline Swift string literal, not SystemPrompt_Inference.txt (which
+        // is a deprecated parallel mirror — see #159).
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("PER-PATTERN TREND"),
+                      "Inference prompt must include the PER-PATTERN TREND section header")
+        XCTAssertTrue(prompt.contains("overrides PROGRESSIVE OVERLOAD when non-progressing"),
+                      "Inference prompt must explicitly mark trend as an override on the default progression")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_pattern_summary[]"),
+                      "Inference prompt must reference the digest JSON path")
+        XCTAssertTrue(prompt.contains("\"plateaued\""),
+                      "Inference must include the plateaued interpretation rule")
+        XCTAssertTrue(prompt.contains("\"declining\""),
+                      "Inference must include the declining interpretation rule")
+        XCTAssertTrue(prompt.contains("\"progressing\""),
+                      "Inference must include the progressing default rule")
+        XCTAssertTrue(prompt.contains("consecutive_force_deloads_on_pattern >= 2"),
+                      "Inference must include the force-deload surfacing rule (ADR-0011 §d)")
+        XCTAssertTrue(prompt.contains("a regressing user does not get a weight increase"),
+                      "Inference must include the asymmetric-error override clause")
+    }
+
+    // ─── Concern B: payload values per digest state ───────────────────────
+
+    func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.horizontalPush, confidence: .calibrating)
+        profile.trend = .plateaued
+        model.patterns[.horizontalPush] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let pushSummary = try XCTUnwrap(summaries.first { ($0["pattern"] as? String) == "horizontal_push" })
+        XCTAssertEqual(pushSummary["trend"] as? String, "plateaued")
+    }
+
+    func test_betaFixture_declining_squat_encodesTrendInPayload() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.trend = .declining
+        model.patterns[.squat] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let squatSummary = try XCTUnwrap(summaries.first { ($0["pattern"] as? String) == "squat" })
+        XCTAssertEqual(squatSummary["trend"] as? String, "declining")
+    }
+
+    func test_betaFixture_consecutiveForceDeloads_verticalPush_encodesCountInPayload() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.verticalPush, confidence: .established)
+        profile.consecutiveForceDeloadsOnPattern = 2
+        model.patterns[.verticalPush] = profile
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let pushSummary = try XCTUnwrap(summaries.first { ($0["pattern"] as? String) == "vertical_push" })
+        XCTAssertEqual(pushSummary["consecutive_force_deloads_on_pattern"] as? Int, 2)
+    }
+
+    func test_betaFixture_allProgressing_encodesAllProgressingInPayload() throws {
+        var model = makeBaselineModel()
+        model.patterns = [
+            .squat:          makePattern(.squat,          confidence: .established),
+            .horizontalPush: makePattern(.horizontalPush, confidence: .established),
+            .verticalPull:   makePattern(.verticalPull,   confidence: .established),
+        ]
+        // makePattern defaults trend to .progressing — no per-test override needed.
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let summaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        XCTAssertEqual(summaries.count, 3)
+        for summary in summaries {
+            XCTAssertEqual(summary["trend"] as? String, "progressing",
+                           "All-progressing fixture must encode trend=progressing for every pattern")
+        }
+    }
+
     // MARK: ─── Cycle 8: empty-input edge cases ───────────────────────────────
 
     func test_digest_emptyModel_yieldsEmptyCollections() {
