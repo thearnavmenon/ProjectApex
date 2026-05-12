@@ -185,3 +185,6 @@ jobs:
 
       - name: Deploy update-trainee-model Edge Function
         run: supabase functions deploy update-trainee-model --project-ref hqjgrlzvrttnyfjqjewe
+
+      - name: Deploy update-trainee-goal Edge Function
+        run: supabase functions deploy update-trainee-goal --project-ref hqjgrlzvrttnyfjqjewe
