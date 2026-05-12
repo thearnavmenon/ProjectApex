@@ -118,7 +118,14 @@ struct TraineeModel: Codable, Sendable, Hashable {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.activeProgramId = try c.decodeIfPresent(UUID.self, forKey: .activeProgramId)
-        self.goal = try c.decode(GoalState.self, forKey: .goal)
+        // Defensive decode per #146 — Edge Function's applySession has no
+        // write path for `goal` (onboarding owns hydration via a separate
+        // flow not yet wired). Decode-if-present + `.placeholder` sentinel
+        // unblocks the rest of the model rather than throwing keyNotFound
+        // and silently dropping the whole TraineeModel via the parseResponse
+        // `try?` at TraineeModelUpdateJob:188.
+        self.goal = try c.decodeIfPresent(GoalState.self, forKey: .goal)
+            ?? GoalState.placeholder
         self.projections = try c.decodeIfPresent(ProjectionState.self, forKey: .projections)
         self.patterns = try c.decodeEnumKeyedDictIfPresent(
             PatternProfile.self, forKey: .patterns

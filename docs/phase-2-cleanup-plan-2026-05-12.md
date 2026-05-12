@@ -86,15 +86,25 @@ ORDER BY ws.session_date DESC;
 
 If `appeared_in_applied_sessions` is `true` within ~5 minutes of session completion, the producer wiring works in production. If `false`, the WAQ retry / Edge Function pipeline has a remaining gap and this becomes the next investigation.
 
-### 6. Investigate `confidence: null` on all 5 patterns
+### 6. [#146](https://github.com/thearnavmenon/ProjectApex/issues/146) — contract-drift between EF emit and Swift decode
 
-After backfill, `trainee_models.model_json.patterns[*].confidence` is `null` for every pattern despite 19 sessions of data. Possible causes:
-- Confidence field is populated by a rule module not in the current backfill data path (e.g., needs cross-session aggregates that 19 sessions doesn't trigger).
-- Or it's actually a fifth gap — another half-wired field.
+**Originally framed as a 15-minute `confidence: null` check; investigation revealed five separate decoder-killer schema gaps.** The `confidence: null` observation was the tip — `JSONDecoder.decode(TraineeModel.self, ...)` was throwing `keyNotFound` on the FIRST missing field (`goal`) and never reaching `patterns[*].confidence`. The `try?` at `TraineeModelUpdateJob.parseResponse:188` silently swallowed every failure, so the iOS local store never hydrated. Net effect: `TraineeModelService.digest()` returned nil for every iOS call, blocking B1–B4 entirely.
 
-15-minute check: read the confidence-population path in `supabase/functions/update-trainee-model/index.ts`, find the trigger condition, see if our user's data should have hit it. If yes → file as a bug. If no → expected behaviour, document the threshold.
+Missing fields per server-emitted `model_json` for the alpha user:
 
-This matters because the digest is about to become a load-bearing input for B1–B4 cutover prompts, and confidence-gated logic (e.g., per ADR-0005's `.established`/`.calibrating` semantics) needs reliable confidence values.
+| Field | Status |
+|---|---|
+| Top-level `goal` | Swift defensive decode + `GoalState.placeholder` sentinel; spinoff issue for the real onboarding write path |
+| Per-PatternProfile `pattern` | EF bootstrap now emits as field |
+| Per-PatternProfile `rpeOffset` | EF bootstrap now emits with default `0` |
+| Per-PatternProfile `recovery` | EF migrated from top-level `model_json.recovery` to per-pattern per ADR-0005 + cross-platform fixture contract. `applyPerSetStimulusRules` + `applyRecoveryReadiness` now operate per-pattern; orphan top-level field stripped via SQL migration |
+| Per-PatternProfile `confidence` | EF bootstrap now emits `"bootstrapping"` default |
+
+This was the **fifth deployment-shape gap** in the same family as #135/#138/#139 (wiring/deploy/migration); #146 was at the contract layer: code emits one shape, code consumes a different shape, the integration point silently absorbs the mismatch.
+
+Sixth gap surfaced during #146 implementation: EF emits camelCase pattern keys (`horizontalPush`), Swift's `MovementPattern.rawValue` uses snake_case (`horizontal_push`). `decodeEnumKeyedDict` silently drops mismatched keys. Filed as separate spinoff — out of #146's scope.
+
+#146's coordinated PR ships this all in one batch with TS test updates, the recovery migration, and the docs update. After it merges, B1–B4 unblock for the 3 keys whose casing happens to match (squat/lunge/isolation); full 8-pattern unblock requires the casing spinoff to merge.
 
 ---
 
@@ -161,7 +171,7 @@ Working top-down, the highest-value sequencing is:
 1. **#1 (file CI auto-deploy issue)** — prevents the next gap of the same shape. Do this first.
 2. **#7 (unpause #132)** — small, safe, ships actual user value (equipment safety on per-day generation). Half-day.
 3. **#5 (live-session smoke check)** — after the next workout, one SQL query. Confirms the producer wiring works in the wild.
-4. **#6 (`confidence: null` investigation)** — 15 minutes. Either rules out a fifth gap or files it.
+4. **#6 ([#146](https://github.com/thearnavmenon/ProjectApex/issues/146))** — coordinated PR resolving 5 contract-drift gaps. ~3h of work; bundles EF + Swift + migration + tests.
 5. **#4 (deepLiftHistory fix per #141)** — likely a one-line WHERE clause fix.
 6. **#8 (resume B1, then B2/B3/B4)** — multi-PR cutover work. Largest scope but everything else has cleared the runway.
 7. **#2 + #3 (audit doc + G1 report corrections)** — can interleave anywhere. Honest accounting, no code risk.

@@ -432,14 +432,17 @@ function applyPerExerciseRules(
 }
 
 /**
- * Per-set stimulus pipeline per #118 (A18). Each set's (intent, reps, rpeFelt)
- * triple maps to a `StimulusDimension | null` via `classifyStimulus`; sets
- * that drive a dimension bump the corresponding `last*StimulusAt` timestamp
- * to the session's `incomingLoggedAt`.
+ * Per-set stimulus pipeline per #118 (A18), migrated to per-pattern recovery
+ * per #146. Each set's (intent, reps, rpeFelt) triple maps to a
+ * `StimulusDimension | null` via `classifyStimulus`; sets that drive a
+ * dimension bump the corresponding `last*StimulusAt` timestamp on the
+ * pattern resolved via `lookupPattern(set.exercise_id)`. Sets whose
+ * exercise has no pattern mapping (or whose intent contributes no
+ * stimulus) are skipped.
  *
- * Bootstrap: missing `model_json.recovery` gets ADR-0005 defaults — null
- * timestamps + 1.0 readinesses. Readiness scalars are owned by A19; this
- * slice only updates the timestamps.
+ * Defense-in-depth: per-pattern bootstrap with full `recovery` shape lives
+ * in `applyPerPatternRules`. If a pattern still lacks a `recovery` field at
+ * this stage, fill ADR-0005 defaults rather than throwing.
  *
  * Monotonicity: the orchestrator's watermark check rejects late arrivals
  * before this helper runs, so `incomingLoggedAt >= last_applied_logged_at >=
@@ -447,37 +450,27 @@ function applyPerExerciseRules(
  * `max()` guard needed.
  */
 function applyPerSetStimulusRules(
-  recovery: Record<string, unknown> | undefined,
+  patterns: Record<string, Record<string, unknown>>,
   setLogs: Array<Record<string, unknown>>,
   incomingLoggedAt: Date,
 ): {
-  recovery: Record<string, unknown>;
+  patterns: Record<string, Record<string, unknown>>;
   rulesFired: Set<string>;
   fieldsChanged: string[];
 } {
   const rulesFired = new Set<string>();
   const fieldsChanged: string[] = [];
-  const wasBootstrapped = recovery === undefined;
-  const newRecovery: Record<string, unknown> = wasBootstrapped
-    ? {
-        lastNeuromuscularStimulusAt: null,
-        lastMetabolicStimulusAt: null,
-        neuromuscularReadiness: 1.0,
-        metabolicReadiness: 1.0,
-      }
-    : { ...recovery };
-  if (wasBootstrapped) {
-    fieldsChanged.push("recovery.bootstrapped");
-  }
-
   const loggedAtIso = incomingLoggedAt.toISOString();
-  let bumpedNm = false;
-  let bumpedMet = false;
 
+  const bumps: Record<string, { nm: boolean; met: boolean }> = {};
   for (const set of setLogs) {
     const intent = set.intent;
     if (typeof intent !== "string") continue;
     if (typeof set.reps_completed !== "number") continue;
+    const exerciseId = set.exercise_id;
+    if (typeof exerciseId !== "string") continue;
+    const patternKey = lookupPattern(exerciseId);
+    if (!patternKey) continue;
     const rpeFelt = typeof set.rpe_felt === "number" ? set.rpe_felt : null;
     const dim = classifyStimulus(
       intent as SetIntent,
@@ -485,28 +478,49 @@ function applyPerSetStimulusRules(
       rpeFelt,
     );
     if (dim === null) continue;
-    if (dim === "neuromuscular" || dim === "both") bumpedNm = true;
-    if (dim === "metabolic" || dim === "both") bumpedMet = true;
+    const entry = bumps[patternKey] ?? { nm: false, met: false };
+    if (dim === "neuromuscular" || dim === "both") entry.nm = true;
+    if (dim === "metabolic" || dim === "both") entry.met = true;
+    bumps[patternKey] = entry;
   }
 
-  if (bumpedNm) {
-    newRecovery.lastNeuromuscularStimulusAt = loggedAtIso;
-    rulesFired.add("stimulus-classifier");
-    fieldsChanged.push("recovery.lastNeuromuscularStimulusAt");
-  }
-  if (bumpedMet) {
-    newRecovery.lastMetabolicStimulusAt = loggedAtIso;
-    rulesFired.add("stimulus-classifier");
-    fieldsChanged.push("recovery.lastMetabolicStimulusAt");
+  const newPatterns: Record<string, Record<string, unknown>> = { ...patterns };
+  for (const [patternKey, flags] of Object.entries(bumps)) {
+    const profile = newPatterns[patternKey];
+    if (!profile) continue; // pattern not in dict — orchestrator owns bootstrap
+    const priorRecovery =
+      (profile.recovery as Record<string, unknown> | undefined) ?? {
+        lastNeuromuscularStimulusAt: null,
+        lastMetabolicStimulusAt: null,
+        neuromuscularReadiness: 1.0,
+        metabolicReadiness: 1.0,
+      };
+    const newRecovery: Record<string, unknown> = { ...priorRecovery };
+    if (flags.nm) {
+      newRecovery.lastNeuromuscularStimulusAt = loggedAtIso;
+      rulesFired.add("stimulus-classifier");
+      fieldsChanged.push(
+        `patterns.${patternKey}.recovery.lastNeuromuscularStimulusAt`,
+      );
+    }
+    if (flags.met) {
+      newRecovery.lastMetabolicStimulusAt = loggedAtIso;
+      rulesFired.add("stimulus-classifier");
+      fieldsChanged.push(
+        `patterns.${patternKey}.recovery.lastMetabolicStimulusAt`,
+      );
+    }
+    newPatterns[patternKey] = { ...profile, recovery: newRecovery };
   }
 
-  return { recovery: newRecovery, rulesFired, fieldsChanged };
+  return { patterns: newPatterns, rulesFired, fieldsChanged };
 }
 
 /**
- * Recovery readiness pipeline per #120 (A19). Reads the just-bumped
- * `last*StimulusAt` timestamps from `recovery` and computes the per-axis
- * readiness scalars via ADR-0010's curve:
+ * Recovery readiness pipeline per #120 (A19), migrated to per-pattern
+ * recovery per #146. For each pattern, reads its `recovery.last*StimulusAt`
+ * timestamps and computes the per-axis readiness scalars via ADR-0010's
+ * curve:
  *
  *   readiness(t) = clamp(0, 1, 0.3 + 0.7 × (1 - exp(-t / tau)))
  *
@@ -523,38 +537,51 @@ function applyPerSetStimulusRules(
  * in-depth catches any path that bypasses the watermark.
  */
 function applyRecoveryReadiness(
-  recovery: Record<string, unknown>,
+  patterns: Record<string, Record<string, unknown>>,
   incomingLoggedAt: Date,
   userId: string,
 ): {
-  recovery: Record<string, unknown>;
+  patterns: Record<string, Record<string, unknown>>;
   rulesFired: Set<string>;
   fieldsChanged: string[];
 } {
   const rulesFired = new Set<string>();
   const fieldsChanged: string[] = [];
-
-  const nmRaw = recovery.lastNeuromuscularStimulusAt;
-  const metRaw = recovery.lastMetabolicStimulusAt;
-  const lastNm = typeof nmRaw === "string" ? new Date(nmRaw) : null;
-  const lastMet = typeof metRaw === "string" ? new Date(metRaw) : null;
-
   const ctx = { userId };
-  const newNmReadiness = readiness("neuromuscular", lastNm, incomingLoggedAt, ctx);
-  const newMetReadiness = readiness("metabolic", lastMet, incomingLoggedAt, ctx);
 
-  const newRecovery = { ...recovery };
-  if (newRecovery.neuromuscularReadiness !== newNmReadiness) {
-    newRecovery.neuromuscularReadiness = newNmReadiness;
-    fieldsChanged.push("recovery.neuromuscularReadiness");
-  }
-  if (newRecovery.metabolicReadiness !== newMetReadiness) {
-    newRecovery.metabolicReadiness = newMetReadiness;
-    fieldsChanged.push("recovery.metabolicReadiness");
-  }
-  rulesFired.add("recovery-curve");
+  const newPatterns: Record<string, Record<string, unknown>> = {};
+  for (const [patternKey, profile] of Object.entries(patterns)) {
+    const recovery =
+      (profile.recovery as Record<string, unknown> | undefined) ?? {
+        lastNeuromuscularStimulusAt: null,
+        lastMetabolicStimulusAt: null,
+        neuromuscularReadiness: 1.0,
+        metabolicReadiness: 1.0,
+      };
+    const nmRaw = recovery.lastNeuromuscularStimulusAt;
+    const metRaw = recovery.lastMetabolicStimulusAt;
+    const lastNm = typeof nmRaw === "string" ? new Date(nmRaw) : null;
+    const lastMet = typeof metRaw === "string" ? new Date(metRaw) : null;
 
-  return { recovery: newRecovery, rulesFired, fieldsChanged };
+    const newNmReadiness = readiness("neuromuscular", lastNm, incomingLoggedAt, ctx);
+    const newMetReadiness = readiness("metabolic", lastMet, incomingLoggedAt, ctx);
+
+    const newRecovery = { ...recovery };
+    if (newRecovery.neuromuscularReadiness !== newNmReadiness) {
+      newRecovery.neuromuscularReadiness = newNmReadiness;
+      fieldsChanged.push(`patterns.${patternKey}.recovery.neuromuscularReadiness`);
+    }
+    if (newRecovery.metabolicReadiness !== newMetReadiness) {
+      newRecovery.metabolicReadiness = newMetReadiness;
+      fieldsChanged.push(`patterns.${patternKey}.recovery.metabolicReadiness`);
+    }
+    newPatterns[patternKey] = { ...profile, recovery: newRecovery };
+  }
+  if (Object.keys(patterns).length > 0) {
+    rulesFired.add("recovery-curve");
+  }
+
+  return { patterns: newPatterns, rulesFired, fieldsChanged };
 }
 
 /**
@@ -736,6 +763,10 @@ function applyPerPatternRules(
   for (const pattern of trainedPatterns) {
     if (!(pattern in merged)) {
       merged[pattern] = {
+        // #146: emit `pattern` as a field so Swift's PatternProfile.init
+        // can decode it (the dict key alone is invisible to the inner
+        // decoder via decodeEnumKeyedDict).
+        pattern,
         currentPhase: "accumulation",
         sessionsInPhase: 0,
         consecutiveForceDeloadsOnPattern: 0,
@@ -743,6 +774,19 @@ function applyPerPatternRules(
         recentSessionDates: [],
         transitionModeUntil: null,
         trend: "progressing",
+        // #146: fields required by Swift PatternProfile decoder. rpeOffset
+        // and confidence default per ADR-0005 (bootstrapping); real calibration
+        // logic flips confidence in later slices. recovery moved from
+        // top-level model_json.recovery to per-pattern per ADR-0005 §"recovery
+        // (two-dimensional NM + metabolic) is locked as per-pattern".
+        rpeOffset: 0,
+        confidence: "bootstrapping",
+        recovery: {
+          lastNeuromuscularStimulusAt: null,
+          lastMetabolicStimulusAt: null,
+          neuromuscularReadiness: 1.0,
+          metabolicReadiness: 1.0,
+        },
         // A20 (#122): persisted track input for plateau-verdict's volume-load
         // dimension. Each entry buckets a session's pattern volume-load
         // (Σ weight × reps over non-warmup sets) by ISO week.
@@ -1470,29 +1514,37 @@ export async function applySession(
       rulesFired.push(...fatigueRuled.rulesFired);
       fieldsChanged.push(...fatigueRuled.fieldsChanged);
 
-      // Per-set stimulus pipeline per #118 (A18). Wires stimulus-classifier
-      // into RecoveryProfile.last*StimulusAt. Readiness scalars wire in A19.
-      const recoveryIn = modelJson.recovery as
-        | Record<string, unknown>
-        | undefined;
+      // Per-set stimulus pipeline per #118 (A18), migrated to per-pattern
+      // recovery per #146. Each set's stimulus dimension attributes to its
+      // exercise's pattern (via lookupPattern); the matching pattern's
+      // recovery.last*StimulusAt timestamps update accordingly. Reads the
+      // post-applyPerPatternRules patterns dict so newly-bootstrapped
+      // patterns from this session have their recovery field present.
+      const patternsAfterPatternRules = newModelJson.patterns as Record<
+        string,
+        Record<string, unknown>
+      >;
       const stimulusRuled = applyPerSetStimulusRules(
-        recoveryIn,
+        patternsAfterPatternRules,
         setLogsArr,
         incomingLoggedAt,
       );
-      newModelJson = { ...newModelJson, recovery: stimulusRuled.recovery };
+      newModelJson = { ...newModelJson, patterns: stimulusRuled.patterns };
       rulesFired.push(...stimulusRuled.rulesFired);
       fieldsChanged.push(...stimulusRuled.fieldsChanged);
 
-      // Recovery readiness compute per #120 (A19). Reads the just-bumped
-      // last*StimulusAt timestamps from stimulusRuled.recovery and writes
-      // *Readiness scalars per ADR-0010's curve.
+      // Recovery readiness compute per #120 (A19), per-pattern per #146.
+      // For each pattern, reads its recovery.last*StimulusAt timestamps
+      // (just bumped above) and writes *Readiness scalars per ADR-0010's
+      // curve. Untrained-this-session patterns also recompute readiness
+      // against the new incomingLoggedAt — recovery decays for everyone
+      // every apply, not just trained patterns.
       const readinessRuled = applyRecoveryReadiness(
-        stimulusRuled.recovery,
+        stimulusRuled.patterns,
         incomingLoggedAt,
         req.user_id,
       );
-      newModelJson = { ...newModelJson, recovery: readinessRuled.recovery };
+      newModelJson = { ...newModelJson, patterns: readinessRuled.patterns };
       rulesFired.push(...readinessRuled.rulesFired);
       fieldsChanged.push(...readinessRuled.fieldsChanged);
 
