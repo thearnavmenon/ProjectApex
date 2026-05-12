@@ -155,7 +155,15 @@ jobs:
   deploy:
     name: Deploy to linked Supabase
     runs-on: ubuntu-latest
-    needs: [test, ef-test]
+    # Intentionally NOT gated on the iOS `test` job. iOS Build & Test is known-flaky
+    # (standing admin-merge permission documented in auto-memory: "don't block on
+    # the iOS Build & Test flake"). Gating deploy on it inherits the flake — a
+    # transient iOS failure would silently skip schema + EF deploy, reproducing
+    # the half-deployed shape this workflow exists to prevent (first observed when
+    # PR #144's own merge landed and the deploy was skipped on the same flake).
+    # iOS app code and Supabase artifacts are independent deploy targets; gating
+    # only on `ef-test` (Deno integration) is the correct correlation.
+    needs: [ef-test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
