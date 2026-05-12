@@ -143,7 +143,7 @@ struct ProgramOverviewView: View {
             if gymProfile != nil {
                 Button(action: {
                     guard let profile = gymProfile else { return }
-                    Task { await viewModel.generateProgram(gymProfile: profile) }
+                    Task { await viewModel.generateMacroSkeleton(gymProfile: profile) }
                 }) {
                     Label("Generate My Program", systemImage: "wand.and.stars")
                         .font(.headline)
