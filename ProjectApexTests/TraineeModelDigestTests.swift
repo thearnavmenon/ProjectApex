@@ -253,18 +253,24 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(digest.activeLimitations, [limitation])
     }
 
-    // MARK: ─── Cycle 6: prescription accuracy flattened from nested map ───────
+    // MARK: ─── Cycle 6: prescription accuracy flattened + filtered ────────────
+    //
+    // ADR-0014 §"Digest exposure filter" — entries surface only when
+    // sampleCount ≥ 5 AND ( |bias| > 0.05 OR rmse > 0.10 OR gap-bucket
+    // bias divergence > 0.05 with both buckets ≥ 3 samples ).
+    // Mirror of supabase/functions/_shared/prescription-accuracy.ts:shouldSurfaceInDigest.
 
     func test_digest_prescriptionAccuracy_flattensNestedMap() {
         var model = makeBaselineModel()
+        // All three entries use surface-worthy values (|bias| > 0.05 OR rmse > 0.10).
         let squatTop = PrescriptionAccuracy(
-            pattern: .squat, intent: .top, bias: -0.05, rmse: 0.08, sampleCount: 12
+            pattern: .squat, intent: .top, bias: -0.08, rmse: 0.06, sampleCount: 12
         )
         let squatBackoff = PrescriptionAccuracy(
-            pattern: .squat, intent: .backoff, bias: 0.02, rmse: 0.06, sampleCount: 18
+            pattern: .squat, intent: .backoff, bias: 0.02, rmse: 0.12, sampleCount: 18
         )
         let pushTop = PrescriptionAccuracy(
-            pattern: .horizontalPush, intent: .top, bias: 0.0, rmse: 0.04, sampleCount: 9
+            pattern: .horizontalPush, intent: .top, bias: 0.10, rmse: 0.04, sampleCount: 9
         )
         model.prescriptionAccuracy = [
             .squat:          [.top: squatTop, .backoff: squatBackoff],
@@ -276,6 +282,91 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(digest.prescriptionAccuracy.count, 3)
         let entries = Set(digest.prescriptionAccuracy.map { "\($0.pattern.rawValue):\($0.intent.rawValue)" })
         XCTAssertEqual(entries, ["squat:top", "squat:backoff", "horizontal_push:top"])
+    }
+
+    func test_digest_prescriptionAccuracy_excludes_belowMinSampleCount() {
+        var model = makeBaselineModel()
+        // sampleCount=4 < 5 → excluded regardless of bias/rmse.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.20, rmse: 0.30, sampleCount: 4
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
+    }
+
+    func test_digest_prescriptionAccuracy_excludes_noSignal() {
+        var model = makeBaselineModel()
+        // sampleCount ≥ 5, but |bias| ≤ 0.05, rmse ≤ 0.10, no gap-bucket data.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.04, rmse: 0.08, sampleCount: 10
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
+    }
+
+    func test_digest_prescriptionAccuracy_includes_onBiasThreshold() {
+        var model = makeBaselineModel()
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.06, rmse: 0.04, sampleCount: 10
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.prescriptionAccuracy.count, 1)
+    }
+
+    func test_digest_prescriptionAccuracy_includes_onRmseThreshold() {
+        var model = makeBaselineModel()
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.0, rmse: 0.11, sampleCount: 10
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.prescriptionAccuracy.count, 1)
+    }
+
+    func test_digest_prescriptionAccuracy_includes_onGapBucketDivergence() {
+        var model = makeBaselineModel()
+        // No primary-signal surfacing (|bias|≤0.05, rmse≤0.10), but
+        // under48h vs over72h bias diverges by 0.10 > 0.05 with both
+        // buckets ≥ 3 samples → surfaces via the gap-bucket branch.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.0, rmse: 0.04, sampleCount: 10,
+            biasByGapBucket: [.under48h: -0.05, .over72h: 0.05],
+            rmseByGapBucket: [:],
+            sampleCountByGapBucket: [.under48h: 4, .over72h: 4]
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.prescriptionAccuracy.count, 1)
+    }
+
+    func test_digest_prescriptionAccuracy_excludes_gapBucketDivergence_whenBucketsSparse() {
+        var model = makeBaselineModel()
+        // Divergence is large (0.10 > 0.05) but the under48h bucket has only
+        // 2 samples (< 3) — suppression rule fires, entry excluded.
+        let entry = PrescriptionAccuracy(
+            pattern: .squat, intent: .top, bias: 0.0, rmse: 0.04, sampleCount: 10,
+            biasByGapBucket: [.under48h: -0.05, .over72h: 0.05],
+            rmseByGapBucket: [:],
+            sampleCountByGapBucket: [.under48h: 2, .over72h: 4]
+        )
+        model.prescriptionAccuracy = [.squat: [.top: entry]]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
     }
 
     // MARK: ─── Cycle 7: disrupted patterns derived from cadence ──────────────
