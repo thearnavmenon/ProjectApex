@@ -84,6 +84,17 @@ import {
   type PatternTransitionState,
 } from "../_shared/global-phase-advance.ts";
 import {
+  aggregateMuscleSetCounts,
+  aggregateStagnationStatus,
+  bootstrapMuscleProfile,
+  computeFocusWeight,
+  computeVolumeDeficit,
+  MUSCLE_VOLUME_WINDOW,
+  type AxisConfidence,
+  type MuscleGroup,
+  type WeeklyVolumeBucket,
+} from "../_shared/per-muscle-rules.ts";
+import {
   CLASSIFIER_BOOTSTRAP_MAX_NOTES,
   CLASSIFIER_BOOTSTRAP_MAX_SESSIONS,
 } from "../_shared/constants.ts";
@@ -941,6 +952,134 @@ function emptyAccuracyCell(
 }
 
 /**
+ * Per #156 (B1.5 — MuscleProfile producer): wire the per-muscle rule pipeline
+ * into the per-apply path. Bootstraps missing entries, appends a session
+ * bucket to each trained muscle's `weeklyVolumeHistory` (last
+ * `MUSCLE_VOLUME_WINDOW`=7 events per ADR-0002), and recomputes each muscle's
+ * `volumeDeficit`, `stagnationStatus` (worst-across-patterns per ADR-0009),
+ * and `focusWeight` (Q4 binary).
+ *
+ * Server-side per-muscle attribution flows `exercise_id → PrimaryMuscle →
+ * MuscleGroup` via `EXERCISE_PRIMARY_MUSCLE_MAP`; this filters unknown
+ * `primary_muscle` strings (e.g. alpha-cohort `posterior_deltoid`) at the
+ * boundary — they never enter `trainedMuscleGroups` and don't trigger
+ * phantom bootstrap entries.
+ *
+ * The `weeklyVolumeHistory` field is EF-only: Swift's `MuscleProfile`
+ * decoder does not list it in `CodingKeys`, mirroring how PatternProfile's
+ * `weeklyVolumeLoadHistory` is invisible to Swift. Preserves the Swift-side
+ * shape lock #156 was scoped under.
+ */
+function applyPerMuscleRules(
+  muscles: Record<string, Record<string, unknown>>,
+  setLogs: Array<Record<string, unknown>>,
+  incomingLoggedAt: Date,
+  patternsRuled: Record<string, Record<string, unknown>>,
+  goal: Record<string, unknown> | undefined,
+): {
+  muscles: Record<string, Record<string, unknown>>;
+  rulesFired: Set<string>;
+  fieldsChanged: string[];
+} {
+  const rulesFired = new Set<string>();
+  const fieldsChanged: string[] = [];
+  const merged: Record<string, Record<string, unknown>> = { ...muscles };
+
+  const sessionCounts = aggregateMuscleSetCounts(setLogs);
+  const trainedMuscleGroups = Object.keys(sessionCounts) as MuscleGroup[];
+
+  // Bootstrap missing trained-this-session muscles per Q1/Q3/Q4/Q5 locks.
+  for (const muscleGroup of trainedMuscleGroups) {
+    if (!(muscleGroup in merged)) {
+      merged[muscleGroup] = {
+        ...bootstrapMuscleProfile(muscleGroup),
+        weeklyVolumeHistory: [],
+      };
+      rulesFired.add("muscle-bootstrap");
+      fieldsChanged.push(`muscles.${muscleGroup}.bootstrapped`);
+    }
+  }
+
+  const focusAreas = Array.isArray(goal?.focusAreas)
+    ? (goal.focusAreas as string[])
+    : [];
+
+  // Project patternsRuled into the {trend, confidence} shape expected by
+  // aggregateStagnationStatus.
+  const patternProfilesForAggregation: Record<
+    string,
+    { trend: ProgressionTrend; confidence: AxisConfidence }
+  > = {};
+  for (const [patternKey, profile] of Object.entries(patternsRuled)) {
+    patternProfilesForAggregation[patternKey] = {
+      trend: ((profile.trend as ProgressionTrend) ?? "progressing"),
+      confidence: ((profile.confidence as AxisConfidence) ?? "bootstrapping"),
+    };
+  }
+
+  for (const [muscleKey, raw] of Object.entries(merged)) {
+    const profile: Record<string, unknown> = { ...raw };
+    const muscleGroup = muscleKey as MuscleGroup;
+
+    // (a) Append this session's contribution to weeklyVolumeHistory if the
+    // muscle was trained. Bound to MUSCLE_VOLUME_WINDOW per ADR-0002.
+    const baseHistory =
+      (profile.weeklyVolumeHistory as WeeklyVolumeBucket[] | undefined) ?? [];
+    const sessionContribution = sessionCounts[muscleGroup] ?? 0;
+    let newHistory = baseHistory;
+    if (sessionContribution > 0) {
+      newHistory = [
+        ...baseHistory,
+        {
+          loggedAtIso: incomingLoggedAt.toISOString(),
+          sets: sessionContribution,
+        },
+      ].slice(-MUSCLE_VOLUME_WINDOW);
+      profile.weeklyVolumeHistory = newHistory;
+      rulesFired.add("muscle-volume-history");
+      fieldsChanged.push(`muscles.${muscleKey}.weeklyVolumeHistory`);
+    }
+
+    // (b) Recompute volumeDeficit from the (possibly updated) history.
+    const tolerance = (profile.volumeTolerance as number) ?? 0;
+    const newDeficit = computeVolumeDeficit(newHistory, tolerance);
+    if (newDeficit !== profile.volumeDeficit) {
+      profile.volumeDeficit = newDeficit;
+      rulesFired.add("muscle-volume-deficit");
+      fieldsChanged.push(`muscles.${muscleKey}.volumeDeficit`);
+    }
+
+    // (c) Recompute stagnationStatus per ADR-0009's worst-across-patterns
+    // aggregation. Reads the post-applyPerPatternRules patterns dict.
+    const newStagnationStatus = aggregateStagnationStatus(
+      muscleGroup,
+      patternProfilesForAggregation,
+    );
+    if (newStagnationStatus !== profile.stagnationStatus) {
+      profile.stagnationStatus = newStagnationStatus;
+      rulesFired.add("muscle-stagnation-aggregate");
+      fieldsChanged.push(`muscles.${muscleKey}.stagnationStatus`);
+    }
+
+    // (d) Recompute focusWeight from goal.focusAreas (Q4 binary lock).
+    const newFocusWeight = computeFocusWeight(muscleGroup, focusAreas);
+    if (newFocusWeight !== profile.focusWeight) {
+      profile.focusWeight = newFocusWeight;
+      rulesFired.add("muscle-focus-weight");
+      fieldsChanged.push(`muscles.${muscleKey}.focusWeight`);
+    }
+
+    merged[muscleKey] = profile;
+  }
+
+  return {
+    muscles: merged,
+    rulesFired,
+    fieldsChanged,
+  };
+}
+
+/**
  * Per #124 (A21): wire prescription-accuracy aggregator into the per-apply
  * path. For each set_log carrying `ai_prescribed`, build a `SetObservation`
  * and pass through `shouldContribute`. Contributing observations
@@ -1449,6 +1588,25 @@ export async function applySession(
       newModelJson = { ...newModelJson, patterns: ruled.patterns };
       rulesFired.push(...ruled.rulesFired);
       fieldsChanged.push(...ruled.fieldsChanged);
+
+      // Per-muscle rule pipeline per #156. Reads the post-applyPerPatternRules
+      // patterns dict for stagnationStatus aggregation (worst-across-patterns
+      // per ADR-0009). Server-side muscle attribution via
+      // EXERCISE_PRIMARY_MUSCLE_MAP filters unknown client-supplied
+      // primary_muscle strings at the boundary.
+      const musclesIn =
+        (modelJson.muscles as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const goalIn = modelJson.goal as Record<string, unknown> | undefined;
+      const muscleRuled = applyPerMuscleRules(
+        musclesIn,
+        setLogsArr,
+        incomingLoggedAt,
+        ruled.patterns,
+        goalIn,
+      );
+      newModelJson = { ...newModelJson, muscles: muscleRuled.muscles };
+      rulesFired.push(...muscleRuled.rulesFired);
+      fieldsChanged.push(...muscleRuled.fieldsChanged);
 
       // Prescription-accuracy pipeline per #124 (A21). Runs after pattern
       // rules so newPatterns has the appended recentSessionDates (for
