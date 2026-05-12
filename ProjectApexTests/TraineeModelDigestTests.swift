@@ -701,6 +701,18 @@ final class TraineeModelDigestTests: XCTestCase {
             "WorkoutSessionManager must not invoke StagnationService.persist (removed in B1/#86)")
     }
 
+    // MARK: ─── B2 (#87): cleanup-reversion guards ────────────────────────────
+
+    func test_sessionPlanService_doesNotReferenceLegacyVolumeDeficitsField() throws {
+        let source = try loadSourceFile("ProjectApex/Services/SessionPlanService.swift")
+        XCTAssertFalse(source.contains("volumeDeficits"),
+            "SessionPlanService must not declare or reference volumeDeficits (removed in B2/#87 — read volume_deficit from traineeModelDigest.perMuscleSummary instead)")
+        XCTAssertFalse(source.contains("volume_deficits"),
+            "SessionPlanService must not emit the volume_deficits JSON key (removed in B2/#87)")
+        XCTAssertFalse(source.contains("VolumeValidationService"),
+            "SessionPlanService must not reference VolumeValidationService (deleted in B2/#87)")
+    }
+
     // MARK: ─── Cycle 8: empty-input edge cases ───────────────────────────────
 
     func test_digest_emptyModel_yieldsEmptyCollections() {
