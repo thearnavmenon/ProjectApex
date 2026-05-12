@@ -190,7 +190,7 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "A18 / #118 (per-pattern recovery per #146): stimulus-classifier wired — bench top×5 bumps horizontalPush NM; row top×8 bumps horizontalPull NM+metabolic (top×8 classifies as 'both')",
+  "A18 / #118 (per-pattern recovery per #146): stimulus-classifier wired — bench top×5 bumps horizontal_push NM; row top×8 bumps horizontal_pull NM+metabolic (top×8 classifies as 'both')",
   async () => {
     const userId = await seedFreshUser();
     const sessionId = crypto.randomUUID();
@@ -205,9 +205,9 @@ orchestratorTest(
           set_logs: [
             // warmup → null dim, no timestamp bump
             { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 60, reps_completed: 5, intent: "warmup" },
-            // top reps=5 → "neuromuscular" → horizontalPush NM only
+            // top reps=5 → "neuromuscular" → horizontal_push NM only
             { exercise_id: "barbell_bench_press", set_number: 2, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
-            // top reps=8 → "both" (BACKOFF_BOTH_REP_MAX=8) → horizontalPull NM + metabolic
+            // top reps=8 → "both" (BACKOFF_BOTH_REP_MAX=8) → horizontal_pull NM + metabolic
             { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top", rpe_felt: 8 },
           ],
         },
@@ -225,15 +225,15 @@ orchestratorTest(
     const patterns = modelJson.patterns as Record<string, Record<string, unknown>>;
     const expectedIso = new Date(loggedAt).toISOString();
 
-    // horizontalPush: NM only (bench top×5). metabolic axis untouched.
-    const pushRec = patterns.horizontalPush.recovery as Record<string, unknown>;
+    // horizontal_push: NM only (bench top×5). metabolic axis untouched.
+    const pushRec = patterns.horizontal_push.recovery as Record<string, unknown>;
     assertEquals(pushRec.lastNeuromuscularStimulusAt, expectedIso);
     assertEquals(pushRec.lastMetabolicStimulusAt, null);
     assertEquals(Number((pushRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
     assertEquals(pushRec.metabolicReadiness, 1.0);
 
-    // horizontalPull: both axes (row top×8 = "both"). NM and metabolic bumped.
-    const pullRec = patterns.horizontalPull.recovery as Record<string, unknown>;
+    // horizontal_pull: both axes (row top×8 = "both"). NM and metabolic bumped.
+    const pullRec = patterns.horizontal_pull.recovery as Record<string, unknown>;
     assertEquals(pullRec.lastNeuromuscularStimulusAt, expectedIso);
     assertEquals(pullRec.lastMetabolicStimulusAt, expectedIso);
     assertEquals(Number((pullRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
@@ -413,7 +413,7 @@ orchestratorTest(
     const lastPerf = modelJson.lastSessionPatternPerformance as Array<Record<string, unknown>>;
     assertEquals(interactions.length, 0);
     assertEquals(lastPerf.length, 1);
-    assertEquals(lastPerf[0].pattern, "horizontalPush");
+    assertEquals(lastPerf[0].pattern, "horizontal_push");
     // First-ever pattern → priorEwma = 0 → performanceDeltaPct = 0
     assertEquals(lastPerf[0].performanceDeltaPct, 0);
   },
@@ -428,7 +428,7 @@ orchestratorTest(
     const loggedAt1 = "2026-05-09T10:00:00Z";
     const loggedAt2 = "2026-05-10T10:00:00Z";
 
-    // Session 1: bench (horizontalPush)
+    // Session 1: bench (horizontal_push)
     await applySession(
       {
         user_id: userId,
@@ -444,7 +444,7 @@ orchestratorTest(
       { stage2Hook: noopStage2 },
     );
 
-    // Session 2: row (horizontalPull)
+    // Session 2: row (horizontal_pull)
     await applySession(
       {
         user_id: userId,
@@ -465,8 +465,8 @@ orchestratorTest(
     `;
     const interactions = (rows[0].model_json as Record<string, unknown>).fatigueInteractions as Array<Record<string, unknown>>;
     assertEquals(interactions.length, 1);
-    assertEquals(interactions[0].fromPattern, "horizontalPush");
-    assertEquals(interactions[0].toPattern, "horizontalPull");
+    assertEquals(interactions[0].fromPattern, "horizontal_push");
+    assertEquals(interactions[0].toPattern, "horizontal_pull");
     assertEquals(interactions[0].totalCount, 1);
     assertEquals((interactions[0].observations as number[]).length, 1);
   },
@@ -574,7 +574,7 @@ orchestratorTest(
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
     const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
-    const push = patterns["horizontalPush"];
+    const push = patterns["horizontal_push"];
     assertEquals((push.weeklyVolumeLoadHistory as unknown[]).length, 0);
     assertEquals(push.trend, "progressing");
   },
@@ -621,7 +621,7 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "A19 / #120 (per-pattern recovery per #146): second session 24h after horizontalPush stimulus produces partially-recovered NM readiness per ADR-0010 curve (~0.7853); metabolic untouched stays 1.0",
+  "A19 / #120 (per-pattern recovery per #146): second session 24h after horizontal_push stimulus produces partially-recovered NM readiness per ADR-0010 curve (~0.7853); metabolic untouched stays 1.0",
   async () => {
     const userId = await seedFreshUser();
     const sessionId1 = crypto.randomUUID();
@@ -629,7 +629,7 @@ orchestratorTest(
     const loggedAt1 = "2026-05-08T10:00:00Z";
     const loggedAt2 = "2026-05-09T10:00:00Z"; // exactly 24h later
 
-    // Session 1: heavy bench top×5 (NM only) → bootstraps horizontalPush
+    // Session 1: heavy bench top×5 (NM only) → bootstraps horizontal_push
     await applySession(
       {
         user_id: userId,
@@ -662,7 +662,7 @@ orchestratorTest(
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
     const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
-    const recovery = patterns.horizontalPush.recovery as Record<string, unknown>;
+    const recovery = patterns.horizontal_push.recovery as Record<string, unknown>;
 
     // NM: 24h since stimulus, tau=30h → 0.3 + 0.7 × (1 - exp(-24/30)) ≈ 0.7853
     const expectedNm = 0.3 + 0.7 * (1 - Math.exp(-24 / 30));
@@ -676,7 +676,7 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "A18 / #118 (per-pattern recovery per #146): warmup-only session bootstraps horizontalPush pattern with default recovery shape — null timestamps + 1.0 readinesses (no stimulus bump from low-stimulus sets)",
+  "A18 / #118 (per-pattern recovery per #146): warmup-only session bootstraps horizontal_push pattern with default recovery shape — null timestamps + 1.0 readinesses (no stimulus bump from low-stimulus sets)",
   async () => {
     const userId = await seedFreshUser();
     const sessionId = crypto.randomUUID();
@@ -703,7 +703,7 @@ orchestratorTest(
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
     const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
-    const recovery = patterns.horizontalPush.recovery as Record<string, unknown>;
+    const recovery = patterns.horizontal_push.recovery as Record<string, unknown>;
 
     // Bootstrapped (the field exists)...
     assertEquals(recovery.neuromuscularReadiness, 1.0);
@@ -749,12 +749,12 @@ orchestratorTest(
     // via the ExerciseLibrary port (#110 / A15).
     assertEquals(
       Object.keys(patterns).sort(),
-      ["horizontalPull", "horizontalPush", "squat"],
+      ["horizontal_pull", "horizontal_push", "squat"],
     );
 
     // Each profile carries ADR-0011 defaults + the just-trained-this-session state.
     const expectedLoggedAtIso = new Date(loggedAt).toISOString();
-    for (const patternKey of ["horizontalPush", "squat", "horizontalPull"]) {
+    for (const patternKey of ["horizontal_push", "squat", "horizontal_pull"]) {
       const profile = patterns[patternKey];
       assertEquals(profile.currentPhase, "accumulation");
       assertEquals(profile.sessionsInPhase, 1);
@@ -1507,8 +1507,8 @@ orchestratorTest(
   async () => {
     // Synthetic 4-of-6 major-pattern transitions fixture. Pre-set
     // lastPhaseTransitionAtSessionCount within the 6-session window for
-    // squat / hipHinge / horizontalPush / verticalPush; the remaining
-    // major patterns (horizontalPull / verticalPull) sit outside the
+    // squat / hip_hinge / horizontal_push / vertical_push; the remaining
+    // major patterns (horizontal_pull / vertical_pull) sit outside the
     // window. session_count post-increment = 7 (above the bootstrap guard
     // of 6). lastGlobalPhaseAdvanceFiredAtSessionCount starts null —
     // never-fired.
@@ -1538,10 +1538,10 @@ orchestratorTest(
     const seedModel = {
       patterns: {
         squat: inWindowProfile("squat"),
-        hipHinge: inWindowProfile("hipHinge"),
-        horizontalPush: inWindowProfile("horizontalPush"),
-        verticalPush: inWindowProfile("verticalPush"),
-        // horizontalPull / verticalPull intentionally absent — they do not
+        hip_hinge: inWindowProfile("hip_hinge"),
+        horizontal_push: inWindowProfile("horizontal_push"),
+        vertical_push: inWindowProfile("vertical_push"),
+        // horizontal_pull / vertical_pull intentionally absent — they do not
         // contribute to the count, leaving 4-of-6 satisfied.
       },
       lastGlobalPhaseAdvanceFiredAtSessionCount: null,

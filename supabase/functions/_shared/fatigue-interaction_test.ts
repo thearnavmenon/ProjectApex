@@ -82,48 +82,48 @@ Deno.test(
 Deno.test(
   "ADR-0005: pair detection — Cartesian product across distinct patterns (2×2 = 4 observations, no self-pairs)",
   () => {
-    // Yesterday: squat + horizontalPush. Today: verticalPush + hipHinge.
+    // Yesterday: squat + horizontal_push. Today: vertical_push + hip_hinge.
     // No pattern overlap → 4 observations:
-    //   {squat → verticalPush, squat → hipHinge,
-    //    horizontalPush → verticalPush, horizontalPush → hipHinge}
+    //   {squat → vertical_push, squat → hip_hinge,
+    //    horizontal_push → vertical_push, horizontal_push → hip_hinge}
     // delta on each obs = performanceDeltaPct of the *to* pattern in newSession.
     // observedAt on each obs = the new session's loggedAt.
     // Iteration order: priorSession.patterns then newSession.patterns, both
     // sorted by MovementPattern string value lexicographically (cycle 4 in
-    // the slice plan). Sorted prior: [horizontalPush, squat]. Sorted new:
-    // [hipHinge, verticalPush].
+    // the slice plan). Sorted prior: [horizontal_push, squat]. Sorted new:
+    // [hip_hinge, vertical_push].
     const prior: SessionPatternPerformance[] = [
       mkPerf("squat", -0.02, 0, "s-prior"),
-      mkPerf("horizontalPush", -0.01, 0, "s-prior"),
+      mkPerf("horizontal_push", -0.01, 0, "s-prior"),
     ];
     const today: SessionPatternPerformance[] = [
-      mkPerf("verticalPush", -0.07, 1, "s-today"),
-      mkPerf("hipHinge", -0.05, 1, "s-today"),
+      mkPerf("vertical_push", -0.07, 1, "s-today"),
+      mkPerf("hip_hinge", -0.05, 1, "s-today"),
     ];
     const result = detectFatigueObservations(today, prior);
     const todayLoggedAt = new Date(2026, 0, 2);
     assertEquals(result, [
       {
-        fromPattern: "horizontalPush",
-        toPattern: "hipHinge",
+        fromPattern: "horizontal_push",
+        toPattern: "hip_hinge",
         delta: -0.05,
         observedAt: todayLoggedAt,
       },
       {
-        fromPattern: "horizontalPush",
-        toPattern: "verticalPush",
+        fromPattern: "horizontal_push",
+        toPattern: "vertical_push",
         delta: -0.07,
         observedAt: todayLoggedAt,
       },
       {
         fromPattern: "squat",
-        toPattern: "hipHinge",
+        toPattern: "hip_hinge",
         delta: -0.05,
         observedAt: todayLoggedAt,
       },
       {
         fromPattern: "squat",
-        toPattern: "verticalPush",
+        toPattern: "vertical_push",
         delta: -0.07,
         observedAt: todayLoggedAt,
       },
@@ -137,10 +137,10 @@ Deno.test(
     // Tracer for appendObservations: starting with no per-pair state, the
     // first observation creates a new FatigueState entry keyed by
     // (fromPattern, toPattern) with the delta in observations and totalCount=1.
-    const result = appendObservations([], [mkObs("squat", "hipHinge", -0.05, 1)]);
+    const result = appendObservations([], [mkObs("squat", "hip_hinge", -0.05, 1)]);
     assertEquals(result.length, 1);
     assertEquals(result[0].fromPattern, "squat");
-    assertEquals(result[0].toPattern, "hipHinge");
+    assertEquals(result[0].toPattern, "hip_hinge");
     assertEquals(result[0].observations, [-0.05]);
     assertEquals(result[0].totalCount, 1);
   },
@@ -154,14 +154,14 @@ Deno.test(
     // new delta lands at the tail. observations.length stays at 10.
     const seedObs: FatigueObservation[] = [];
     for (let i = 1; i <= 10; i++) {
-      seedObs.push(mkObs("squat", "hipHinge", -0.01 * i, i));
+      seedObs.push(mkObs("squat", "hip_hinge", -0.01 * i, i));
     }
     const seeded = appendObservations([], seedObs);
     assertEquals(seeded[0].observations.length, 10);
     assertEquals(seeded[0].totalCount, 10);
 
     const after = appendObservations(seeded, [
-      mkObs("squat", "hipHinge", -0.11, 11),
+      mkObs("squat", "hip_hinge", -0.11, 11),
     ]);
     assertEquals(after[0].observations.length, 10);
     // Oldest (-0.01) evicted; tail is -0.11.
@@ -180,7 +180,7 @@ Deno.test(
     let state: FatigueState[] = [];
     for (let i = 1; i <= 20; i++) {
       state = appendObservations(state, [
-        mkObs("squat", "hipHinge", -0.001 * i, i),
+        mkObs("squat", "hip_hinge", -0.001 * i, i),
       ]);
     }
     assertEquals(state.length, 1);
@@ -197,7 +197,7 @@ Deno.test(
     // Swift implementation (TraineeModelInteractions.swift:100). Returns 0.
     const state: FatigueState = {
       fromPattern: "squat",
-      toPattern: "hipHinge",
+      toPattern: "hip_hinge",
       observations: [-0.05],
       totalCount: 1,
     };
@@ -214,7 +214,7 @@ Deno.test(
     // (TraineeModelInteractions.swift:106) snaps to exactly 1.0.
     const state: FatigueState = {
       fromPattern: "squat",
-      toPattern: "hipHinge",
+      toPattern: "hip_hinge",
       observations: [-0.05, -0.05],
       totalCount: 2,
     };
@@ -235,7 +235,7 @@ Deno.test(
     // 1 - 1e-4/1e-2 = 0.99 and break the test.
     const state: FatigueState = {
       fromPattern: "squat",
-      toPattern: "hipHinge",
+      toPattern: "hip_hinge",
       observations: [0.0001, -0.0001],
       totalCount: 2,
     };
@@ -257,7 +257,7 @@ Deno.test(
     // the guarded ratio's effect on consistencyFactor.
     const state: FatigueState = {
       fromPattern: "squat",
-      toPattern: "hipHinge",
+      toPattern: "hip_hinge",
       observations: [0.005, -0.005],
       totalCount: 2,
     };
@@ -273,7 +273,7 @@ Deno.test(
     // Inclusive at 15 (>=, not >). Below threshold → hard cap at 0.5.
     const below: FatigueState = {
       fromPattern: "squat",
-      toPattern: "hipHinge",
+      toPattern: "hip_hinge",
       observations: [-0.05, -0.05],
       totalCount: 14,
     };
@@ -281,7 +281,7 @@ Deno.test(
 
     const at: FatigueState = {
       fromPattern: "squat",
-      toPattern: "hipHinge",
+      toPattern: "hip_hinge",
       observations: [-0.05, -0.05],
       totalCount: 15,
     };
@@ -307,7 +307,7 @@ Deno.test(
     // degenerate — × 1.0 is identity — so wouldn't catch that regression.
     const state: FatigueState = {
       fromPattern: "squat",
-      toPattern: "hipHinge",
+      toPattern: "hip_hinge",
       observations: [0.1, 0.2],
       totalCount: 14,
     };
@@ -355,7 +355,7 @@ for (const row of fixtureFile.fixtures) {
     () => {
       const state: FatigueState = {
         fromPattern: "squat",
-        toPattern: "hipHinge",
+        toPattern: "hip_hinge",
         observations: row.observations,
         totalCount: row.totalCount,
       };

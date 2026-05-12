@@ -27,9 +27,9 @@ Deno.test("exercise-library: load-bearing pattern resolutions for the smoke fixt
   // its synthetic session_payload. If a Swift renaming changes one of
   // these, the smoke's pattern-bootstrap assertion would silently fail
   // to map. Pinning here catches that drift loudly.
-  assertEquals(lookupPattern("barbell_bench_press"), "horizontalPush");
+  assertEquals(lookupPattern("barbell_bench_press"), "horizontal_push");
   assertEquals(lookupPattern("barbell_back_squat"), "squat");
-  assertEquals(lookupPattern("barbell_row"), "horizontalPull");
+  assertEquals(lookupPattern("barbell_row"), "horizontal_pull");
 });
 
 Deno.test("exercise-library: lookupPattern returns undefined for unknown IDs", () => {
@@ -43,12 +43,12 @@ Deno.test("exercise-library: every value is a valid MovementPattern (8-enum)", (
   // ADR-0005's pattern taxonomy is closed at 8. Catch any typo in the
   // map that would produce a string outside this set.
   const valid = new Set([
-    "horizontalPush",
-    "verticalPush",
-    "horizontalPull",
-    "verticalPull",
+    "horizontal_push",
+    "vertical_push",
+    "horizontal_pull",
+    "vertical_pull",
     "squat",
-    "hipHinge",
+    "hip_hinge",
     "lunge",
     "isolation",
   ]);

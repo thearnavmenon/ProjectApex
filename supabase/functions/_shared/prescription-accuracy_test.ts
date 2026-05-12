@@ -25,7 +25,7 @@ import {
 // Base fixture — all 6 inclusion criteria pass. Each cycle overrides only
 // the field(s) under test, leaving the rest at "criteria-pass" defaults.
 const baseObs = (overrides: Partial<SetObservation> = {}): SetObservation => ({
-  pattern: "horizontalPush",
+  pattern: "horizontal_push",
   prescribedIntent: "top",
   loggedIntent: "top",
   prescribedReps: 5,
@@ -116,7 +116,7 @@ Deno.test("ADR-0014 §criterion 6: deload phase excluded — sets prescribed dur
 });
 
 const emptyCell = (
-  pattern = "horizontalPush",
+  pattern = "horizontal_push",
   intent = "top",
 ): PerCellAccumulator => ({
   pattern,
@@ -139,7 +139,7 @@ const ZERO_BUCKET_RECORD = (): Record<InterSessionGapBucket, number> => ({
 // Direct DigestableAccuracy fixture (skips the cell-aggregation path so
 // surfacing tests can isolate the rule from the aggregation pipeline).
 const mkDigest = (overrides: Partial<DigestableAccuracy> = {}): DigestableAccuracy => ({
-  pattern: "horizontalPush",
+  pattern: "horizontal_push",
   intent: "top",
   bias: 0,
   rmse: 0,

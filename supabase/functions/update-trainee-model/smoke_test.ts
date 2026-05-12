@@ -76,7 +76,7 @@ function syntheticSessionPayload(loggedAt: string): Record<string, unknown> {
   return {
     logged_at: loggedAt,
     set_logs: [
-      // horizontalPush — bench press: warmup ramp + top sets + backoff
+      // horizontal_push — bench press: warmup ramp + top sets + backoff
       { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 60, reps_completed: 5, intent: "warmup" },
       { exercise_id: "barbell_bench_press", set_number: 2, weight_kg: 80, reps_completed: 5, intent: "warmup" },
       { exercise_id: "barbell_bench_press", set_number: 3, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
@@ -86,7 +86,7 @@ function syntheticSessionPayload(loggedAt: string): Record<string, unknown> {
       { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "warmup" },
       { exercise_id: "barbell_back_squat", set_number: 2, weight_kg: 130, reps_completed: 5, intent: "top", rpe_felt: 8 },
       { exercise_id: "barbell_back_squat", set_number: 3, weight_kg: 130, reps_completed: 5, intent: "top", rpe_felt: 8 },
-      // horizontalPull — barbell row top sets
+      // horizontal_pull — barbell row top sets
       { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top", rpe_felt: 8 },
       { exercise_id: "barbell_row", set_number: 2, weight_kg: 70, reps_completed: 8, intent: "top", rpe_felt: 8 },
     ],
@@ -147,19 +147,19 @@ smokeTest(
 
     // model_json.patterns bootstrapped for all 3 trained movement patterns
     // (#110 / A15). The synthetic fixture's exercise IDs resolve to:
-    //   barbell_bench_press → horizontalPush
+    //   barbell_bench_press → horizontal_push
     //   barbell_back_squat  → squat
-    //   barbell_row         → horizontalPull
+    //   barbell_row         → horizontal_pull
     // Each PatternProfile starts at accumulation, sessionsInPhase=1
     // (this apply counted), trend=progressing, recentSessionDates=[loggedAt].
     const modelJson = (model[0].model_json as Record<string, unknown>);
     const patterns = modelJson.patterns as Record<string, Record<string, unknown>>;
     assertEquals(
       Object.keys(patterns).sort(),
-      ["horizontalPull", "horizontalPush", "squat"],
+      ["horizontal_pull", "horizontal_push", "squat"],
     );
     const expectedLoggedAtIso = new Date(loggedAt).toISOString();
-    for (const patternKey of ["horizontalPush", "squat", "horizontalPull"]) {
+    for (const patternKey of ["horizontal_push", "squat", "horizontal_pull"]) {
       const profile = patterns[patternKey];
       assertEquals(profile.currentPhase, "accumulation");
       assertEquals(profile.sessionsInPhase, 1);
@@ -191,14 +191,14 @@ smokeTest(
     // RecoveryProfile.last*StimulusAt populated per-pattern (A18 / #118,
     // migrated to per-pattern recovery per #146). Per stimulus-classifier:
     //   - bench top×5 RPE 8 → NM; backoff×8 RPE 7 → "both" (reps ≤ 8)
-    //     → horizontalPush: NM + met both bumped
+    //     → horizontal_push: NM + met both bumped
     //   - squat top×5 RPE 8 → NM only
     //     → squat: NM bumped, met null
     //   - row top×8 RPE 8 → "both"
-    //     → horizontalPull: NM + met both bumped
+    //     → horizontal_pull: NM + met both bumped
     // Readinesses computed via ADR-0010 curve at t=0 → residual floor 0.3
     // (A19 / #120) on bumped axes; null-timestamp axes stay at 1.0.
-    const pushRec = patterns.horizontalPush.recovery as Record<string, unknown>;
+    const pushRec = patterns.horizontal_push.recovery as Record<string, unknown>;
     assertEquals(pushRec.lastNeuromuscularStimulusAt, expectedLoggedAtIso);
     assertEquals(pushRec.lastMetabolicStimulusAt, expectedLoggedAtIso);
     assertEquals(Number((pushRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
@@ -210,7 +210,7 @@ smokeTest(
     assertEquals(Number((squatRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
     assertEquals(squatRec.metabolicReadiness, 1.0);
 
-    const pullRec = patterns.horizontalPull.recovery as Record<string, unknown>;
+    const pullRec = patterns.horizontal_pull.recovery as Record<string, unknown>;
     assertEquals(pullRec.lastNeuromuscularStimulusAt, expectedLoggedAtIso);
     assertEquals(pullRec.lastMetabolicStimulusAt, expectedLoggedAtIso);
     assertEquals(Number((pullRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
@@ -251,7 +251,7 @@ smokeTest(
       modelJson.lastSessionPatternPerformance as Array<Record<string, unknown>>;
     assertEquals(lastSessionPerf.length, 3);
     const perfPatterns = lastSessionPerf.map((p) => p.pattern as string).sort();
-    assertEquals(perfPatterns, ["horizontalPull", "horizontalPush", "squat"]);
+    assertEquals(perfPatterns, ["horizontal_pull", "horizontal_push", "squat"]);
 
     // All 7 G1-audit unwired modules now have orchestrator-side wiring +
     // smoke coverage. Phase 4 (G1 redefinition) closes #85.

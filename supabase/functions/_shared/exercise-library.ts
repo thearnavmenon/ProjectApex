@@ -26,12 +26,12 @@
  * 8 values per ADR-0005's pattern taxonomy.
  */
 export type MovementPattern =
-  | "horizontalPush"
-  | "verticalPush"
-  | "horizontalPull"
-  | "verticalPull"
+  | "horizontal_push"
+  | "vertical_push"
+  | "horizontal_pull"
+  | "vertical_pull"
   | "squat"
-  | "hipHinge"
+  | "hip_hinge"
   | "lunge"
   | "isolation";
 
@@ -43,42 +43,42 @@ export type MovementPattern =
  */
 export const EXERCISE_PATTERN_MAP: Record<string, MovementPattern> = {
   // Chest
-  barbell_bench_press: "horizontalPush",
-  dumbbell_bench_press: "horizontalPush",
-  incline_barbell_press: "horizontalPush",
-  incline_dumbbell_press: "horizontalPush",
-  decline_bench_press: "horizontalPush",
-  machine_chest_press: "horizontalPush",
+  barbell_bench_press: "horizontal_push",
+  dumbbell_bench_press: "horizontal_push",
+  incline_barbell_press: "horizontal_push",
+  incline_dumbbell_press: "horizontal_push",
+  decline_bench_press: "horizontal_push",
+  machine_chest_press: "horizontal_push",
   cable_chest_fly: "isolation",
   pec_deck_fly: "isolation",
   dumbbell_fly: "isolation",
-  push_ups: "horizontalPush",
+  push_ups: "horizontal_push",
 
   // Back
-  barbell_row: "horizontalPull",
-  dumbbell_row: "horizontalPull",
-  t_bar_row: "horizontalPull",
-  cable_row: "horizontalPull",
-  seated_cable_row: "horizontalPull",
-  lat_pulldown_wide: "verticalPull",
-  lat_pulldown_close: "verticalPull",
-  pull_ups: "verticalPull",
-  chin_ups: "verticalPull",
-  face_pull: "horizontalPull",
+  barbell_row: "horizontal_pull",
+  dumbbell_row: "horizontal_pull",
+  t_bar_row: "horizontal_pull",
+  cable_row: "horizontal_pull",
+  seated_cable_row: "horizontal_pull",
+  lat_pulldown_wide: "vertical_pull",
+  lat_pulldown_close: "vertical_pull",
+  pull_ups: "vertical_pull",
+  chin_ups: "vertical_pull",
+  face_pull: "horizontal_pull",
   cable_rear_delt_fly: "isolation",
-  cable_straight_arm_pulldown: "verticalPull",
-  dumbbell_single_arm_row: "horizontalPull",
-  assisted_pull_up: "verticalPull",
+  cable_straight_arm_pulldown: "vertical_pull",
+  dumbbell_single_arm_row: "horizontal_pull",
+  assisted_pull_up: "vertical_pull",
 
   // Shoulders
-  overhead_press: "verticalPush",
-  dumbbell_shoulder_press: "verticalPush",
-  machine_shoulder_press: "verticalPush",
+  overhead_press: "vertical_push",
+  dumbbell_shoulder_press: "vertical_push",
+  machine_shoulder_press: "vertical_push",
   lateral_raise: "isolation",
   cable_lateral_raise: "isolation",
   rear_delt_fly: "isolation",
-  arnold_press: "verticalPush",
-  upright_row: "verticalPull",
+  arnold_press: "vertical_push",
+  upright_row: "vertical_pull",
 
   // Quads
   barbell_back_squat: "squat",
@@ -92,16 +92,16 @@ export const EXERCISE_PATTERN_MAP: Record<string, MovementPattern> = {
   smith_machine_squat: "squat",
 
   // Hamstrings / Glutes / Hips
-  conventional_deadlift: "hipHinge",
-  romanian_deadlift: "hipHinge",
-  dumbbell_romanian_deadlift: "hipHinge",
+  conventional_deadlift: "hip_hinge",
+  romanian_deadlift: "hip_hinge",
+  dumbbell_romanian_deadlift: "hip_hinge",
   lying_leg_curl: "isolation",
   seated_leg_curl: "isolation",
-  stiff_leg_deadlift: "hipHinge",
-  hip_thrust: "hipHinge",
-  cable_pull_through: "hipHinge",
-  glute_bridge: "hipHinge",
-  sumo_deadlift: "hipHinge",
+  stiff_leg_deadlift: "hip_hinge",
+  hip_thrust: "hip_hinge",
+  cable_pull_through: "hip_hinge",
+  glute_bridge: "hip_hinge",
+  sumo_deadlift: "hip_hinge",
 
   // Biceps
   barbell_curl: "isolation",
@@ -116,14 +116,14 @@ export const EXERCISE_PATTERN_MAP: Record<string, MovementPattern> = {
   cable_tricep_pushdown: "isolation",
   overhead_tricep_extension: "isolation",
   skull_crushers: "isolation",
-  dips: "verticalPush",
-  close_grip_bench_press: "horizontalPush",
+  dips: "vertical_push",
+  close_grip_bench_press: "horizontal_push",
   dumbbell_overhead_tricep_extension: "isolation",
   cable_overhead_tricep_extension: "isolation",
 
   // Smith / cable variants for chest
-  smith_machine_bench_press: "horizontalPush",
-  smith_machine_incline_press: "horizontalPush",
+  smith_machine_bench_press: "horizontal_push",
+  smith_machine_incline_press: "horizontal_push",
   cable_crossover_chest_fly: "isolation",
 
   // Calves

@@ -230,22 +230,22 @@ Deno.test("ADR-0009 amendment: muscle aggregation — empty participation (no pa
   assertEquals(aggregateMuscleStagnationStatus([]), "progressing");
 });
 
-Deno.test("ADR-0009 amendment: muscle aggregation — single-pattern muscle (chest with horizontalPush declining) → muscle declining (trivial aggregation; chest/shoulders/biceps/triceps have ≤1 primary pattern)", () => {
+Deno.test("ADR-0009 amendment: muscle aggregation — single-pattern muscle (chest with horizontal_push declining) → muscle declining (trivial aggregation; chest/shoulders/biceps/triceps have ≤1 primary pattern)", () => {
   const chestPatterns: PatternTrendForMuscleAggregation[] = [
-    { pattern: "horizontalPush", trend: "declining", confidence: "established" },
+    { pattern: "horizontal_push", trend: "declining", confidence: "established" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(chestPatterns), "declining");
 });
 
-Deno.test("ADR-0009 amendment: muscle aggregation — legs scenario (squat plateaued + hipHinge progressing + lunge progressing, all participating) → legs plateaued (the canonical aggregation-risk concentration cell — see v2.x watch-item #9)", () => {
+Deno.test("ADR-0009 amendment: muscle aggregation — legs scenario (squat plateaued + hip_hinge progressing + lunge progressing, all participating) → legs plateaued (the canonical aggregation-risk concentration cell — see v2.x watch-item #9)", () => {
   // The named scenario from ADR-0009 §"Concentration of aggregation risk".
   // Squat plateaus are common; under worst-across-patterns, one squat plateau
-  // forces legs.stagnationStatus = .plateaued even when hipHinge and lunge
+  // forces legs.stagnationStatus = .plateaued even when hip_hinge and lunge
   // are progressing. v2.x upgrade-path trigger if this fires >30% of the
   // time across alpha cohort.
   const legsPatterns: PatternTrendForMuscleAggregation[] = [
     { pattern: "squat", trend: "plateaued", confidence: "established" },
-    { pattern: "hipHinge", trend: "progressing", confidence: "established" },
+    { pattern: "hip_hinge", trend: "progressing", confidence: "established" },
     { pattern: "lunge", trend: "progressing", confidence: "calibrating" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(legsPatterns), "plateaued");
@@ -256,7 +256,7 @@ Deno.test("ADR-0009 amendment: muscle aggregation — all patterns declining BUT
   // declining. With it, the participating set is empty → progressing.
   const patterns: PatternTrendForMuscleAggregation[] = [
     { pattern: "squat", trend: "declining", confidence: "bootstrapping" },
-    { pattern: "hipHinge", trend: "declining", confidence: "bootstrapping" },
+    { pattern: "hip_hinge", trend: "declining", confidence: "bootstrapping" },
     { pattern: "lunge", trend: "declining", confidence: "bootstrapping" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(patterns), "progressing");
@@ -268,7 +268,7 @@ Deno.test("ADR-0009 amendment: muscle aggregation — bootstrapping pattern with
   // participation precondition. Remaining patterns are both progressing.
   const patterns: PatternTrendForMuscleAggregation[] = [
     { pattern: "squat", trend: "declining", confidence: "bootstrapping" },
-    { pattern: "hipHinge", trend: "progressing", confidence: "established" },
+    { pattern: "hip_hinge", trend: "progressing", confidence: "established" },
     { pattern: "lunge", trend: "progressing", confidence: "calibrating" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(patterns), "progressing");
@@ -277,7 +277,7 @@ Deno.test("ADR-0009 amendment: muscle aggregation — bootstrapping pattern with
 Deno.test("ADR-0009 amendment: muscle aggregation — one declining + one plateaued + one progressing → muscle declining (declining > plateaued in worst-order)", () => {
   const patterns: PatternTrendForMuscleAggregation[] = [
     { pattern: "squat", trend: "declining", confidence: "established" },
-    { pattern: "hipHinge", trend: "plateaued", confidence: "established" },
+    { pattern: "hip_hinge", trend: "plateaued", confidence: "established" },
     { pattern: "lunge", trend: "progressing", confidence: "calibrating" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(patterns), "declining");
@@ -286,7 +286,7 @@ Deno.test("ADR-0009 amendment: muscle aggregation — one declining + one platea
 Deno.test("ADR-0009 amendment: muscle aggregation — one pattern plateaued + rest progressing → muscle plateaued", () => {
   const patterns: PatternTrendForMuscleAggregation[] = [
     { pattern: "squat", trend: "plateaued", confidence: "established" },
-    { pattern: "hipHinge", trend: "progressing", confidence: "established" },
+    { pattern: "hip_hinge", trend: "progressing", confidence: "established" },
     { pattern: "lunge", trend: "progressing", confidence: "calibrating" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(patterns), "plateaued");
@@ -295,7 +295,7 @@ Deno.test("ADR-0009 amendment: muscle aggregation — one pattern plateaued + re
 Deno.test("ADR-0009 amendment: muscle aggregation — one pattern declining + rest progressing → muscle declining (worst-across-patterns)", () => {
   const patterns: PatternTrendForMuscleAggregation[] = [
     { pattern: "squat", trend: "declining", confidence: "established" },
-    { pattern: "hipHinge", trend: "progressing", confidence: "established" },
+    { pattern: "hip_hinge", trend: "progressing", confidence: "established" },
     { pattern: "lunge", trend: "progressing", confidence: "calibrating" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(patterns), "declining");
@@ -306,7 +306,7 @@ Deno.test("ADR-0009 amendment (2026-05-07): muscle aggregation — all participa
   // (none bootstrapping → all participate).
   const patterns: PatternTrendForMuscleAggregation[] = [
     { pattern: "squat", trend: "progressing", confidence: "established" },
-    { pattern: "hipHinge", trend: "progressing", confidence: "established" },
+    { pattern: "hip_hinge", trend: "progressing", confidence: "established" },
     { pattern: "lunge", trend: "progressing", confidence: "calibrating" },
   ];
   assertEquals(aggregateMuscleStagnationStatus(patterns), "progressing");
