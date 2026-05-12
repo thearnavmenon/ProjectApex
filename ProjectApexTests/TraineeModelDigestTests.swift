@@ -713,6 +713,12 @@ final class TraineeModelDigestTests: XCTestCase {
             "SessionPlanService must not reference VolumeValidationService (deleted in B2/#87)")
     }
 
+    func test_progressViewModel_doesNotReferenceVolumeValidationService() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Progress/ProgressViewModel.swift")
+        XCTAssertFalse(source.contains("VolumeValidationService"),
+            "ProgressViewModel must not invoke VolumeValidationService (deleted in B2/#87 — the legacy compute+persist pipe fed only SessionPlanService, which now reads volume_deficit from the trainee-model digest)")
+    }
+
     // MARK: ─── Cycle 8: empty-input edge cases ───────────────────────────────
 
     func test_digest_emptyModel_yieldsEmptyCollections() {

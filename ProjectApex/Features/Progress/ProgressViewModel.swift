@@ -163,7 +163,7 @@ final class ProgressViewModel {
 
     // MARK: - Load
 
-    func loadAll(plannedWeekDays: [TrainingDay] = []) async {
+    func loadAll() async {
         isLoading = true
         errorMessage = nil
 
@@ -224,17 +224,7 @@ final class ProgressViewModel {
             weeklyVolume = computeWeeklyVolume(setLogs: setLogs)
             heatmapData  = computeHeatmap(sessions: sessions, setLogs: setLogs, sessionDateMap: sessionDateMap)
 
-            // Step 4: volume deficits if planned days were provided
-            if !plannedWeekDays.isEmpty {
-                let thisWeekLogs = setLogs.filter { isThisCalendarWeek($0.loggedAt) }
-                let deficits = VolumeValidationService.currentWeekDeficits(
-                    completedSetLogs: thisWeekLogs,
-                    plannedDays: plannedWeekDays
-                )
-                VolumeValidationService.persist(deficits)
-            }
-
-            // Step 5: per-pattern trend banners from the trainee model.
+            // Step 4: per-pattern trend banners from the trainee model.
             // Replaces the legacy `StagnationService.load()` call from UserDefaults
             // — the digest is the canonical source post-B1 (#86). Defaults to empty
             // when the local store hasn't hydrated yet.
@@ -486,10 +476,6 @@ final class ProgressViewModel {
 
     private func date(of log: SetLog, in map: [UUID: Date]) -> Date {
         map[log.sessionId] ?? log.loggedAt
-    }
-
-    private func isThisCalendarWeek(_ date: Date) -> Bool {
-        Calendar.current.isDate(date, equalTo: Date(), toGranularity: .weekOfYear)
     }
 
     private func iso8601(_ date: Date) -> String {
