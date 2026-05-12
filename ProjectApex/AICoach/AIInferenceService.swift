@@ -971,6 +971,7 @@ actor AIInferenceService {
         }
 
         var prescription = wrapper.setPrescription
+        prescription.reasoning = String(prescription.reasoning.prefix(200))
 
         // 5. Validate
         do {
@@ -1076,6 +1077,7 @@ actor AIInferenceService {
             }
 
             var prescription = wrapper.setPrescription
+            prescription.reasoning = String(prescription.reasoning.prefix(200))
             do {
                 try prescription.validate()
             } catch {
