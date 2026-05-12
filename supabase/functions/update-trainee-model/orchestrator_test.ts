@@ -190,7 +190,7 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "A18 / #118: stimulus-classifier wired — first apply with mixed-intent sets bootstraps RecoveryProfile + bumps last*StimulusAt per Q3 mapping",
+  "A18 / #118 (per-pattern recovery per #146): stimulus-classifier wired — bench top×5 bumps horizontalPush NM; row top×8 bumps horizontalPull NM+metabolic (top×8 classifies as 'both')",
   async () => {
     const userId = await seedFreshUser();
     const sessionId = crypto.randomUUID();
@@ -205,9 +205,9 @@ orchestratorTest(
           set_logs: [
             // warmup → null dim, no timestamp bump
             { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 60, reps_completed: 5, intent: "warmup" },
-            // top reps=5 → "neuromuscular" (BACKOFF_NM_REP_MAX is 5)
+            // top reps=5 → "neuromuscular" → horizontalPush NM only
             { exercise_id: "barbell_bench_press", set_number: 2, weight_kg: 100, reps_completed: 5, intent: "top", rpe_felt: 8 },
-            // top reps=8 RPE=8 → "metabolic" (no RPE bump under threshold)
+            // top reps=8 → "both" (BACKOFF_BOTH_REP_MAX=8) → horizontalPull NM + metabolic
             { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top", rpe_felt: 8 },
           ],
         },
@@ -222,22 +222,25 @@ orchestratorTest(
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
     const modelJson = rows[0].model_json as Record<string, unknown>;
-    const recovery = modelJson.recovery as Record<string, unknown>;
-
-    // Both timestamps bumped to loggedAt: NM (top×5) + metabolic (top×8).
+    const patterns = modelJson.patterns as Record<string, Record<string, unknown>>;
     const expectedIso = new Date(loggedAt).toISOString();
-    assertEquals(recovery.lastNeuromuscularStimulusAt, expectedIso);
-    assertEquals(recovery.lastMetabolicStimulusAt, expectedIso);
 
-    // Readinesses computed via A19's recovery-curve at t=0 → residual floor 0.3.
-    assertEquals(
-      Number((recovery.neuromuscularReadiness as number).toFixed(4)),
-      0.3,
-    );
-    assertEquals(
-      Number((recovery.metabolicReadiness as number).toFixed(4)),
-      0.3,
-    );
+    // horizontalPush: NM only (bench top×5). metabolic axis untouched.
+    const pushRec = patterns.horizontalPush.recovery as Record<string, unknown>;
+    assertEquals(pushRec.lastNeuromuscularStimulusAt, expectedIso);
+    assertEquals(pushRec.lastMetabolicStimulusAt, null);
+    assertEquals(Number((pushRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
+    assertEquals(pushRec.metabolicReadiness, 1.0);
+
+    // horizontalPull: both axes (row top×8 = "both"). NM and metabolic bumped.
+    const pullRec = patterns.horizontalPull.recovery as Record<string, unknown>;
+    assertEquals(pullRec.lastNeuromuscularStimulusAt, expectedIso);
+    assertEquals(pullRec.lastMetabolicStimulusAt, expectedIso);
+    assertEquals(Number((pullRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
+    assertEquals(Number((pullRec.metabolicReadiness as number).toFixed(4)), 0.3);
+
+    // No orphan top-level recovery write per #146.
+    assertEquals(modelJson.recovery, undefined);
   },
 );
 
@@ -578,7 +581,7 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "A19 / #120: recovery-curve wired — same-instant stimulus (lastStimulusAt === loggedAt) sets bumped axes to residual floor 0.3; null-timestamp axis stays at 1.0",
+  "A19 / #120 (per-pattern recovery per #146): recovery-curve wired — same-instant stimulus on squat NM axis sets squat NM readiness to floor 0.3; squat metabolic axis stays at 1.0 (null timestamp)",
   async () => {
     const userId = await seedFreshUser();
     const sessionId = crypto.randomUUID();
@@ -603,7 +606,8 @@ orchestratorTest(
     const rows = await sql`
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
-    const recovery = (rows[0].model_json as Record<string, unknown>).recovery as Record<string, unknown>;
+    const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
+    const recovery = patterns.squat.recovery as Record<string, unknown>;
 
     // NM stimulus at loggedAt, computed at loggedAt → t=0 → readiness = floor 0.3
     assertEquals(
@@ -617,7 +621,7 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "A19 / #120: recovery-curve wired — second session 24h after stimulus produces partially-recovered readiness per ADR-0010 curve (NM ~0.78, metabolic ~0.69 if re-stimulated then 0.3)",
+  "A19 / #120 (per-pattern recovery per #146): second session 24h after horizontalPush stimulus produces partially-recovered NM readiness per ADR-0010 curve (~0.7853); metabolic untouched stays 1.0",
   async () => {
     const userId = await seedFreshUser();
     const sessionId1 = crypto.randomUUID();
@@ -625,7 +629,7 @@ orchestratorTest(
     const loggedAt1 = "2026-05-08T10:00:00Z";
     const loggedAt2 = "2026-05-09T10:00:00Z"; // exactly 24h later
 
-    // Session 1: heavy bench top×5 (NM only)
+    // Session 1: heavy bench top×5 (NM only) → bootstraps horizontalPush
     await applySession(
       {
         user_id: userId,
@@ -642,7 +646,8 @@ orchestratorTest(
     );
 
     // Session 2: empty (no stimulus). Tests "readiness recomputes from now-loggedAt
-    // even when no new stimulus arrives."
+    // even when no new stimulus arrives" — readiness decay applies even for
+    // patterns not trained this session.
     await applySession(
       {
         user_id: userId,
@@ -656,7 +661,8 @@ orchestratorTest(
     const rows = await sql`
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
-    const recovery = (rows[0].model_json as Record<string, unknown>).recovery as Record<string, unknown>;
+    const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
+    const recovery = patterns.horizontalPush.recovery as Record<string, unknown>;
 
     // NM: 24h since stimulus, tau=30h → 0.3 + 0.7 × (1 - exp(-24/30)) ≈ 0.7853
     const expectedNm = 0.3 + 0.7 * (1 - Math.exp(-24 / 30));
@@ -670,7 +676,7 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "A18 / #118: warmup-only session leaves RecoveryProfile bootstrapped with null timestamps (no stimulus bump from low-stimulus sets)",
+  "A18 / #118 (per-pattern recovery per #146): warmup-only session bootstraps horizontalPush pattern with default recovery shape — null timestamps + 1.0 readinesses (no stimulus bump from low-stimulus sets)",
   async () => {
     const userId = await seedFreshUser();
     const sessionId = crypto.randomUUID();
@@ -696,7 +702,8 @@ orchestratorTest(
     const rows = await sql`
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
-    const recovery = (rows[0].model_json as Record<string, unknown>).recovery as Record<string, unknown>;
+    const patterns = (rows[0].model_json as Record<string, unknown>).patterns as Record<string, Record<string, unknown>>;
+    const recovery = patterns.horizontalPush.recovery as Record<string, unknown>;
 
     // Bootstrapped (the field exists)...
     assertEquals(recovery.neuromuscularReadiness, 1.0);

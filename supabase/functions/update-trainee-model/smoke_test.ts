@@ -188,23 +188,36 @@ smokeTest(
       assertEquals(profile.sessionCount, 1);
     }
 
-    // RecoveryProfile.last*StimulusAt populated (A18 / #118). The synthetic
-    // fixture has top sets at reps 5 (NM) and reps 8 with RPE 8 (metabolic),
-    // plus a backoff at reps 8 RPE 7 (metabolic) — so both timestamps must
-    // bump to loggedAt. Readinesses computed via ADR-0010 curve at t=0 →
-    // residual floor 0.3 (A19 / #120).
-    const recovery = modelJson.recovery as Record<string, unknown>;
-    assertEquals(recovery.lastNeuromuscularStimulusAt, expectedLoggedAtIso);
-    assertEquals(recovery.lastMetabolicStimulusAt, expectedLoggedAtIso);
-    // Readiness curve: 0.3 + 0.7 × (1 - exp(-0/tau)) = 0.3
-    assertEquals(
-      Number((recovery.neuromuscularReadiness as number).toFixed(4)),
-      0.3,
-    );
-    assertEquals(
-      Number((recovery.metabolicReadiness as number).toFixed(4)),
-      0.3,
-    );
+    // RecoveryProfile.last*StimulusAt populated per-pattern (A18 / #118,
+    // migrated to per-pattern recovery per #146). Per stimulus-classifier:
+    //   - bench top×5 RPE 8 → NM; backoff×8 RPE 7 → "both" (reps ≤ 8)
+    //     → horizontalPush: NM + met both bumped
+    //   - squat top×5 RPE 8 → NM only
+    //     → squat: NM bumped, met null
+    //   - row top×8 RPE 8 → "both"
+    //     → horizontalPull: NM + met both bumped
+    // Readinesses computed via ADR-0010 curve at t=0 → residual floor 0.3
+    // (A19 / #120) on bumped axes; null-timestamp axes stay at 1.0.
+    const pushRec = patterns.horizontalPush.recovery as Record<string, unknown>;
+    assertEquals(pushRec.lastNeuromuscularStimulusAt, expectedLoggedAtIso);
+    assertEquals(pushRec.lastMetabolicStimulusAt, expectedLoggedAtIso);
+    assertEquals(Number((pushRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
+    assertEquals(Number((pushRec.metabolicReadiness as number).toFixed(4)), 0.3);
+
+    const squatRec = patterns.squat.recovery as Record<string, unknown>;
+    assertEquals(squatRec.lastNeuromuscularStimulusAt, expectedLoggedAtIso);
+    assertEquals(squatRec.lastMetabolicStimulusAt, null);
+    assertEquals(Number((squatRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
+    assertEquals(squatRec.metabolicReadiness, 1.0);
+
+    const pullRec = patterns.horizontalPull.recovery as Record<string, unknown>;
+    assertEquals(pullRec.lastNeuromuscularStimulusAt, expectedLoggedAtIso);
+    assertEquals(pullRec.lastMetabolicStimulusAt, expectedLoggedAtIso);
+    assertEquals(Number((pullRec.neuromuscularReadiness as number).toFixed(4)), 0.3);
+    assertEquals(Number((pullRec.metabolicReadiness as number).toFixed(4)), 0.3);
+
+    // No orphan top-level recovery write per #146.
+    assertEquals(modelJson.recovery, undefined);
 
     // A21 / #124: prescription-accuracy bootstrapped to {} (synthetic
     // fixture has no ai_prescribed → no contributions accumulate).
