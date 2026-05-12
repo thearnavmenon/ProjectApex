@@ -1,3 +1,10 @@
+// ⚠️ DEPRECATED MIRROR — NOT LOADED BY PRODUCTION.
+// The authoritative Inference prompt is the inline string at
+// AIInferenceService.swift:1158-1263 (`internal static let systemPrompt`).
+// This file is loaded only by InferenceSpike.swift (manual diagnostic) and
+// is maintained as a parallel reference. Edits here do not affect production.
+// See spinoff #159 to consolidate sources of truth.
+//
 // VERSION: 5.0 — 2026-05-12
 // CHANGES FROM v4.9 (v5.0):
 //   • MAJOR VERSION BUMP — invalidates PromptCachingProvider cache.
