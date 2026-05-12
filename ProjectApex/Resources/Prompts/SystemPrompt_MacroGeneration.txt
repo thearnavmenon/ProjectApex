@@ -8,6 +8,7 @@ Return ONLY a single JSON object — no prose, no markdown fences, no explanatio
 CRITICAL: phase_templates is an array of JSON objects. Every phase object MUST be wrapped in { }.
 CRITICAL: training_days is an array of JSON objects. Every day object MUST be wrapped in { }.
 CRITICAL: exercises is an array of JSON objects. Every exercise object MUST be wrapped in { }.
+CRITICAL: every training_day MUST include at least one exercise. Empty exercises arrays are rejected and force a corrective retry. Never emit a training_day stub with `"exercises": []`.
 
 The top-level structure is:
 

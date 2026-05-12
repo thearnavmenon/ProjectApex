@@ -578,4 +578,297 @@ final class EquipmentConstraintValidationTests: XCTestCase {
             XCTFail("Expected ProgramGenerationError but got: \(error)")
         }
     }
+
+    // MARK: ─── validateNonEmptyTrainingDays() — pure static tests ─────────────
+
+    func test_validateNonEmpty_emptyMesocycle_noViolations() {
+        // A fully-populated mesocycle (every day has at least one exercise) returns no violations.
+        let mesocycle = singleExerciseMesocycle(equipment: .barbell)
+        let violations = ProgramGenerationService.validateNonEmptyTrainingDays(mesocycle: mesocycle)
+        XCTAssertTrue(violations.isEmpty,
+                      "No violations expected when every training day has at least one exercise.")
+    }
+
+    func test_validateNonEmpty_detectsEmptyDay() {
+        // A mesocycle with one day whose exercises array is empty produces one violation.
+        let emptyDay = TrainingDay(
+            id: UUID(),
+            dayOfWeek: 3,
+            dayLabel: "Full_Body",
+            exercises: [],
+            sessionNotes: nil
+        )
+        let week = TrainingWeek(
+            id: UUID(),
+            weekNumber: 4,
+            phase: .accumulation,
+            trainingDays: [emptyDay]
+        )
+        let mesocycle = Mesocycle(
+            id: UUID(),
+            userId: UUID(),
+            createdAt: Date(),
+            isActive: true,
+            weeks: [week],
+            totalWeeks: 12,
+            periodizationModel: "linear_periodization"
+        )
+
+        let violations = ProgramGenerationService.validateNonEmptyTrainingDays(mesocycle: mesocycle)
+        XCTAssertEqual(violations.count, 1)
+        XCTAssertEqual(violations[0].dayLabel, "Full_Body")
+        XCTAssertEqual(violations[0].weekNumber, 4)
+        XCTAssertEqual(violations[0].phase, .accumulation)
+    }
+
+    func test_validateNonEmpty_multipleEmpties_acrossWeeks() {
+        // Two empty days in two different weeks → two violations.
+        func makeWeek(_ n: Int, populated: Bool) -> TrainingWeek {
+            let day = TrainingDay(
+                id: UUID(),
+                dayOfWeek: 1,
+                dayLabel: "Day_\(n)",
+                exercises: populated ? [makePlannedExercise()] : [],
+                sessionNotes: nil
+            )
+            return TrainingWeek(
+                id: UUID(), weekNumber: n, phase: .accumulation, trainingDays: [day]
+            )
+        }
+        let mesocycle = Mesocycle(
+            id: UUID(),
+            userId: UUID(),
+            createdAt: Date(),
+            isActive: true,
+            weeks: [
+                makeWeek(1, populated: false),  // empty
+                makeWeek(2, populated: true),   // ok
+                makeWeek(3, populated: false),  // empty
+            ],
+            totalWeeks: 12,
+            periodizationModel: "linear_periodization"
+        )
+
+        let violations = ProgramGenerationService.validateNonEmptyTrainingDays(mesocycle: mesocycle)
+        XCTAssertEqual(violations.count, 2)
+        XCTAssertEqual(Set(violations.map(\.weekNumber)), Set([1, 3]))
+    }
+
+    func test_emptyDayViolation_struct() {
+        let v = EmptyTrainingDayViolation(
+            dayLabel: "Lower",
+            weekNumber: 4,
+            phase: .accumulation
+        )
+        XCTAssertEqual(v.dayLabel, "Lower")
+        XCTAssertEqual(v.weekNumber, 4)
+        XCTAssertEqual(v.phase, .accumulation)
+    }
+
+    // MARK: ─── generate() empty-day corrective re-prompt path ─────────────────
+
+    func test_generate_emptyDayCorrected_succeedsAfterRetry() async throws {
+        // First call returns a template with one empty Full_Body day; second
+        // call returns the same template with that day populated. The service
+        // should detect, re-prompt, and return the corrected mesocycle.
+        let provider = CallCountingProvider(responses: [
+            mesocycleWithEmptyFullBodyDayJSON(),    // first call — has empty day
+            barbellOnlyMesocycleJSON()              // second call (correction) — clean
+        ])
+        let service = ProgramGenerationService(provider: provider)
+
+        let mesocycle = try await service.generate(
+            userProfile: UserProfile(
+                userId: "AAAAAAAA-0000-0000-0000-000000000001",
+                experienceLevel: "intermediate",
+                goals: ["hypertrophy"],
+                bodyweightKg: 80,
+                ageYears: 28
+            ),
+            gymProfile: limitedGymProfile,
+            trainingDaysPerWeek: 4
+        )
+
+        XCTAssertEqual(provider.callCount, 2,
+                       "Expected one corrective re-prompt after detecting the empty day.")
+        let remaining = ProgramGenerationService.validateNonEmptyTrainingDays(mesocycle: mesocycle)
+        XCTAssertTrue(remaining.isEmpty,
+                      "Mesocycle returned to caller must have no empty training days.")
+    }
+
+    func test_generate_emptyDayPersists_throwsEmptyTrainingDay() async {
+        // Both calls return the empty-day template. After one corrective retry
+        // the service should throw `emptyTrainingDay`.
+        let provider = CallCountingProvider(responses: [
+            mesocycleWithEmptyFullBodyDayJSON(),
+            mesocycleWithEmptyFullBodyDayJSON()
+        ])
+        let service = ProgramGenerationService(provider: provider)
+
+        do {
+            _ = try await service.generate(
+                userProfile: UserProfile(
+                    userId: "AAAAAAAA-0000-0000-0000-000000000001",
+                    experienceLevel: "intermediate",
+                    goals: ["hypertrophy"],
+                    bodyweightKg: 80,
+                    ageYears: 28
+                ),
+                gymProfile: limitedGymProfile,
+                trainingDaysPerWeek: 4
+            )
+            XCTFail("Expected ProgramGenerationError.emptyTrainingDay")
+        } catch let err as ProgramGenerationError {
+            guard case .emptyTrainingDay(let violations) = err else {
+                XCTFail("Expected .emptyTrainingDay, got \(err)")
+                return
+            }
+            XCTAssertFalse(violations.isEmpty,
+                           "Throw must include at least one violation.")
+            XCTAssertTrue(violations.contains { $0.dayLabel == "Full_Body" },
+                          "The Full_Body day from the fixture should appear in violations.")
+        } catch {
+            XCTFail("Expected ProgramGenerationError but got: \(error)")
+        }
+    }
+}
+
+// MARK: - Empty-day test fixtures
+
+private func makePlannedExercise() -> PlannedExercise {
+    PlannedExercise(
+        id: UUID(),
+        exerciseId: "barbell_bench_press",
+        name: "Barbell Bench Press",
+        primaryMuscle: "pectoralis_major",
+        synergists: ["anterior_deltoid"],
+        equipmentRequired: .barbell,
+        sets: 3,
+        repRange: RepRange(min: 8, max: 12),
+        tempo: "3-1-1-0",
+        restSeconds: 120,
+        rirTarget: 2,
+        coachingCues: ["Retract scapula"]
+    )
+}
+
+/// MesocycleTemplate JSON with one accumulation training day whose `exercises`
+/// array is empty (Full_Body). All other phases are populated with a single
+/// barbell exercise. Drives the empty-day-corrective-re-prompt code path.
+private func mesocycleWithEmptyFullBodyDayJSON() -> String {
+    """
+    {
+      "mesocycle_template": {
+        "periodization_model": "linear_periodization",
+        "phase_templates": [
+          {
+            "phase": "accumulation",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "barbell_bench_press",
+                    "name": "Barbell Bench Press",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": ["anterior_deltoid"],
+                    "equipment_required": "barbell",
+                    "sets": 4,
+                    "rep_range": { "min": 8, "max": 12 },
+                    "tempo": "3-1-1-0",
+                    "rest_seconds": 150,
+                    "rir_target": 3,
+                    "coaching_cues": ["Retract scapula"]
+                  }
+                ]
+              },
+              {
+                "day_of_week": 3,
+                "day_label": "Full_Body",
+                "session_notes": null,
+                "exercises": []
+              }
+            ]
+          },
+          {
+            "phase": "intensification",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "barbell_bench_press",
+                    "name": "Barbell Bench Press",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": ["anterior_deltoid"],
+                    "equipment_required": "barbell",
+                    "sets": 4,
+                    "rep_range": { "min": 6, "max": 8 },
+                    "tempo": "3-1-1-0",
+                    "rest_seconds": 180,
+                    "rir_target": 2,
+                    "coaching_cues": ["Retract scapula"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "peaking",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "barbell_bench_press",
+                    "name": "Barbell Bench Press",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": ["anterior_deltoid"],
+                    "equipment_required": "barbell",
+                    "sets": 3,
+                    "rep_range": { "min": 3, "max": 5 },
+                    "tempo": "3-1-1-0",
+                    "rest_seconds": 240,
+                    "rir_target": 1,
+                    "coaching_cues": ["Retract scapula"]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "phase": "deload",
+            "training_days": [
+              {
+                "day_of_week": 1,
+                "day_label": "Push_A",
+                "session_notes": null,
+                "exercises": [
+                  {
+                    "exercise_id": "barbell_bench_press",
+                    "name": "Barbell Bench Press",
+                    "primary_muscle": "pectoralis_major",
+                    "synergists": ["anterior_deltoid"],
+                    "equipment_required": "barbell",
+                    "sets": 2,
+                    "rep_range": { "min": 8, "max": 12 },
+                    "tempo": "3-1-1-0",
+                    "rest_seconds": 120,
+                    "rir_target": 4,
+                    "coaching_cues": ["Easy pace"]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+    """
 }
