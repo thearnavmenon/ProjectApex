@@ -14,6 +14,9 @@
 //   • `currentMesocycle` so views can observe in-place day mutations
 
 import SwiftUI
+import OSLog
+
+private let programPersistLogger = Logger(subsystem: "com.projectapex", category: "ProgramPersist")
 
 // MARK: - SessionMetaRow
 
@@ -184,7 +187,7 @@ final class ProgramViewModel {
                 let row = ProgramRow.forInsert(from: capturedMesocycle, userId: capturedUserId)
                 try await capturedClient.insert(row, table: "programs")
             } catch {
-                // Non-fatal
+                programPersistLogger.error("program insert failed (regenerateProgram): \(error.localizedDescription, privacy: .public) — user_id=\(capturedUserId.uuidString, privacy: .public), program_id=\(capturedMesocycle.id.uuidString, privacy: .public). Local cache preserved; row will not exist server-side until a successful retry.")
             }
         }
     }
@@ -251,7 +254,7 @@ final class ProgramViewModel {
                         let row = ProgramRow.forInsert(from: mesocycle, userId: capturedUserId)
                         try await capturedClient.insert(row, table: "programs")
                     } catch {
-                        // Non-fatal: program already in local cache
+                        programPersistLogger.error("program insert failed (generateProgram): \(error.localizedDescription, privacy: .public) — user_id=\(capturedUserId.uuidString, privacy: .public), program_id=\(mesocycle.id.uuidString, privacy: .public). Local cache preserved; row will not exist server-side until a successful retry.")
                     }
                 }
             }
@@ -317,7 +320,7 @@ final class ProgramViewModel {
                         let row = ProgramRow.forInsert(from: mesocycle, userId: capturedUserId)
                         try await capturedClient.insert(row, table: "programs")
                     } catch {
-                        // Non-fatal
+                        programPersistLogger.error("program insert failed (generateMacroSkeleton): \(error.localizedDescription, privacy: .public) — user_id=\(capturedUserId.uuidString, privacy: .public), program_id=\(mesocycle.id.uuidString, privacy: .public). Local cache preserved; row will not exist server-side until a successful retry.")
                     }
                 }
             }
