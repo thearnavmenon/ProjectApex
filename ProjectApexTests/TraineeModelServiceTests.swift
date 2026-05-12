@@ -5,9 +5,9 @@
 //
 // The actor is the read-side interface to the trainee model — wraps the
 // SwiftData local cache (@MainActor TraineeModelLocalStore) and the
-// WriteAheadQueue. Phase 1 ships read(), digest(), enqueueUpdate(forSession:);
+// WriteAheadQueue. Public API is read(), digest(), enqueueUpdate(forSession:setLogs:);
 // the WAQ flush handler that routes trainee_model_update items to the
-// Edge Function lands in Slice 11 (#12). Update-rule logic is Phase 2.
+// Edge Function lives in TraineeModelUpdateJob. Producer wiring landed in #135.
 //
 // The class is @MainActor because TraineeModelLocalStore must be created
 // and torn down inside an active Swift Concurrency Task — same constraint
@@ -18,10 +18,14 @@
 //   • read() returns the cached snapshot after the store is hydrated
 //   • digest() returns nil when the local cache is empty (cold-start path)
 //   • digest() returns a TraineeModelDigest assembled from the cached model
-//   • enqueueUpdate(forSession:) appends one item to the WAQ
-//   • enqueueUpdate(forSession:) targets the trainee_model_updates table
-//   • enqueueUpdate(forSession:) emits a payload whose decoded JSON shape
+//   • enqueueUpdate(forSession:setLogs:) appends one item to the WAQ
+//   • enqueueUpdate(forSession:setLogs:) targets the trainee_model_updates table
+//   • enqueueUpdate(forSession:setLogs:) emits a payload whose decoded JSON shape
 //     matches the Edge Function contract { user_id, session_id, session_payload }
+//   • session_payload carries logged_at (ISO 8601) + set_logs[] per #135
+//   • set_logs entries map SetLog → exercise_id/set_number/weight_kg/reps_completed/intent/rpe_felt
+//   • set_logs without an intent are skipped (Edge Function rejects payloads
+//     where any element omits intent)
 
 import XCTest
 @testable import ProjectApex
@@ -185,12 +189,37 @@ final class TraineeModelServiceTests: XCTestCase {
         XCTAssertEqual(patternConfidences, [.calibrating, .established])
     }
 
-    // MARK: ─── enqueueUpdate(forSession:) — WAQ shape ────────────────────────
+    // MARK: ─── enqueueUpdate(forSession:setLogs:) — WAQ shape ──────────────
+
+    private func makeSetLog(
+        setNumber: Int,
+        exerciseId: String = "barbell_bench_press",
+        weightKg: Double = 100,
+        reps: Int = 5,
+        rpe: Int? = 8,
+        intent: SetIntent? = .top
+    ) -> SetLog {
+        SetLog(
+            id: UUID(),
+            sessionId: sessionId,
+            exerciseId: exerciseId,
+            setNumber: setNumber,
+            weightKg: weightKg,
+            repsCompleted: reps,
+            rpeFelt: rpe,
+            rirEstimated: nil,
+            aiPrescribed: nil,
+            loggedAt: ref,
+            primaryMuscle: nil,
+            intent: intent,
+            completionFlags: []
+        )
+    }
 
     func test_enqueueUpdate_appendsOneItemToQueue() async throws {
         let session = makeSession()
 
-        try await service.enqueueUpdate(forSession: session)
+        try await service.enqueueUpdate(forSession: session, setLogs: [])
 
         let pending = await waq.queue
         XCTAssertEqual(pending.count, 1, "Expected exactly one queued write")
@@ -199,7 +228,7 @@ final class TraineeModelServiceTests: XCTestCase {
     func test_enqueueUpdate_targetsTraineeModelUpdatesTable() async throws {
         let session = makeSession()
 
-        try await service.enqueueUpdate(forSession: session)
+        try await service.enqueueUpdate(forSession: session, setLogs: [])
 
         let pending = await waq.queue
         let item = try XCTUnwrap(pending.first)
@@ -209,7 +238,7 @@ final class TraineeModelServiceTests: XCTestCase {
     func test_enqueueUpdate_payloadShape_matchesEdgeFunctionContract() async throws {
         let session = makeSession()
 
-        try await service.enqueueUpdate(forSession: session)
+        try await service.enqueueUpdate(forSession: session, setLogs: [])
 
         let pending = await waq.queue
         let item = try XCTUnwrap(pending.first)
@@ -217,16 +246,88 @@ final class TraineeModelServiceTests: XCTestCase {
         // Edge Function (supabase/functions/update-trainee-model/index.ts)
         // expects exactly { user_id, session_id, session_payload } with
         // user_id and session_id as UUID strings and session_payload as a
-        // JSON object. Phase 1 sends an empty session_payload object;
-        // Phase 2 fills in set_logs / notes when rule logic ships.
+        // JSON object carrying logged_at (required) and set_logs (optional).
         let json = try JSONSerialization.jsonObject(with: item.payload) as? [String: Any]
         let body = try XCTUnwrap(json)
 
         XCTAssertEqual((body["user_id"]    as? String)?.lowercased(), userId.uuidString.lowercased())
         XCTAssertEqual((body["session_id"] as? String)?.lowercased(), sessionId.uuidString.lowercased())
-        XCTAssertNotNil(body["session_payload"] as? [String: Any],
-                        "session_payload must be a JSON object per Edge Function contract")
+        let payload = try XCTUnwrap(body["session_payload"] as? [String: Any])
         XCTAssertEqual(Set(body.keys), ["user_id", "session_id", "session_payload"],
-                       "Payload must carry exactly the Edge Function contract keys")
+                       "Top-level keys must match Edge Function contract")
+        XCTAssertEqual(Set(payload.keys), ["logged_at", "set_logs"],
+                       "session_payload must carry logged_at + set_logs")
+    }
+
+    func test_enqueueUpdate_sessionPayload_loggedAtIsIso8601String() async throws {
+        let session = makeSession()
+
+        try await service.enqueueUpdate(forSession: session, setLogs: [])
+
+        let pending = await waq.queue
+        let item = try XCTUnwrap(pending.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: item.payload) as? [String: Any])
+        let payload = try XCTUnwrap(body["session_payload"] as? [String: Any])
+        let loggedAt = try XCTUnwrap(payload["logged_at"] as? String)
+
+        // Edge Function (applySession line 1262) throws if logged_at is not a
+        // string parseable by `new Date()`. ISO8601DateFormatter with
+        // .withInternetDateTime emits e.g. "2026-05-12T15:30:00Z" — accepted.
+        let parsed = ISO8601DateFormatter().date(from: loggedAt)
+        XCTAssertNotNil(parsed, "logged_at must parse as ISO 8601 — got \(loggedAt)")
+        XCTAssertEqual(parsed, ref, "logged_at must equal the injected now()")
+    }
+
+    func test_enqueueUpdate_setLogs_mapsAllFieldsToSnakeCase() async throws {
+        let session = makeSession()
+        let sets: [SetLog] = [
+            makeSetLog(setNumber: 1, exerciseId: "barbell_back_squat",
+                       weightKg: 130, reps: 5, rpe: 8, intent: .top),
+            makeSetLog(setNumber: 2, exerciseId: "barbell_back_squat",
+                       weightKg: 110, reps: 8, rpe: 7, intent: .backoff),
+        ]
+
+        try await service.enqueueUpdate(forSession: session, setLogs: sets)
+
+        let pending = await waq.queue
+        let item = try XCTUnwrap(pending.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: item.payload) as? [String: Any])
+        let payload = try XCTUnwrap(body["session_payload"] as? [String: Any])
+        let logs = try XCTUnwrap(payload["set_logs"] as? [[String: Any]])
+
+        XCTAssertEqual(logs.count, 2)
+
+        let first = logs[0]
+        XCTAssertEqual(first["exercise_id"]    as? String, "barbell_back_squat")
+        XCTAssertEqual(first["set_number"]     as? Int,    1)
+        XCTAssertEqual(first["weight_kg"]      as? Double, 130)
+        XCTAssertEqual(first["reps_completed"] as? Int,    5)
+        XCTAssertEqual(first["rpe_felt"]       as? Int,    8)
+        XCTAssertEqual(first["intent"]         as? String, "top")
+
+        let second = logs[1]
+        XCTAssertEqual(second["intent"] as? String, "backoff")
+    }
+
+    func test_enqueueUpdate_setLogs_skipsEntriesMissingIntent() async throws {
+        let session = makeSession()
+        // Mix of valid + nil-intent sets — the latter must be filtered out so
+        // the Edge Function does not reject the entire payload at validation.
+        let sets: [SetLog] = [
+            makeSetLog(setNumber: 1, intent: .top),
+            makeSetLog(setNumber: 2, intent: nil),
+            makeSetLog(setNumber: 3, intent: .backoff),
+        ]
+
+        try await service.enqueueUpdate(forSession: session, setLogs: sets)
+
+        let pending = await waq.queue
+        let item = try XCTUnwrap(pending.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: item.payload) as? [String: Any])
+        let payload = try XCTUnwrap(body["session_payload"] as? [String: Any])
+        let logs = try XCTUnwrap(payload["set_logs"] as? [[String: Any]])
+
+        XCTAssertEqual(logs.count, 2, "intent=nil sets must be filtered out")
+        XCTAssertEqual(logs.map { $0["intent"] as? String }, ["top", "backoff"])
     }
 }

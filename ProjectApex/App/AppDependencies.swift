@@ -43,6 +43,8 @@ final class AppDependencies {
     let traineeModelLocalStore: TraineeModelLocalStore
     /// WAQ adapter: routes trainee_model_updates items to the Edge Function (Phase 1 / Slice 11).
     let traineeModelUpdateJob: TraineeModelUpdateJob
+    /// Producer side: enqueues a trainee_model_updates item per completed session (#135).
+    let traineeModelService: TraineeModelService
     /// Pending late-arrival notifications surfaced on the post-session summary (Phase 2 / Slice A3, ADR-0008).
     let lateArrivalNotificationQueue: LateArrivalNotificationQueue
     /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
@@ -165,7 +167,12 @@ final class AppDependencies {
         // completes before any user interaction can trigger a WAQ flush.
         Task { await tmJob.register(with: waq) }
 
-        // 11. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak
+        // 10b. TraineeModelService — producer side. Enqueues one trainee_model_updates
+        // item per completed session; the handler registered above dispatches them.
+        let tmService = TraineeModelService(store: tmStore, writeAheadQueue: waq)
+        self.traineeModelService = tmService
+
+        // 11. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak, trainee model
         let manager = WorkoutSessionManager(
             aiInference: inferenceService,
             healthKit: healthKitService,
@@ -173,7 +180,8 @@ final class AppDependencies {
             supabase: supabaseClient,
             gymFactStore: gymFactStore,
             writeAheadQueue: waq,
-            gymStreakService: gymStreakService
+            gymStreakService: gymStreakService,
+            traineeModelService: tmService
         )
         self.workoutSessionManager = manager
 
