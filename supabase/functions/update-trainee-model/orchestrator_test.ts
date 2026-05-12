@@ -1704,6 +1704,181 @@ orchestratorTest(
   },
 );
 
+orchestratorTest(
+  "#156: per-set attribution — quads + hamstrings collapse to legs; shoulders maps 1:1; unknown exercise IDs silently skipped",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-10T10:00:00Z";
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            // 2 quads sets → contribute to legs.
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top" },
+            { exercise_id: "barbell_back_squat", set_number: 2, weight_kg: 130, reps_completed: 5, intent: "top" },
+            // 1 hamstrings set → collapses to legs.
+            { exercise_id: "romanian_deadlift", set_number: 1, weight_kg: 110, reps_completed: 8, intent: "backoff" },
+            // 1 shoulders set (amrap counts as contributing).
+            { exercise_id: "lateral_raise", set_number: 1, weight_kg: 8, reps_completed: 12, intent: "amrap" },
+            // Warmup set on quads → excluded from volume aggregation.
+            { exercise_id: "barbell_back_squat", set_number: 0, weight_kg: 60, reps_completed: 5, intent: "warmup" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const muscles = modelJson.muscles as Record<string, Record<string, unknown>>;
+
+    // Two muscle groups bootstrapped — legs (collapsed) and shoulders (1:1).
+    assertEquals(Object.keys(muscles).sort(), ["legs", "shoulders"]);
+
+    // legs aggregates 2 quads + 1 hamstrings = 3 contributing sets; warmup
+    // excluded.
+    const legsHistory = muscles.legs.weeklyVolumeHistory as Array<Record<string, unknown>>;
+    assertEquals(legsHistory.length, 1);
+    assertEquals(legsHistory[0].sets, 3);
+    assertEquals(muscles.legs.volumeDeficit, 15); // 18 − 3
+
+    // shoulders 1:1 mapping; 1 contributing set.
+    const shouldersHistory = muscles.shoulders.weeklyVolumeHistory as Array<Record<string, unknown>>;
+    assertEquals(shouldersHistory.length, 1);
+    assertEquals(shouldersHistory[0].sets, 1);
+    assertEquals(muscles.shoulders.volumeDeficit, 17); // 18 − 1
+  },
+);
+
+orchestratorTest(
+  "#156: weeklyVolumeHistory accumulates across applies; volumeDeficit converges toward 0 as volume accrues",
+  async () => {
+    const userId = await seedFreshUser();
+    const loggedAtBase = new Date("2026-05-10T10:00:00Z");
+
+    // Three consecutive applies on chest, each contributing 5 sets.
+    // Cumulative sets: 5, 10, 15. Deficits: 18−5=13, 18−10=8, 18−15=3.
+    for (let i = 0; i < 3; i++) {
+      const loggedAt = new Date(loggedAtBase.getTime() + i * 86_400_000).toISOString();
+      await applySession(
+        {
+          user_id: userId,
+          session_id: crypto.randomUUID(),
+          session_payload: {
+            logged_at: loggedAt,
+            set_logs: [
+              { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 80, reps_completed: 5, intent: "top" },
+              { exercise_id: "barbell_bench_press", set_number: 2, weight_kg: 80, reps_completed: 5, intent: "top" },
+              { exercise_id: "barbell_bench_press", set_number: 3, weight_kg: 80, reps_completed: 5, intent: "top" },
+              { exercise_id: "barbell_bench_press", set_number: 4, weight_kg: 70, reps_completed: 8, intent: "backoff" },
+              { exercise_id: "barbell_bench_press", set_number: 5, weight_kg: 70, reps_completed: 8, intent: "backoff" },
+            ],
+          },
+        },
+        sql,
+        { stage2Hook: noopStage2 },
+      );
+    }
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const chest = (modelJson.muscles as Record<string, Record<string, unknown>>).chest;
+
+    // History accumulated three buckets (still within 7-event window).
+    const history = chest.weeklyVolumeHistory as Array<Record<string, unknown>>;
+    assertEquals(history.length, 3);
+    assertEquals(history[0].sets, 5);
+    assertEquals(history[1].sets, 5);
+    assertEquals(history[2].sets, 5);
+
+    // Cumulative volume = 15 sets; deficit = 18 − 15 = 3.
+    assertEquals(chest.volumeDeficit, 3);
+  },
+);
+
+orchestratorTest(
+  "#156: end-to-end snapshot — alpha-shaped session populates all six MuscleGroups with Q1-locked defaults",
+  async () => {
+    const userId = await seedFreshUser();
+    const sessionId = crypto.randomUUID();
+    const loggedAt = "2026-05-12T10:00:00Z";
+
+    // One set touching each of the six MuscleGroups (mirrors the alpha
+    // cohort's full-coverage shape across back/chest/shoulders/biceps/
+    // triceps/legs).
+    await applySession(
+      {
+        user_id: userId,
+        session_id: sessionId,
+        session_payload: {
+          logged_at: loggedAt,
+          set_logs: [
+            { exercise_id: "barbell_row", set_number: 1, weight_kg: 70, reps_completed: 8, intent: "top" },             // back
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 80, reps_completed: 5, intent: "top" },     // chest
+            { exercise_id: "overhead_press", set_number: 1, weight_kg: 50, reps_completed: 5, intent: "top" },          // shoulders
+            { exercise_id: "barbell_curl", set_number: 1, weight_kg: 30, reps_completed: 10, intent: "top" },           // biceps
+            { exercise_id: "cable_tricep_pushdown", set_number: 1, weight_kg: 25, reps_completed: 12, intent: "top" },  // triceps
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top" },     // legs (quads)
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const muscles = (rows[0].model_json as Record<string, unknown>).muscles as Record<
+      string,
+      Record<string, unknown>
+    >;
+
+    // All six MuscleGroups populated.
+    assertEquals(
+      Object.keys(muscles).sort(),
+      ["back", "biceps", "chest", "legs", "shoulders", "triceps"],
+    );
+
+    const expectedTolerances: Record<string, number> = {
+      back: 21,
+      chest: 18,
+      shoulders: 18,
+      biceps: 16,
+      triceps: 12,
+      legs: 18,
+    };
+
+    const loggedAtIso = new Date(loggedAt).toISOString();
+    for (const [muscleGroup, expectedTolerance] of Object.entries(expectedTolerances)) {
+      const profile = muscles[muscleGroup];
+      assertEquals(profile.muscleGroup, muscleGroup);
+      assertEquals(profile.volumeTolerance, expectedTolerance);
+      assertEquals(profile.observedSweetSpot, null);
+      assertEquals(profile.focusWeight, 0); // GoalState.placeholder
+      assertEquals(profile.stagnationStatus, "progressing"); // empty-participation default
+      assertEquals(profile.confidence, "bootstrapping"); // Q5 lock
+      // weeklyVolumeHistory has exactly one bucket — this session.
+      const history = profile.weeklyVolumeHistory as Array<Record<string, unknown>>;
+      assertEquals(history.length, 1);
+      assertEquals(history[0].loggedAtIso, loggedAtIso);
+      assertEquals(history[0].sets, 1);
+      // deficit = tolerance − 1
+      assertEquals(profile.volumeDeficit, expectedTolerance - 1);
+    }
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).
