@@ -45,6 +45,17 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
     static let fatigueInteractionConfidenceThreshold: Double = 0.7
+
+    enum CodingKeys: String, CodingKey {
+        case goal
+        case projections
+        case perPatternSummary         = "per_pattern_summary"
+        case perMuscleSummary          = "per_muscle_summary"
+        case activeFatigueInteractions = "active_fatigue_interactions"
+        case activeLimitations         = "active_limitations"
+        case prescriptionAccuracy      = "prescription_accuracy"
+        case disruptedPatterns         = "disrupted_patterns"
+    }
 }
 
 // MARK: - Assembly
@@ -118,6 +129,16 @@ struct PatternSummary: Codable, Sendable, Hashable {
         self.inTransitionMode = profile.inTransitionMode(asOf: reference)
         self.consecutiveForceDeloadsOnPattern = profile.consecutiveForceDeloadsOnPattern
     }
+
+    enum CodingKeys: String, CodingKey {
+        case pattern
+        case currentPhase                    = "current_phase"
+        case confidence
+        case rpeOffset                       = "rpe_offset"
+        case trend
+        case inTransitionMode                = "in_transition_mode"
+        case consecutiveForceDeloadsOnPattern = "consecutive_force_deloads_on_pattern"
+    }
 }
 
 // MARK: - MuscleSummary
@@ -141,6 +162,15 @@ struct MuscleSummary: Codable, Sendable, Hashable {
         self.focusWeight       = profile.focusWeight
         self.stagnationStatus  = profile.stagnationStatus
         self.confidence        = profile.confidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case muscleGroup       = "muscle_group"
+        case volumeTolerance   = "volume_tolerance"
+        case volumeDeficit     = "volume_deficit"
+        case focusWeight       = "focus_weight"
+        case stagnationStatus  = "stagnation_status"
+        case confidence
     }
 }
 

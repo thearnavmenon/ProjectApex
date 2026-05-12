@@ -392,6 +392,66 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(digest.disruptedPatterns, [.squat])
     }
 
+    // MARK: ─── B1: digest wire shape locked to snake_case ──────────────────
+    //
+    // The system prompts reference fields via snake_case JSON paths
+    // (`trainee_model_digest.per_pattern_summary[].trend`,
+    //  `per_muscle_summary[].stagnation_status`,
+    //  `per_pattern_summary[].consecutive_force_deloads_on_pattern`).
+    //
+    // Without explicit CodingKeys, Codable auto-synthesis emits camelCase
+    // — the LLM reads a path that doesn't exist and silently degrades.
+    // PR #150 lesson: snake_case ↔ camelCase drift across the wire boundary
+    // must be locked at the type, not the encoder strategy.
+
+    func test_digest_jsonShape_isAllSnakeCase() throws {
+        var model = makeBaselineModel()
+        var profile = makePattern(.squat, confidence: .calibrating)
+        profile.trend = .plateaued
+        profile.consecutiveForceDeloadsOnPattern = 2
+        model.patterns[.squat] = profile
+        model.muscles[.legs] = MuscleProfile(
+            muscleGroup: .legs,
+            volumeTolerance: 14.0,
+            observedSweetSpot: 11,
+            volumeDeficit: 3,
+            focusWeight: 0.7,
+            stagnationStatus: .declining,
+            confidence: .established
+        )
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        // Top-level digest keys.
+        XCTAssertNotNil(json["per_pattern_summary"], "TraineeModelDigest must emit per_pattern_summary")
+        XCTAssertNotNil(json["per_muscle_summary"], "TraineeModelDigest must emit per_muscle_summary")
+        XCTAssertNotNil(json["active_fatigue_interactions"], "TraineeModelDigest must emit active_fatigue_interactions")
+        XCTAssertNotNil(json["active_limitations"], "TraineeModelDigest must emit active_limitations")
+        XCTAssertNotNil(json["prescription_accuracy"], "TraineeModelDigest must emit prescription_accuracy")
+        XCTAssertNotNil(json["disrupted_patterns"], "TraineeModelDigest must emit disrupted_patterns")
+
+        // PatternSummary keys the B1 prompt block references.
+        let patternSummaries = try XCTUnwrap(json["per_pattern_summary"] as? [[String: Any]])
+        let squatSummary = try XCTUnwrap(patternSummaries.first { ($0["pattern"] as? String) == "squat" })
+        XCTAssertNotNil(squatSummary["current_phase"])
+        XCTAssertNotNil(squatSummary["rpe_offset"])
+        XCTAssertNotNil(squatSummary["in_transition_mode"])
+        XCTAssertNotNil(squatSummary["consecutive_force_deloads_on_pattern"])
+        XCTAssertEqual(squatSummary["consecutive_force_deloads_on_pattern"] as? Int, 2)
+        XCTAssertEqual(squatSummary["trend"] as? String, "plateaued")
+
+        // MuscleSummary keys the B1 prompt block references.
+        let muscleSummaries = try XCTUnwrap(json["per_muscle_summary"] as? [[String: Any]])
+        let legsSummary = try XCTUnwrap(muscleSummaries.first { ($0["muscle_group"] as? String) == "legs" })
+        XCTAssertNotNil(legsSummary["volume_tolerance"])
+        XCTAssertNotNil(legsSummary["volume_deficit"])
+        XCTAssertNotNil(legsSummary["focus_weight"])
+        XCTAssertNotNil(legsSummary["stagnation_status"])
+        XCTAssertEqual(legsSummary["stagnation_status"] as? String, "declining")
+    }
+
     // MARK: ─── B1: PatternSummary surfaces consecutiveForceDeloadsOnPattern ──
     //
     // Per ADR-0011 §(d), the digest exposes a per-pattern counter that
