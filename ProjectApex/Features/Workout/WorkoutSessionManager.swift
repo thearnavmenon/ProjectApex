@@ -1496,41 +1496,11 @@ actor WorkoutSessionManager {
             await gymStreakService.invalidate(userId: sessionUserId)
         }
 
-        // Compute and persist stagnation signals after each completed session.
-        // Runs detached so the UI isn't blocked. SessionPlanService reads the
-        // persisted signals synchronously via UserDefaults before the next session.
-        Task.detached(priority: .utility) { [supabase, sessionUserId] in
-            do {
-                // Fetch up to 50 completed sessions for this user (most recent first)
-                let sessions: [WorkoutSession] = try await supabase.fetch(
-                    WorkoutSession.self,
-                    table: "workout_sessions",
-                    filters: [
-                        Filter(column: "user_id",  op: .eq, value: sessionUserId.uuidString),
-                        Filter(column: "completed", op: .is, value: "true"),
-                    ],
-                    order: "session_date.desc",
-                    limit: 50,
-                    select: "id,user_id,program_id,session_date,week_number,day_type,completed,status"
-                )
-                guard !sessions.isEmpty else { return }
+        // Stagnation signals are now computed server-side by the trainee-model
+        // pipeline (PatternProfile.trend per ADR-0009 hybrid plateau verdict)
+        // and surfaced via TraineeModelDigest.perPatternSummary. The legacy
+        // client-side StagnationService computation was removed in B1 (#86).
 
-                // Two-query pattern: set_logs has no user_id column, so filter by session IDs
-                let sessionIds = sessions.map { $0.id.uuidString }.joined(separator: ",")
-                let setLogs: [SetLog] = try await supabase.fetch(
-                    SetLog.self,
-                    table: "set_logs",
-                    filters: [Filter(column: "session_id", op: .in, value: "(\(sessionIds))")],
-                    select: "id,session_id,exercise_id,set_number,weight_kg,reps_completed,rpe_felt,rir_estimated,logged_at,primary_muscle"
-                )
-
-                let signals = StagnationService.computeSignals(from: setLogs)
-                StagnationService.persist(signals)
-                print("[WorkoutSessionManager] Stagnation signals computed: \(signals.count) exercises analysed.")
-            } catch {
-                print("[WorkoutSessionManager] Stagnation computation failed: \(error.localizedDescription)")
-            }
-        }
 
         // Advance per-pattern phase tracking after each completed session.
         // Runs detached so the UI is not blocked. PatternPhaseService reads the

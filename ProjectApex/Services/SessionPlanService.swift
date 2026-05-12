@@ -315,9 +315,6 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
     let liftHistory: [LiftHistoryEntry]
     let weekFatigue: WeekFatigueSignals
     let ragMemory: [RAGMemoryItem]
-    /// Stagnation signals computed post-session by StagnationService.
-    /// Empty array when no stagnation data is available yet.
-    let stagnationSignals: [StagnationSignal]
     /// Volume deficit signals for the current mesocycle week.
     /// Empty array when volume is on-track or insufficient data exists.
     let volumeDeficits: [VolumeDeficit]
@@ -325,8 +322,9 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
     /// in practice this is always provided for every session generation call.
     let temporalContext: TemporalContext?
     /// Trainee-model projection (B1 / #86). Carries per-pattern trend +
-    /// consecutiveForceDeloadsOnPattern that supersede stagnationSignals.
-    /// Nil when the local store has no model for this user yet.
+    /// per-pattern force-deload counter, superseding the legacy per-exercise
+    /// stagnation-signal payload. Nil when the local store has no model for
+    /// this user yet.
     let traineeModelDigest: TraineeModelDigest?
 
     enum CodingKeys: String, CodingKey {
@@ -342,7 +340,6 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
         case liftHistory         = "lift_history"
         case weekFatigue         = "week_fatigue"
         case ragMemory           = "rag_memory"
-        case stagnationSignals   = "stagnation_signals"
         case volumeDeficits      = "volume_deficits"
         case temporalContext     = "temporal_context"
         case traineeModelDigest  = "trainee_model_digest"
@@ -551,10 +548,9 @@ actor SessionPlanService {
             volumeLandmark: weekVolumeLandmark(for: week.phase, weekNumber: week.weekNumber)
         )
 
-        // Load persisted signals from UserDefaults (written post-session by WorkoutSessionManager).
-        // stagnationSignals is starved here (B1 / #86) — the prompt now consumes
-        // traineeModelDigest.per_pattern_summary[].trend instead. Field is removed
-        // entirely in B1.24; passing [] keeps the build green during the cutover.
+        // Plateau/decline signals are now sourced from the trainee-model digest
+        // below (PatternProfile.trend per ADR-0009 hybrid plateau verdict) — the
+        // legacy client-side per-set load() call was removed in B1 (#86).
         let volumeDeficits = VolumeValidationService.load()
         let traineeModelDigest = await traineeModelService?.digest()
 
@@ -571,7 +567,6 @@ actor SessionPlanService {
             liftHistory: liftHistory,
             weekFatigue: fatigue,
             ragMemory: ragMemory,
-            stagnationSignals: [],
             volumeDeficits: volumeDeficits,
             temporalContext: temporalContext,
             traineeModelDigest: traineeModelDigest

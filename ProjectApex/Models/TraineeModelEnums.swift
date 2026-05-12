@@ -87,9 +87,9 @@ enum ProjectionProgress: String, Codable, Sendable, Hashable, CaseIterable {
 
 // MARK: - ProgressionTrend (PatternProfile.trend, MuscleProfile.stagnationStatus)
 
-/// Capability trajectory used by both pattern-level trend (replacing
-/// StagnationService output) and muscle-level stagnation status per
-/// ADR-0005's service-supersession notes.
+/// Capability trajectory used by both pattern-level trend and muscle-level
+/// stagnation status per ADR-0005's service-supersession notes. The hybrid
+/// plateau verdict that produces these values is specified in ADR-0009.
 enum ProgressionTrend: String, Codable, Sendable, Hashable, CaseIterable {
     case progressing
     case plateaued

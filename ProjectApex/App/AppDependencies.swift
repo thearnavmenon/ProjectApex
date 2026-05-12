@@ -78,6 +78,12 @@ final class AppDependencies {
     // MARK: Init
 
     init() {
+        // 0. One-shot cleanup: remove the legacy StagnationService UserDefaults
+        // key. The service + key were deleted in B1 (#86); this prevents stale
+        // data from persisting on installs that upgraded across the cutover.
+        // Cheap idempotent op — removeObject is a no-op when the key is absent.
+        UserDefaults.standard.removeObject(forKey: "apex.stagnation_signals")
+
         // 1. Keychain — source of all API keys
         let keychain = KeychainService.shared
         self.keychainService = keychain

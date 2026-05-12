@@ -629,6 +629,42 @@ final class TraineeModelDigestTests: XCTestCase {
         }
     }
 
+    // MARK: ─── B1: cleanup-reversion guards ──────────────────────────────────
+    //
+    // Source-grep tests that lock B1's deletions in place. Same shape as the
+    // β negative anchors on prompt files — they catch lexical reversion at
+    // the source level, which compile-time field deletion alone can't (e.g.,
+    // someone re-adding the legacy stagnationSignals field would change the
+    // type but if they forgot a renamed consumer they'd get a compile error;
+    // these tests give a clearer "you reverted B1's deletion" signal).
+
+    private func loadSourceFile(_ relativePath: String) throws -> String {
+        let testFileURL = URL(fileURLWithPath: #file)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()  // ProjectApexTests/
+            .deletingLastPathComponent()  // <repo root>
+        let sourceURL = repoRoot.appendingPathComponent(relativePath)
+        return try String(contentsOf: sourceURL, encoding: .utf8)
+    }
+
+    func test_sessionPlanService_doesNotReferenceLegacyStagnationField() throws {
+        let source = try loadSourceFile("ProjectApex/Services/SessionPlanService.swift")
+        XCTAssertFalse(source.contains("stagnationSignals"),
+            "SessionPlanService must not declare or reference stagnationSignals (removed in B1/#86 — read trend from traineeModelDigest instead)")
+        XCTAssertFalse(source.contains("stagnation_signals"),
+            "SessionPlanService must not emit the stagnation_signals JSON key (removed in B1/#86)")
+        XCTAssertFalse(source.contains("StagnationService"),
+            "SessionPlanService must not reference StagnationService (deleted in B1/#86)")
+    }
+
+    func test_workoutSessionManager_doesNotComputeStagnationSignals() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Workout/WorkoutSessionManager.swift")
+        XCTAssertFalse(source.contains("StagnationService.computeSignals"),
+            "WorkoutSessionManager must not invoke StagnationService.computeSignals (removed in B1/#86 — trend is computed server-side per ADR-0009)")
+        XCTAssertFalse(source.contains("StagnationService.persist"),
+            "WorkoutSessionManager must not invoke StagnationService.persist (removed in B1/#86)")
+    }
+
     // MARK: ─── Cycle 8: empty-input edge cases ───────────────────────────────
 
     func test_digest_emptyModel_yieldsEmptyCollections() {
