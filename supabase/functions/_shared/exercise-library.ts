@@ -139,6 +139,131 @@ export const EXERCISE_PATTERN_MAP: Record<string, MovementPattern> = {
 export const EXERCISE_LIBRARY_ENTRY_COUNT = 71;
 
 /**
+ * PrimaryMuscle taxonomy — mirrors `ProjectApex/Models/PrimaryMuscle.swift`
+ * (9 fine-grained cases per ADR-0005's two-level muscle taxonomy). Used by
+ * applyPerMuscleRules (#156) to bootstrap MuscleProfile entries via the
+ * PrimaryMuscle → MuscleGroup collapse (leg subgroups → "legs"; upper-body
+ * 1:1).
+ */
+export type PrimaryMuscle =
+  | "back"
+  | "chest"
+  | "biceps"
+  | "shoulders"
+  | "triceps"
+  | "quads"
+  | "hamstrings"
+  | "glutes"
+  | "calves";
+
+/**
+ * Map from canonical `exercise_id` to `PrimaryMuscle`. Mirrors the
+ * `primaryMuscle` field of `ProjectApex/Models/ExerciseLibrary.swift`'s
+ * `ExerciseDefinition` entries. The key set MUST equal `EXERCISE_PATTERN_MAP`'s
+ * key set — both maps describe the same 71 canonical exercises from different
+ * axes. Consumed by applyPerMuscleRules (#156) for per-set muscle attribution
+ * in `model_json.muscles` bootstrap and volume aggregation.
+ */
+export const EXERCISE_PRIMARY_MUSCLE_MAP: Record<string, PrimaryMuscle> = {
+  // Chest
+  barbell_bench_press: "chest",
+  dumbbell_bench_press: "chest",
+  incline_barbell_press: "chest",
+  incline_dumbbell_press: "chest",
+  decline_bench_press: "chest",
+  machine_chest_press: "chest",
+  cable_chest_fly: "chest",
+  pec_deck_fly: "chest",
+  dumbbell_fly: "chest",
+  push_ups: "chest",
+
+  // Back
+  barbell_row: "back",
+  dumbbell_row: "back",
+  t_bar_row: "back",
+  cable_row: "back",
+  seated_cable_row: "back",
+  lat_pulldown_wide: "back",
+  lat_pulldown_close: "back",
+  pull_ups: "back",
+  chin_ups: "back",
+  face_pull: "back",
+  cable_rear_delt_fly: "back",
+  cable_straight_arm_pulldown: "back",
+  dumbbell_single_arm_row: "back",
+  assisted_pull_up: "back",
+
+  // Shoulders
+  overhead_press: "shoulders",
+  dumbbell_shoulder_press: "shoulders",
+  machine_shoulder_press: "shoulders",
+  lateral_raise: "shoulders",
+  cable_lateral_raise: "shoulders",
+  rear_delt_fly: "shoulders",
+  arnold_press: "shoulders",
+  upright_row: "shoulders",
+
+  // Quads
+  barbell_back_squat: "quads",
+  front_squat: "quads",
+  leg_press: "quads",
+  hack_squat_machine: "quads",
+  goblet_squat: "quads",
+  leg_extension: "quads",
+  bulgarian_split_squat: "quads",
+  walking_lunge: "quads",
+  smith_machine_squat: "quads",
+
+  // Hamstrings
+  conventional_deadlift: "hamstrings",
+  romanian_deadlift: "hamstrings",
+  dumbbell_romanian_deadlift: "hamstrings",
+  lying_leg_curl: "hamstrings",
+  seated_leg_curl: "hamstrings",
+  stiff_leg_deadlift: "hamstrings",
+
+  // Glutes
+  hip_thrust: "glutes",
+  cable_pull_through: "glutes",
+  glute_bridge: "glutes",
+  sumo_deadlift: "glutes",
+
+  // Biceps
+  barbell_curl: "biceps",
+  ez_bar_curl: "biceps",
+  dumbbell_curl: "biceps",
+  preacher_curl: "biceps",
+  hammer_curl: "biceps",
+  cable_curl: "biceps",
+  cable_hammer_curl: "biceps",
+
+  // Triceps
+  cable_tricep_pushdown: "triceps",
+  overhead_tricep_extension: "triceps",
+  skull_crushers: "triceps",
+  dips: "triceps",
+  close_grip_bench_press: "triceps",
+  dumbbell_overhead_tricep_extension: "triceps",
+  cable_overhead_tricep_extension: "triceps",
+
+  // Smith / cable variants for chest
+  smith_machine_bench_press: "chest",
+  smith_machine_incline_press: "chest",
+  cable_crossover_chest_fly: "chest",
+
+  // Calves
+  standing_calf_raise: "calves",
+  seated_calf_raise: "calves",
+  smith_machine_calf_raise: "calves",
+};
+
+/**
+ * Pinned entry count — drift detector for the primary-muscle mirror. Must
+ * match `EXERCISE_LIBRARY_ENTRY_COUNT` (same 71 canonical exercises).
+ */
+export const EXERCISE_PRIMARY_MUSCLE_MAP_ENTRY_COUNT = 71;
+
+/**
  * Maps legacy / variant exercise_id strings to their canonical equivalents.
  * Mirror of `ExerciseLibrary.normalizationMap` in
  * `ProjectApex/Models/ExerciseLibrary.swift`. Keep in sync — any addition

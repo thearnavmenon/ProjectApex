@@ -12,6 +12,8 @@ import {
   EXERCISE_NORMALIZATION_ENTRY_COUNT,
   EXERCISE_NORMALIZATION_MAP,
   EXERCISE_PATTERN_MAP,
+  EXERCISE_PRIMARY_MUSCLE_MAP,
+  EXERCISE_PRIMARY_MUSCLE_MAP_ENTRY_COUNT,
   lookupPattern,
 } from "./exercise-library.ts";
 
@@ -107,6 +109,18 @@ Deno.test("lookupPattern: resolves legacy aliases to the canonical pattern", () 
   assertEquals(lookupPattern("lat_pulldown_wide_grip"), "vertical_pull");
   assertEquals(lookupPattern("dumbbell_flat_press"), "horizontal_push");
   assertEquals(lookupPattern("cable_pulldown_neutral_grip"), "vertical_pull");
+});
+
+Deno.test("exercise-library: primaryMuscleMap entry count matches the pinned constant", () => {
+  // Drift detector for the primary-muscle mirror. If this fires, the Swift
+  // library probably gained / removed an exercise but the TS port wasn't
+  // updated. Add or remove the matching entry here AND bump
+  // EXERCISE_PRIMARY_MUSCLE_MAP_ENTRY_COUNT in lockstep with
+  // EXERCISE_LIBRARY_ENTRY_COUNT (the two maps share the same key set).
+  assertEquals(
+    Object.keys(EXERCISE_PRIMARY_MUSCLE_MAP).length,
+    EXERCISE_PRIMARY_MUSCLE_MAP_ENTRY_COUNT,
+  );
 });
 
 Deno.test("exercise-library: every value is a valid MovementPattern (8-enum)", () => {
