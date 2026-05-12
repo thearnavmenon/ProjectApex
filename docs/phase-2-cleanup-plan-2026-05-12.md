@@ -118,9 +118,9 @@ Originally paused mid-session pending the per-week refactor architecture decisio
 
 Action: resume the issue. Implementation follows the legacy `ProgramGenerationService.validateEquipmentConstraints` shape (post-LLM check, one corrective re-prompt, typed error surface on persistent violation).
 
-### 8. Resume B1 (#86), then B2/B3/B4 in sequence
+### 8. Resume B1 (#86) → MuscleProfile producer (#156) → B2 (#87) → B3 (#88) → B4 (#89)
 
-The four cutover slices were paused 2026-05-10 pending data accrual. The accrual gate is now meaningful again — the alpha user has 19 backfilled sessions and the digest has real `per_pattern_summary.trend` values. Per the [Phase 2 memory entry](MEMORY.md), the gate query before resuming B1 is:
+The four cutover slices were paused 2026-05-10 pending data accrual. After this session's contract-drift closures (#146/#147/#148 via PR #149/#150/#152), the iOS decoder hydrates the full TraineeModel and the digest can carry `per_pattern_summary.trend` for every trained pattern. Updated gate query (post-#148, pattern keys are now snake_case):
 
 ```sql
 SELECT user_id, key AS pattern, value->>'trend' AS trend
@@ -128,9 +128,17 @@ FROM public.trainee_models, jsonb_each(model_json->'patterns')
 WHERE value->>'trend' != 'progressing';
 ```
 
-For our alpha user this currently returns ≥2 rows (`verticalPull → declining`, `isolation → declining`), satisfying the gate. **B1 can proceed.**
+For our alpha user this currently returns ≥2 rows (`vertical_pull → declining`, `isolation → declining`), satisfying the gate. **B1 can proceed.**
 
-Sequencing: B1 → B2 → B3 → B4, each its own PR. B4 (full digest collapse + WorkoutContext restructure) sequences last.
+**Sequencing now interleaves a producer slice between B1 and B2:**
+
+1. **B1 (#86)** — stagnation cutover. Reads `PatternProfile.trend` (already populating post-#146). No dependencies; ships first.
+2. **MuscleProfile producer (#156)** — surfaced this session as the fourth contract-drift gap. `model_json.muscles` is iOS-readable but EF never writes it. B2's volume-deficit signal reads `MuscleProfile.volumeDeficit`; empty dict → B2 has no signal. Same shape as the per-pattern recovery work in #146 — needs a new `applyPerMuscleRules` rule module + bootstrap path + per-set muscle attribution. Substantive slice, not a one-line fix.
+3. **B2 (#87)** — volume-deficit cutover. Depends on #156's output. Ships third.
+4. **B3 (#88)** — pattern phase cutover. Reads `PatternProfile.currentPhase` (already populating post-#146). Independent of #156; could parallelize with #156 but conventionally sequenced after B2.
+5. **B4 (#89)** — full digest collapse + WorkoutContext restructure. Sequences last.
+
+Each its own PR.
 
 ---
 
@@ -173,7 +181,7 @@ Working top-down, the highest-value sequencing is:
 3. **#5 (live-session smoke check)** — after the next workout, one SQL query. Confirms the producer wiring works in the wild.
 4. **#6 ([#146](https://github.com/thearnavmenon/ProjectApex/issues/146))** — coordinated PR resolving 5 contract-drift gaps. ~3h of work; bundles EF + Swift + migration + tests.
 5. **#4 (deepLiftHistory fix per #141)** — likely a one-line WHERE clause fix.
-6. **#8 (resume B1, then B2/B3/B4)** — multi-PR cutover work. Largest scope but everything else has cleared the runway.
+6. **#8 (resume B1 → #156 → B2 → B3 → B4)** — multi-PR cutover work, with the MuscleProfile producer slice interleaved between B1 and B2. Largest scope but everything else has cleared the runway.
 7. **#2 + #3 (audit doc + G1 report corrections)** — can interleave anywhere. Honest accounting, no code risk.
 8. **Tier 6** — only if/when motivated.
 
