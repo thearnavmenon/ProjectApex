@@ -869,20 +869,19 @@ struct OnboardingView: View {
         }
 
         do {
-            let userId = deps.resolvedUserId.uuidString
-            let userProfile = UserProfile(
+            let userId = deps.resolvedUserId
+            print("[OnboardingView] runProgramGeneration — training_days_per_week: \(profile.daysPerWeek)")
+            let skeleton = try await deps.macroPlanService.generateSkeleton(
                 userId: userId,
+                gymProfile: gymProf,
                 experienceLevel: profile.trainingAge.rawValue,
                 goals: [profile.primaryGoal.rawValue],
                 bodyweightKg: profile.bodyweightKg,
-                ageYears: profile.age
-            )
-            print("[OnboardingView] runProgramGeneration — training_days_per_week: \(profile.daysPerWeek)")
-            let mesocycle = try await deps.programGenerationService.generate(
-                userProfile: userProfile,
-                gymProfile: gymProf,
+                ageYears: profile.age,
+                trainingAge: profile.trainingAge.rawValue,
                 trainingDaysPerWeek: profile.daysPerWeek
             )
+            let mesocycle = MacroPlanService.buildPendingMesocycle(from: skeleton, userId: userId)
             // Cache immediately so ProgramViewModel.loadProgram() finds it on the fast path.
             mesocycle.saveToUserDefaults()
             isGenerating = false

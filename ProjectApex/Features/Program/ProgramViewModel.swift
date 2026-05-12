@@ -148,8 +148,8 @@ final class ProgramViewModel {
         // 2. Clear the local cache so generation is not shadowed by old data.
         Mesocycle.clearUserDefaults()
 
-        // 3. Generate new program via the shared path (skip Supabase — we persist after grafting).
-        await generateProgram(gymProfile: gymProfile, persistToSupabase: false)
+        // 3. Generate a new skeleton via FB-008 path (skip Supabase — we persist after grafting).
+        await generateMacroSkeleton(gymProfile: gymProfile, persistToSupabase: false)
 
         // 4. Graft completed days back if we have any and generation succeeded.
         guard !completedDaySnapshots.isEmpty,
@@ -269,7 +269,10 @@ final class ProgramViewModel {
 
     /// Generates a 12-week skeleton (phase structure + week intents, no exercises).
     /// The resulting Mesocycle has all TrainingDays as `.pending` stubs.
-    func generateMacroSkeleton(gymProfile: GymProfile) async {
+    ///
+    /// - Parameter persistToSupabase: When false, skips the Supabase write so the
+    ///   caller (e.g. regenerateProgram) can write after applying its own post-processing.
+    func generateMacroSkeleton(gymProfile: GymProfile, persistToSupabase: Bool = true) async {
         guard await !macroPlanService.isGenerating else { return }
         viewState = .generating
 
@@ -304,16 +307,18 @@ final class ProgramViewModel {
             // Build pending mesocycle from skeleton
             let mesocycle = MacroPlanService.buildPendingMesocycle(from: skeleton, userId: userId)
 
-            // Persist to Supabase (fire-and-forget)
-            let capturedUserId = userId
-            let capturedClient = supabaseClient
-            Task.detached {
-                do {
-                    try await capturedClient.deactivatePrograms(userId: capturedUserId)
-                    let row = ProgramRow.forInsert(from: mesocycle, userId: capturedUserId)
-                    try await capturedClient.insert(row, table: "programs")
-                } catch {
-                    // Non-fatal
+            if persistToSupabase {
+                // Persist to Supabase (fire-and-forget)
+                let capturedUserId = userId
+                let capturedClient = supabaseClient
+                Task.detached {
+                    do {
+                        try await capturedClient.deactivatePrograms(userId: capturedUserId)
+                        let row = ProgramRow.forInsert(from: mesocycle, userId: capturedUserId)
+                        try await capturedClient.insert(row, table: "programs")
+                    } catch {
+                        // Non-fatal
+                    }
                 }
             }
             mesocycle.saveToUserDefaults()
