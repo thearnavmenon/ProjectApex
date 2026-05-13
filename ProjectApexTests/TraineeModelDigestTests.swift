@@ -830,6 +830,15 @@ final class TraineeModelDigestTests: XCTestCase {
             "ProgramOverviewView must not reference MovementPatternPhaseState (type deleted with PatternPhaseService.swift in B3/#88)")
     }
 
+    func test_appDependencies_b3_clearsPatternPhaseStatesUserDefaults() throws {
+        // Mirror B1's apex.stagnation_signals + B2's apex.volume_deficits cleanup —
+        // remove the legacy PatternPhaseService UserDefaults key on app launch so
+        // installs that upgraded across the cutover don't carry stale data.
+        let source = try loadSourceFile("ProjectApex/App/AppDependencies.swift")
+        XCTAssertTrue(source.contains("apex.pattern_phase_states"),
+            "AppDependencies bootstrap must include removeObject(forKey: \"apex.pattern_phase_states\") (B3 / #88 — mirrors B1's stagnation_signals + B2's volume_deficits cleanup)")
+    }
+
     func test_patternPhaseService_b3_sourceFilesDeleted() throws {
         let testFileURL = URL(fileURLWithPath: #file)
         let repoRoot = testFileURL
