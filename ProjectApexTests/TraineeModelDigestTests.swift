@@ -927,5 +927,39 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertTrue(digest.activeLimitations.isEmpty)
         XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
         XCTAssertTrue(digest.disruptedPatterns.isEmpty)
+        XCTAssertTrue(digest.transfers.isEmpty)
+    }
+
+    // MARK: ─── B4 (#89) cycle 2: transfers filtered by R²≥0.4 ∧ pairedObs≥5 ────
+
+    func test_digest_transfers_filtersByRSquaredAndPairedObservations() {
+        var model = makeBaselineModel()
+        // Q10 lock-in: surface only transfers with R²≥0.4 AND pairedObservations≥5.
+        // Below either threshold → drop. Lower bounds inclusive.
+        let passing  = ExerciseTransfer(fromExerciseId: "bench_press",
+                                        toExerciseId:   "incline_bench_press",
+                                        coefficient: 0.85, rSquared: 0.5,
+                                        pairedObservations: 10)
+        let lowRSq   = ExerciseTransfer(fromExerciseId: "squat",
+                                        toExerciseId:   "leg_press",
+                                        coefficient: 0.70, rSquared: 0.3,
+                                        pairedObservations: 10)
+        let lowObs   = ExerciseTransfer(fromExerciseId: "deadlift",
+                                        toExerciseId:   "rdl",
+                                        coefficient: 0.80, rSquared: 0.5,
+                                        pairedObservations: 4)
+        let boundary = ExerciseTransfer(fromExerciseId: "overhead_press",
+                                        toExerciseId:   "incline_bench_press",
+                                        coefficient: 0.60, rSquared: 0.4,
+                                        pairedObservations: 5)
+        model.transfers = [passing, lowRSq, lowObs, boundary]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        let surfacedPairs = Set(digest.transfers.map { "\($0.fromExerciseId)→\($0.toExerciseId)" })
+        XCTAssertEqual(surfacedPairs,
+                       ["bench_press→incline_bench_press",
+                        "overhead_press→incline_bench_press"],
+                       "Only transfers with R²≥0.4 AND pairedObservations≥5 should surface in the digest")
     }
 }

@@ -41,10 +41,21 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// before passing to the model; do not forward the full list verbatim.
     var prescriptionAccuracy: [PrescriptionAccuracy]
     var disruptedPatterns: [MovementPattern]
+    /// Cross-exercise transfer coefficients filtered to entries the LLM should
+    /// reason from per Q10 lock-in (R²≥0.4 AND pairedObservations≥5). Below
+    /// either threshold the regression is too noisy to surface.
+    var transfers: [ExerciseTransfer]
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
     static let fatigueInteractionConfidenceThreshold: Double = 0.7
+
+    /// Minimum R² (inclusive) for a transfer entry to surface (Q10 lock-in).
+    static let transferRSquaredThreshold: Double = 0.4
+
+    /// Minimum paired-observation count (inclusive) for a transfer entry to
+    /// surface (Q10 lock-in — guards against tiny-sample regressions).
+    static let transferPairedObservationsThreshold: Int = 5
 
     enum CodingKeys: String, CodingKey {
         case goal
@@ -55,6 +66,7 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case activeLimitations         = "active_limitations"
         case prescriptionAccuracy      = "prescription_accuracy"
         case disruptedPatterns         = "disrupted_patterns"
+        case transfers
     }
 }
 
@@ -86,6 +98,11 @@ extension TraineeModelDigest {
         let disruptedPatterns = model.disruptedPatterns(asOf: reference)
             .sorted { $0.rawValue < $1.rawValue }
 
+        let transfers = model.transfers.filter {
+            $0.rSquared >= Self.transferRSquaredThreshold
+            && $0.pairedObservations >= Self.transferPairedObservationsThreshold
+        }
+
         self.init(
             goal: model.goal,
             projections: model.projections,
@@ -94,7 +111,8 @@ extension TraineeModelDigest {
             activeFatigueInteractions: activeFatigueInteractions,
             activeLimitations: model.activeLimitations,
             prescriptionAccuracy: prescriptionAccuracy,
-            disruptedPatterns: disruptedPatterns
+            disruptedPatterns: disruptedPatterns,
+            transfers: transfers
         )
     }
 }
