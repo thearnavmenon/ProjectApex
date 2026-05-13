@@ -34,17 +34,57 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     var projections: ProjectionState?
     var perPatternSummary: [PatternSummary]
     var perMuscleSummary: [MuscleSummary]
-    var activeFatigueInteractions: [FatigueInteraction]
-    var activeLimitations: [ActiveLimitation]
+    /// Digest-only projection of FatigueInteraction — snake_case wire shape
+    /// (B4 / #89 cycle 9a). The persisted type retains its camelCase JSONB
+    /// shape for TS-edge-function round-trip compatibility.
+    var activeFatigueInteractions: [FatigueInteractionDigest]
+    /// Digest-only projection of ActiveLimitation — snake_case wire shape
+    /// (B4 / #89 cycle 9a). Persisted type unchanged.
+    var activeLimitations: [ActiveLimitationDigest]
     /// Unfiltered — every entry from the source model's nested map, flattened.
     /// Callers consuming this for prompt assembly must filter by request context
     /// before passing to the model; do not forward the full list verbatim.
-    var prescriptionAccuracy: [PrescriptionAccuracy]
+    /// Digest-only projection of PrescriptionAccuracy — snake_case wire shape
+    /// (B4 / #89 cycle 9a). Persisted type unchanged.
+    var prescriptionAccuracy: [PrescriptionAccuracyDigest]
     var disruptedPatterns: [MovementPattern]
+    /// Cross-exercise transfer coefficients filtered to entries the LLM should
+    /// reason from per Q10 lock-in (R²≥0.4 AND pairedObservations≥5). Below
+    /// either threshold the regression is too noisy to surface.
+    /// Digest-only projection of ExerciseTransfer — snake_case wire shape
+    /// (B4 / #89 cycle 9a). Persisted type unchanged.
+    var transfers: [ExerciseTransferDigest]
+    /// Total completed sessions across the user's history (pass-through from
+    /// TraineeModel.totalSessionCount). Surfaced for the 6-session cooldown
+    /// reasoning in coaching prompts.
+    var totalSessionCount: Int
+    /// Session-count at which the most recent global-phase-advance event fired
+    /// per ADR-0012 (pass-through). Nil for users that have never crossed the
+    /// 6-session cooldown gate.
+    var lastGlobalPhaseAdvanceFiredAtSessionCount: Int?
+    /// Per-exercise narrow projections sorted by exerciseId. Drops topSets,
+    /// sessionSnapshots, and formDegradationCleanSessions per ADR-0005
+    /// token-economy guidance.
+    var perExerciseSummary: [ExerciseSummary]
+    /// Aggregated 7-day fatigue projection (B4 / #89). Carries pre-derived
+    /// `deloadTriggered` and `fatigueManagementFlagged` flags so both
+    /// SessionPlan and Inference prompts read a single canonical signal.
+    /// Non-optional with empty default (γ2 lock during B4 grilling) — when
+    /// the caller omits explicit fatigue at digest assembly, an empty
+    /// `WeekFatigueSignals` is substituted (both flags false → LLM falls
+    /// through to normal behavior).
+    var weeklyFatigue: WeekFatigueSignals
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
     static let fatigueInteractionConfidenceThreshold: Double = 0.7
+
+    /// Minimum R² (inclusive) for a transfer entry to surface (Q10 lock-in).
+    static let transferRSquaredThreshold: Double = 0.4
+
+    /// Minimum paired-observation count (inclusive) for a transfer entry to
+    /// surface (Q10 lock-in — guards against tiny-sample regressions).
+    static let transferPairedObservationsThreshold: Int = 5
 
     enum CodingKeys: String, CodingKey {
         case goal
@@ -55,13 +95,20 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case activeLimitations         = "active_limitations"
         case prescriptionAccuracy      = "prescription_accuracy"
         case disruptedPatterns         = "disrupted_patterns"
+        case transfers
+        case totalSessionCount         = "total_session_count"
+        case lastGlobalPhaseAdvanceFiredAtSessionCount = "last_global_phase_advance_fired_at_session_count"
+        case perExerciseSummary        = "per_exercise_summary"
+        case weeklyFatigue             = "weekly_fatigue"
     }
 }
 
 // MARK: - Assembly
 
 extension TraineeModelDigest {
-    init(from model: TraineeModel, asOf reference: Date = Date()) {
+    init(from model: TraineeModel,
+         weeklyFatigue: WeekFatigueSignals? = nil,
+         asOf reference: Date = Date()) {
         let perPatternSummary = model.patterns
             .sorted { $0.key.rawValue < $1.key.rawValue }
             .map { PatternSummary(profile: $0.value, asOf: reference) }
@@ -70,9 +117,12 @@ extension TraineeModelDigest {
             .sorted { $0.key.rawValue < $1.key.rawValue }
             .map { MuscleSummary(profile: $0.value) }
 
-        let activeFatigueInteractions = model.fatigueInteractions.filter {
-            $0.confidence >= Self.fatigueInteractionConfidenceThreshold
-        }
+        let activeFatigueInteractions = model.fatigueInteractions
+            .filter { $0.confidence >= Self.fatigueInteractionConfidenceThreshold }
+            .map(FatigueInteractionDigest.init(from:))
+
+        let activeLimitations = model.activeLimitations
+            .map(ActiveLimitationDigest.init(from:))
 
         let prescriptionAccuracy = model.prescriptionAccuracy
             .sorted { $0.key.rawValue < $1.key.rawValue }
@@ -82,9 +132,28 @@ extension TraineeModelDigest {
                     .map { $0.value }
                     .filter(\.shouldSurfaceInDigest)
             }
+            .map(PrescriptionAccuracyDigest.init(from:))
 
         let disruptedPatterns = model.disruptedPatterns(asOf: reference)
             .sorted { $0.rawValue < $1.rawValue }
+
+        let transfers = model.transfers
+            .filter {
+                $0.rSquared >= Self.transferRSquaredThreshold
+                && $0.pairedObservations >= Self.transferPairedObservationsThreshold
+            }
+            .map(ExerciseTransferDigest.init(from:))
+
+        let perExerciseSummary = model.exercises
+            .sorted { $0.key < $1.key }
+            .map { ExerciseSummary(profile: $0.value) }
+
+        // γ2 lock: substitute an empty fatigue struct when the caller doesn't
+        // supply one — keeps the prompt's empty-state handling single-cased
+        // (no separate null branch) and matches the existing "empty default"
+        // convention used by the other digest collections.
+        let resolvedWeeklyFatigue = weeklyFatigue
+            ?? WeekFatigueSignals.compute(from: [], sessionCount: 0)
 
         self.init(
             goal: model.goal,
@@ -92,9 +161,14 @@ extension TraineeModelDigest {
             perPatternSummary: perPatternSummary,
             perMuscleSummary: perMuscleSummary,
             activeFatigueInteractions: activeFatigueInteractions,
-            activeLimitations: model.activeLimitations,
+            activeLimitations: activeLimitations,
             prescriptionAccuracy: prescriptionAccuracy,
-            disruptedPatterns: disruptedPatterns
+            disruptedPatterns: disruptedPatterns,
+            transfers: transfers,
+            totalSessionCount: model.totalSessionCount,
+            lastGlobalPhaseAdvanceFiredAtSessionCount: model.lastGlobalPhaseAdvanceFiredAtSessionCount,
+            perExerciseSummary: perExerciseSummary,
+            weeklyFatigue: resolvedWeeklyFatigue
         )
     }
 }
@@ -174,6 +248,48 @@ struct MuscleSummary: Codable, Sendable, Hashable {
     }
 }
 
+// MARK: - ExerciseSummary
+
+/// Narrow projection of ExerciseProfile (B4 / #89). Drops topSets,
+/// sessionSnapshots, and formDegradationCleanSessions; surfaces the
+/// fields a coaching prompt actually reasons over (e1RM trio, session
+/// count, form-degradation flag, learning-phase flag, confidence).
+/// learningPhase is read from the source profile's computed property,
+/// not redefined here — the threshold (sessionCount < 10) is locked
+/// by ADR-0005.
+struct ExerciseSummary: Codable, Sendable, Hashable {
+    var exerciseId: String
+    var e1rmCurrent: Double
+    var e1rmMedian: Double
+    var e1rmPeak: Double
+    var sessionCount: Int
+    var learningPhase: Bool
+    var formDegradationFlag: Bool
+    var confidence: AxisConfidence
+
+    init(profile: ExerciseProfile) {
+        self.exerciseId          = profile.exerciseId
+        self.e1rmCurrent         = profile.e1rmCurrent
+        self.e1rmMedian          = profile.e1rmMedian
+        self.e1rmPeak            = profile.e1rmPeak
+        self.sessionCount        = profile.sessionCount
+        self.learningPhase       = profile.learningPhase
+        self.formDegradationFlag = profile.formDegradationFlag
+        self.confidence          = profile.confidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case exerciseId          = "exercise_id"
+        case e1rmCurrent         = "e1rm_current"
+        case e1rmMedian          = "e1rm_median"
+        case e1rmPeak            = "e1rm_peak"
+        case sessionCount        = "session_count"
+        case learningPhase       = "learning_phase"
+        case formDegradationFlag = "form_degradation_flag"
+        case confidence
+    }
+}
+
 // MARK: - PrescriptionAccuracy digest surfacing rule
 //
 // Mirror of supabase/functions/_shared/prescription-accuracy.ts:shouldSurfaceInDigest
@@ -205,5 +321,159 @@ extension PrescriptionAccuracy {
         let over72hBias = biasByGapBucket[.over72h] ?? 0
         let divergence = abs(under48hBias - over72hBias)
         return divergence > Self.gapBucketDivergenceThreshold
+    }
+}
+
+// MARK: - PrescriptionAccuracyDigest
+//
+// Digest-only projection of PrescriptionAccuracy (B4 / #89 cycle 9a). Persisted
+// type lives in TraineeModelInteractions.swift and retains camelCase JSONB
+// shape for TS-edge-function round-trip (note-classifier.ts / prescription-
+// accuracy.ts write and read camelCase). Snake_case CodingKeys here own the
+// wire shape the LLM reads — matches the PatternProfile→PatternSummary pattern.
+struct PrescriptionAccuracyDigest: Codable, Sendable, Hashable {
+    var pattern: MovementPattern
+    var intent: SetIntent
+    var bias: Double
+    var rmse: Double
+    var sampleCount: Int
+    var biasByGapBucket: [InterSessionGapBucket: Double]
+    var rmseByGapBucket: [InterSessionGapBucket: Double]
+    var sampleCountByGapBucket: [InterSessionGapBucket: Int]
+
+    init(from source: PrescriptionAccuracy) {
+        self.pattern = source.pattern
+        self.intent = source.intent
+        self.bias = source.bias
+        self.rmse = source.rmse
+        self.sampleCount = source.sampleCount
+        self.biasByGapBucket = source.biasByGapBucket
+        self.rmseByGapBucket = source.rmseByGapBucket
+        self.sampleCountByGapBucket = source.sampleCountByGapBucket
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case pattern, intent, bias, rmse
+        case sampleCount             = "sample_count"
+        case biasByGapBucket         = "bias_by_gap_bucket"
+        case rmseByGapBucket         = "rmse_by_gap_bucket"
+        case sampleCountByGapBucket  = "sample_count_by_gap_bucket"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.pattern = try c.decode(MovementPattern.self, forKey: .pattern)
+        self.intent = try c.decode(SetIntent.self, forKey: .intent)
+        self.bias = try c.decode(Double.self, forKey: .bias)
+        self.rmse = try c.decode(Double.self, forKey: .rmse)
+        self.sampleCount = try c.decode(Int.self, forKey: .sampleCount)
+        self.biasByGapBucket = try c.decodeEnumKeyedDictIfPresent(Double.self, forKey: .biasByGapBucket)
+        self.rmseByGapBucket = try c.decodeEnumKeyedDictIfPresent(Double.self, forKey: .rmseByGapBucket)
+        self.sampleCountByGapBucket = try c.decodeEnumKeyedDictIfPresent(Int.self, forKey: .sampleCountByGapBucket)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(pattern, forKey: .pattern)
+        try c.encode(intent, forKey: .intent)
+        try c.encode(bias, forKey: .bias)
+        try c.encode(rmse, forKey: .rmse)
+        try c.encode(sampleCount, forKey: .sampleCount)
+        try c.encodeEnumKeyedDict(biasByGapBucket, forKey: .biasByGapBucket)
+        try c.encodeEnumKeyedDict(rmseByGapBucket, forKey: .rmseByGapBucket)
+        try c.encodeEnumKeyedDict(sampleCountByGapBucket, forKey: .sampleCountByGapBucket)
+    }
+}
+
+// MARK: - ActiveLimitationDigest
+//
+// Digest-only projection (B4 / #89 cycle 9a). Persisted type unchanged.
+struct ActiveLimitationDigest: Codable, Sendable, Hashable {
+    var subject: LimitationSubject
+    var severity: Severity
+    var onsetDate: Date
+    var evidenceCount: Int
+    var userConfirmed: Bool
+    var notes: String?
+    var sessionsWithoutReMention: Int
+
+    init(from source: ActiveLimitation) {
+        self.subject = source.subject
+        self.severity = source.severity
+        self.onsetDate = source.onsetDate
+        self.evidenceCount = source.evidenceCount
+        self.userConfirmed = source.userConfirmed
+        self.notes = source.notes
+        self.sessionsWithoutReMention = source.sessionsWithoutReMention
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case subject, severity, notes
+        case onsetDate                = "onset_date"
+        case evidenceCount            = "evidence_count"
+        case userConfirmed            = "user_confirmed"
+        case sessionsWithoutReMention = "sessions_without_re_mention"
+    }
+}
+
+// MARK: - FatigueInteractionDigest
+//
+// Digest-only projection (B4 / #89 cycle 9a). Persisted type unchanged.
+//
+// Drops the raw observations array (up to 10 doubles per pair) in favour of
+// a precomputed recentEffectMean scalar (B4 / #89 cycle 11) — LLM-friendly
+// (no array-math) and ~10× lower token cost. Window matches FatigueInteraction
+// .consistencyFactor — last 10 observations.
+struct FatigueInteractionDigest: Codable, Sendable, Hashable {
+    var fromPattern: MovementPattern
+    var toPattern: MovementPattern
+    /// Mean of the last-10 observations window. Δ% of capacity on to_pattern
+    /// after a session containing from_pattern: negative = fatigue carryover,
+    /// positive = potentiation.
+    var recentEffectMean: Double
+    var totalCount: Int
+
+    init(from source: FatigueInteraction) {
+        self.fromPattern = source.fromPattern
+        self.toPattern = source.toPattern
+        let recent = Array(source.observations.suffix(10))
+        self.recentEffectMean = recent.isEmpty
+            ? 0
+            : recent.reduce(0, +) / Double(recent.count)
+        self.totalCount = source.totalCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case fromPattern       = "from_pattern"
+        case toPattern         = "to_pattern"
+        case recentEffectMean  = "recent_effect_mean"
+        case totalCount        = "total_count"
+    }
+}
+
+// MARK: - ExerciseTransferDigest
+//
+// Digest-only projection (B4 / #89 cycle 9a). Persisted type unchanged.
+struct ExerciseTransferDigest: Codable, Sendable, Hashable {
+    var fromExerciseId: String
+    var toExerciseId: String
+    var coefficient: Double
+    var rSquared: Double
+    var pairedObservations: Int
+
+    init(from source: ExerciseTransfer) {
+        self.fromExerciseId = source.fromExerciseId
+        self.toExerciseId = source.toExerciseId
+        self.coefficient = source.coefficient
+        self.rSquared = source.rSquared
+        self.pairedObservations = source.pairedObservations
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case coefficient
+        case fromExerciseId      = "from_exercise_id"
+        case toExerciseId        = "to_exercise_id"
+        case rSquared            = "r_squared"
+        case pairedObservations  = "paired_observations"
     }
 }

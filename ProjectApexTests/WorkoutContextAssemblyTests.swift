@@ -117,10 +117,7 @@ struct WorkoutContextAssemblyTests {
         #expect(logEntry.prescribedReps > 0)
         #expect(!logEntry.outcomeNote.isEmpty)
 
-        // WeeklyFatigueSummary (FB-009)
-        let fatigue = try! #require(ctx.weeklyFatigueSummary)
-        #expect(fatigue.sessionsThisWeek >= 0)
-        #expect(fatigue.totalSetsThisWeek >= 0)
+        // Weekly fatigue (FB-009) now routed through the digest (B4 / #89).
     }
 
     // MARK: Top-level snake_case CodingKeys
@@ -144,8 +141,7 @@ struct WorkoutContextAssemblyTests {
             "historical_performance",
             "qualitative_notes_today",
             "rag_retrieved_memory",
-            "session_log",
-            "weekly_fatigue_summary"
+            "session_log"
         ]
         let actualKeys = Set(json.keys)
         #expect(expectedKeys.isSubset(of: actualKeys))
@@ -315,12 +311,7 @@ struct WorkoutContextAssemblyTests {
             #expect(decEntry.outcomeNote == origEntry.outcomeNote)
         }
 
-        // WeeklyFatigueSummary (FB-009)
-        let origFatigue = try! #require(original.weeklyFatigueSummary)
-        let decFatigue  = try! #require(decoded.weeklyFatigueSummary)
-        #expect(decFatigue.sessionsThisWeek == origFatigue.sessionsThisWeek)
-        #expect(decFatigue.totalSetsThisWeek == origFatigue.totalSetsThisWeek)
-        #expect(decFatigue.avgRpeThisWeek == origFatigue.avgRpeThisWeek)
+        // Weekly fatigue (FB-009) now routed through the digest (B4 / #89).
     }
 
     // MARK: nil biometrics
@@ -343,7 +334,6 @@ struct WorkoutContextAssemblyTests {
             qualitativeNotesToday: [],
             ragRetrievedMemory: [],
             sessionLog: [],
-            weeklyFatigueSummary: nil,
             gymWeightFacts: nil,
             traineeModelDigest: nil
         )
@@ -373,7 +363,6 @@ struct WorkoutContextAssemblyTests {
             qualitativeNotesToday: [],
             ragRetrievedMemory: [],
             sessionLog: [],
-            weeklyFatigueSummary: nil,
             gymWeightFacts: nil,
             traineeModelDigest: nil
         )
