@@ -658,6 +658,22 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must include the 2-phase-divergence session_notes threshold")
     }
 
+    func test_sessionPlanPrompt_b3_teachesPhaseCycling_postDeloadResumesAccumulation() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // ADR-0011 (c): mesocycle is cyclic — deload → accumulation, no terminal phase.
+        // Without the cue, the LLM may treat post-deload as "programme ended" rather
+        // than as the start of the next accumulation cycle.
+        XCTAssertTrue(prompt.contains("PHASE-CYCLING"),
+                      "SessionPlan must include a PHASE-CYCLING subsection (ADR-0011 (c))")
+        XCTAssertTrue(prompt.contains("ADR-0011"),
+                      "SessionPlan must cite ADR-0011 as the source of the cyclic mesocycle decision")
+        XCTAssertTrue(prompt.contains("deload → accumulation"),
+                      "SessionPlan must describe the deload → accumulation cycling (no terminal phase)")
+        XCTAssertTrue(prompt.contains("lower end of accumulation"),
+                      "SessionPlan must teach post-deload prescription at the lower end of accumulation rep ranges (lifted but restored capability)")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {

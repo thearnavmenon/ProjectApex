@@ -253,6 +253,13 @@ trainee_model_digest.disrupted_patterns[] lists patterns whose current absence e
 patterns, prescribe a lighter reintroduction: note it in session_notes (max 20 words)
 and consider a conservative first-set weight.
 
+PHASE-CYCLING (ADR-0011):
+The mesocycle is cyclic: deload → accumulation → intensification → peaking → deload →
+accumulation → ... (no terminal phase). When a pattern's current_phase indicates it just
+cycled out of deload and into accumulation, expect lifted but restored capability —
+prescribe at the lower end of accumulation rep ranges with moderate RIR, not the bottom
+of the deload prescription.
+
 ═══════════════════════════════════════════════════════════════
 JSON VALIDITY RULES
 ═══════════════════════════════════════════════════════════════
