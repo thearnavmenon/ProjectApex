@@ -419,24 +419,35 @@ struct ActiveLimitationDigest: Codable, Sendable, Hashable {
 // MARK: - FatigueInteractionDigest
 //
 // Digest-only projection (B4 / #89 cycle 9a). Persisted type unchanged.
+//
+// Drops the raw observations array (up to 10 doubles per pair) in favour of
+// a precomputed recentEffectMean scalar (B4 / #89 cycle 11) — LLM-friendly
+// (no array-math) and ~10× lower token cost. Window matches FatigueInteraction
+// .consistencyFactor — last 10 observations.
 struct FatigueInteractionDigest: Codable, Sendable, Hashable {
     var fromPattern: MovementPattern
     var toPattern: MovementPattern
-    var observations: [Double]
+    /// Mean of the last-10 observations window. Δ% of capacity on to_pattern
+    /// after a session containing from_pattern: negative = fatigue carryover,
+    /// positive = potentiation.
+    var recentEffectMean: Double
     var totalCount: Int
 
     init(from source: FatigueInteraction) {
         self.fromPattern = source.fromPattern
         self.toPattern = source.toPattern
-        self.observations = source.observations
+        let recent = Array(source.observations.suffix(10))
+        self.recentEffectMean = recent.isEmpty
+            ? 0
+            : recent.reduce(0, +) / Double(recent.count)
         self.totalCount = source.totalCount
     }
 
     enum CodingKeys: String, CodingKey {
-        case observations
-        case fromPattern = "from_pattern"
-        case toPattern   = "to_pattern"
-        case totalCount  = "total_count"
+        case fromPattern       = "from_pattern"
+        case toPattern         = "to_pattern"
+        case recentEffectMean  = "recent_effect_mean"
+        case totalCount        = "total_count"
     }
 }
 

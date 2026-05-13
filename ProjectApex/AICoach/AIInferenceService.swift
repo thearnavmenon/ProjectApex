@@ -1125,9 +1125,13 @@ actor AIInferenceService {
 
     // MARK: - System Prompt
     //
-    // VERSION: 5.0 — 2026-05-12 — added PER-PATTERN TREND interpretation block
-    // per ADR-0009 + ADR-0011. Changing this literal invalidates the
-    // PromptCachingProvider cache on the next prescribe() call.
+    // VERSION: 6.0 — 2026-05-13 — B4 (#89) digest collapse: added PRESCRIPTION
+    // ACCURACY, CROSS-EXERCISE TRANSFER, CROSS-PATTERN FATIGUE INTERACTIONS,
+    // ACTIVE LIMITATIONS, FORM-DEGRADATION FLAG blocks; rewrote DELOAD DETECTION
+    // to read trainee_model_digest.weekly_fatigue (pre-derived flags, no
+    // coaching judgement). Cumulative cache-bust on top of v5.0's PER-PATTERN
+    // TREND addition (ADR-0009 + ADR-0011). Changing this literal invalidates
+    // the PromptCachingProvider cache on the next prescribe() call.
     //
     // NOTE: SystemPrompt_Inference.txt is a deprecated parallel mirror, loaded
     // only by InferenceSpike. THIS inline string is the production authority.
@@ -1224,10 +1228,16 @@ actor AIInferenceService {
         - underloaded → open at or above. Push harder.
         Session log takes priority; RAG provides the cross-session baseline.
 
-        DELOAD DETECTION: Read weekly_fatigue_summary (sessions_this_week, avg_rpe_this_week,
-        exercises_with_multiple_misses, total_sets_this_week). Make a coaching judgement — no fixed
-        threshold triggers this. If the picture warrants it, reduce volume/intensity voluntarily and
-        say so in the coaching_cue. Add deload_recommended to safety_flags if appropriate.
+        DELOAD DETECTION: trainee_model_digest.weekly_fatigue carries two pre-derived flags
+        — deload_triggered and fatigue_management_flagged — aggregated over the last 7 training
+        events. Follow them deterministically (no subjective re-derivation):
+        - deload_triggered = true: prescribe ~50% volume (cut reps OR weight to land at RPE 5–6),
+          rir_target ≥ 4, coaching_cue acknowledges the deload, add deload_recommended to
+          safety_flags.
+        - fatigue_management_flagged = true (and deload_triggered = false): hold rir_target one
+          step higher than the phase template would normally suggest, reduce prescribed reps by
+          1–2, coaching_cue acknowledges high weekly fatigue.
+        - Both false: proceed normally with the rules below.
 
         PROGRESSIVE OVERLOAD (default when all reps completed):
         - ≥ 2 RIR: increase weight by one minimum increment.
@@ -1254,6 +1264,70 @@ actor AIInferenceService {
 
         Per-pattern trend takes precedence over PROGRESSIVE OVERLOAD defaults when they conflict —
         a regressing user does not get a weight increase just because they completed all prescribed reps.
+
+        PRESCRIPTION ACCURACY (AI self-correction):
+        trainee_model_digest.prescription_accuracy lists per (pattern, intent) cells where prior
+        prescriptions have drifted from actual capability. Entries are pre-filtered per ADR-0014
+        §"Digest exposure filter" — every surfaced entry is a loud signal, not noise.
+        Sign convention (rep-error = (reps_completed − reps_prescribed) / reps_prescribed):
+        - bias > 0 for the current_exercise's (pattern, intent): the AI under-prescribed. Increase
+          this set's weight by approximately the bias magnitude (e.g. bias 0.08 → +5–8%).
+        - bias < 0 for that cell: the AI over-prescribed. Reduce this set's weight by approximately
+          the bias magnitude.
+        - rmse ≥ 0.10 with |bias| < 0.05: prescription is noisy. Be conservative — anchor on the
+          user's most recent on-target working set rather than the historical median, and hold
+          rir_target one step higher.
+        Calibrate ONLY against the matching (pattern, intent) cell for the current set; do not
+        blanket-adjust unrelated patterns.
+
+        GAP-BUCKET DIVERGENCE (ADR-0010 fatigue-stacking): when the cell's bias_by_gap_bucket
+        diverges between under_48h and over_72h by > 0.05, use temporal_context
+        .days_since_last_trained_by_pattern to pick the applicable correction — short-gap
+        cell for < 48h, long-gap cell for > 72h.
+
+        CROSS-EXERCISE TRANSFER:
+        trainee_model_digest.transfers[] lists per-user-learned strength-transfer coefficients
+        between exercise pairs. Entries are pre-filtered (Q10 lock): only pairs with R² ≥ 0.4 AND
+        paired_observations ≥ 5 surface. Each entry: from_exercise_id, to_exercise_id, coefficient,
+        r_squared, paired_observations.
+        For the same intent: target_weight_on(to_exercise_id) ≈ source_weight_on(from_exercise_id)
+        × coefficient. Higher r_squared = stronger evidence (≥ 0.7 firm anchor; ≈ 0.4 soft prior).
+        Apply when current_exercise has low session_count in lift_history AND a transferring
+        sibling has rich history. Do not override recent direct sets on the current exercise — if
+        the user has fresh top-set data on it, anchor on session_log / recent_sets and treat the
+        transfer as a sanity check.
+
+        CROSS-PATTERN FATIGUE INTERACTIONS:
+        trainee_model_digest.active_fatigue_interactions[] lists per-pair carryover effects
+        (confidence ≥ 0.7 per ADR-0005). Each entry: from_pattern, to_pattern, recent_effect_mean,
+        total_count. recent_effect_mean is the Δ% of capacity on to_pattern after a session
+        containing from_pattern (mean over the last-10 observations window):
+        - recent_effect_mean < 0 → fatigue carryover. Reduce this set's weight on to_pattern by
+          approximately the carryover magnitude when temporal_context.days_since_last_trained_by
+          _pattern shows from_pattern was trained within ~3 days.
+        - recent_effect_mean > 0 → potentiation. Prescribe at the upper end of the phase rep / RIR
+          window when from_pattern was trained within ~1 day.
+
+        ACTIVE LIMITATIONS:
+        trainee_model_digest.active_limitations[] lists current injury / pain states. Each entry:
+        subject ({"kind": "pattern"|"muscle"|"joint", "value": …}), severity ("mild"|"moderate"
+        |"severe"), onset_date, evidence_count, user_confirmed, notes, sessions_without_re_mention.
+        Per ADR-0005, AI-inferred limitations (user_confirmed = false) cap at "mild" — treat them
+        as soft constraints; user_confirmed entries carry full weight.
+        When current_exercise loads an affected subject:
+        - "mild"     → reduce weight 10–15%, coaching_cue flags the limitation.
+        - "moderate" → coaching_cue strongly recommends substitution and adds "joint_concern" or
+                       "shoulder_caution" to safety_flags as appropriate; weight is reduced ≥ 20%.
+        - "severe"   → reduce weight to bodyweight-only or minimum increment, add
+                       "pain_reported" / "joint_concern" to safety_flags, coaching_cue flags the
+                       severity. Do not prescribe a top set.
+
+        FORM-DEGRADATION FLAG:
+        trainee_model_digest.per_exercise_summary[].form_degradation_flag is a per-exercise
+        boolean. When true for current_exercise: prescribe lighter weight (5–10% below the user's
+        most recent working set on this exercise), hold rir_target one step higher, focus
+        coaching_cue on form quality (not load), and do not push for a PR. The flag overrides
+        PROGRESSIVE OVERLOAD and PER-PATTERN TREND for this exercise until it clears.
 
         FIRST-SESSION CALIBRATION: If is_first_session is true, prescribe ~60% estimated 1RM.
         Use user_profile.bodyweight_kg and training_age as anchors.

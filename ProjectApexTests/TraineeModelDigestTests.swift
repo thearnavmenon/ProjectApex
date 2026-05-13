@@ -636,7 +636,7 @@ final class TraineeModelDigestTests: XCTestCase {
         let prompt = try loadSessionPlanPrompt()
 
         // Positive anchors: new PER-PATTERN TREND block per ADR-0009 + ADR-0011.
-        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
                       "SessionPlan prompt must carry v2.0 header (cache-bust)")
         XCTAssertTrue(prompt.contains("PER-PATTERN TREND"),
                       "SessionPlan must include the PER-PATTERN TREND section header")
@@ -784,7 +784,7 @@ final class TraineeModelDigestTests: XCTestCase {
 
         // Per Q L6 lock: stay at v2.0 (cumulative bullet, not version bump — minor
         // edits within v2.0 are cache-compatible per PromptCachingProvider).
-        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
                       "SessionPlan prompt must remain at v2.0 (no version bump in B3)")
         XCTAssertTrue(prompt.contains("Replaced legacy temporal_context.pattern_phases"),
                       "SessionPlan v2.0 header must record the B3 cumulative change")
@@ -881,7 +881,7 @@ final class TraineeModelDigestTests: XCTestCase {
 
         // Per the cycle 21 lock: stay at v2.0 (cumulative bullet) — major version
         // bumps are atomic at cycle 21.
-        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
                       "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
         XCTAssertTrue(prompt.contains("Added PRESCRIPTION ACCURACY block"),
                       "SessionPlan v2.0 header must record the B4 cycle 9b cumulative change")
@@ -955,10 +955,358 @@ final class TraineeModelDigestTests: XCTestCase {
     func test_sessionPlanPrompt_b4_10_versionHeaderRecordsB4Cycle10CumulativeChange() throws {
         let prompt = try loadSessionPlanPrompt()
 
-        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
                       "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
         XCTAssertTrue(prompt.contains("Added CROSS-EXERCISE TRANSFER block"),
                       "SessionPlan v2.0 header must record the B4 cycle 10 cumulative change")
+    }
+
+    // MARK: ─── B4 (#89) cycle 11: CROSS-PATTERN FATIGUE INTERACTIONS — anchors ──
+    //
+    // Reads trainee_model_digest.active_fatigue_interactions[] (already
+    // filtered to confidence ≥ 0.7 per ADR-0005). FatigueInteractionDigest
+    // drops the raw observations array in favour of a precomputed
+    // recent_effect_mean scalar (mean of the last-10 observations window,
+    // matching consistencyFactor's window) — LLM-friendly and ~10× lower
+    // token cost than emitting the array.
+
+    func test_digest_b4_11_fatigueInteractionDigest_emitsRecentEffectMean_andDropsObservations() throws {
+        var model = makeBaselineModel()
+        // 15 observations all -0.05 → confidence ≥ 0.7 surfaces.
+        model.fatigueInteractions = [
+            FatigueInteraction(
+                fromPattern: .squat, toPattern: .horizontalPush,
+                observations: Array(repeating: -0.05, count: 15),
+                totalCount: 15
+            )
+        ]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        let fis = try XCTUnwrap(json["active_fatigue_interactions"] as? [[String: Any]])
+        let fi = try XCTUnwrap(fis.first)
+        let mean = try XCTUnwrap(fi["recent_effect_mean"] as? Double)
+        XCTAssertEqual(mean, -0.05, accuracy: 1e-9,
+            "recent_effect_mean must equal the mean of the last-10 observations window")
+        XCTAssertNil(fi["observations"],
+            "FatigueInteractionDigest must not emit the raw observations array (token economy + LLM-array-math avoidance)")
+    }
+
+    func test_sessionPlanPrompt_b4_11_referencesFatigueInteractionsDigestPath() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("CROSS-PATTERN FATIGUE INTERACTIONS"),
+                      "SessionPlan must include the CROSS-PATTERN FATIGUE INTERACTIONS section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.active_fatigue_interactions"),
+                      "SessionPlan must reference the digest active_fatigue_interactions JSON path")
+        XCTAssertTrue(prompt.contains("confidence ≥ 0.7"),
+                      "SessionPlan must surface the ADR-0005 confidence filter (every surfaced pair is a vetted signal)")
+    }
+
+    func test_sessionPlanPrompt_b4_11_teachesRecentEffectMeanDirection() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Sign convention (delta-percent of capacity on to_pattern after
+        // from_pattern): negative = fatigue carryover (capacity reduced),
+        // positive = potentiation (capacity boosted).
+        XCTAssertTrue(prompt.contains("recent_effect_mean"),
+                      "SessionPlan must reference the recent_effect_mean field")
+        XCTAssertTrue(prompt.contains("from_pattern"),
+                      "SessionPlan must reference from_pattern")
+        XCTAssertTrue(prompt.contains("to_pattern"),
+                      "SessionPlan must reference to_pattern")
+        XCTAssertTrue(prompt.contains("fatigue carryover"),
+                      "SessionPlan must label negative recent_effect_mean as fatigue carryover")
+        XCTAssertTrue(prompt.contains("potentiation"),
+                      "SessionPlan must label positive recent_effect_mean as potentiation")
+    }
+
+    func test_sessionPlanPrompt_b4_11_tiesAdjustmentToTemporalContext() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Application rule: only adjust today's prescription if from_pattern
+        // was trained recently enough for the carryover to apply.
+        XCTAssertTrue(prompt.contains("days_since_last_trained_by_pattern"),
+                      "SessionPlan must tie the fatigue-interaction adjustment to temporal_context recency for from_pattern")
+        XCTAssertTrue(prompt.contains("educe prescribed load"),
+                      "SessionPlan must instruct reducing prescribed load on to_pattern when carryover is active")
+    }
+
+    func test_sessionPlanPrompt_b4_11_versionHeaderRecordsB4Cycle11CumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
+        XCTAssertTrue(prompt.contains("Added CROSS-PATTERN FATIGUE INTERACTIONS block"),
+                      "SessionPlan v2.0 header must record the B4 cycle 11 cumulative change")
+    }
+
+    // MARK: ─── B4 (#89) cycle 12: ACTIVE LIMITATIONS block — prompt anchors ──
+
+    func test_sessionPlanPrompt_b4_12_referencesActiveLimitationsDigestPath() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("ACTIVE LIMITATIONS\n"),
+                      "SessionPlan must include the ACTIVE LIMITATIONS section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.active_limitations"),
+                      "SessionPlan must reference the digest active_limitations JSON path")
+    }
+
+    func test_sessionPlanPrompt_b4_12_teachesSubjectAndSeverityFields() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // subject is a tagged union — {kind: pattern|muscle|joint, value: …}.
+        XCTAssertTrue(prompt.contains("subject"),
+                      "SessionPlan must reference the subject field on each entry")
+        XCTAssertTrue(prompt.contains("\"pattern\"") && prompt.contains("\"muscle\"") && prompt.contains("\"joint\""),
+                      "SessionPlan must enumerate the LimitationSubject kinds")
+        // Severity grading.
+        XCTAssertTrue(prompt.contains("severity"),
+                      "SessionPlan must reference the severity field")
+        XCTAssertTrue(prompt.contains("\"mild\"") && prompt.contains("\"moderate\"") && prompt.contains("\"severe\""),
+                      "SessionPlan must enumerate all three Severity values")
+    }
+
+    func test_sessionPlanPrompt_b4_12_teachesUserConfirmedDistinction() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // ADR-0005: AI-inferred limitations cap at .mild until user confirms.
+        // The prompt must surface user_confirmed so the LLM weights confidence.
+        XCTAssertTrue(prompt.contains("user_confirmed"),
+                      "SessionPlan must reference the user_confirmed field")
+        XCTAssertTrue(prompt.contains("AI-inferred"),
+                      "SessionPlan must contrast AI-inferred (cap at mild) vs user-confirmed")
+        XCTAssertTrue(prompt.contains("ADR-0005"),
+                      "SessionPlan must cite ADR-0005 for the corroboration-threshold cap")
+    }
+
+    func test_sessionPlanPrompt_b4_12_teachesSeverityGradedActions() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Three severity bands have distinct programming actions: mild = scale
+        // load, moderate = substitute, severe = full avoid.
+        XCTAssertTrue(prompt.contains("10–15%"),
+                      "SessionPlan must surface the mild-severity load-scaling magnitude")
+        XCTAssertTrue(prompt.contains("ubstitute"),
+                      "SessionPlan must instruct substitution on moderate-severity (case-insensitive on leading char)")
+        XCTAssertTrue(prompt.contains("Full avoidance") || prompt.contains("full avoidance"),
+                      "SessionPlan must instruct full avoidance on severe-severity")
+    }
+
+    func test_sessionPlanPrompt_b4_12_versionHeaderRecordsB4Cycle12CumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
+        XCTAssertTrue(prompt.contains("Added ACTIVE LIMITATIONS block"),
+                      "SessionPlan v2.0 header must record the B4 cycle 12 cumulative change")
+    }
+
+    // MARK: ─── B4 (#89) cycle 13: FORM-DEGRADATION FLAG block — prompt anchors ──
+
+    func test_sessionPlanPrompt_b4_13_referencesFormDegradationDigestPath() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("FORM-DEGRADATION"),
+                      "SessionPlan must include the FORM-DEGRADATION section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_exercise_summary[].form_degradation_flag"),
+                      "SessionPlan must reference the digest form_degradation_flag JSON path")
+    }
+
+    func test_sessionPlanPrompt_b4_13_teachesBackOffWhenFlagged() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // When form_degradation_flag = true: back off — lighter load, lower
+        // intensity, prioritise form. Do NOT push for a PR.
+        XCTAssertTrue(prompt.contains("lighter load") || prompt.contains("reduce load"),
+                      "SessionPlan must instruct lighter load on flagged exercises")
+        XCTAssertTrue(prompt.contains("orm-focused") || prompt.contains("orm quality"),
+                      "SessionPlan must instruct a form-focused coaching cue (case-insensitive on leading char)")
+        XCTAssertTrue(prompt.contains("do not push") || prompt.contains("Do not push") || prompt.contains("not pursue a PR") || prompt.contains("not pursue PR"),
+                      "SessionPlan must forbid pursuing a PR while form_degradation_flag is true")
+    }
+
+    func test_sessionPlanPrompt_b4_13_versionHeaderRecordsB4Cycle13CumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
+        XCTAssertTrue(prompt.contains("Added FORM-DEGRADATION FLAG block"),
+                      "SessionPlan v2.0 header must record the B4 cycle 13 cumulative change")
+    }
+
+    // MARK: ─── B4 (#89) cycle 14: WEEK FATIGUE SIGNALS rewrite — redirect to digest ──
+
+    func test_sessionPlanPrompt_b4_14_redirectsWeekFatigueToDigestPath() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("trainee_model_digest.weekly_fatigue"),
+                      "SessionPlan WEEK FATIGUE SIGNALS must read trainee_model_digest.weekly_fatigue (not top-level week_fatigue)")
+        // Legacy "Read week_fatigue carefully" prose must be gone — the standalone
+        // top-level path was deprecated when WeeklyFatigueSummary was deleted in
+        // cycle 7. Note "week_fatigue" with underscore-f does NOT appear inside
+        // "weekly_fatigue", so the negative anchor is safe.
+        XCTAssertFalse(prompt.contains("Read week_fatigue"),
+                       "Legacy 'Read week_fatigue …' prose must be removed (replaced with the digest path)")
+    }
+
+    func test_sessionPlanPrompt_b4_14_preservesFatigueAndDeloadFlagBehaviors() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // (I) lock: pre-derived flags in the digest. Behaviors stay identical;
+        // only the path changes.
+        XCTAssertTrue(prompt.contains("fatigue_management_flagged"),
+                      "WEEK FATIGUE SIGNALS must keep the fatigue_management_flagged rule (pre-derived flag per (I) lock)")
+        XCTAssertTrue(prompt.contains("deload_triggered"),
+                      "WEEK FATIGUE SIGNALS must keep the deload_triggered rule")
+        XCTAssertTrue(prompt.contains("is_fatigue_management_day = true"),
+                      "WEEK FATIGUE SIGNALS must preserve the is_fatigue_management_day = true behaviour")
+        XCTAssertTrue(prompt.contains("is_deload = true"),
+                      "WEEK FATIGUE SIGNALS must preserve the is_deload = true behaviour")
+    }
+
+    func test_sessionPlanPrompt_b4_14_versionHeaderRecordsB4Cycle14CumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
+        XCTAssertTrue(prompt.contains("Redirected WEEK FATIGUE SIGNALS"),
+                      "SessionPlan v2.0 header must record the B4 cycle 14 cumulative change (path redirect)")
+    }
+
+    // MARK: ─── B4 (#89) cycle 15: Inference PRESCRIPTION ACCURACY block ──
+
+    func test_inferencePrompt_b4_15_containsPrescriptionAccuracyBlock() {
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("PRESCRIPTION ACCURACY"),
+                      "Inference must include the PRESCRIPTION ACCURACY section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.prescription_accuracy"),
+                      "Inference must reference the digest prescription_accuracy JSON path")
+        XCTAssertTrue(prompt.contains("ADR-0014"),
+                      "Inference must cite ADR-0014 (digest exposure filter)")
+        XCTAssertTrue(prompt.contains("under-prescribed"),
+                      "Inference must explain positive bias as AI under-prescribing")
+        XCTAssertTrue(prompt.contains("over-prescribed"),
+                      "Inference must explain negative bias as AI over-prescribing")
+    }
+
+    // MARK: ─── B4 (#89) cycle 16: Inference CROSS-EXERCISE TRANSFER block ──
+
+    func test_inferencePrompt_b4_16_containsCrossExerciseTransferBlock() {
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("CROSS-EXERCISE TRANSFER"),
+                      "Inference must include the CROSS-EXERCISE TRANSFER section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.transfers"),
+                      "Inference must reference the digest transfers JSON path")
+        XCTAssertTrue(prompt.contains("× coefficient"),
+                      "Inference must teach the multiplication direction (target ≈ source × coefficient)")
+    }
+
+    // MARK: ─── B4 (#89) cycle 17: Inference CROSS-PATTERN FATIGUE INTERACTIONS ──
+
+    func test_inferencePrompt_b4_17_containsFatigueInteractionsBlock() {
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("CROSS-PATTERN FATIGUE INTERACTIONS"),
+                      "Inference must include the CROSS-PATTERN FATIGUE INTERACTIONS section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.active_fatigue_interactions"),
+                      "Inference must reference the digest active_fatigue_interactions JSON path")
+        XCTAssertTrue(prompt.contains("recent_effect_mean"),
+                      "Inference must reference the recent_effect_mean field")
+        XCTAssertTrue(prompt.contains("fatigue carryover"),
+                      "Inference must label negative recent_effect_mean as fatigue carryover")
+    }
+
+    // MARK: ─── B4 (#89) cycle 18: Inference ACTIVE LIMITATIONS ──
+
+    func test_inferencePrompt_b4_18_containsActiveLimitationsBlock() {
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("ACTIVE LIMITATIONS"),
+                      "Inference must include the ACTIVE LIMITATIONS section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.active_limitations"),
+                      "Inference must reference the digest active_limitations JSON path")
+        XCTAssertTrue(prompt.contains("severity"),
+                      "Inference must reference the severity field")
+        XCTAssertTrue(prompt.contains("user_confirmed"),
+                      "Inference must reference the user_confirmed field for AI-inferred vs confirmed weighting")
+    }
+
+    // MARK: ─── B4 (#89) cycle 19: Inference FORM-DEGRADATION FLAG ──
+
+    func test_inferencePrompt_b4_19_containsFormDegradationFlagBlock() {
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("FORM-DEGRADATION"),
+                      "Inference must include the FORM-DEGRADATION section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_exercise_summary[].form_degradation_flag"),
+                      "Inference must reference the digest form_degradation_flag JSON path")
+        XCTAssertTrue(prompt.contains("not push for a PR") || prompt.contains("not pursue a PR"),
+                      "Inference must forbid pursuing a PR while form_degradation_flag is true")
+    }
+
+    // MARK: ─── B4 (#89) cycle 20: Inference DELOAD DETECTION rewrite ──
+
+    func test_inferencePrompt_b4_20_deloadDetectionReadsDigestWeeklyFatigue() {
+        let prompt = AIInferenceService.systemPrompt
+
+        // Positive anchors: new path + pre-derived flags (I) lock.
+        XCTAssertTrue(prompt.contains("DELOAD DETECTION"),
+                      "Inference must keep the DELOAD DETECTION section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.weekly_fatigue"),
+                      "Inference DELOAD DETECTION must read trainee_model_digest.weekly_fatigue (not weekly_fatigue_summary)")
+        XCTAssertTrue(prompt.contains("deload_triggered"),
+                      "Inference DELOAD DETECTION must follow the pre-derived deload_triggered flag")
+        XCTAssertTrue(prompt.contains("fatigue_management_flagged"),
+                      "Inference DELOAD DETECTION must follow the pre-derived fatigue_management_flagged flag")
+    }
+
+    func test_inferencePrompt_b4_20_deloadDetectionStripsLegacyShape() {
+        let prompt = AIInferenceService.systemPrompt
+
+        // Negative anchors: legacy WeeklyFatigueSummary fields + "coaching
+        // judgement" subjective framing must be gone per (I) lock.
+        XCTAssertFalse(prompt.contains("weekly_fatigue_summary"),
+                       "Legacy weekly_fatigue_summary path must be removed (WeeklyFatigueSummary type deleted in cycle 7)")
+        XCTAssertFalse(prompt.contains("coaching judgement"),
+                       "Legacy 'make a coaching judgement' subjective framing must be removed — pre-derived flags drive the decision (I lock)")
+        XCTAssertFalse(prompt.contains("sessions_this_week"),
+                       "Legacy WeeklyFatigueSummary field name sessions_this_week must be gone")
+        XCTAssertFalse(prompt.contains("avg_rpe_this_week"),
+                       "Legacy WeeklyFatigueSummary field name avg_rpe_this_week must be gone")
+        XCTAssertFalse(prompt.contains("exercises_with_multiple_misses"),
+                       "Legacy WeeklyFatigueSummary field name exercises_with_multiple_misses must be gone")
+        XCTAssertFalse(prompt.contains("total_sets_this_week"),
+                       "Legacy WeeklyFatigueSummary field name total_sets_this_week must be gone")
+    }
+
+    // MARK: ─── B4 (#89) cycle 21: version bumps + cumulative annotation ──
+
+    func test_sessionPlanPrompt_b4_21_versionBumpedTo_v3() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("VERSION: 3.0"),
+                      "SessionPlan prompt must be bumped to v3.0 at cycle 21 (cache-bust for cumulative B1+B2+B3+B4)")
+        XCTAssertFalse(prompt.contains("VERSION: 2.0"),
+                       "SessionPlan prompt v2.0 line must be replaced (not duplicated) by v3.0")
+        XCTAssertTrue(prompt.contains("CHANGES FROM v2.0"),
+                      "SessionPlan v3.0 header must summarise the cumulative B1+B2+B3+B4 changes")
+    }
+
+    func test_inferencePrompt_b4_21_versionBumpedTo_v6() throws {
+        // The Inference VERSION lives in a Swift // comment above the
+        // systemPrompt literal — not inside the prompt string. Read the source
+        // file to verify the version annotation tracks the cycle 21 bump.
+        let source = try loadSourceFile("ProjectApex/AICoach/AIInferenceService.swift")
+
+        XCTAssertTrue(source.contains("VERSION: 6.0"),
+                      "AIInferenceService.systemPrompt VERSION comment must be bumped to 6.0 at cycle 21 (cumulative B1+B2+B3+B4 cache-bust)")
+        XCTAssertFalse(source.contains("VERSION: 5.0"),
+                       "Stale VERSION: 5.0 comment must be replaced (not duplicated)")
     }
 
     // ─── Concern B: payload values per digest state ───────────────────────
