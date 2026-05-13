@@ -511,39 +511,12 @@ final class ProgramViewModel {
                 .filter { $0.status == .skipped && ($0.skippedAt ?? .distantPast) >= thirtyDaysAgo }
                 .count ?? 0
 
-            // ── Phase 2: Per-pattern phase state ──
-            // Load persisted states; if empty and history exists, run one-time migration.
-            let daysPerWeek: Int = {
-                let v = UserDefaults.standard.integer(forKey: UserProfileConstants.daysPerWeekKey)
-                return v > 0 ? v : 4
-            }()
-
-            var persistedPhaseStates = PatternPhaseService.load()
-            if persistedPhaseStates.isEmpty && !deepLiftHistory.isEmpty {
-                persistedPhaseStates = PatternPhaseService.computeInitialPhases(
-                    from: deepLiftHistory,
-                    daysPerWeek: daysPerWeek
-                )
-                PatternPhaseService.persist(persistedPhaseStates)
-                print("[ProgramViewModel] Pattern phase migration: initialised \(persistedPhaseStates.count) patterns from history.")
-            }
-
-            let patternPhases: [String: PatternPhaseInfo]? = persistedPhaseStates.isEmpty ? nil :
-                Dictionary(uniqueKeysWithValues: persistedPhaseStates.map { state in
-                    (state.pattern.rawValue, PatternPhaseInfo(
-                        currentPhase: state.phase.rawValue,
-                        sessionsCompleted: state.sessionsCompletedInPhase,
-                        sessionsRequired: state.sessionsRequiredForPhase
-                    ))
-                })
-
             return TemporalContext(
                 daysSinceLastSession: daysSinceLastSession,
                 daysSinceLastTrainedByPattern: daysSinceByPattern,
                 skippedSessionCountLast30Days: skippedCount,
                 globalProgrammePhase: week.phase.rawValue,
                 globalProgrammeWeek: week.weekNumber,
-                patternPhases: patternPhases,
                 requiresReturnPhaseOverride: (daysSinceLastSession ?? 0) >= 28
             )
         }()

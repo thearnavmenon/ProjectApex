@@ -789,6 +789,20 @@ final class TraineeModelDigestTests: XCTestCase {
             "WorkoutSessionManager must not invoke StagnationService.persist (removed in B1/#86)")
     }
 
+    // MARK: ─── B3 (#88): cleanup-reversion guards ────────────────────────────
+
+    func test_programViewModel_b3_doesNotAssemblePatternPhasesForTemporalContext() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Program/ProgramViewModel.swift")
+        XCTAssertFalse(source.contains("PatternPhaseService.load"),
+            "ProgramViewModel must not call PatternPhaseService.load (removed in B3/#88 — phase state is read from TraineeModelDigest)")
+        XCTAssertFalse(source.contains("PatternPhaseService.computeInitialPhases"),
+            "ProgramViewModel must not call PatternPhaseService.computeInitialPhases (removed in B3/#88 — phase bootstrap is server-side per #146)")
+        XCTAssertFalse(source.contains("PatternPhaseService.persist"),
+            "ProgramViewModel must not call PatternPhaseService.persist (removed in B3/#88 — phase mutation is server-side)")
+        XCTAssertFalse(source.contains("PatternPhaseInfo"),
+            "ProgramViewModel must not reference PatternPhaseInfo (type deleted with PatternPhaseService.swift in B3/#88)")
+    }
+
     // MARK: ─── B2 (#87): cleanup-reversion guards ────────────────────────────
 
     func test_sessionPlanService_doesNotReferenceLegacyVolumeDeficitsField() throws {
