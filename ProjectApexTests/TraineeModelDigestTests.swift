@@ -658,6 +658,17 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must include the 2-phase-divergence session_notes threshold")
     }
 
+    func test_sessionPlanPrompt_b3_versionHeaderRecordsB3CumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Per Q L6 lock: stay at v2.0 (cumulative bullet, not version bump — minor
+        // edits within v2.0 are cache-compatible per PromptCachingProvider).
+        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump in B3)")
+        XCTAssertTrue(prompt.contains("Replaced legacy temporal_context.pattern_phases"),
+                      "SessionPlan v2.0 header must record the B3 cumulative change")
+    }
+
     func test_sessionPlanPrompt_b3_teachesPhaseCycling_postDeloadResumesAccumulation() throws {
         let prompt = try loadSessionPlanPrompt()
 

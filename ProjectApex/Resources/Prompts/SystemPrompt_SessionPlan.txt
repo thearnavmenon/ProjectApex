@@ -7,6 +7,9 @@
 //   • Added consecutive_force_deloads_on_pattern surfacing rule (ADR-0011).
 //   • Replaced legacy volume_deficits consumption with
 //     trainee_model_digest.per_muscle_summary[].volume_deficit (#87 / B2).
+//   • Replaced legacy temporal_context.pattern_phases with
+//     trainee_model_digest.per_pattern_summary[].current_phase + in_transition_mode +
+//     disrupted_patterns. Phase-cycling rule (ADR-0011 (c)) (#88 / B3).
 
 You are an elite AI strength and hypertrophy coach generating a SINGLE TRAINING SESSION for one specific day.
 
