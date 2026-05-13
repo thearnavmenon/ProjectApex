@@ -315,9 +315,6 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
     let liftHistory: [LiftHistoryEntry]
     let weekFatigue: WeekFatigueSignals
     let ragMemory: [RAGMemoryItem]
-    /// Volume deficit signals for the current mesocycle week.
-    /// Empty array when volume is on-track or insufficient data exists.
-    let volumeDeficits: [VolumeDeficit]
     /// Phase-1-Skip: gap-awareness context. Nil only if assembly fails unexpectedly;
     /// in practice this is always provided for every session generation call.
     let temporalContext: TemporalContext?
@@ -340,7 +337,6 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
         case liftHistory         = "lift_history"
         case weekFatigue         = "week_fatigue"
         case ragMemory           = "rag_memory"
-        case volumeDeficits      = "volume_deficits"
         case temporalContext     = "temporal_context"
         case traineeModelDigest  = "trainee_model_digest"
     }
@@ -548,10 +544,11 @@ actor SessionPlanService {
             volumeLandmark: weekVolumeLandmark(for: week.phase, weekNumber: week.weekNumber)
         )
 
-        // Plateau/decline signals are now sourced from the trainee-model digest
-        // below (PatternProfile.trend per ADR-0009 hybrid plateau verdict) — the
-        // legacy client-side per-set load() call was removed in B1 (#86).
-        let volumeDeficits = VolumeValidationService.load()
+        // Plateau/decline signals + volume-deficit signals are sourced from the
+        // trainee-model digest below (per_pattern_summary[].trend per ADR-0009
+        // hybrid plateau verdict; per_muscle_summary[].volume_deficit per #87 /
+        // B2) — the legacy client-side load() calls were removed in B1 (#86)
+        // and B2 (#87).
         let traineeModelDigest = await traineeModelService?.digest()
 
         let request = SessionPlanRequest(
@@ -567,7 +564,6 @@ actor SessionPlanService {
             liftHistory: liftHistory,
             weekFatigue: fatigue,
             ragMemory: ragMemory,
-            volumeDeficits: volumeDeficits,
             temporalContext: temporalContext,
             traineeModelDigest: traineeModelDigest
         )
