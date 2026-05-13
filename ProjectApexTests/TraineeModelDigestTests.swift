@@ -806,6 +806,87 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must teach post-deload prescription at the lower end of accumulation rep ranges (lifted but restored capability)")
     }
 
+    // MARK: ─── B4 (#89) cycle 9b: PRESCRIPTION ACCURACY block — prompt anchors ───
+    //
+    // ADR-0014 §"Digest exposure filter" — an entry surfaces only when
+    // sampleCount ≥ 5 AND ( |bias| > 0.05 OR rmse > 0.10 OR gap-bucket
+    // divergence > 0.05 ). Sign convention (rep-error = (reps_completed -
+    // reps_prescribed) / reps_prescribed): positive bias = AI under-prescribed,
+    // negative = AI over-prescribed. The gap-bucket divergence ties to ADR-0010
+    // (fatigue-stacking detection).
+
+    func test_sessionPlanPrompt_b4_9b_referencesPrescriptionAccuracyDigestPath() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("PRESCRIPTION ACCURACY"),
+                      "SessionPlan must include the PRESCRIPTION ACCURACY section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.prescription_accuracy"),
+                      "SessionPlan must reference the digest prescription_accuracy JSON path")
+        XCTAssertTrue(prompt.contains("ADR-0014"),
+                      "SessionPlan must cite ADR-0014 (digest exposure filter — every surfaced entry is a loud signal)")
+    }
+
+    func test_sessionPlanPrompt_b4_9b_teachesPositiveBiasMeansUnderPrescribed() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Rep-error sign convention (ADR-0014 §"Error metric"): positive bias =
+        // user exceeded prescribed reps = AI under-prescribed → load should increase.
+        XCTAssertTrue(prompt.contains("bias > 0"),
+                      "SessionPlan must surface the positive-bias rule")
+        XCTAssertTrue(prompt.contains("under-prescribed"),
+                      "SessionPlan must explain positive bias as AI under-prescribing (load too light)")
+        XCTAssertTrue(prompt.contains("increase load"),
+                      "SessionPlan must instruct increasing load on positive bias")
+    }
+
+    func test_sessionPlanPrompt_b4_9b_teachesNegativeBiasMeansOverPrescribed() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("bias < 0"),
+                      "SessionPlan must surface the negative-bias rule")
+        XCTAssertTrue(prompt.contains("over-prescribed"),
+                      "SessionPlan must explain negative bias as AI over-prescribing (load too heavy)")
+        XCTAssertTrue(prompt.contains("reduce load"),
+                      "SessionPlan must instruct reducing load on negative bias")
+    }
+
+    func test_sessionPlanPrompt_b4_9b_teachesRmseAsPrescriptionNoise() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // High RMSE with low bias = prescription is noisy across observations.
+        // Guidance: lean conservative, anchor on the user's most recent on-target
+        // working set rather than the historical median.
+        XCTAssertTrue(prompt.contains("rmse"),
+                      "SessionPlan must reference the rmse field on each cell")
+        XCTAssertTrue(prompt.contains("noisy"),
+                      "SessionPlan must frame high rmse as noisy / inconsistent prescription")
+    }
+
+    func test_sessionPlanPrompt_b4_9b_teachesGapBucketDivergence_andCitesAdr0010() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Gap-bucket divergence signal — when bias differs sharply between
+        // under_48h and over_72h cells, the AI isn't accounting for inter-session
+        // recovery state (ADR-0010 fatigue-stacking).
+        XCTAssertTrue(prompt.contains("bias_by_gap_bucket"),
+                      "SessionPlan must reference the digest bias_by_gap_bucket path (snake_case — see cycle 9a wire-shape lock)")
+        XCTAssertTrue(prompt.contains("ADR-0010"),
+                      "SessionPlan must cite ADR-0010 for the fatigue-stacking semantic underlying gap-bucket divergence")
+        XCTAssertTrue(prompt.contains("temporal_context"),
+                      "SessionPlan must tie the gap-bucket calibration to temporal_context (which gap bucket applies to today's session)")
+    }
+
+    func test_sessionPlanPrompt_b4_9b_versionHeaderRecordsB4Cycle9bCumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Per the cycle 21 lock: stay at v2.0 (cumulative bullet) — major version
+        // bumps are atomic at cycle 21.
+        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
+        XCTAssertTrue(prompt.contains("Added PRESCRIPTION ACCURACY block"),
+                      "SessionPlan v2.0 header must record the B4 cycle 9b cumulative change")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {
