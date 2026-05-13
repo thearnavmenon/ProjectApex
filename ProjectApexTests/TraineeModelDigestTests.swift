@@ -809,6 +809,12 @@ final class TraineeModelDigestTests: XCTestCase {
             "ProgramViewModel must not call PatternPhaseService.clear in generateProgram/generateMacroSkeleton (removed in B3/#88 — server-side EF handles phase reset on program regen)")
     }
 
+    func test_workoutSessionManager_b3_doesNotAdvancePatternPhases() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Workout/WorkoutSessionManager.swift")
+        XCTAssertFalse(source.contains("PatternPhaseService"),
+            "WorkoutSessionManager must not reference PatternPhaseService (removed in B3/#88 — phase advancement is server-side in the update-trainee-model Edge Function per ADR-0011)")
+    }
+
     // MARK: ─── B2 (#87): cleanup-reversion guards ────────────────────────────
 
     func test_sessionPlanService_doesNotReferenceLegacyVolumeDeficitsField() throws {

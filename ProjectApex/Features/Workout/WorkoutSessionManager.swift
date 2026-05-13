@@ -1496,42 +1496,12 @@ actor WorkoutSessionManager {
             await gymStreakService.invalidate(userId: sessionUserId)
         }
 
-        // Stagnation signals are now computed server-side by the trainee-model
-        // pipeline (PatternProfile.trend per ADR-0009 hybrid plateau verdict)
-        // and surfaced via TraineeModelDigest.perPatternSummary. The legacy
-        // client-side StagnationService computation was removed in B1 (#86).
-
-
-        // Advance per-pattern phase tracking after each completed session.
-        // Runs detached so the UI is not blocked. PatternPhaseService reads the
-        // persisted states synchronously via UserDefaults before the next session.
-        // Skipped sessions never reach finishSession() — skip safety is structural.
-        // NOTE: This hook is entirely in-memory (completedDay exercises) + UserDefaults.
-        // It does NOT fetch from Supabase, so there is no read/write race condition with
-        // the stagnation hook above, which does fetch from Supabase independently.
-        if let completedDay = trainingDay {
-            // Capture daysPerWeek on-actor before entering the detached task —
-            // UserProfileConstants.daysPerWeekKey is MainActor-isolated.
-            let capturedDaysPerWeek: Int = {
-                let v = UserDefaults.standard.integer(forKey: UserProfileConstants.daysPerWeekKey)
-                return v > 0 ? v : 4
-            }()
-            Task.detached(priority: .utility) { [completedDay, capturedDaysPerWeek] in
-                let trainedPatterns = Set(completedDay.exercises.compactMap { exercise in
-                    ExerciseLibrary.lookup(exercise.exerciseId)?.movementPattern
-                })
-                guard !trainedPatterns.isEmpty else { return }
-
-                let current = PatternPhaseService.load()
-                let updated = PatternPhaseService.advancePhases(
-                    current: current,
-                    trainedPatterns: trainedPatterns,
-                    daysPerWeek: capturedDaysPerWeek
-                )
-                PatternPhaseService.persist(updated)
-                print("[WorkoutSessionManager] Pattern phases advanced: \(updated.count) patterns tracked.")
-            }
-        }
+        // Stagnation signals + per-pattern phase advancement are now computed
+        // server-side by the trainee-model pipeline (PatternProfile.trend per
+        // ADR-0009 hybrid plateau verdict; PatternProfile.currentPhase per
+        // ADR-0011 cyclic mesocycle) and surfaced via TraineeModelDigest.
+        // The legacy client-side StagnationService + PatternPhaseService hooks
+        // were removed in B1 (#86) and B3 (#88) respectively.
     }
 
     // MARK: - Memory Event Taxonomy (P4-T07 / FB-006)
