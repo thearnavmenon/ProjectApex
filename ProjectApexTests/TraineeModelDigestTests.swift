@@ -629,6 +629,20 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must surface the collapsed 3-session window semantic so the LLM does not anchor on stale pre-transition data")
     }
 
+    func test_sessionPlanPrompt_b3_teachesDisruptedPatternsReintroduction_fromDigestDisruptedPatterns() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Per Q2 resolution: digest-based, cadence-relative (replaces the legacy
+        // ≥21-day absolute-day override that used to live inside the per-pattern
+        // phase block).
+        XCTAssertTrue(prompt.contains("DISRUPTED PATTERNS"),
+                      "SessionPlan must include a DISRUPTED PATTERNS subsection")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.disrupted_patterns"),
+                      "SessionPlan must reference the digest disrupted_patterns array")
+        XCTAssertTrue(prompt.contains("2× typical cadence"),
+                      "SessionPlan must surface ADR-0005's cadence-relative semantic (current absence > 2× typical cadence)")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {

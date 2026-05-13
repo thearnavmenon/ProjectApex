@@ -240,6 +240,12 @@ capability data is the most current-state-accurate estimate; do not anchor presc
 on data older than the 3-session transition-mode window. Triggers: calibration-recency,
 deload-end, phase-transition, long-absence return.
 
+DISRUPTED PATTERNS (ADR-0005):
+trainee_model_digest.disrupted_patterns[] lists patterns whose current absence exceeds
+2× typical cadence (cadence-relative — independent of absolute calendar days). For these
+patterns, prescribe a lighter reintroduction: note it in session_notes (max 20 words)
+and consider a conservative first-set weight.
+
 ═══════════════════════════════════════════════════════════════
 JSON VALIDITY RULES
 ═══════════════════════════════════════════════════════════════
