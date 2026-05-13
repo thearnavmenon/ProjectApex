@@ -250,7 +250,7 @@ final class TraineeModelDigestTests: XCTestCase {
 
         let digest = TraineeModelDigest(from: model, asOf: ref)
 
-        XCTAssertEqual(digest.activeLimitations, [limitation])
+        XCTAssertEqual(digest.activeLimitations, [ActiveLimitationDigest(from: limitation)])
     }
 
     // MARK: ─── Cycle 6: prescription accuracy flattened + filtered ────────────
@@ -450,6 +450,127 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertNotNil(legsSummary["focus_weight"])
         XCTAssertNotNil(legsSummary["stagnation_status"])
         XCTAssertEqual(legsSummary["stagnation_status"] as? String, "declining")
+    }
+
+    // MARK: ─── B4 (#89) cycle 9a: nested-interaction digest wire shape ────────
+    //
+    // PrescriptionAccuracy / ActiveLimitation / FatigueInteraction / ExerciseTransfer
+    // are *persisted* types with camelCase JSONB shapes (TS edge functions write
+    // and read them in camelCase — see note-classifier.ts, fatigue-interaction.ts).
+    // The B1 wire-shape lock above covers digest-only projection types
+    // (PatternSummary, MuscleSummary, ExerciseSummary) but the four persisted
+    // types were forwarded unchanged into the digest, exposing camelCase paths
+    // to the LLM (e.g., `bias_by_gap_bucket` → actually `biasByGapBucket`).
+    //
+    // The fix mirrors the PatternProfile→PatternSummary pattern: four new
+    // digest-only projection types (…Digest) with explicit snake_case
+    // CodingKeys. The persisted types keep their camelCase JSONB shape.
+    func test_digest_b4_jsonShape_isSnakeCase_forNestedInteractionTypes() throws {
+        var model = makeBaselineModel()
+
+        // PrescriptionAccuracy entry loud enough to surface (bias > 0.05 floor).
+        model.prescriptionAccuracy = [
+            .horizontalPush: [
+                .top: PrescriptionAccuracy(
+                    pattern: .horizontalPush, intent: .top,
+                    bias: 0.08, rmse: 0.04, sampleCount: 10,
+                    biasByGapBucket: [.under48h: -0.02, .over72h: 0.06],
+                    rmseByGapBucket: [.under48h: 0.08, .over72h: 0.04],
+                    sampleCountByGapBucket: [.under48h: 5, .over72h: 5]
+                )
+            ]
+        ]
+        // ActiveLimitation — pass-through (no digest-side filter today).
+        model.activeLimitations = [
+            ActiveLimitation(
+                subject: .pattern(.squat),
+                severity: .mild,
+                onsetDate: ref.addingTimeInterval(-7 * 86400),
+                evidenceCount: 2,
+                userConfirmed: false,
+                sessionsWithoutReMention: 1
+            )
+        ]
+        // FatigueInteraction — 15 observations at -0.05 → consistency 1.0,
+        // countFactor 1.0, confidence ≥ 0.7 surfaces.
+        model.fatigueInteractions = [
+            FatigueInteraction(
+                fromPattern: .squat, toPattern: .horizontalPush,
+                observations: Array(repeating: -0.05, count: 15),
+                totalCount: 15
+            )
+        ]
+        // ExerciseTransfer — passes Q10 lock (R²≥0.4 ∧ pairedObs≥5).
+        model.transfers = [
+            ExerciseTransfer(
+                fromExerciseId: "bench_press",
+                toExerciseId: "incline_bench_press",
+                coefficient: 0.85, rSquared: 0.6,
+                pairedObservations: 10
+            )
+        ]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        let data = try JSONEncoder().encode(digest)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        // PrescriptionAccuracyDigest — multi-word fields must be snake_case.
+        let accs = try XCTUnwrap(json["prescription_accuracy"] as? [[String: Any]])
+        let acc = try XCTUnwrap(accs.first)
+        XCTAssertNotNil(acc["sample_count"],
+            "PrescriptionAccuracyDigest must emit sample_count (snake_case) — current camelCase makes the LLM-referenced path unreachable")
+        XCTAssertNotNil(acc["bias_by_gap_bucket"],
+            "PrescriptionAccuracyDigest must emit bias_by_gap_bucket (snake_case)")
+        XCTAssertNotNil(acc["rmse_by_gap_bucket"],
+            "PrescriptionAccuracyDigest must emit rmse_by_gap_bucket (snake_case)")
+        XCTAssertNotNil(acc["sample_count_by_gap_bucket"],
+            "PrescriptionAccuracyDigest must emit sample_count_by_gap_bucket (snake_case)")
+        XCTAssertNil(acc["sampleCount"],
+            "PrescriptionAccuracyDigest must not leak the camelCase persisted shape")
+        XCTAssertNil(acc["biasByGapBucket"],
+            "PrescriptionAccuracyDigest must not leak the camelCase persisted shape")
+
+        // ActiveLimitationDigest — multi-word fields must be snake_case.
+        let lims = try XCTUnwrap(json["active_limitations"] as? [[String: Any]])
+        let lim = try XCTUnwrap(lims.first)
+        XCTAssertNotNil(lim["onset_date"],
+            "ActiveLimitationDigest must emit onset_date (snake_case)")
+        XCTAssertNotNil(lim["evidence_count"],
+            "ActiveLimitationDigest must emit evidence_count (snake_case)")
+        XCTAssertNotNil(lim["user_confirmed"],
+            "ActiveLimitationDigest must emit user_confirmed (snake_case)")
+        XCTAssertNotNil(lim["sessions_without_re_mention"],
+            "ActiveLimitationDigest must emit sessions_without_re_mention (snake_case)")
+        XCTAssertNil(lim["onsetDate"],
+            "ActiveLimitationDigest must not leak the camelCase persisted shape")
+
+        // FatigueInteractionDigest — multi-word fields must be snake_case.
+        let fis = try XCTUnwrap(json["active_fatigue_interactions"] as? [[String: Any]])
+        let fi = try XCTUnwrap(fis.first)
+        XCTAssertNotNil(fi["from_pattern"],
+            "FatigueInteractionDigest must emit from_pattern (snake_case)")
+        XCTAssertNotNil(fi["to_pattern"],
+            "FatigueInteractionDigest must emit to_pattern (snake_case)")
+        XCTAssertNotNil(fi["total_count"],
+            "FatigueInteractionDigest must emit total_count (snake_case)")
+        XCTAssertNil(fi["fromPattern"],
+            "FatigueInteractionDigest must not leak the camelCase persisted shape")
+
+        // ExerciseTransferDigest — multi-word fields must be snake_case.
+        let trs = try XCTUnwrap(json["transfers"] as? [[String: Any]])
+        let tr = try XCTUnwrap(trs.first)
+        XCTAssertNotNil(tr["from_exercise_id"],
+            "ExerciseTransferDigest must emit from_exercise_id (snake_case)")
+        XCTAssertNotNil(tr["to_exercise_id"],
+            "ExerciseTransferDigest must emit to_exercise_id (snake_case)")
+        XCTAssertNotNil(tr["r_squared"],
+            "ExerciseTransferDigest must emit r_squared (snake_case)")
+        XCTAssertNotNil(tr["paired_observations"],
+            "ExerciseTransferDigest must emit paired_observations (snake_case)")
+        XCTAssertNil(tr["fromExerciseId"],
+            "ExerciseTransferDigest must not leak the camelCase persisted shape")
+        XCTAssertNil(tr["rSquared"],
+            "ExerciseTransferDigest must not leak the camelCase persisted shape")
     }
 
     // MARK: ─── B1: PatternSummary surfaces consecutiveForceDeloadsOnPattern ──
