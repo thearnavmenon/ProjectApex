@@ -57,6 +57,14 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// sessionSnapshots, and formDegradationCleanSessions per ADR-0005
     /// token-economy guidance.
     var perExerciseSummary: [ExerciseSummary]
+    /// Aggregated 7-day fatigue projection (B4 / #89). Carries pre-derived
+    /// `deloadTriggered` and `fatigueManagementFlagged` flags so both
+    /// SessionPlan and Inference prompts read a single canonical signal.
+    /// Non-optional with empty default (γ2 lock during B4 grilling) — when
+    /// the caller omits explicit fatigue at digest assembly, an empty
+    /// `WeekFatigueSignals` is substituted (both flags false → LLM falls
+    /// through to normal behavior).
+    var weeklyFatigue: WeekFatigueSignals
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
@@ -82,13 +90,16 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case totalSessionCount         = "total_session_count"
         case lastGlobalPhaseAdvanceFiredAtSessionCount = "last_global_phase_advance_fired_at_session_count"
         case perExerciseSummary        = "per_exercise_summary"
+        case weeklyFatigue             = "weekly_fatigue"
     }
 }
 
 // MARK: - Assembly
 
 extension TraineeModelDigest {
-    init(from model: TraineeModel, asOf reference: Date = Date()) {
+    init(from model: TraineeModel,
+         weeklyFatigue: WeekFatigueSignals? = nil,
+         asOf reference: Date = Date()) {
         let perPatternSummary = model.patterns
             .sorted { $0.key.rawValue < $1.key.rawValue }
             .map { PatternSummary(profile: $0.value, asOf: reference) }
@@ -122,6 +133,13 @@ extension TraineeModelDigest {
             .sorted { $0.key < $1.key }
             .map { ExerciseSummary(profile: $0.value) }
 
+        // γ2 lock: substitute an empty fatigue struct when the caller doesn't
+        // supply one — keeps the prompt's empty-state handling single-cased
+        // (no separate null branch) and matches the existing "empty default"
+        // convention used by the other digest collections.
+        let resolvedWeeklyFatigue = weeklyFatigue
+            ?? WeekFatigueSignals.compute(from: [], sessionCount: 0)
+
         self.init(
             goal: model.goal,
             projections: model.projections,
@@ -134,7 +152,8 @@ extension TraineeModelDigest {
             transfers: transfers,
             totalSessionCount: model.totalSessionCount,
             lastGlobalPhaseAdvanceFiredAtSessionCount: model.lastGlobalPhaseAdvanceFiredAtSessionCount,
-            perExerciseSummary: perExerciseSummary
+            perExerciseSummary: perExerciseSummary,
+            weeklyFatigue: resolvedWeeklyFatigue
         )
     }
 }

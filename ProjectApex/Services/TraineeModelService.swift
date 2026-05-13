@@ -88,9 +88,9 @@ actor TraineeModelService {
     ///     }
     ///
     /// See file header for the rationale for the Optional return.
-    func digest() async -> TraineeModelDigest? {
+    func digest(weeklyFatigue: WeekFatigueSignals? = nil) async -> TraineeModelDigest? {
         guard let model = await store.load() else { return nil }
-        return TraineeModelDigest(from: model, asOf: now())
+        return TraineeModelDigest(from: model, weeklyFatigue: weeklyFatigue, asOf: now())
     }
 
     // MARK: - Write — enqueue path

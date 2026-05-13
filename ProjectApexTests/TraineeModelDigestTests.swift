@@ -929,6 +929,7 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertTrue(digest.disruptedPatterns.isEmpty)
         XCTAssertTrue(digest.transfers.isEmpty)
         XCTAssertTrue(digest.perExerciseSummary.isEmpty)
+        XCTAssertEqual(digest.weeklyFatigue.sessionsCompletedThisWeek, 0)
     }
 
     // MARK: ─── B4 (#89) cycle 3: totalSessionCount pass-through ───────────────
@@ -940,6 +941,33 @@ final class TraineeModelDigestTests: XCTestCase {
         let digest = TraineeModelDigest(from: model, asOf: ref)
 
         XCTAssertEqual(digest.totalSessionCount, 42)
+    }
+
+    // MARK: ─── B4 (#89) cycle 6: weeklyFatigue field + assembly signature ─────
+
+    func test_digest_weeklyFatigue_surfacesCallerSuppliedValue() {
+        let model = makeBaselineModel()
+        let supplied = WeekFatigueSignals.compute(from: [], sessionCount: 3)
+        // sessionCount 3 with no logs → empty signals carrying the session count
+
+        let digest = TraineeModelDigest(from: model, weeklyFatigue: supplied, asOf: ref)
+
+        XCTAssertEqual(digest.weeklyFatigue.sessionsCompletedThisWeek, 3)
+        XCTAssertFalse(digest.weeklyFatigue.deloadTriggered)
+        XCTAssertFalse(digest.weeklyFatigue.fatigueManagementFlagged)
+    }
+
+    func test_digest_weeklyFatigue_defaultsToEmptyWhenCallerOmits() {
+        let model = makeBaselineModel()
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+        // γ2 lock: non-optional, default-empty when caller doesn't supply
+
+        XCTAssertEqual(digest.weeklyFatigue.sessionsCompletedThisWeek, 0)
+        XCTAssertNil(digest.weeklyFatigue.weeklyAvgRPE)
+        XCTAssertEqual(digest.weeklyFatigue.significantMissCount, 0)
+        XCTAssertFalse(digest.weeklyFatigue.deloadTriggered)
+        XCTAssertFalse(digest.weeklyFatigue.fatigueManagementFlagged)
     }
 
     // MARK: ─── B4 (#89) cycle 5: perExerciseSummary projection ────────────────

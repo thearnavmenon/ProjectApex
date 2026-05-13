@@ -13,7 +13,7 @@
 import Foundation
 
 /// Aggregated fatigue signals derived from completed sessions in the current 7-day window.
-nonisolated struct WeekFatigueSignals: Codable, Sendable {
+nonisolated struct WeekFatigueSignals: Codable, Sendable, Hashable {
     /// Number of sessions completed this week (Mon–Sun).
     let sessionsCompletedThisWeek: Int
     /// Average RPE across all sets this week. Nil when no sets logged yet.
