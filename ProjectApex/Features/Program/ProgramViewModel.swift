@@ -79,9 +79,15 @@ final class ProgramViewModel {
     private let programGenerationService: ProgramGenerationService
     private let macroPlanService: MacroPlanService
     private let sessionPlanService: SessionPlanService
+    private let traineeModelService: TraineeModelService?
 
     /// User ID sourced from AppDependencies.resolvedUserId at construction time.
     private let userId: UUID
+
+    /// Per-pattern phase state for the PATTERN PROGRESS section in ProgramOverviewView
+    /// — sourced from TraineeModelDigest.perPatternSummary (B3 / #88). Empty until
+    /// the local trainee-model cache hydrates.
+    var patternPhaseSummaries: [PatternSummary] = []
 
     // MARK: Init
 
@@ -90,12 +96,14 @@ final class ProgramViewModel {
         programGenerationService: ProgramGenerationService,
         macroPlanService: MacroPlanService,
         sessionPlanService: SessionPlanService,
-        userId: UUID
+        userId: UUID,
+        traineeModelService: TraineeModelService? = nil
     ) {
         self.supabaseClient = supabaseClient
         self.programGenerationService = programGenerationService
         self.macroPlanService = macroPlanService
         self.sessionPlanService = sessionPlanService
+        self.traineeModelService = traineeModelService
         self.userId = userId
     }
 
@@ -104,6 +112,9 @@ final class ProgramViewModel {
     /// Loads the active program: tries UserDefaults cache first, then Supabase.
     func loadProgram() async {
         viewState = .loading
+
+        // Refresh per-pattern phase summaries from the trainee model digest (B3 / #88).
+        patternPhaseSummaries = await traineeModelService?.digest()?.perPatternSummary ?? []
 
         // 1. Fast path: UserDefaults cache
         if let cached = Mesocycle.loadFromUserDefaults() {
@@ -214,9 +225,6 @@ final class ProgramViewModel {
         guard await !programGenerationService.isGenerating else { return }
         viewState = .generating
 
-        // Clear per-pattern phase state: this is a brand-new programme, not a regeneration.
-        PatternPhaseService.clear()
-
         // Read user profile from UserDefaults for consistent generation across paths.
         let bwKg: Double? = UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) > 0
             ? UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) : nil
@@ -278,9 +286,6 @@ final class ProgramViewModel {
     func generateMacroSkeleton(gymProfile: GymProfile, persistToSupabase: Bool = true) async {
         guard await !macroPlanService.isGenerating else { return }
         viewState = .generating
-
-        // Clear per-pattern phase state: this is a brand-new programme, not a regeneration.
-        PatternPhaseService.clear()
 
         // Read onboarding profile from UserDefaults if available.
         let bwKg: Double? = UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) > 0
@@ -511,39 +516,12 @@ final class ProgramViewModel {
                 .filter { $0.status == .skipped && ($0.skippedAt ?? .distantPast) >= thirtyDaysAgo }
                 .count ?? 0
 
-            // ── Phase 2: Per-pattern phase state ──
-            // Load persisted states; if empty and history exists, run one-time migration.
-            let daysPerWeek: Int = {
-                let v = UserDefaults.standard.integer(forKey: UserProfileConstants.daysPerWeekKey)
-                return v > 0 ? v : 4
-            }()
-
-            var persistedPhaseStates = PatternPhaseService.load()
-            if persistedPhaseStates.isEmpty && !deepLiftHistory.isEmpty {
-                persistedPhaseStates = PatternPhaseService.computeInitialPhases(
-                    from: deepLiftHistory,
-                    daysPerWeek: daysPerWeek
-                )
-                PatternPhaseService.persist(persistedPhaseStates)
-                print("[ProgramViewModel] Pattern phase migration: initialised \(persistedPhaseStates.count) patterns from history.")
-            }
-
-            let patternPhases: [String: PatternPhaseInfo]? = persistedPhaseStates.isEmpty ? nil :
-                Dictionary(uniqueKeysWithValues: persistedPhaseStates.map { state in
-                    (state.pattern.rawValue, PatternPhaseInfo(
-                        currentPhase: state.phase.rawValue,
-                        sessionsCompleted: state.sessionsCompletedInPhase,
-                        sessionsRequired: state.sessionsRequiredForPhase
-                    ))
-                })
-
             return TemporalContext(
                 daysSinceLastSession: daysSinceLastSession,
                 daysSinceLastTrainedByPattern: daysSinceByPattern,
                 skippedSessionCountLast30Days: skippedCount,
                 globalProgrammePhase: week.phase.rawValue,
                 globalProgrammeWeek: week.weekNumber,
-                patternPhases: patternPhases,
                 requiresReturnPhaseOverride: (daysSinceLastSession ?? 0) >= 28
             )
         }()

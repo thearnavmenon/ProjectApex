@@ -597,6 +597,94 @@ final class TraineeModelDigestTests: XCTestCase {
                        "Legacy 20%-below-target framing must not reappear (replaced with MEV-relative integer count)")
     }
 
+    // MARK: ─── B3 (#88): PER-PATTERN PHASE STATE block — prompt-shape anchors ───
+    //
+    // B3 replaces the legacy `temporal_context.pattern_phases` consumption with
+    // `trainee_model_digest.per_pattern_summary[].current_phase` +
+    // `in_transition_mode` + `disrupted_patterns` (ADR-0005, ADR-0011).
+    // Each β anchor below drives one chunk of the new block.
+
+    func test_sessionPlanPrompt_b3_teachesDeloadPhasePrescription_fromDigestCurrentPhase() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // New section header replaces legacy "PER-PATTERN PHASE TRACKING".
+        XCTAssertTrue(prompt.contains("PER-PATTERN PHASE STATE"),
+                      "SessionPlan must include the PER-PATTERN PHASE STATE section header (B3 replaces legacy PER-PATTERN PHASE TRACKING)")
+        // Digest path replaces legacy temporal_context.pattern_phases.
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_pattern_summary[].current_phase"),
+                      "SessionPlan must reference the digest current_phase JSON path")
+        // Phase enum surfaces in the new block so the LLM knows .deload is a valid value.
+        XCTAssertTrue(prompt.contains("\"deload\""),
+                      "SessionPlan must enumerate the deload phase in the new PER-PATTERN PHASE STATE block")
+    }
+
+    func test_sessionPlanPrompt_b3_teachesTransitionModeInterpretation_fromDigestInTransitionMode() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Digest field reference — transition-mode is surfaced per-pattern.
+        XCTAssertTrue(prompt.contains("in_transition_mode"),
+                      "SessionPlan must reference the digest in_transition_mode field (ADR-0005)")
+        // ADR-0005's transition-mode formula collapses to 3 most recent sessions.
+        XCTAssertTrue(prompt.contains("3 most recent sessions"),
+                      "SessionPlan must surface the collapsed 3-session window semantic so the LLM does not anchor on stale pre-transition data")
+    }
+
+    func test_sessionPlanPrompt_b3_teachesDisruptedPatternsReintroduction_fromDigestDisruptedPatterns() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Per Q2 resolution: digest-based, cadence-relative (replaces the legacy
+        // ≥21-day absolute-day override that used to live inside the per-pattern
+        // phase block).
+        XCTAssertTrue(prompt.contains("DISRUPTED PATTERNS"),
+                      "SessionPlan must include a DISRUPTED PATTERNS subsection")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.disrupted_patterns"),
+                      "SessionPlan must reference the digest disrupted_patterns array")
+        XCTAssertTrue(prompt.contains("2× typical cadence"),
+                      "SessionPlan must surface ADR-0005's cadence-relative semantic (current absence > 2× typical cadence)")
+    }
+
+    func test_sessionPlanPrompt_b3_teachesPatternOverGlobalDivergence_whenPatternPhaseLagsGlobalPhase() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Earlier-than-global and later-than-global divergence rules — preserved
+        // from the legacy PER-PATTERN PHASE TRACKING block, restated against the
+        // new digest contract.
+        XCTAssertTrue(prompt.contains("EARLIER phase than the global"),
+                      "SessionPlan must teach that a pattern in an EARLIER phase than global is undertrained")
+        XCTAssertTrue(prompt.contains("LATER phase than the global"),
+                      "SessionPlan must teach that a pattern in a LATER phase than global is ahead")
+        // Session-notes divergence threshold — keep noisy notes off when divergence is small.
+        XCTAssertTrue(prompt.contains("2 or more phases behind"),
+                      "SessionPlan must include the 2-phase-divergence session_notes threshold")
+    }
+
+    func test_sessionPlanPrompt_b3_versionHeaderRecordsB3CumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Per Q L6 lock: stay at v2.0 (cumulative bullet, not version bump — minor
+        // edits within v2.0 are cache-compatible per PromptCachingProvider).
+        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump in B3)")
+        XCTAssertTrue(prompt.contains("Replaced legacy temporal_context.pattern_phases"),
+                      "SessionPlan v2.0 header must record the B3 cumulative change")
+    }
+
+    func test_sessionPlanPrompt_b3_teachesPhaseCycling_postDeloadResumesAccumulation() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // ADR-0011 (c): mesocycle is cyclic — deload → accumulation, no terminal phase.
+        // Without the cue, the LLM may treat post-deload as "programme ended" rather
+        // than as the start of the next accumulation cycle.
+        XCTAssertTrue(prompt.contains("PHASE-CYCLING"),
+                      "SessionPlan must include a PHASE-CYCLING subsection (ADR-0011 (c))")
+        XCTAssertTrue(prompt.contains("ADR-0011"),
+                      "SessionPlan must cite ADR-0011 as the source of the cyclic mesocycle decision")
+        XCTAssertTrue(prompt.contains("deload → accumulation"),
+                      "SessionPlan must describe the deload → accumulation cycling (no terminal phase)")
+        XCTAssertTrue(prompt.contains("lower end of accumulation"),
+                      "SessionPlan must teach post-deload prescription at the lower end of accumulation rep ranges (lifted but restored capability)")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {
@@ -699,6 +787,111 @@ final class TraineeModelDigestTests: XCTestCase {
             "WorkoutSessionManager must not invoke StagnationService.computeSignals (removed in B1/#86 — trend is computed server-side per ADR-0009)")
         XCTAssertFalse(source.contains("StagnationService.persist"),
             "WorkoutSessionManager must not invoke StagnationService.persist (removed in B1/#86)")
+    }
+
+    // MARK: ─── B3 (#88): cleanup-reversion guards ────────────────────────────
+
+    func test_programViewModel_b3_doesNotAssemblePatternPhasesForTemporalContext() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Program/ProgramViewModel.swift")
+        XCTAssertFalse(source.contains("PatternPhaseService.load"),
+            "ProgramViewModel must not call PatternPhaseService.load (removed in B3/#88 — phase state is read from TraineeModelDigest)")
+        XCTAssertFalse(source.contains("PatternPhaseService.computeInitialPhases"),
+            "ProgramViewModel must not call PatternPhaseService.computeInitialPhases (removed in B3/#88 — phase bootstrap is server-side per #146)")
+        XCTAssertFalse(source.contains("PatternPhaseService.persist"),
+            "ProgramViewModel must not call PatternPhaseService.persist (removed in B3/#88 — phase mutation is server-side)")
+        XCTAssertFalse(source.contains("PatternPhaseInfo"),
+            "ProgramViewModel must not reference PatternPhaseInfo (type deleted with PatternPhaseService.swift in B3/#88)")
+    }
+
+    func test_programViewModel_b3_doesNotInvokePatternPhaseService_clearOnGenerate() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Program/ProgramViewModel.swift")
+        XCTAssertFalse(source.contains("PatternPhaseService.clear"),
+            "ProgramViewModel must not call PatternPhaseService.clear in generateProgram/generateMacroSkeleton (removed in B3/#88 — server-side EF handles phase reset on program regen)")
+    }
+
+    func test_workoutSessionManager_b3_doesNotAdvancePatternPhases() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Workout/WorkoutSessionManager.swift")
+        // Mirror B1's "doesNotComputeStagnationSignals" form: match the actual hook
+        // surface (specific method calls), not the bare type name — backstory
+        // comments are allowed to reference the deleted service.
+        XCTAssertFalse(source.contains("PatternPhaseService.load"),
+            "WorkoutSessionManager must not invoke PatternPhaseService.load (removed in B3/#88 — phase advancement is server-side in the EF per ADR-0011)")
+        XCTAssertFalse(source.contains("PatternPhaseService.advancePhases"),
+            "WorkoutSessionManager must not invoke PatternPhaseService.advancePhases (removed in B3/#88)")
+        XCTAssertFalse(source.contains("PatternPhaseService.persist"),
+            "WorkoutSessionManager must not invoke PatternPhaseService.persist (removed in B3/#88)")
+    }
+
+    func test_programOverviewView_b3_readsPatternPhaseFromDigest_notPatternPhaseService() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Program/ProgramOverviewView.swift")
+        XCTAssertFalse(source.contains("PatternPhaseService.load"),
+            "ProgramOverviewView must not call PatternPhaseService.load (removed in B3/#88 — phase state is read from viewModel.patternPhaseSummaries / TraineeModelDigest)")
+        XCTAssertFalse(source.contains("MovementPatternPhaseState"),
+            "ProgramOverviewView must not reference MovementPatternPhaseState (type deleted with PatternPhaseService.swift in B3/#88)")
+    }
+
+    func test_appDependencies_b3_clearsPatternPhaseStatesUserDefaults() throws {
+        // Mirror B1's apex.stagnation_signals + B2's apex.volume_deficits cleanup —
+        // remove the legacy PatternPhaseService UserDefaults key on app launch so
+        // installs that upgraded across the cutover don't carry stale data.
+        let source = try loadSourceFile("ProjectApex/App/AppDependencies.swift")
+        XCTAssertTrue(source.contains("apex.pattern_phase_states"),
+            "AppDependencies bootstrap must include removeObject(forKey: \"apex.pattern_phase_states\") (B3 / #88 — mirrors B1's stagnation_signals + B2's volume_deficits cleanup)")
+    }
+
+    func test_patternPhaseService_b3_sourceFilesDeleted() throws {
+        let testFileURL = URL(fileURLWithPath: #file)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()  // ProjectApexTests/
+            .deletingLastPathComponent()  // <repo root>
+        let serviceURL = repoRoot.appendingPathComponent("ProjectApex/Services/PatternPhaseService.swift")
+        let testsURL   = repoRoot.appendingPathComponent("ProjectApexTests/PatternPhaseServiceTests.swift")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: serviceURL.path),
+            "PatternPhaseService.swift must be deleted in B3/#88 — server-side update-trainee-model EF owns phase advancement per ADR-0011")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: testsURL.path),
+            "PatternPhaseServiceTests.swift must be deleted in B3/#88 — tests deleted alongside the service they covered")
+    }
+
+    func test_sessionPlanService_b3_doesNotCarryPatternPhasesField() throws {
+        // Mirror B1's test_sessionPlanService_doesNotReferenceLegacyStagnationField:
+        // assert the type no longer declares the legacy patternPhases field +
+        // CodingKey + PatternPhaseInfo reference.
+        let source = try loadSourceFile("ProjectApex/Services/SessionPlanService.swift")
+        XCTAssertFalse(source.contains("patternPhases"),
+            "SessionPlanService must not declare or reference patternPhases (TemporalContext field removed in B3/#88 — phase is read from TraineeModelDigest)")
+        XCTAssertFalse(source.contains("pattern_phases"),
+            "SessionPlanService must not emit the pattern_phases JSON key (TemporalContext field removed in B3/#88)")
+        XCTAssertFalse(source.contains("PatternPhaseInfo"),
+            "SessionPlanService must not reference PatternPhaseInfo (type deleted with PatternPhaseService.swift in B3/#88)")
+    }
+
+    func test_temporalContext_b3_encodedJsonOmitsPatternPhasesKey() throws {
+        let ctx = TemporalContext(
+            daysSinceLastSession: 4,
+            daysSinceLastTrainedByPattern: ["squat": 7],
+            skippedSessionCountLast30Days: 0,
+            globalProgrammePhase: "intensification",
+            globalProgrammeWeek: 5
+        )
+        let data = try JSONEncoder().encode(ctx)
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("\"pattern_phases\""),
+            "Encoded TemporalContext JSON must not contain the pattern_phases key (field removed in B3/#88 — phase is in TraineeModelDigest)")
+    }
+
+    func test_skipFeatureTests_b3_doesNotReferenceLegacyPatternPhaseSymbols() throws {
+        // Q7 (NEW): SkipFeatureTests.swift had three legacy references — prompt-
+        // content asserts, a Codable round-trip test using PatternPhaseInfo, and
+        // a nil-encoding test for the absent `pattern_phases` key. All updated /
+        // removed in B3/#88 since PatternPhaseInfo + the TemporalContext field +
+        // the prompt section header are all gone.
+        let source = try loadSourceFile("ProjectApexTests/SkipFeatureTests.swift")
+        XCTAssertFalse(source.contains("PatternPhaseInfo"),
+            "SkipFeatureTests must not reference PatternPhaseInfo (type deleted with PatternPhaseService.swift in B3/#88)")
+        XCTAssertFalse(source.contains("patternPhases:"),
+            "SkipFeatureTests must not pass patternPhases: to TemporalContext (field removed in B3/#88)")
+        XCTAssertFalse(source.contains("PER-PATTERN PHASE TRACKING"),
+            "SkipFeatureTests must not assert on the legacy section header (replaced by PER-PATTERN PHASE STATE in B3/#88)")
     }
 
     // MARK: ─── B2 (#87): cleanup-reversion guards ────────────────────────────
