@@ -176,11 +176,8 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
 // MARK: - TemporalContext
 
 /// Gap-awareness context for the LLM, describing how long it has been since the user
-/// last trained overall and per movement pattern.
-///
-/// Per-pattern phase state moved to `TraineeModelDigest.perPatternSummary` in
-/// B3 (#88); the legacy `patternPhases: [String: PatternPhaseInfo]?` field +
-/// `pattern_phases` JSON key were removed in that slice.
+/// last trained overall and per movement pattern. Per-pattern phase state lives on
+/// `TraineeModelDigest.perPatternSummary` (B3 / #88), not on this struct.
 ///
 /// Assembly: computed in `ProgramViewModel.generateDaySession` from:
 ///   • recent session metadata (Supabase query for last 7 days, any type)
