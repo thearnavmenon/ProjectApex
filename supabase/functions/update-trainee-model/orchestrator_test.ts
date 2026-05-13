@@ -117,6 +117,53 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "#175: model_json.totalSessionCount mirrors session_count column on every apply",
+  async () => {
+    const userId = await seedFreshUser();
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: { logged_at: "2026-05-08T10:00:00Z", set_logs: [] },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    let rows = await sql`
+      SELECT model_json, session_count FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    assertEquals(rows[0].session_count, 1);
+    assertEquals(
+      (rows[0].model_json as Record<string, unknown>).totalSessionCount,
+      1,
+      "first apply must mirror session_count=1 into model_json.totalSessionCount",
+    );
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: { logged_at: "2026-05-09T10:00:00Z", set_logs: [] },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    rows = await sql`
+      SELECT model_json, session_count FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    assertEquals(rows[0].session_count, 2);
+    assertEquals(
+      (rows[0].model_json as Record<string, unknown>).totalSessionCount,
+      2,
+      "second apply must mirror session_count=2 into model_json.totalSessionCount",
+    );
+  },
+);
+
+orchestratorTest(
   "A17 / #116: ewma-engine wired — first apply with valid top sets bootstraps ExerciseProfile + populates e1rmCurrent via Epley × EWMA",
   async () => {
     const userId = await seedFreshUser();

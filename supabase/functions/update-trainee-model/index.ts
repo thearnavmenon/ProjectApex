@@ -1740,6 +1740,17 @@ export async function applySession(
       }
     }
 
+    // Mirror the canonical session_count column into model_json so Swift's
+    // TraineeModel.totalSessionCount decode sees the value B4's HEAVY
+    // REASSESSMENT prompt rule needs per ADR-0012 (#175). Without this,
+    // totalSessionCount decodes to 0 and the digest's
+    // `total_session_count - last_global_phase_advance_fired_at_session_count`
+    // computation misfires.
+    newModelJson = {
+      ...newModelJson,
+      totalSessionCount: newSessionCount,
+    };
+
     // Step 5: write back + advance watermark (ADR-0008 §"In-order").
     // session_count drives ADR-0012's 6-session-window cooldown.
     //
