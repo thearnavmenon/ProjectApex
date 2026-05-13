@@ -941,6 +941,25 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(digest.totalSessionCount, 42)
     }
 
+    // MARK: ─── B4 (#89) cycle 4: lastGlobalPhaseAdvance pass-through ──────────
+
+    func test_digest_lastGlobalPhaseAdvanceFiredAt_passesThroughWhenSet() {
+        var model = makeBaselineModel()
+        model.lastGlobalPhaseAdvanceFiredAtSessionCount = 17
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.lastGlobalPhaseAdvanceFiredAtSessionCount, 17)
+    }
+
+    func test_digest_lastGlobalPhaseAdvanceFiredAt_passesThroughWhenNil() {
+        let model = makeBaselineModel()  // never fired
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertNil(digest.lastGlobalPhaseAdvanceFiredAtSessionCount)
+    }
+
     // MARK: ─── B4 (#89) cycle 2: transfers filtered by R²≥0.4 ∧ pairedObs≥5 ────
 
     func test_digest_transfers_filtersByRSquaredAndPairedObservations() {

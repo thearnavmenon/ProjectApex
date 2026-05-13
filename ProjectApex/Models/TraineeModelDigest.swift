@@ -49,6 +49,10 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// TraineeModel.totalSessionCount). Surfaced for the 6-session cooldown
     /// reasoning in coaching prompts.
     var totalSessionCount: Int
+    /// Session-count at which the most recent global-phase-advance event fired
+    /// per ADR-0012 (pass-through). Nil for users that have never crossed the
+    /// 6-session cooldown gate.
+    var lastGlobalPhaseAdvanceFiredAtSessionCount: Int?
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
@@ -72,6 +76,7 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case disruptedPatterns         = "disrupted_patterns"
         case transfers
         case totalSessionCount         = "total_session_count"
+        case lastGlobalPhaseAdvanceFiredAtSessionCount = "last_global_phase_advance_fired_at_session_count"
     }
 }
 
@@ -118,7 +123,8 @@ extension TraineeModelDigest {
             prescriptionAccuracy: prescriptionAccuracy,
             disruptedPatterns: disruptedPatterns,
             transfers: transfers,
-            totalSessionCount: model.totalSessionCount
+            totalSessionCount: model.totalSessionCount,
+            lastGlobalPhaseAdvanceFiredAtSessionCount: model.lastGlobalPhaseAdvanceFiredAtSessionCount
         )
     }
 }
