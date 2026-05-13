@@ -79,9 +79,16 @@ final class ProgramViewModel {
     private let programGenerationService: ProgramGenerationService
     private let macroPlanService: MacroPlanService
     private let sessionPlanService: SessionPlanService
+    private let traineeModelService: TraineeModelService?
 
     /// User ID sourced from AppDependencies.resolvedUserId at construction time.
     private let userId: UUID
+
+    /// Per-pattern phase state for the PATTERN PROGRESS section in ProgramOverviewView
+    /// — sourced from TraineeModelDigest.perPatternSummary (B3 / #88). Replaces the
+    /// legacy PatternPhaseService.load() UserDefaults read. Empty until the local
+    /// trainee-model cache hydrates.
+    var patternPhaseSummaries: [PatternSummary] = []
 
     // MARK: Init
 
@@ -90,12 +97,14 @@ final class ProgramViewModel {
         programGenerationService: ProgramGenerationService,
         macroPlanService: MacroPlanService,
         sessionPlanService: SessionPlanService,
-        userId: UUID
+        userId: UUID,
+        traineeModelService: TraineeModelService? = nil
     ) {
         self.supabaseClient = supabaseClient
         self.programGenerationService = programGenerationService
         self.macroPlanService = macroPlanService
         self.sessionPlanService = sessionPlanService
+        self.traineeModelService = traineeModelService
         self.userId = userId
     }
 
@@ -104,6 +113,10 @@ final class ProgramViewModel {
     /// Loads the active program: tries UserDefaults cache first, then Supabase.
     func loadProgram() async {
         viewState = .loading
+
+        // Refresh per-pattern phase summaries from the trainee model digest
+        // (B3 / #88 — replaces the legacy PatternPhaseService.load() read).
+        patternPhaseSummaries = await traineeModelService?.digest()?.perPatternSummary ?? []
 
         // 1. Fast path: UserDefaults cache
         if let cached = Mesocycle.loadFromUserDefaults() {

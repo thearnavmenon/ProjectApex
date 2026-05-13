@@ -135,7 +135,8 @@ struct ContentView: View {
                     programGenerationService: deps.programGenerationService,
                     macroPlanService: deps.macroPlanService,
                     sessionPlanService: deps.sessionPlanService,
-                    userId: deps.resolvedUserId
+                    userId: deps.resolvedUserId,
+                    traineeModelService: deps.traineeModelService
                 )
                 Task {
                     await programViewModel?.loadProgram()
@@ -160,7 +161,8 @@ struct ContentView: View {
                     programGenerationService: deps.programGenerationService,
                     macroPlanService: deps.macroPlanService,
                     sessionPlanService: deps.sessionPlanService,
-                    userId: deps.resolvedUserId
+                    userId: deps.resolvedUserId,
+                    traineeModelService: deps.traineeModelService
                 )
             }
 

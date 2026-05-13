@@ -273,12 +273,13 @@ struct ProgramOverviewView: View {
 
     // MARK: - Pattern Progress Section
 
-    /// Collapsible section showing per-movement-pattern phase state.
-    /// Only renders when PatternPhaseService has tracked data.
+    /// Collapsible section showing per-movement-pattern phase state. Sourced
+    /// from TraineeModelDigest.perPatternSummary via viewModel.patternPhaseSummaries
+    /// (B3 / #88). Renders only when the digest has hydrated.
     @ViewBuilder
     private var patternProgressSection: some View {
-        let states = PatternPhaseService.load()
-        if !states.isEmpty {
+        let summaries = viewModel.patternPhaseSummaries
+        if !summaries.isEmpty {
             VStack(spacing: 0) {
                 // Collapse/expand header
                 Button {
@@ -303,8 +304,8 @@ struct ProgramOverviewView: View {
 
                 if isPatternProgressExpanded {
                     VStack(spacing: 6) {
-                        ForEach(states) { state in
-                            patternPhaseRow(state)
+                        ForEach(summaries, id: \.pattern) { summary in
+                            patternPhaseRow(summary)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -323,42 +324,24 @@ struct ProgramOverviewView: View {
         }
     }
 
-    private func patternPhaseRow(_ state: MovementPatternPhaseState) -> some View {
-        let progress: Double = state.sessionsRequiredForPhase > 0
-            ? min(Double(state.sessionsCompletedInPhase) / Double(state.sessionsRequiredForPhase), 1.0)
-            : 1.0
-        return HStack(spacing: 10) {
+    // Q6 / B3: pattern name + phase badge only. The digest does not carry
+    // session-counter fields, so the legacy N/M counter + progress bar are
+    // dropped. PatternProgress as a surface stays present.
+    private func patternPhaseRow(_ summary: PatternSummary) -> some View {
+        HStack(spacing: 10) {
             // Human-readable pattern name (e.g. "Horizontal Push")
-            Text(formatPatternName(state.pattern.rawValue))
+            Text(formatPatternName(summary.pattern.rawValue))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             // Phase badge
-            Text(shortPhaseName(state.phase))
+            Text(shortPhaseName(summary.currentPhase))
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(state.phase.accentColor)
+                .foregroundStyle(summary.currentPhase.accentColor)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
-                .background(state.phase.accentColor.opacity(0.15), in: Capsule())
-
-            // Session counter: N/M
-            Text("\(state.sessionsCompletedInPhase)/\(state.sessionsRequiredForPhase)")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .foregroundStyle(.white.opacity(0.40))
-                .frame(width: 36, alignment: .trailing)
-
-            // Mini progress bar
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.white.opacity(0.10))
-                    Capsule()
-                        .fill(state.phase.accentColor.opacity(0.70))
-                        .frame(width: geo.size.width * progress)
-                }
-            }
-            .frame(width: 48, height: 4)
+                .background(summary.currentPhase.accentColor.opacity(0.15), in: Capsule())
         }
     }
 
