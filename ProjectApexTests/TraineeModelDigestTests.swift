@@ -618,6 +618,17 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must enumerate the deload phase in the new PER-PATTERN PHASE STATE block")
     }
 
+    func test_sessionPlanPrompt_b3_teachesTransitionModeInterpretation_fromDigestInTransitionMode() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Digest field reference — transition-mode is surfaced per-pattern.
+        XCTAssertTrue(prompt.contains("in_transition_mode"),
+                      "SessionPlan must reference the digest in_transition_mode field (ADR-0005)")
+        // ADR-0005's transition-mode formula collapses to 3 most recent sessions.
+        XCTAssertTrue(prompt.contains("3 most recent sessions"),
+                      "SessionPlan must surface the collapsed 3-session window semantic so the LLM does not anchor on stale pre-transition data")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {

@@ -233,6 +233,13 @@ the global programme phase. When a pattern's current_phase is "deload", prescrib
 pattern's deload parameters (low volume, low intensity, RIR ≥ 3) regardless of the
 global programme phase.
 
+TRANSITION MODE (ADR-0005):
+When per_pattern_summary[i].in_transition_mode == true, the EWMA capability window has
+collapsed to the 3 most recent sessions (plain mean, not exponential weighting). Recent
+capability data is the most current-state-accurate estimate; do not anchor prescriptions
+on data older than the 3-session transition-mode window. Triggers: calibration-recency,
+deload-end, phase-transition, long-absence return.
+
 ═══════════════════════════════════════════════════════════════
 JSON VALIDITY RULES
 ═══════════════════════════════════════════════════════════════
