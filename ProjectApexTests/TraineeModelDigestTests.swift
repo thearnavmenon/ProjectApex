@@ -643,6 +643,21 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must surface ADR-0005's cadence-relative semantic (current absence > 2× typical cadence)")
     }
 
+    func test_sessionPlanPrompt_b3_teachesPatternOverGlobalDivergence_whenPatternPhaseLagsGlobalPhase() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Earlier-than-global and later-than-global divergence rules — preserved
+        // from the legacy PER-PATTERN PHASE TRACKING block, restated against the
+        // new digest contract.
+        XCTAssertTrue(prompt.contains("EARLIER phase than the global"),
+                      "SessionPlan must teach that a pattern in an EARLIER phase than global is undertrained")
+        XCTAssertTrue(prompt.contains("LATER phase than the global"),
+                      "SessionPlan must teach that a pattern in a LATER phase than global is ahead")
+        // Session-notes divergence threshold — keep noisy notes off when divergence is small.
+        XCTAssertTrue(prompt.contains("2 or more phases behind"),
+                      "SessionPlan must include the 2-phase-divergence session_notes threshold")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {

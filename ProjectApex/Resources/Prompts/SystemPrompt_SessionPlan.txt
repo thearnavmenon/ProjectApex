@@ -233,6 +233,13 @@ the global programme phase. When a pattern's current_phase is "deload", prescrib
 pattern's deload parameters (low volume, low intensity, RIR ≥ 3) regardless of the
 global programme phase.
 
+A pattern in an EARLIER phase than the global programme phase is undertrained relative
+to the programme — apply that pattern's earlier-phase parameters (higher reps, higher
+RIR, more volume) before ramping intensity. A pattern in a LATER phase than the global
+phase is ahead — apply that pattern's advanced-phase parameters. Only note divergence
+in session_notes when a pattern is 2 or more phases behind the global phase (e.g.,
+global = peaking, pattern = accumulation). Keep the note under 20 words.
+
 TRANSITION MODE (ADR-0005):
 When per_pattern_summary[i].in_transition_mode == true, the EWMA capability window has
 collapsed to the 3 most recent sessions (plain mean, not exponential weighting). Recent
