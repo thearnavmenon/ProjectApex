@@ -597,6 +597,27 @@ final class TraineeModelDigestTests: XCTestCase {
                        "Legacy 20%-below-target framing must not reappear (replaced with MEV-relative integer count)")
     }
 
+    // MARK: ─── B3 (#88): PER-PATTERN PHASE STATE block — prompt-shape anchors ───
+    //
+    // B3 replaces the legacy `temporal_context.pattern_phases` consumption with
+    // `trainee_model_digest.per_pattern_summary[].current_phase` +
+    // `in_transition_mode` + `disrupted_patterns` (ADR-0005, ADR-0011).
+    // Each β anchor below drives one chunk of the new block.
+
+    func test_sessionPlanPrompt_b3_teachesDeloadPhasePrescription_fromDigestCurrentPhase() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // New section header replaces legacy "PER-PATTERN PHASE TRACKING".
+        XCTAssertTrue(prompt.contains("PER-PATTERN PHASE STATE"),
+                      "SessionPlan must include the PER-PATTERN PHASE STATE section header (B3 replaces legacy PER-PATTERN PHASE TRACKING)")
+        // Digest path replaces legacy temporal_context.pattern_phases.
+        XCTAssertTrue(prompt.contains("trainee_model_digest.per_pattern_summary[].current_phase"),
+                      "SessionPlan must reference the digest current_phase JSON path")
+        // Phase enum surfaces in the new block so the LLM knows .deload is a valid value.
+        XCTAssertTrue(prompt.contains("\"deload\""),
+                      "SessionPlan must enumerate the deload phase in the new PER-PATTERN PHASE STATE block")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {

@@ -222,41 +222,16 @@ Guidance:
   judgment and reflect your reasoning in session_notes (max 20 words).
 
 ═══════════════════════════════════════════════════════════════
-PER-PATTERN PHASE TRACKING
+PER-PATTERN PHASE STATE
 ═══════════════════════════════════════════════════════════════
-temporal_context may include a "pattern_phases" object that maps each movement pattern
-(e.g. "horizontal_push", "squat") to its own phase state:
+trainee_model_digest.per_pattern_summary[].current_phase gives the per-movement-pattern
+periodization phase. Values: "accumulation" | "intensification" | "peaking" | "deload".
 
-  {
-    "current_phase": "accumulation" | "intensification" | "peaking" | "deload",
-    "sessions_completed": <integer>,
-    "sessions_required": <integer>
-  }
-
-When pattern_phases IS present (a non-empty object):
-• Use the pattern-specific phase to determine sets, reps, RIR, and rest for EACH exercise —
-  NOT the global phase. The pattern's own phase reflects how much volume tolerance that
-  movement pattern has actually built.
-• global_programme_phase provides macro context only: use it to gauge overall recovery
-  bandwidth and fatigue state for the session, not to prescribe individual exercises.
-• A pattern in an EARLIER phase than the global phase means it is undertrained relative to the
-  programme. Apply that pattern's accumulation/earlier-phase parameters (higher reps, higher RIR,
-  more volume) before ramping intensity.
-• A pattern in a LATER phase than the global phase means it is ahead of the programme and can
-  tolerate more intensity. Apply that pattern's advanced-phase parameters accordingly.
-• Only note divergence in session_notes when a pattern is 2 or more phases behind the global
-  phase (e.g. global = peaking, pattern = accumulation). Keep the note under 20 words.
-• TEMPORAL CONTEXT STILL APPLIES: if days_since_last_trained_by_pattern shows ≥21 days of
-  absence for a given pattern, prescribe conservatively for that pattern — raise RIR by 1–2
-  and reduce load toward the lower end of the phase range. The temporal gap overrides the
-  pattern's normal phase intensity. This applies even if the pattern phase shows intensification
-  or peaking.
-
-When pattern_phases IS absent (key missing from temporal_context):
-• This means the user has not yet generated their first session under the pattern-tracking
-  system. Fall back to global_programme_phase for all prescription decisions.
-• Do NOT treat absent pattern_phases the same as an empty object — absent means no
-  per-pattern data exists yet, not that all patterns are at accumulation.
+The per-pattern phase reflects how much volume tolerance THAT movement pattern has
+actually built. Use it to determine sets, reps, RIR, and rest for EACH exercise — NOT
+the global programme phase. When a pattern's current_phase is "deload", prescribe that
+pattern's deload parameters (low volume, low intensity, RIR ≥ 3) regardless of the
+global programme phase.
 
 ═══════════════════════════════════════════════════════════════
 JSON VALIDITY RULES
