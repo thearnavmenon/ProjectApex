@@ -112,6 +112,23 @@ final class TraineeModelSnapshotsCrossValidationTests: XCTestCase {
         )
     }
 
+    /// Cross-exercise transfers are persisted as a JSON array under the
+    /// `transfers` top-level key (per cross-platform shape contract; see
+    /// docs/fixtures/trainee-model-snapshot.json). The EF writes the rich
+    /// shape (intercept, spearmanFlagged, seWidening, state, observations)
+    /// alongside the basic 5 fields Swift's ExerciseTransfer carries; Swift
+    /// Codable tolerates the extra keys by default and decodes the basic
+    /// fields.
+    func test_transfers_listShapeDecodesCorrectly() {
+        XCTAssertEqual(Self.model.transfers.count, 1)
+        let t0 = Self.model.transfers[0]
+        XCTAssertEqual(t0.fromExerciseId, "barbell_bench_press")
+        XCTAssertEqual(t0.toExerciseId, "overhead_press")
+        XCTAssertEqual(t0.coefficient, 0.83)
+        XCTAssertEqual(t0.rSquared, 0.62)
+        XCTAssertEqual(t0.pairedObservations, 8)
+    }
+
     /// PrescriptionAccuracy gained gap-bucket fields in slice A9 (#80) per
     /// ADR-0014. The fixture exercises the populated dictionaries; verify
     /// the Swift Codable's `decodeIfPresent` defaults to empty-dict on

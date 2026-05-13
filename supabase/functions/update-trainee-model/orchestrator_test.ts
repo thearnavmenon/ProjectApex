@@ -19,7 +19,7 @@
 // Run locally:
 //   deno test --allow-net --allow-env supabase/functions/update-trainee-model/orchestrator_test.ts
 
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import { assertEquals, assertExists } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import postgres from "postgres";
 import { applySession } from "./index.ts";
 import type { ApplyCompleteEvent, LateArrivalEvent } from "../_shared/observability.ts";
@@ -416,17 +416,23 @@ orchestratorTest(
     const rows = await sql`
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
-    const tr = (rows[0].model_json as Record<string, unknown>).transferRegressions as Record<string, Record<string, Record<string, unknown>>>;
-    const benchToRow = tr["barbell_bench_press"]["barbell_row"];
-    const rowToBench = tr["barbell_row"]["barbell_bench_press"];
+    const transfers = (rows[0].model_json as Record<string, unknown>).transfers as Array<Record<string, unknown>>;
+    assertEquals(transfers.length, 2);
+    const benchToRow = transfers.find(
+      (t) => t.fromExerciseId === "barbell_bench_press" && t.toExerciseId === "barbell_row",
+    );
+    const rowToBench = transfers.find(
+      (t) => t.fromExerciseId === "barbell_row" && t.toExerciseId === "barbell_bench_press",
+    );
+    assertExists(benchToRow);
+    assertExists(rowToBench);
     assertEquals((benchToRow.observations as unknown[]).length, 1);
     assertEquals((rowToBench.observations as unknown[]).length, 1);
-    const benchToRowFit = benchToRow.fit as Record<string, unknown>;
-    assertEquals(benchToRowFit.state, "candidate");
+    assertEquals(benchToRow.state, "candidate");
     // Placeholder fit values — n<2 path returns zeroed coefficients (no NaN).
-    assertEquals(benchToRowFit.coefficient, 0);
-    assertEquals(benchToRowFit.rSquared, 0);
-    assertEquals(benchToRowFit.pairedObservations, 1);
+    assertEquals(benchToRow.coefficient, 0);
+    assertEquals(benchToRow.rSquared, 0);
+    assertEquals(benchToRow.pairedObservations, 1);
   },
 );
 
@@ -544,8 +550,88 @@ orchestratorTest(
     const rows = await sql`
       SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
     `;
-    const tr = (rows[0].model_json as Record<string, unknown>).transferRegressions as Record<string, unknown>;
-    assertEquals(Object.keys(tr).length, 0);
+    const transfers = (rows[0].model_json as Record<string, unknown>).transfers as Array<Record<string, unknown>>;
+    assertEquals(transfers.length, 0);
+  },
+);
+
+orchestratorTest(
+  "schema-drift-fix: row seeded with legacy transferRegressions dict (no transfers key) auto-migrates on first apply — all cells preserved as transfers list entries with new observation appended for the trained pair",
+  async () => {
+    // Simulates the prod migration: alpha row has model_json containing
+    // `transferRegressions` dict-of-dicts under the old key, no `transfers`
+    // key. First post-deploy apply must hydrate the legacy dict, process
+    // rule, and write the unified `transfers` list shape — preserving every
+    // existing cell.
+    const userId = crypto.randomUUID();
+    await sql`
+      INSERT INTO public.users (id, display_name)
+      VALUES (${userId}, ${"orchestrator-test-" + userId.slice(0, 8)})
+    `;
+    // Seed model_json with two pre-existing cells under the LEGACY key —
+    // bench↔squat pair (both directions). One observation each.
+    const legacyModel = {
+      transferRegressions: {
+        "barbell_bench_press": {
+          "barbell_back_squat": {
+            observations: [{ fromE1RM: 100, toE1RM: 130, observedAt: "2026-05-01T10:00:00Z" }],
+            fit: { coefficient: 0, intercept: 0, rSquared: 0, pairedObservations: 1, spearmanFlagged: false, seWidening: 0, state: "candidate" },
+          },
+        },
+        "barbell_back_squat": {
+          "barbell_bench_press": {
+            observations: [{ fromE1RM: 130, toE1RM: 100, observedAt: "2026-05-01T10:00:00Z" }],
+            fit: { coefficient: 0, intercept: 0, rSquared: 0, pairedObservations: 1, spearmanFlagged: false, seWidening: 0, state: "candidate" },
+          },
+        },
+      },
+    };
+    await sql`
+      INSERT INTO public.trainee_models (user_id, model_json)
+      VALUES (${userId}, ${sql.json(legacyModel)})
+    `;
+
+    // Apply a session that re-trains the same pair — adds one observation
+    // to each direction. Post-apply, total observations per cell = 2.
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: {
+          logged_at: "2026-05-08T10:00:00Z",
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 102.5, reps_completed: 5, intent: "top", rpe_felt: 8 },
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 132.5, reps_completed: 5, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const transfers = modelJson.transfers as Array<Record<string, unknown>>;
+    assertExists(transfers, "transfers list must be populated post-apply");
+    assertEquals(transfers.length, 2);
+
+    const benchToSquat = transfers.find(
+      (t) => t.fromExerciseId === "barbell_bench_press" && t.toExerciseId === "barbell_back_squat",
+    );
+    const squatToBench = transfers.find(
+      (t) => t.fromExerciseId === "barbell_back_squat" && t.toExerciseId === "barbell_bench_press",
+    );
+    assertExists(benchToSquat, "legacy bench→squat cell must migrate");
+    assertExists(squatToBench, "legacy squat→bench cell must migrate");
+
+    // Each cell now carries 2 observations (1 legacy + 1 from this session).
+    assertEquals((benchToSquat.observations as unknown[]).length, 2);
+    assertEquals((squatToBench.observations as unknown[]).length, 2);
+    // n=2 enables a real fit — no longer placeholder zeros.
+    assertEquals(benchToSquat.pairedObservations, 2);
+    assertEquals(benchToSquat.state, "candidate"); // <5 obs, stays candidate per Q10
   },
 );
 
@@ -1690,6 +1776,21 @@ orchestratorTest(
       "between_48_and_72h": 0.05,
       "over72h": 0.06,
     });
+    // transfers must be a JSON array (not the legacy `transferRegressions`
+    // dict-of-dicts shape). Element shape carries the basic 5 fields Swift's
+    // ExerciseTransfer struct decodes plus EF-internal rich fields (intercept,
+    // spearmanFlagged, seWidening, state, observations) that Swift Codable
+    // tolerates by default.
+    const transfers = returned.transfers as Array<Record<string, unknown>>;
+    assertEquals(Array.isArray(transfers), true, "transfers must be a JSON array, not a dict (cross-platform shape contract)");
+    assertEquals(transfers.length, 1);
+    const t0 = transfers[0];
+    assertEquals(t0.fromExerciseId, "barbell_bench_press");
+    assertEquals(t0.toExerciseId, "overhead_press");
+    assertEquals(t0.coefficient, 0.83);
+    assertEquals(t0.rSquared, 0.62);
+    assertEquals(t0.pairedObservations, 8);
+    assertEquals(t0.state, "published");
   },
 );
 
