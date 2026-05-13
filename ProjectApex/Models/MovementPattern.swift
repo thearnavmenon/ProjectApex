@@ -1,8 +1,8 @@
 // MovementPattern.swift
 // ProjectApex — Models
 //
-// Motion taxonomy used by ExerciseLibrary entries, MovementPatternPhaseState,
-// and the trainee model's PatternProfile keying. See ADR-0005 and CONTEXT.md.
+// Motion taxonomy used by ExerciseLibrary entries and the trainee model's
+// PatternProfile keying. See ADR-0005 and CONTEXT.md.
 //
 // Cases mirror the eight pattern strings present in the codebase prior to
 // Slice 1's typed-enum migration. .calves and .core are deliberately absent —

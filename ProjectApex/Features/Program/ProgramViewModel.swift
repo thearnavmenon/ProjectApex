@@ -85,9 +85,8 @@ final class ProgramViewModel {
     private let userId: UUID
 
     /// Per-pattern phase state for the PATTERN PROGRESS section in ProgramOverviewView
-    /// — sourced from TraineeModelDigest.perPatternSummary (B3 / #88). Replaces the
-    /// legacy PatternPhaseService.load() UserDefaults read. Empty until the local
-    /// trainee-model cache hydrates.
+    /// — sourced from TraineeModelDigest.perPatternSummary (B3 / #88). Empty until
+    /// the local trainee-model cache hydrates.
     var patternPhaseSummaries: [PatternSummary] = []
 
     // MARK: Init
@@ -114,8 +113,7 @@ final class ProgramViewModel {
     func loadProgram() async {
         viewState = .loading
 
-        // Refresh per-pattern phase summaries from the trainee model digest
-        // (B3 / #88 — replaces the legacy PatternPhaseService.load() read).
+        // Refresh per-pattern phase summaries from the trainee model digest (B3 / #88).
         patternPhaseSummaries = await traineeModelService?.digest()?.perPatternSummary ?? []
 
         // 1. Fast path: UserDefaults cache

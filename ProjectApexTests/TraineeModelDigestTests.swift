@@ -830,6 +830,19 @@ final class TraineeModelDigestTests: XCTestCase {
             "ProgramOverviewView must not reference MovementPatternPhaseState (type deleted with PatternPhaseService.swift in B3/#88)")
     }
 
+    func test_patternPhaseService_b3_sourceFilesDeleted() throws {
+        let testFileURL = URL(fileURLWithPath: #file)
+        let repoRoot = testFileURL
+            .deletingLastPathComponent()  // ProjectApexTests/
+            .deletingLastPathComponent()  // <repo root>
+        let serviceURL = repoRoot.appendingPathComponent("ProjectApex/Services/PatternPhaseService.swift")
+        let testsURL   = repoRoot.appendingPathComponent("ProjectApexTests/PatternPhaseServiceTests.swift")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: serviceURL.path),
+            "PatternPhaseService.swift must be deleted in B3/#88 — server-side update-trainee-model EF owns phase advancement per ADR-0011")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: testsURL.path),
+            "PatternPhaseServiceTests.swift must be deleted in B3/#88 — tests deleted alongside the service they covered")
+    }
+
     func test_sessionPlanService_b3_doesNotCarryPatternPhasesField() throws {
         // Mirror B1's test_sessionPlanService_doesNotReferenceLegacyStagnationField:
         // assert the type no longer declares the legacy patternPhases field +
