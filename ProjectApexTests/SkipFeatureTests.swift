@@ -384,51 +384,29 @@ struct SkipFeatureTests {
         // Phrase-level: confirm specific guidance text survives prompt edits
         #expect(content.contains("1-week"),          "Missing 1-week gap guidance (treat as deload/neutral)")
         #expect(content.contains("reintroduction"),  "Missing reintroduction guidance for 3+ week movement-pattern gaps")
-        // Phase 2: per-pattern phase tracking directives
-        #expect(content.contains("PER-PATTERN PHASE TRACKING"), "Missing PER-PATTERN PHASE TRACKING section header")
-        #expect(content.contains("pattern_phases"),              "Missing pattern_phases field reference")
-        #expect(content.contains("current_phase"),               "Missing current_phase key in pattern phase schema")
+        // Phase 2 / B3: per-pattern phase state directives — sourced from digest, not temporal_context.
+        #expect(content.contains("PER-PATTERN PHASE STATE"), "Missing PER-PATTERN PHASE STATE section header (B3 / #88)")
+        #expect(content.contains("per_pattern_summary"),      "Missing per_pattern_summary digest path reference")
+        #expect(content.contains("current_phase"),            "Missing current_phase key in pattern phase schema")
     }
 
     // MARK: 8. TemporalContext Phase 2 fields
 
     @Test("TemporalContext with Phase 2 fields survives JSON round-trip")
     func temporalContextPhase2FieldsRoundTrip() throws {
-        let phases: [String: PatternPhaseInfo] = [
-            "horizontal_push": PatternPhaseInfo(currentPhase: "intensification", sessionsCompleted: 3, sessionsRequired: 8),
-            "squat":           PatternPhaseInfo(currentPhase: "accumulation",    sessionsCompleted: 1, sessionsRequired: 8)
-        ]
         let ctx = TemporalContext(
             daysSinceLastSession: 4,
             daysSinceLastTrainedByPattern: ["horizontal_push": 4, "squat": 7],
             skippedSessionCountLast30Days: 0,
             globalProgrammePhase: "intensification",
-            globalProgrammeWeek: 5,
-            patternPhases: phases
+            globalProgrammeWeek: 5
         )
         let data = try JSONEncoder().encode(ctx)
         let decoded = try JSONDecoder().decode(TemporalContext.self, from: data)
 
         #expect(decoded.globalProgrammePhase == "intensification")
         #expect(decoded.globalProgrammeWeek == 5)
-        #expect(decoded.patternPhases?["horizontal_push"]?.sessionsCompleted == 3)
-        #expect(decoded.patternPhases?["squat"]?.currentPhase == "accumulation")
-    }
-
-    @Test("TemporalContext with nil Phase 2 fields omits pattern_phases from JSON")
-    func temporalContextPhase2FieldsNilEncoding() throws {
-        let ctx = TemporalContext(
-            daysSinceLastSession: 2,
-            daysSinceLastTrainedByPattern: [:],
-            skippedSessionCountLast30Days: 0
-        )
-        let data = try JSONEncoder().encode(ctx)
-        let json = String(data: data, encoding: .utf8) ?? ""
-
-        // globalProgrammePhase/Week should appear as explicit null (same policy as daysSinceLastSession)
-        #expect(json.contains("\"global_programme_phase\":null"))
-        #expect(json.contains("\"global_programme_week\":null"))
-        // patternPhases absent → key should NOT appear (encodeIfPresent)
-        #expect(!json.contains("\"pattern_phases\""))
+        #expect(decoded.daysSinceLastTrainedByPattern["horizontal_push"] == 4)
+        #expect(decoded.daysSinceLastTrainedByPattern["squat"] == 7)
     }
 }

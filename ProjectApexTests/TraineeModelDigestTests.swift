@@ -830,6 +830,21 @@ final class TraineeModelDigestTests: XCTestCase {
             "ProgramOverviewView must not reference MovementPatternPhaseState (type deleted with PatternPhaseService.swift in B3/#88)")
     }
 
+    func test_skipFeatureTests_b3_doesNotReferenceLegacyPatternPhaseSymbols() throws {
+        // Q7 (NEW): SkipFeatureTests.swift had three legacy references — prompt-
+        // content asserts, a Codable round-trip test using PatternPhaseInfo, and
+        // a nil-encoding test for the absent `pattern_phases` key. All updated /
+        // removed in B3/#88 since PatternPhaseInfo + the TemporalContext field +
+        // the prompt section header are all gone.
+        let source = try loadSourceFile("ProjectApexTests/SkipFeatureTests.swift")
+        XCTAssertFalse(source.contains("PatternPhaseInfo"),
+            "SkipFeatureTests must not reference PatternPhaseInfo (type deleted with PatternPhaseService.swift in B3/#88)")
+        XCTAssertFalse(source.contains("patternPhases:"),
+            "SkipFeatureTests must not pass patternPhases: to TemporalContext (field removed in B3/#88)")
+        XCTAssertFalse(source.contains("PER-PATTERN PHASE TRACKING"),
+            "SkipFeatureTests must not assert on the legacy section header (replaced by PER-PATTERN PHASE STATE in B3/#88)")
+    }
+
     // MARK: ─── B2 (#87): cleanup-reversion guards ────────────────────────────
 
     func test_sessionPlanService_doesNotReferenceLegacyVolumeDeficitsField() throws {
