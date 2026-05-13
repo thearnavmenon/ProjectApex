@@ -1209,6 +1209,90 @@ function applyPrescriptionAccuracy(
 }
 
 /**
+ * Internal apply-path representation of transfer state — dict-of-dict for
+ * O(1) cell lookup during the per-pair update loop. The JSONB write/read
+ * boundary uses the flat-list shape (`TransferEntry[]`) per the
+ * cross-platform contract; bridges at the caller convert between the two.
+ */
+type TransferDict = Record<string, Record<string, {
+  observations: PairedObservation[];
+  fit: TransferFit;
+}>>;
+
+/**
+ * Flat-list element for JSONB persistence under the `transfers` key.
+ * Matches Swift's `ExerciseTransfer` struct (basic fields decode); the
+ * EF-internal rich fields (intercept, spearmanFlagged, seWidening, state,
+ * observations) ride along and are tolerated by Swift Codable's default
+ * unknown-key behavior.
+ */
+interface TransferEntry {
+  fromExerciseId: string;
+  toExerciseId: string;
+  coefficient: number;
+  intercept: number;
+  rSquared: number;
+  pairedObservations: number;
+  spearmanFlagged: boolean;
+  seWidening: number;
+  state: TransferFit["state"];
+  observations: PairedObservation[];
+}
+
+/**
+ * Hydrate the internal dict from the JSONB-side list shape. Used at apply-
+ * path entry to round-trip an existing `transfers` array back into the
+ * O(1)-lookup structure the rule operates on.
+ */
+function hydrateTransferDictFromList(list: TransferEntry[]): TransferDict {
+  const dict: TransferDict = {};
+  for (const e of list) {
+    if (!dict[e.fromExerciseId]) dict[e.fromExerciseId] = {};
+    dict[e.fromExerciseId][e.toExerciseId] = {
+      observations: e.observations,
+      fit: {
+        coefficient: e.coefficient,
+        intercept: e.intercept,
+        rSquared: e.rSquared,
+        pairedObservations: e.pairedObservations,
+        spearmanFlagged: e.spearmanFlagged,
+        seWidening: e.seWidening,
+        state: e.state,
+      },
+    };
+  }
+  return dict;
+}
+
+/**
+ * Flatten the internal dict to the JSONB-side list shape. Used at apply-
+ * path exit before the UPSERT. Output ordering is deterministic
+ * (lexicographic by from then to) for stable JSONB diffs.
+ */
+function flattenTransferDictToList(dict: TransferDict): TransferEntry[] {
+  const list: TransferEntry[] = [];
+  for (const fromExerciseId of Object.keys(dict).sort()) {
+    const byTo = dict[fromExerciseId];
+    for (const toExerciseId of Object.keys(byTo).sort()) {
+      const cell = byTo[toExerciseId];
+      list.push({
+        fromExerciseId,
+        toExerciseId,
+        coefficient: cell.fit.coefficient,
+        intercept: cell.fit.intercept,
+        rSquared: cell.fit.rSquared,
+        pairedObservations: cell.fit.pairedObservations,
+        spearmanFlagged: cell.fit.spearmanFlagged,
+        seWidening: cell.fit.seWidening,
+        state: cell.fit.state,
+        observations: cell.observations,
+      });
+    }
+  }
+  return list;
+}
+
+/**
  * Per #126 (A22): wire transfer-regression. v1 alpha-cohort pair-detection
  * rule = "trained in the same session": for each pair of exercises with
  * top-intent sets in the current session, record a directional
@@ -1223,19 +1307,16 @@ function applyPrescriptionAccuracy(
  * sxx=0 → `coefficient = NaN`, which would break JSONB serialisation; the
  * placeholder fit (zeroed coefficients, state=candidate) keeps storage
  * clean while still tracking the observation.
+ *
+ * Operates on the internal dict-of-dict shape; the caller bridges to/from
+ * the JSONB list shape (`TransferEntry[]`) at the apply-path boundary.
  */
-function applyTransferRegressions(
-  transferRegressions: Record<string, Record<string, {
-    observations: PairedObservation[];
-    fit: TransferFit;
-  }>>,
+function applyTransfers(
+  transfers: TransferDict,
   setLogs: Array<Record<string, unknown>>,
   incomingLoggedAt: Date,
 ): {
-  transferRegressions: Record<string, Record<string, {
-    observations: PairedObservation[];
-    fit: TransferFit;
-  }>>;
+  transfers: TransferDict;
   rulesFired: Set<string>;
   fieldsChanged: string[];
 } {
@@ -1259,15 +1340,12 @@ function applyTransferRegressions(
   }
 
   if (sessionE1rmByExercise.size < 2) {
-    return { transferRegressions, rulesFired, fieldsChanged };
+    return { transfers, rulesFired, fieldsChanged };
   }
 
   // Clone storage shape so updates remain immutable from caller's POV.
-  const next: Record<string, Record<string, {
-    observations: PairedObservation[];
-    fit: TransferFit;
-  }>> = {};
-  for (const [from, m] of Object.entries(transferRegressions)) {
+  const next: TransferDict = {};
+  for (const [from, m] of Object.entries(transfers)) {
     next[from] = { ...m };
   }
 
@@ -1308,11 +1386,11 @@ function applyTransferRegressions(
       fromMap[toEx] = { observations: newObservations, fit: newFit };
       next[fromEx] = fromMap;
       rulesFired.add("transfer-regression");
-      fieldsChanged.push(`transferRegressions.${fromEx}.${toEx}`);
+      fieldsChanged.push(`transfers.${fromEx}.${toEx}`);
     }
   }
 
-  return { transferRegressions: next, rulesFired, fieldsChanged };
+  return { transfers: next, rulesFired, fieldsChanged };
 }
 
 /**
@@ -1634,21 +1712,29 @@ export async function applySession(
       // Transfer-regression pipeline per #126 (A22). Pair-detects within
       // the current session and recomputes the log-log fit per ordered
       // exercise pair.
-      const transferIn =
-        (modelJson.transferRegressions as
-          | Record<string, Record<string, {
-              observations: PairedObservation[];
-              fit: TransferFit;
-            }>>
-          | undefined) ?? {};
-      const transferRuled = applyTransferRegressions(
+      //
+      // JSONB shape contract: top-level key `transfers` carries a flat list
+      // of TransferEntry per the cross-platform fixture. Internal apply uses
+      // dict-of-dict for O(1) lookup; the bridges hydrate/flatten at the
+      // boundary. Legacy fallback: rows pre-dating the schema-drift fix
+      // store the same data under `transferRegressions` (dict-of-dict);
+      // when `transfers` is absent and the legacy key is present, hydrate
+      // from there. The legacy key is left in place on write (not actively
+      // cleaned up here) — a follow-up cleanup PR drops it after the
+      // migration is verified across the alpha cohort.
+      const transferList = modelJson.transfers as TransferEntry[] | undefined;
+      const legacyDict = modelJson.transferRegressions as TransferDict | undefined;
+      const transferIn: TransferDict = transferList !== undefined
+        ? hydrateTransferDictFromList(transferList)
+        : (legacyDict ?? {});
+      const transferRuled = applyTransfers(
         transferIn,
         setLogsArr,
         incomingLoggedAt,
       );
       newModelJson = {
         ...newModelJson,
-        transferRegressions: transferRuled.transferRegressions,
+        transfers: flattenTransferDictToList(transferRuled.transfers),
       };
       rulesFired.push(...transferRuled.rulesFired);
       fieldsChanged.push(...transferRuled.fieldsChanged);

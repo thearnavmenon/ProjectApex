@@ -228,17 +228,18 @@ smokeTest(
     // A22 / #126: transfer-regression — fixture has 3 top-intent exercises
     // (bench, squat, row) → 6 ordered pairs (3×2 = each pair recorded both
     // directions). Single session → n=1, candidate state, placeholder fit.
-    const transfers = modelJson.transferRegressions as Record<string, Record<string, Record<string, unknown>>>;
+    const transfers = modelJson.transfers as Array<Record<string, unknown>>;
     const expectedExercises = ["barbell_back_squat", "barbell_bench_press", "barbell_row"];
-    assertEquals(Object.keys(transfers).sort(), expectedExercises);
+    assertEquals(transfers.length, 6);
     for (const fromEx of expectedExercises) {
       for (const toEx of expectedExercises) {
         if (fromEx === toEx) continue;
-        const cell = transfers[fromEx][toEx];
-        assertExists(cell, `transferRegressions[${fromEx}][${toEx}] should exist`);
+        const cell = transfers.find(
+          (t) => t.fromExerciseId === fromEx && t.toExerciseId === toEx,
+        );
+        assertExists(cell, `transfers entry [${fromEx} → ${toEx}] should exist`);
         assertEquals((cell.observations as unknown[]).length, 1);
-        const fit = cell.fit as Record<string, unknown>;
-        assertEquals(fit.state, "candidate");
+        assertEquals(cell.state, "candidate");
       }
     }
 

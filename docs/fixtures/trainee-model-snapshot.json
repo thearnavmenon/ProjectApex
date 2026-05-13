@@ -99,7 +99,23 @@
     }
   },
   "prescriptionIntentMismatches": [],
-  "transfers": [],
+  "transfers": [
+    {
+      "fromExerciseId": "barbell_bench_press",
+      "toExerciseId": "overhead_press",
+      "coefficient": 0.83,
+      "intercept": 12.4,
+      "rSquared": 0.62,
+      "pairedObservations": 8,
+      "spearmanFlagged": false,
+      "seWidening": 0.0,
+      "state": "published",
+      "observations": [
+        { "fromE1RM": 100.0, "toE1RM": 65.0, "observedAt": "2025-12-15T10:00:00.000Z" },
+        { "fromE1RM": 102.5, "toE1RM": 67.5, "observedAt": "2025-12-22T10:00:00.000Z" }
+      ]
+    }
+  ],
   "bodyweight": {
     "entries": []
   },
