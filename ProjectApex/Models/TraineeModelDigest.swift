@@ -45,6 +45,10 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// reason from per Q10 lock-in (R²≥0.4 AND pairedObservations≥5). Below
     /// either threshold the regression is too noisy to surface.
     var transfers: [ExerciseTransfer]
+    /// Total completed sessions across the user's history (pass-through from
+    /// TraineeModel.totalSessionCount). Surfaced for the 6-session cooldown
+    /// reasoning in coaching prompts.
+    var totalSessionCount: Int
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
@@ -67,6 +71,7 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case prescriptionAccuracy      = "prescription_accuracy"
         case disruptedPatterns         = "disrupted_patterns"
         case transfers
+        case totalSessionCount         = "total_session_count"
     }
 }
 
@@ -112,7 +117,8 @@ extension TraineeModelDigest {
             activeLimitations: model.activeLimitations,
             prescriptionAccuracy: prescriptionAccuracy,
             disruptedPatterns: disruptedPatterns,
-            transfers: transfers
+            transfers: transfers,
+            totalSessionCount: model.totalSessionCount
         )
     }
 }

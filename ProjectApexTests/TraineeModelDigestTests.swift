@@ -930,6 +930,17 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertTrue(digest.transfers.isEmpty)
     }
 
+    // MARK: ─── B4 (#89) cycle 3: totalSessionCount pass-through ───────────────
+
+    func test_digest_totalSessionCount_passesThroughFromModel() {
+        var model = makeBaselineModel()
+        model.totalSessionCount = 42
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.totalSessionCount, 42)
+    }
+
     // MARK: ─── B4 (#89) cycle 2: transfers filtered by R²≥0.4 ∧ pairedObs≥5 ────
 
     func test_digest_transfers_filtersByRSquaredAndPairedObservations() {
