@@ -53,6 +53,10 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// per ADR-0012 (pass-through). Nil for users that have never crossed the
     /// 6-session cooldown gate.
     var lastGlobalPhaseAdvanceFiredAtSessionCount: Int?
+    /// Per-exercise narrow projections sorted by exerciseId. Drops topSets,
+    /// sessionSnapshots, and formDegradationCleanSessions per ADR-0005
+    /// token-economy guidance.
+    var perExerciseSummary: [ExerciseSummary]
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
@@ -77,6 +81,7 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case transfers
         case totalSessionCount         = "total_session_count"
         case lastGlobalPhaseAdvanceFiredAtSessionCount = "last_global_phase_advance_fired_at_session_count"
+        case perExerciseSummary        = "per_exercise_summary"
     }
 }
 
@@ -113,6 +118,10 @@ extension TraineeModelDigest {
             && $0.pairedObservations >= Self.transferPairedObservationsThreshold
         }
 
+        let perExerciseSummary = model.exercises
+            .sorted { $0.key < $1.key }
+            .map { ExerciseSummary(profile: $0.value) }
+
         self.init(
             goal: model.goal,
             projections: model.projections,
@@ -124,7 +133,8 @@ extension TraineeModelDigest {
             disruptedPatterns: disruptedPatterns,
             transfers: transfers,
             totalSessionCount: model.totalSessionCount,
-            lastGlobalPhaseAdvanceFiredAtSessionCount: model.lastGlobalPhaseAdvanceFiredAtSessionCount
+            lastGlobalPhaseAdvanceFiredAtSessionCount: model.lastGlobalPhaseAdvanceFiredAtSessionCount,
+            perExerciseSummary: perExerciseSummary
         )
     }
 }
@@ -200,6 +210,48 @@ struct MuscleSummary: Codable, Sendable, Hashable {
         case volumeDeficit     = "volume_deficit"
         case focusWeight       = "focus_weight"
         case stagnationStatus  = "stagnation_status"
+        case confidence
+    }
+}
+
+// MARK: - ExerciseSummary
+
+/// Narrow projection of ExerciseProfile (B4 / #89). Drops topSets,
+/// sessionSnapshots, and formDegradationCleanSessions; surfaces the
+/// fields a coaching prompt actually reasons over (e1RM trio, session
+/// count, form-degradation flag, learning-phase flag, confidence).
+/// learningPhase is read from the source profile's computed property,
+/// not redefined here — the threshold (sessionCount < 10) is locked
+/// by ADR-0005.
+struct ExerciseSummary: Codable, Sendable, Hashable {
+    var exerciseId: String
+    var e1rmCurrent: Double
+    var e1rmMedian: Double
+    var e1rmPeak: Double
+    var sessionCount: Int
+    var learningPhase: Bool
+    var formDegradationFlag: Bool
+    var confidence: AxisConfidence
+
+    init(profile: ExerciseProfile) {
+        self.exerciseId          = profile.exerciseId
+        self.e1rmCurrent         = profile.e1rmCurrent
+        self.e1rmMedian          = profile.e1rmMedian
+        self.e1rmPeak            = profile.e1rmPeak
+        self.sessionCount        = profile.sessionCount
+        self.learningPhase       = profile.learningPhase
+        self.formDegradationFlag = profile.formDegradationFlag
+        self.confidence          = profile.confidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case exerciseId          = "exercise_id"
+        case e1rmCurrent         = "e1rm_current"
+        case e1rmMedian          = "e1rm_median"
+        case e1rmPeak            = "e1rm_peak"
+        case sessionCount        = "session_count"
+        case learningPhase       = "learning_phase"
+        case formDegradationFlag = "form_degradation_flag"
         case confidence
     }
 }

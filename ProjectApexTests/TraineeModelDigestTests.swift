@@ -928,6 +928,7 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertTrue(digest.prescriptionAccuracy.isEmpty)
         XCTAssertTrue(digest.disruptedPatterns.isEmpty)
         XCTAssertTrue(digest.transfers.isEmpty)
+        XCTAssertTrue(digest.perExerciseSummary.isEmpty)
     }
 
     // MARK: ─── B4 (#89) cycle 3: totalSessionCount pass-through ───────────────
@@ -939,6 +940,47 @@ final class TraineeModelDigestTests: XCTestCase {
         let digest = TraineeModelDigest(from: model, asOf: ref)
 
         XCTAssertEqual(digest.totalSessionCount, 42)
+    }
+
+    // MARK: ─── B4 (#89) cycle 5: perExerciseSummary projection ────────────────
+
+    func test_digest_perExerciseSummary_projectsExerciseProfileFields() {
+        var model = makeBaselineModel()
+        model.exercises = [
+            "bench_press": ExerciseProfile(
+                exerciseId: "bench_press",
+                e1rmCurrent: 100, e1rmMedian: 95, e1rmPeak: 105,
+                sessionCount: 15, formDegradationFlag: true,
+                confidence: .established
+            ),
+            "squat": ExerciseProfile(
+                exerciseId: "squat",
+                e1rmCurrent: 140, e1rmMedian: 135, e1rmPeak: 145,
+                sessionCount: 8, formDegradationFlag: false,
+                confidence: .calibrating
+            ),
+        ]
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.perExerciseSummary.count, 2)
+        let byExercise = Dictionary(uniqueKeysWithValues:
+            digest.perExerciseSummary.map { ($0.exerciseId, $0) })
+
+        let bench = try? XCTUnwrap(byExercise["bench_press"])
+        XCTAssertEqual(bench?.e1rmCurrent, 100)
+        XCTAssertEqual(bench?.e1rmMedian, 95)
+        XCTAssertEqual(bench?.e1rmPeak, 105)
+        XCTAssertEqual(bench?.sessionCount, 15)
+        XCTAssertEqual(bench?.learningPhase, false,
+            "sessionCount=15 → learning phase ended (threshold 10 per ADR-0005)")
+        XCTAssertEqual(bench?.formDegradationFlag, true)
+        XCTAssertEqual(bench?.confidence, .established)
+
+        let sq = try? XCTUnwrap(byExercise["squat"])
+        XCTAssertEqual(sq?.learningPhase, true,
+            "sessionCount=8 → still in learning phase (threshold 10 per ADR-0005)")
+        XCTAssertEqual(sq?.formDegradationFlag, false)
     }
 
     // MARK: ─── B4 (#89) cycle 4: lastGlobalPhaseAdvance pass-through ──────────
