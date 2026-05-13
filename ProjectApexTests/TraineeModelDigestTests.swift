@@ -887,6 +887,80 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan v2.0 header must record the B4 cycle 9b cumulative change")
     }
 
+    // MARK: ─── B4 (#89) cycle 10: CROSS-EXERCISE TRANSFER block — prompt anchors ──
+    //
+    // Reads trainee_model_digest.transfers[] (already filtered to R²≥0.4 ∧
+    // pairedObservations≥5 per Q10 lock-in — entries the LLM should reason
+    // from). Each entry: from_exercise_id, to_exercise_id, coefficient,
+    // r_squared, paired_observations.
+
+    func test_sessionPlanPrompt_b4_10_referencesTransfersDigestPath() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("CROSS-EXERCISE TRANSFER"),
+                      "SessionPlan must include the CROSS-EXERCISE TRANSFER section header")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.transfers"),
+                      "SessionPlan must reference the digest transfers JSON path")
+        XCTAssertTrue(prompt.contains("R² ≥ 0.4"),
+                      "SessionPlan must surface the Q10 R² filter floor so the LLM knows surfaced entries are vetted")
+        XCTAssertTrue(prompt.contains("paired_observations"),
+                      "SessionPlan must reference the digest paired_observations field (≥ 5 filter input)")
+    }
+
+    func test_sessionPlanPrompt_b4_10_teachesCoefficientAsStrengthRatio() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Coefficient meaning: target_weight on `to` exercise ≈ source_weight on
+        // `from` exercise × coefficient (same intent / rep target). Surface the
+        // multiplication so the LLM doesn't invert the relationship.
+        XCTAssertTrue(prompt.contains("coefficient"),
+                      "SessionPlan must reference the coefficient field")
+        XCTAssertTrue(prompt.contains("from_exercise_id"),
+                      "SessionPlan must reference the from_exercise_id source side")
+        XCTAssertTrue(prompt.contains("to_exercise_id"),
+                      "SessionPlan must reference the to_exercise_id target side")
+        XCTAssertTrue(prompt.contains("× coefficient"),
+                      "SessionPlan must teach the multiplication direction (target ≈ source × coefficient) so the LLM does not invert the ratio")
+    }
+
+    func test_sessionPlanPrompt_b4_10_teachesRSquaredAsConfidenceWeighting() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // R² is the regression-fit quality. Per Q10 lock, the filter excludes
+        // R² < 0.4, so any surfaced entry is at-least "moderate fit". The
+        // prompt should still differentiate moderate (≈0.4–0.6) from strong
+        // (≥0.7) so the LLM weights its anchor confidence.
+        XCTAssertTrue(prompt.contains("r_squared"),
+                      "SessionPlan must reference the r_squared field")
+        XCTAssertTrue(prompt.contains("higher r_squared"),
+                      "SessionPlan must teach that higher r_squared = stronger evidence (weight the anchor accordingly)")
+    }
+
+    func test_sessionPlanPrompt_b4_10_teachesWhenToUseTransfer_lowHistoryAnchoring() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        // Primary use case: anchoring starting weight on an exercise the user
+        // has low lift_history depth on, when a related transferring exercise
+        // has rich history. Should NOT override direct recent sets on the
+        // target exercise — transfer is for cold-start, not for overriding fresh
+        // signal.
+        XCTAssertTrue(prompt.contains("calibration") || prompt.contains("anchor starting weight"),
+                      "SessionPlan must explain when to apply the transfer (cold-start calibration / anchoring starting weight)")
+        XCTAssertTrue(prompt.contains("session_count"),
+                      "SessionPlan must tie the transfer use to lift_history session_count (low history on target → consult transfer)")
+        XCTAssertTrue(prompt.contains("override recent direct sets"),
+                      "SessionPlan must warn against using transfer to override direct recent sets on the target exercise")
+    }
+
+    func test_sessionPlanPrompt_b4_10_versionHeaderRecordsB4Cycle10CumulativeChange() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("VERSION: 2.0"),
+                      "SessionPlan prompt must remain at v2.0 (no version bump mid-B4)")
+        XCTAssertTrue(prompt.contains("Added CROSS-EXERCISE TRANSFER block"),
+                      "SessionPlan v2.0 header must record the B4 cycle 10 cumulative change")
+    }
+
     // ─── Concern B: payload values per digest state ───────────────────────
 
     func test_betaFixture_plateaued_horizontalPush_encodesTrendInPayload() throws {
