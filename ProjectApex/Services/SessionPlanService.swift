@@ -170,7 +170,6 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
     let userProfile: MacroPlanUserProfile
     let gymProfile: MacroPlanGymProfile
     let liftHistory: [LiftHistoryEntry]
-    let weekFatigue: WeekFatigueSignals
     let ragMemory: [RAGMemoryItem]
     /// Phase-1-Skip: gap-awareness context. Nil only if assembly fails unexpectedly;
     /// in practice this is always provided for every session generation call.
@@ -192,7 +191,6 @@ nonisolated struct SessionPlanRequest: Codable, Sendable {
         case userProfile         = "user_profile"
         case gymProfile          = "gym_profile"
         case liftHistory         = "lift_history"
-        case weekFatigue         = "week_fatigue"
         case ragMemory           = "rag_memory"
         case temporalContext     = "temporal_context"
         case traineeModelDigest  = "trainee_model_digest"
@@ -401,12 +399,14 @@ actor SessionPlanService {
             volumeLandmark: weekVolumeLandmark(for: week.phase, weekNumber: week.weekNumber)
         )
 
-        // Plateau/decline signals + volume-deficit signals are sourced from the
-        // trainee-model digest below (per_pattern_summary[].trend per ADR-0009
-        // hybrid plateau verdict; per_muscle_summary[].volume_deficit per #87 /
-        // B2) — the legacy client-side load() calls were removed in B1 (#86)
-        // and B2 (#87).
-        let traineeModelDigest = await traineeModelService?.digest()
+        // Plateau/decline + volume-deficit signals come from the digest
+        // (per_pattern_summary[].trend per ADR-0009; per_muscle_summary[].
+        // volume_deficit per B2). B4 (#89) also routes weeklyFatigue through
+        // the digest — SessionPlanRequest no longer carries week_fatigue
+        // as a top-level field.
+        let traineeModelDigest = await traineeModelService?.digest(
+            weeklyFatigue: fatigue
+        )
 
         let request = SessionPlanRequest(
             userId: userId.uuidString,
@@ -419,7 +419,6 @@ actor SessionPlanService {
             userProfile: userProfile,
             gymProfile: MacroPlanGymProfile(from: gymProfile),
             liftHistory: liftHistory,
-            weekFatigue: fatigue,
             ragMemory: ragMemory,
             temporalContext: temporalContext,
             traineeModelDigest: traineeModelDigest
