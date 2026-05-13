@@ -830,6 +830,33 @@ final class TraineeModelDigestTests: XCTestCase {
             "ProgramOverviewView must not reference MovementPatternPhaseState (type deleted with PatternPhaseService.swift in B3/#88)")
     }
 
+    func test_sessionPlanService_b3_doesNotCarryPatternPhasesField() throws {
+        // Mirror B1's test_sessionPlanService_doesNotReferenceLegacyStagnationField:
+        // assert the type no longer declares the legacy patternPhases field +
+        // CodingKey + PatternPhaseInfo reference.
+        let source = try loadSourceFile("ProjectApex/Services/SessionPlanService.swift")
+        XCTAssertFalse(source.contains("patternPhases"),
+            "SessionPlanService must not declare or reference patternPhases (TemporalContext field removed in B3/#88 — phase is read from TraineeModelDigest)")
+        XCTAssertFalse(source.contains("pattern_phases"),
+            "SessionPlanService must not emit the pattern_phases JSON key (TemporalContext field removed in B3/#88)")
+        XCTAssertFalse(source.contains("PatternPhaseInfo"),
+            "SessionPlanService must not reference PatternPhaseInfo (type deleted with PatternPhaseService.swift in B3/#88)")
+    }
+
+    func test_temporalContext_b3_encodedJsonOmitsPatternPhasesKey() throws {
+        let ctx = TemporalContext(
+            daysSinceLastSession: 4,
+            daysSinceLastTrainedByPattern: ["squat": 7],
+            skippedSessionCountLast30Days: 0,
+            globalProgrammePhase: "intensification",
+            globalProgrammeWeek: 5
+        )
+        let data = try JSONEncoder().encode(ctx)
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertFalse(json.contains("\"pattern_phases\""),
+            "Encoded TemporalContext JSON must not contain the pattern_phases key (field removed in B3/#88 — phase is in TraineeModelDigest)")
+    }
+
     func test_skipFeatureTests_b3_doesNotReferenceLegacyPatternPhaseSymbols() throws {
         // Q7 (NEW): SkipFeatureTests.swift had three legacy references — prompt-
         // content asserts, a Codable round-trip test using PatternPhaseInfo, and

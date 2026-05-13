@@ -178,8 +178,9 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable {
 /// Gap-awareness context for the LLM, describing how long it has been since the user
 /// last trained overall and per movement pattern.
 ///
-/// This struct is intentionally open for extension — Phase 2 will add per-pattern phase
-/// state (`phasedByPattern: [String: MesocyclePhase]`) without requiring a rewrite.
+/// Per-pattern phase state moved to `TraineeModelDigest.perPatternSummary` in
+/// B3 (#88); the legacy `patternPhases: [String: PatternPhaseInfo]?` field +
+/// `pattern_phases` JSON key were removed in that slice.
 ///
 /// Assembly: computed in `ProgramViewModel.generateDaySession` from:
 ///   • recent session metadata (Supabase query for last 7 days, any type)
@@ -196,17 +197,11 @@ nonisolated struct TemporalContext: Codable, Sendable {
     /// Number of sessions explicitly skipped by the user in the last 30 days.
     let skippedSessionCountLast30Days: Int
 
-    // MARK: Phase 2 — Per-pattern phase state
-    // All three fields are optional so existing tests and serialised data remain valid.
-
     /// The programme's global phase at the time of this session (MesocyclePhase raw value).
     /// Nil when not yet available (pre-migration or test contexts).
     let globalProgrammePhase: String?
     /// The programme's global week number (1-based).
     let globalProgrammeWeek: Int?
-    /// Per-movement-pattern phase state. Keys are movement pattern strings.
-    /// Nil when PatternPhaseService has not yet been initialised for this user.
-    let patternPhases: [String: PatternPhaseInfo]?
     /// True when daysSinceLastSession >= 28 — signals a significant return-to-training gap.
     /// When true the LLM ignores the pattern phase label and generates a reduced-volume
     /// accumulation baseline session instead.
@@ -218,7 +213,6 @@ nonisolated struct TemporalContext: Codable, Sendable {
         case skippedSessionCountLast30Days    = "skipped_session_count_last_30_days"
         case globalProgrammePhase             = "global_programme_phase"
         case globalProgrammeWeek              = "global_programme_week"
-        case patternPhases                    = "pattern_phases"
         case requiresReturnPhaseOverride      = "requires_return_phase_override"
     }
 
@@ -227,7 +221,6 @@ nonisolated struct TemporalContext: Codable, Sendable {
     ///   can distinguish "first-ever session" from "field missing from payload".
     /// • `globalProgrammePhase` and `globalProgrammeWeek` also encode as null when nil
     ///   so the LLM sees them explicitly rather than treating absence as an unknown.
-    /// • `patternPhases` uses encodeIfPresent — absence signals "use global phase".
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(daysSinceLastSession, forKey: .daysSinceLastSession)
@@ -235,12 +228,11 @@ nonisolated struct TemporalContext: Codable, Sendable {
         try container.encode(skippedSessionCountLast30Days, forKey: .skippedSessionCountLast30Days)
         try container.encode(globalProgrammePhase, forKey: .globalProgrammePhase)
         try container.encode(globalProgrammeWeek, forKey: .globalProgrammeWeek)
-        try container.encodeIfPresent(patternPhases, forKey: .patternPhases)
         try container.encode(requiresReturnPhaseOverride, forKey: .requiresReturnPhaseOverride)
     }
 
-    /// Custom decoder: uses decodeIfPresent for all Phase 2 fields so pre-Phase-2
-    /// serialised payloads (missing the new keys) still decode without error.
+    /// Custom decoder: uses decodeIfPresent for optional fields so pre-Phase-2
+    /// serialised payloads (missing the keys) still decode without error.
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         daysSinceLastSession          = try c.decodeIfPresent(Int.self, forKey: .daysSinceLastSession)
@@ -248,7 +240,6 @@ nonisolated struct TemporalContext: Codable, Sendable {
         skippedSessionCountLast30Days = try c.decode(Int.self, forKey: .skippedSessionCountLast30Days)
         globalProgrammePhase          = try c.decodeIfPresent(String.self, forKey: .globalProgrammePhase)
         globalProgrammeWeek           = try c.decodeIfPresent(Int.self, forKey: .globalProgrammeWeek)
-        patternPhases                 = try c.decodeIfPresent([String: PatternPhaseInfo].self, forKey: .patternPhases)
         requiresReturnPhaseOverride   = try c.decodeIfPresent(Bool.self, forKey: .requiresReturnPhaseOverride) ?? false
     }
 
@@ -259,7 +250,6 @@ nonisolated struct TemporalContext: Codable, Sendable {
         skippedSessionCountLast30Days: Int,
         globalProgrammePhase: String? = nil,
         globalProgrammeWeek: Int? = nil,
-        patternPhases: [String: PatternPhaseInfo]? = nil,
         requiresReturnPhaseOverride: Bool = false
     ) {
         self.daysSinceLastSession           = daysSinceLastSession
@@ -267,7 +257,6 @@ nonisolated struct TemporalContext: Codable, Sendable {
         self.skippedSessionCountLast30Days  = skippedSessionCountLast30Days
         self.globalProgrammePhase           = globalProgrammePhase
         self.globalProgrammeWeek            = globalProgrammeWeek
-        self.patternPhases                  = patternPhases
         self.requiresReturnPhaseOverride    = requiresReturnPhaseOverride
     }
 }
