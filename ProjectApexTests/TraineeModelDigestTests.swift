@@ -803,6 +803,12 @@ final class TraineeModelDigestTests: XCTestCase {
             "ProgramViewModel must not reference PatternPhaseInfo (type deleted with PatternPhaseService.swift in B3/#88)")
     }
 
+    func test_programViewModel_b3_doesNotInvokePatternPhaseService_clearOnGenerate() throws {
+        let source = try loadSourceFile("ProjectApex/Features/Program/ProgramViewModel.swift")
+        XCTAssertFalse(source.contains("PatternPhaseService.clear"),
+            "ProgramViewModel must not call PatternPhaseService.clear in generateProgram/generateMacroSkeleton (removed in B3/#88 — server-side EF handles phase reset on program regen)")
+    }
+
     // MARK: ─── B2 (#87): cleanup-reversion guards ────────────────────────────
 
     func test_sessionPlanService_doesNotReferenceLegacyVolumeDeficitsField() throws {

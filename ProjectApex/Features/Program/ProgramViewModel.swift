@@ -214,9 +214,6 @@ final class ProgramViewModel {
         guard await !programGenerationService.isGenerating else { return }
         viewState = .generating
 
-        // Clear per-pattern phase state: this is a brand-new programme, not a regeneration.
-        PatternPhaseService.clear()
-
         // Read user profile from UserDefaults for consistent generation across paths.
         let bwKg: Double? = UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) > 0
             ? UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) : nil
@@ -278,9 +275,6 @@ final class ProgramViewModel {
     func generateMacroSkeleton(gymProfile: GymProfile, persistToSupabase: Bool = true) async {
         guard await !macroPlanService.isGenerating else { return }
         viewState = .generating
-
-        // Clear per-pattern phase state: this is a brand-new programme, not a regeneration.
-        PatternPhaseService.clear()
 
         // Read onboarding profile from UserDefaults if available.
         let bwKg: Double? = UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) > 0
