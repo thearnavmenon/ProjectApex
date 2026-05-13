@@ -811,8 +811,15 @@ final class TraineeModelDigestTests: XCTestCase {
 
     func test_workoutSessionManager_b3_doesNotAdvancePatternPhases() throws {
         let source = try loadSourceFile("ProjectApex/Features/Workout/WorkoutSessionManager.swift")
-        XCTAssertFalse(source.contains("PatternPhaseService"),
-            "WorkoutSessionManager must not reference PatternPhaseService (removed in B3/#88 — phase advancement is server-side in the update-trainee-model Edge Function per ADR-0011)")
+        // Mirror B1's "doesNotComputeStagnationSignals" form: match the actual hook
+        // surface (specific method calls), not the bare type name — backstory
+        // comments are allowed to reference the deleted service.
+        XCTAssertFalse(source.contains("PatternPhaseService.load"),
+            "WorkoutSessionManager must not invoke PatternPhaseService.load (removed in B3/#88 — phase advancement is server-side in the EF per ADR-0011)")
+        XCTAssertFalse(source.contains("PatternPhaseService.advancePhases"),
+            "WorkoutSessionManager must not invoke PatternPhaseService.advancePhases (removed in B3/#88)")
+        XCTAssertFalse(source.contains("PatternPhaseService.persist"),
+            "WorkoutSessionManager must not invoke PatternPhaseService.persist (removed in B3/#88)")
     }
 
     // MARK: ─── B2 (#87): cleanup-reversion guards ────────────────────────────
