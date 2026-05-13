@@ -259,7 +259,6 @@ enum InferenceSpike {
                     outcomeNote: "near_miss"
                 )
             ],
-            weeklyFatigueSummary: nil,
             gymWeightFacts: nil,
             traineeModelDigest: nil
         )

@@ -136,8 +136,12 @@ actor WorkoutSessionManager {
     private var sessionHistoryToday: [ExerciseHistoryItem] = []
     /// User biometric profile read from UserDefaults at session start (FB-003).
     private var cachedUserProfile: UserProfileContext? = nil
-    /// Rolling weekly fatigue summary computed at session start and refreshed each set (FB-009).
-    private var cachedWeeklyFatigueSummary: WeeklyFatigueSummary? = nil
+    /// Rolling 7-day fatigue projection (B4 / #89). Fetched at session start
+    /// and forwarded into TraineeModelService.digest(weeklyFatigue:) on each
+    /// per-set context build. Nil only on Supabase fetch error — the digest's
+    /// non-optional weeklyFatigue field substitutes an empty struct in that
+    /// case (γ2 lock).
+    private var cachedWeeklyFatigue: WeekFatigueSignals? = nil
     /// GymProfile snapshot cached at session start — used by assembleWorkoutContext()
     /// to look up bodyweightOnly flags without crossing actor boundaries.
     private var cachedGymProfile: GymProfile? = nil
@@ -207,7 +211,7 @@ actor WorkoutSessionManager {
         self.cachedBiometrics = nil
         self.cachedStreakResult = nil
         self.cachedRAGMemory = []
-        self.cachedWeeklyFatigueSummary = nil
+        self.cachedWeeklyFatigue = nil
         self.cachedGymProfile = nil
         self.swapRecords = []
         self.inflightRequestCount = 0
@@ -265,11 +269,11 @@ actor WorkoutSessionManager {
         // Fetch streak, RAG memory, weekly fatigue, and session count in parallel
         async let streakFetch        = gymStreakService.computeStreak(userId: newSession.userId)
         async let ragFetch           = fetchRAGMemory(for: firstExercise)
-        async let fatigueFetch       = fetchWeeklyFatigueSummary(userId: newSession.userId)
+        async let fatigueFetch       = fetchWeeklyFatigue(userId: newSession.userId)
         async let sessionCountFetch  = fetchCompletedSessionCount(userId: newSession.userId)
         cachedStreakResult           = await streakFetch
         cachedRAGMemory             = await ragFetch
-        cachedWeeklyFatigueSummary  = await fatigueFetch
+        cachedWeeklyFatigue  = await fatigueFetch
         cachedTotalSessionCount      = await sessionCountFetch
 
         // Trigger first prescription; state → .active when result arrives
@@ -755,7 +759,7 @@ actor WorkoutSessionManager {
         self.cachedBiometrics = nil
         self.cachedStreakResult = nil
         self.cachedRAGMemory = []
-        self.cachedWeeklyFatigueSummary = nil
+        self.cachedWeeklyFatigue = nil
         self.inflightRequestCount = 0
         self.inferenceGeneration = 0
         self.inferenceRetryNeeded = false
@@ -813,11 +817,11 @@ actor WorkoutSessionManager {
         let currentExercise = trainingDay.exercises[exerciseIndex]
         async let streakFetch       = gymStreakService.computeStreak(userId: pausedState.userId)
         async let ragFetch          = fetchRAGMemory(for: currentExercise)
-        async let fatigueFetch      = fetchWeeklyFatigueSummary(userId: pausedState.userId)
+        async let fatigueFetch      = fetchWeeklyFatigue(userId: pausedState.userId)
         async let sessionCountFetch = fetchCompletedSessionCount(userId: pausedState.userId)
         cachedStreakResult          = await streakFetch
         cachedRAGMemory            = await ragFetch
-        cachedWeeklyFatigueSummary = await fatigueFetch
+        cachedWeeklyFatigue = await fatigueFetch
         cachedTotalSessionCount    = await sessionCountFetch
 
         print("[WorkoutSessionManager] resumeSession ✓ — sessionId: \(pausedState.sessionId), exerciseIndex: \(exerciseIndex), setNumber: \(currentSetNumber)")
@@ -858,7 +862,7 @@ actor WorkoutSessionManager {
         cachedStreakResult = nil
         cachedRAGMemory = []
         cachedUserProfile = nil
-        cachedWeeklyFatigueSummary = nil
+        cachedWeeklyFatigue = nil
         cachedGymProfile = nil
         swapRecords = []
         inflightRequestCount = 0
@@ -1055,9 +1059,12 @@ actor WorkoutSessionManager {
         // These are injected as hard constraints so the AI never prescribes unavailable loads.
         let gymFacts = await gymFactStore.contextStrings(for: exercise.equipmentRequired)
 
-        // Trainee-model projection (B1 / #86). Nil when the local store hasn't
-        // hydrated yet — prompt rule degrades to "no trend signal" gracefully.
-        let traineeModelDigest = await traineeModelService?.digest()
+        // Trainee-model projection (B1 / #86, B4 / #89). Weekly fatigue is now
+        // routed through the digest's weeklyFatigue field per (α)+(I); cache
+        // can be nil on Supabase fetch error → digest substitutes empty struct.
+        let traineeModelDigest = await traineeModelService?.digest(
+            weeklyFatigue: cachedWeeklyFatigue
+        )
 
         return WorkoutContext(
             requestType: "set_prescription",
@@ -1074,7 +1081,6 @@ actor WorkoutSessionManager {
             qualitativeNotesToday: qualitativeNotesToday,
             ragRetrievedMemory: cachedRAGMemory,
             sessionLog: buildSessionLog(),
-            weeklyFatigueSummary: cachedWeeklyFatigueSummary,
             gymWeightFacts: gymFacts.isEmpty ? nil : gymFacts,
             traineeModelDigest: traineeModelDigest
         )
@@ -1319,10 +1325,14 @@ actor WorkoutSessionManager {
         }
     }
 
-    /// Fetches recent set logs from Supabase and computes the rolling 7-day fatigue summary.
-    /// Called once at session start and stored in `cachedWeeklyFatigueSummary`.
-    private func fetchWeeklyFatigueSummary(userId: UUID) async -> WeeklyFatigueSummary? {
-        // Query set_logs joined to workout_sessions for this user in the last 7 days
+    /// Fetches recent set logs from Supabase and computes the rolling 7-day
+    /// fatigue projection using `WeekFatigueSignals.compute`. Called once at
+    /// session start (and again on resume) and stored in `cachedWeeklyFatigue`.
+    ///
+    /// B4 (#89): rewritten under (α)+(I) to produce the canonical
+    /// `WeekFatigueSignals` shape that the digest carries. Session count for
+    /// the week is derived from distinct session_ids in the fetched logs.
+    private func fetchWeeklyFatigue(userId: UUID) async -> WeekFatigueSignals? {
         let sevenDaysAgo = ISO8601DateFormatter().string(
             from: Date(timeIntervalSinceNow: -7 * 24 * 3600)
         )
@@ -1339,35 +1349,8 @@ actor WorkoutSessionManager {
         } catch {
             return nil
         }
-        guard !recentLogs.isEmpty else {
-            return WeeklyFatigueSummary(
-                sessionsThisWeek: 0,
-                avgRpeThisWeek: nil,
-                exercisesWithMultipleMisses: [],
-                totalSetsThisWeek: recentLogs.count
-            )
-        }
-        let rpeValues = recentLogs.compactMap { $0.rpeFelt.map(Double.init) }
-        let avgRpe = rpeValues.isEmpty ? nil : rpeValues.reduce(0, +) / Double(rpeValues.count)
-        // Count misses per exercise (actual < planned)
-        var missCounts: [String: Int] = [:]
-        for log in recentLogs {
-            let target = log.aiPrescribed?.reps ?? 0
-            if target > 0, log.repsCompleted < target {
-                missCounts[log.exerciseId, default: 0] += 1
-            }
-        }
-        let exercisesWithMultipleMisses = missCounts
-            .filter { $0.value >= 2 }
-            .map { $0.key }
-            .sorted()
-        let sessionIds = Set(recentLogs.map { $0.sessionId.uuidString })
-        return WeeklyFatigueSummary(
-            sessionsThisWeek: sessionIds.count,
-            avgRpeThisWeek: avgRpe,
-            exercisesWithMultipleMisses: exercisesWithMultipleMisses,
-            totalSetsThisWeek: recentLogs.count
-        )
+        let sessionCount = Set(recentLogs.map(\.sessionId)).count
+        return WeekFatigueSignals.compute(from: recentLogs, sessionCount: sessionCount)
     }
 
     /// Fetches the top-K most relevant memory items for `exercise` via the

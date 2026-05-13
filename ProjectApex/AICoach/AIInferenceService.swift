@@ -44,9 +44,6 @@ nonisolated struct WorkoutContext: Codable, Sendable {
     /// Append-only log of every set completed so far this session, across all exercises.
     /// The AI's primary working memory for free-reasoning about weight/rep adjustments (FB-009).
     let sessionLog: [SessionLogEntry]
-    /// Rolling 7-day fatigue picture. The AI reads this and decides voluntarily whether
-    /// to reduce volume/intensity — no hardcoded threshold triggers it (FB-009).
-    let weeklyFatigueSummary: WeeklyFatigueSummary?
     /// Confirmed unavailable weights for the current equipment type, sourced from
     /// GymFactStore. E.g. ["16.0kg not available — use 15.0kg instead"].
     /// The AI treats these as hard constraints — never prescribe the unavailable weight.
@@ -72,7 +69,6 @@ nonisolated struct WorkoutContext: Codable, Sendable {
         case qualitativeNotesToday      = "qualitative_notes_today"
         case ragRetrievedMemory         = "rag_retrieved_memory"
         case sessionLog                 = "session_log"
-        case weeklyFatigueSummary       = "weekly_fatigue_summary"
         case gymWeightFacts             = "gym_weight_facts"
         case traineeModelDigest         = "trainee_model_digest"
     }
@@ -387,28 +383,6 @@ nonisolated struct SessionLogEntry: Codable, Sendable {
         case actualReps         = "actual_reps"
         case rpe
         case outcomeNote        = "outcome_note"
-    }
-}
-
-// MARK: WeeklyFatigueSummary
-
-/// Rolling weekly fatigue picture fed into every WorkoutContext.
-/// No thresholds are applied here — the AI reads this data and decides what to do.
-nonisolated struct WeeklyFatigueSummary: Codable, Sendable {
-    /// Number of sessions completed in the rolling 7-day window.
-    let sessionsThisWeek: Int
-    /// Average RPE across all sets in the rolling 7-day window. Nil if no data.
-    let avgRpeThisWeek: Double?
-    /// Exercise names that have had 2 or more rep misses (actual < prescribed) this week.
-    let exercisesWithMultipleMisses: [String]
-    /// Total sets logged this week across all exercises.
-    let totalSetsThisWeek: Int
-
-    enum CodingKeys: String, CodingKey {
-        case sessionsThisWeek           = "sessions_this_week"
-        case avgRpeThisWeek             = "avg_rpe_this_week"
-        case exercisesWithMultipleMisses = "exercises_with_multiple_misses"
-        case totalSetsThisWeek          = "total_sets_this_week"
     }
 }
 
@@ -815,12 +789,6 @@ extension WorkoutContext {
                     outcomeNote: "moderate_miss"
                 )
             ],
-            weeklyFatigueSummary: WeeklyFatigueSummary(
-                sessionsThisWeek: 3,
-                avgRpeThisWeek: 7.8,
-                exercisesWithMultipleMisses: [],
-                totalSetsThisWeek: 42
-            ),
             gymWeightFacts: nil,
             traineeModelDigest: nil
         )

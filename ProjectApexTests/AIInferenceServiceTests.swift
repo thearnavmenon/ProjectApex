@@ -678,11 +678,6 @@ final class AIInferenceServiceTests: XCTestCase {
                     outcomeNote: "on_target"
                 )
             ],
-            weeklyFatigueSummary: WeeklyFatigueSummary(
-                sessionsThisWeek: 3, avgRpeThisWeek: 7.0,
-                exercisesWithMultipleMisses: [],
-                totalSetsThisWeek: 42
-            ),
             gymWeightFacts: nil,
             traineeModelDigest: digest
         )
