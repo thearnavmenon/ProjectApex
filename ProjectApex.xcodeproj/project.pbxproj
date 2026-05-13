@@ -28,7 +28,6 @@
 		47D91CC12F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC02F61A9E7007B3B34 /* WorkoutContextAssemblyTests.swift */; };
 		47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47D91CC22F61AADC007B3B34 /* AIInferenceServiceTests.swift */; };
 		47DFECFD2F72C1FC006F4B62 /* ExerciseLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DFECFC2F72C1FC006F4B62 /* ExerciseLibraryTests.swift */; };
-		47DFED072F73D887006F4B62 /* VolumeValidationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DFED062F73D887006F4B62 /* VolumeValidationServiceTests.swift */; };
 		47DFED092F99B001006F4B62 /* AnthropicProviderCachingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47DFED082F99B001006F4B62 /* AnthropicProviderCachingTests.swift */; };
 		47E356CB2F61BA7300C69CD6 /* SupabaseClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */; };
 		47E356CF2F61BFCF00C69CD6 /* EquipmentMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */; };
@@ -92,7 +91,6 @@
 		47DFECF42F7261C1006F4B62 /* ExerciseSwapViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapViewModel.swift; sourceTree = "<group>"; };
 		47DFECF52F7261EE006F4B62 /* ExerciseSwapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseSwapView.swift; sourceTree = "<group>"; };
 		47DFECFC2F72C1FC006F4B62 /* ExerciseLibraryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseLibraryTests.swift; sourceTree = "<group>"; };
-		47DFED062F73D887006F4B62 /* VolumeValidationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VolumeValidationServiceTests.swift; sourceTree = "<group>"; };
 		47DFED082F99B001006F4B62 /* AnthropicProviderCachingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnthropicProviderCachingTests.swift; sourceTree = "<group>"; };
 		47E356CA2F61BA7300C69CD6 /* SupabaseClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClientTests.swift; sourceTree = "<group>"; };
 		47E356CE2F61BFCF00C69CD6 /* EquipmentMergerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentMergerTests.swift; sourceTree = "<group>"; };
@@ -227,7 +225,6 @@
 				47C5C1BB2F62C08E0005F99E /* MemoryServiceTests.swift */,
 				474B848C2F67D31C001E0879 /* MacroPlanServiceDayCountTests.swift */,
 				47DFECFC2F72C1FC006F4B62 /* ExerciseLibraryTests.swift */,
-				47DFED062F73D887006F4B62 /* VolumeValidationServiceTests.swift */,
 				478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */,
 				478DD9F42F993A1E001D3636 /* PatternPhaseServiceTests.swift */,
 				FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */,
@@ -365,7 +362,6 @@
 				47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */,
 				47DFECFD2F72C1FC006F4B62 /* ExerciseLibraryTests.swift in Sources */,
 				47D91CB32F61A8CB007B3B34 /* GymProfileTests.swift in Sources */,
-				47DFED072F73D887006F4B62 /* VolumeValidationServiceTests.swift in Sources */,
 				47C5C1B82F62BB3D0005F99E /* GymStreakServiceTests.swift in Sources */,
 				47BB8E662F6273F30082C53F /* ProgramPersistenceTests.swift in Sources */,
 				478DD9F12F9928C6001D3636 /* SkipFeatureTests.swift in Sources */,
