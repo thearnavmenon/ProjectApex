@@ -61,6 +61,7 @@ struct DeveloperSettingsView: View {
     @State private var openAIStored: Bool         = false
     @State private var supabaseStored: Bool       = false
     @State private var supabaseServiceStored: Bool = false
+    @State private var supabaseAnonKeyValue: String? = nil
 
     /// Banner shown after a save attempt.
     @State private var bannerMessage: String?
@@ -203,7 +204,40 @@ struct DeveloperSettingsView: View {
             statusRow(label: "Anthropic API Key",      isPresent: anthropicStored)
             statusRow(label: "OpenAI API Key",         isPresent: openAIStored)
             statusRow(label: "Supabase Anon Key",      isPresent: supabaseStored)
-            statusRow(label: "Supabase Service Key",   isPresent: supabaseServiceStored)
+            if let value = supabaseAnonKeyValue {
+                Text(value)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                statusRow(label: "Supabase Service Key", isPresent: supabaseServiceStored)
+                if supabaseServiceStored {
+                    Button(role: .destructive) {
+                        Task { await clearSupabaseServiceKey() }
+                    } label: {
+                        Image(systemName: "trash")
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Delete Supabase service key from Keychain")
+                }
+            }
+        }
+    }
+
+    /// Deletes the stored Supabase service-role key from the Keychain and clears
+    /// it from the live `SupabaseClient` so subsequent requests fall back to the
+    /// anon key as the bearer.
+    @MainActor
+    private func clearSupabaseServiceKey() async {
+        do {
+            try keychain.delete(.supabaseServiceKey)
+            await deps.supabaseClient.set(serviceKey: nil)
+            refreshStoredStatus()
+            showBanner("Supabase service key cleared.", isError: false)
+        } catch {
+            showBanner("Failed to clear service key: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -571,7 +605,8 @@ struct DeveloperSettingsView: View {
     private func refreshStoredStatus() {
         anthropicStored      = (try? keychain.retrieve(.anthropicAPIKey))    != nil
         openAIStored         = (try? keychain.retrieve(.openAIAPIKey))       != nil
-        supabaseStored       = (try? keychain.retrieve(.supabaseAnonKey))    != nil
+        supabaseAnonKeyValue  = try? keychain.retrieve(.supabaseAnonKey)
+        supabaseStored       = supabaseAnonKeyValue != nil
         supabaseServiceStored = (try? keychain.retrieve(.supabaseServiceKey)) != nil
     }
 
