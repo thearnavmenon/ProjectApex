@@ -1716,17 +1716,9 @@ export async function applySession(
       // JSONB shape contract: top-level key `transfers` carries a flat list
       // of TransferEntry per the cross-platform fixture. Internal apply uses
       // dict-of-dict for O(1) lookup; the bridges hydrate/flatten at the
-      // boundary. Legacy fallback: rows pre-dating the schema-drift fix
-      // store the same data under `transferRegressions` (dict-of-dict);
-      // when `transfers` is absent and the legacy key is present, hydrate
-      // from there. The legacy key is left in place on write (not actively
-      // cleaned up here) — a follow-up cleanup PR drops it after the
-      // migration is verified across the alpha cohort.
+      // boundary.
       const transferList = modelJson.transfers as TransferEntry[] | undefined;
-      const legacyDict = modelJson.transferRegressions as TransferDict | undefined;
-      const transferIn: TransferDict = transferList !== undefined
-        ? hydrateTransferDictFromList(transferList)
-        : (legacyDict ?? {});
+      const transferIn: TransferDict = hydrateTransferDictFromList(transferList ?? []);
       const transferRuled = applyTransfers(
         transferIn,
         setLogsArr,

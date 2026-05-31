@@ -636,6 +636,86 @@ orchestratorTest(
 );
 
 orchestratorTest(
+  "legacy-fallback-removed: row with ONLY legacy `transferRegressions` is NOT auto-migrated — applyTransfers reads only the new `transfers` key (empty); session observations are the sole source of new cells, no legacy carryover",
+  async () => {
+    // Inverse of the deleted schema-drift-fix test. PR #177 shipped a one-cycle
+    // migration shim that hydrated `transferRegressions` (legacy dict) when
+    // `transfers` (new list) was absent. This cleanup PR removes that shim
+    // after the alpha cohort migration completed (verified 2026-05-17).
+    //
+    // Seed legacy dict with 2 cells (1 observation each). Apply a session
+    // that re-trains the same pair. Pre-fix behavior: legacy obs preserved
+    // + new obs appended → 2 obs per cell. Post-fix behavior: legacy obs
+    // ignored, only new obs counted → 1 obs per cell.
+    const userId = crypto.randomUUID();
+    await sql`
+      INSERT INTO public.users (id, display_name)
+      VALUES (${userId}, ${"orchestrator-test-" + userId.slice(0, 8)})
+    `;
+    const legacyModel = {
+      transferRegressions: {
+        "barbell_bench_press": {
+          "barbell_back_squat": {
+            observations: [{ fromE1RM: 100, toE1RM: 130, observedAt: "2026-05-01T10:00:00Z" }],
+            fit: { coefficient: 0, intercept: 0, rSquared: 0, pairedObservations: 1, spearmanFlagged: false, seWidening: 0, state: "candidate" },
+          },
+        },
+        "barbell_back_squat": {
+          "barbell_bench_press": {
+            observations: [{ fromE1RM: 130, toE1RM: 100, observedAt: "2026-05-01T10:00:00Z" }],
+            fit: { coefficient: 0, intercept: 0, rSquared: 0, pairedObservations: 1, spearmanFlagged: false, seWidening: 0, state: "candidate" },
+          },
+        },
+      },
+    };
+    await sql`
+      INSERT INTO public.trainee_models (user_id, model_json)
+      VALUES (${userId}, ${sql.json(legacyModel)})
+    `;
+
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: {
+          logged_at: "2026-05-08T10:00:00Z",
+          set_logs: [
+            { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 102.5, reps_completed: 5, intent: "top", rpe_felt: 8 },
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 132.5, reps_completed: 5, intent: "top", rpe_felt: 8 },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    const transfers = modelJson.transfers as Array<Record<string, unknown>>;
+    assertExists(transfers, "transfers list must be populated by session observations");
+    assertEquals(transfers.length, 2);
+
+    const benchToSquat = transfers.find(
+      (t) => t.fromExerciseId === "barbell_bench_press" && t.toExerciseId === "barbell_back_squat",
+    );
+    const squatToBench = transfers.find(
+      (t) => t.fromExerciseId === "barbell_back_squat" && t.toExerciseId === "barbell_bench_press",
+    );
+    assertExists(benchToSquat, "bench→squat cell must come from this session");
+    assertExists(squatToBench, "squat→bench cell must come from this session");
+
+    // Each cell carries exactly 1 observation — the session's new entry.
+    // Legacy `transferRegressions` is ignored (no fallback hydration).
+    assertEquals((benchToSquat.observations as unknown[]).length, 1);
+    assertEquals((squatToBench.observations as unknown[]).length, 1);
+    assertEquals(benchToSquat.pairedObservations, 1);
+    assertEquals(benchToSquat.state, "candidate");
+  },
+);
+
+orchestratorTest(
   "A21 / #124: prescription-accuracy filter — user_corrected_weight=true is rejected by shouldContribute; cell stays absent",
   async () => {
     const userId = await seedFreshUser();
