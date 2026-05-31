@@ -87,7 +87,7 @@ extension ProgramRow {
     ///   - userId:    The authenticated user's UUID.
     static func forInsert(from mesocycle: Mesocycle, userId: UUID) -> ProgramRow {
         ProgramRow(
-            id: nil,
+            id: mesocycle.id,
             userId: userId,
             mesocycleJson: mesocycle,
             weeks: mesocycle.totalWeeks,
