@@ -97,3 +97,17 @@ The replay scaffold (`scripts/phase2-verification-gate/`) is preserved as a refe
 **PASS-CONDITIONAL.** Phase 2 production HTTP path is wired, smoke-tested in CI, and produces visible state changes across all 7 rule modules from the integration audit. 2B can proceed. All deferred items are tracked as v2.x watch-items above with explicit revisit triggers.
 
 Per Q12 PRD-internal, this verdict gates 2B-merge-allow. The deferrals are scope-realistic for n=1 alpha; they are not silent gaps.
+
+## Verdict acceptance — 2026-06-01 (post-B4 + post-cleanup boundary)
+
+The PASS-CONDITIONAL verdict above is **accepted as terminal**, exiting via the OR branch of the standing project memory's delete-when clause ("user decides Phase 2 is done at current state"). No stronger verdict was pursued; the AND branch (G1 re-runs land non-PASS-CONDITIONAL) was not mechanically reachable at n=1 without resurrecting deleted legacy services.
+
+**Reasoning:**
+
+- The three legacy comparators referenced in §3 (StagnationService, VolumeValidationService, PatternPhaseService) were permanently deleted by B1/B2/B3 (PRs [#160](https://github.com/thearnavmenon/ProjectApex/pull/160), [#170](https://github.com/thearnavmenon/ProjectApex/pull/170), [#174](https://github.com/thearnavmenon/ProjectApex/pull/174)). Re-running Comparisons 1–3 as originally written is no longer possible without structural code resurrection.
+- The n=1 alpha cohort has not grown since 2026-05-10. The v2.x revisit triggers in §80–91 (n>1 alpha, force-deload firing, completed deload cycle, multi-day NM cross-day stimulus, etc.) have not fired.
+- Cleanup PR [#194](https://github.com/thearnavmenon/ProjectApex/pull/194) (2026-06-01) completed the `transferRegressions` legacy-fallback removal and orphan-SQL apply; no Phase 2 cleanup work remains.
+- The smoke test ([`supabase/functions/update-trainee-model/smoke_test.ts`](../supabase/functions/update-trainee-model/smoke_test.ts), CI-run via `Edge Function Tests (Deno)` on every PR) remains the standing alpha-cohort oracle.
+- v2.x watch-items 1–10 above remain the authoritative deferral record. This footer does not retire them; only their revisit triggers firing does.
+
+The project memory `project_phase_2_half_deployed.md` is deleted concurrently with this footer landing; this section is its durable replacement as the verdict-acceptance recording.
