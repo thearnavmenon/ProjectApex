@@ -556,20 +556,22 @@ orchestratorTest(
 );
 
 orchestratorTest(
-  "schema-drift-fix: row seeded with legacy transferRegressions dict (no transfers key) auto-migrates on first apply — all cells preserved as transfers list entries with new observation appended for the trained pair",
+  "legacy-fallback-removed: row with ONLY legacy `transferRegressions` is NOT auto-migrated — applyTransfers reads only the new `transfers` key (empty); session observations are the sole source of new cells, no legacy carryover",
   async () => {
-    // Simulates the prod migration: alpha row has model_json containing
-    // `transferRegressions` dict-of-dicts under the old key, no `transfers`
-    // key. First post-deploy apply must hydrate the legacy dict, process
-    // rule, and write the unified `transfers` list shape — preserving every
-    // existing cell.
+    // Inverse of the deleted schema-drift-fix test. PR #177 shipped a one-cycle
+    // migration shim that hydrated `transferRegressions` (legacy dict) when
+    // `transfers` (new list) was absent. This cleanup PR removes that shim
+    // after the alpha cohort migration completed (verified 2026-05-17).
+    //
+    // Seed legacy dict with 2 cells (1 observation each). Apply a session
+    // that re-trains the same pair. Pre-fix behavior: legacy obs preserved
+    // + new obs appended → 2 obs per cell. Post-fix behavior: legacy obs
+    // ignored, only new obs counted → 1 obs per cell.
     const userId = crypto.randomUUID();
     await sql`
       INSERT INTO public.users (id, display_name)
       VALUES (${userId}, ${"orchestrator-test-" + userId.slice(0, 8)})
     `;
-    // Seed model_json with two pre-existing cells under the LEGACY key —
-    // bench↔squat pair (both directions). One observation each.
     const legacyModel = {
       transferRegressions: {
         "barbell_bench_press": {
@@ -591,8 +593,6 @@ orchestratorTest(
       VALUES (${userId}, ${sql.json(legacyModel)})
     `;
 
-    // Apply a session that re-trains the same pair — adds one observation
-    // to each direction. Post-apply, total observations per cell = 2.
     await applySession(
       {
         user_id: userId,
@@ -614,7 +614,7 @@ orchestratorTest(
     `;
     const modelJson = rows[0].model_json as Record<string, unknown>;
     const transfers = modelJson.transfers as Array<Record<string, unknown>>;
-    assertExists(transfers, "transfers list must be populated post-apply");
+    assertExists(transfers, "transfers list must be populated by session observations");
     assertEquals(transfers.length, 2);
 
     const benchToSquat = transfers.find(
@@ -623,15 +623,15 @@ orchestratorTest(
     const squatToBench = transfers.find(
       (t) => t.fromExerciseId === "barbell_back_squat" && t.toExerciseId === "barbell_bench_press",
     );
-    assertExists(benchToSquat, "legacy bench→squat cell must migrate");
-    assertExists(squatToBench, "legacy squat→bench cell must migrate");
+    assertExists(benchToSquat, "bench→squat cell must come from this session");
+    assertExists(squatToBench, "squat→bench cell must come from this session");
 
-    // Each cell now carries 2 observations (1 legacy + 1 from this session).
-    assertEquals((benchToSquat.observations as unknown[]).length, 2);
-    assertEquals((squatToBench.observations as unknown[]).length, 2);
-    // n=2 enables a real fit — no longer placeholder zeros.
-    assertEquals(benchToSquat.pairedObservations, 2);
-    assertEquals(benchToSquat.state, "candidate"); // <5 obs, stays candidate per Q10
+    // Each cell carries exactly 1 observation — the session's new entry.
+    // Legacy `transferRegressions` is ignored (no fallback hydration).
+    assertEquals((benchToSquat.observations as unknown[]).length, 1);
+    assertEquals((squatToBench.observations as unknown[]).length, 1);
+    assertEquals(benchToSquat.pairedObservations, 1);
+    assertEquals(benchToSquat.state, "candidate");
   },
 );
 
