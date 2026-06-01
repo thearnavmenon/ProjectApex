@@ -40,6 +40,21 @@ export type MuscleGroup =
   | "legs";
 
 /**
+ * Runtime set of the locked-six `MuscleGroup` values — single source of truth
+ * mirroring the type above (the type alone is compile-time only). Used to
+ * validate client-supplied muscle strings at trust boundaries so non-canonical
+ * tokens (e.g. "posterior_deltoid") cannot leak into model state (#167).
+ */
+export const MUSCLE_GROUPS: ReadonlySet<MuscleGroup> = new Set<MuscleGroup>([
+  "back",
+  "chest",
+  "biceps",
+  "shoulders",
+  "triceps",
+  "legs",
+]);
+
+/**
  * Q1-locked per-muscle volume targets (MEV midpoints, per-7-events at
  * 4×/week cadence). volumeTolerance is bootstrapped from this table per
  * 2026-05-13 prep-prompt lock. Follow-up: EWMA-update of tolerance from
