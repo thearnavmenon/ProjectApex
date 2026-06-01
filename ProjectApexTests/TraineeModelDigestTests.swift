@@ -658,6 +658,23 @@ final class TraineeModelDigestTests: XCTestCase {
                        "Legacy stagnation_signals interpretation prose must not reappear")
     }
 
+    func test_sessionPlanPrompt_containsHeavyReassessmentBlock() throws {
+        let prompt = try loadSessionPlanPrompt()
+
+        XCTAssertTrue(prompt.contains("HEAVY REASSESSMENT (ADR-0005 / ADR-0012)"),
+                      "SessionPlan must include the HEAVY REASSESSMENT section header per #178")
+        XCTAssertTrue(prompt.contains("trainee_model_digest.heavy_reassessment_signal"),
+                      "SessionPlan must reference the heavy_reassessment_signal digest path so the LLM reads the correct field")
+        XCTAssertTrue(prompt.contains("recently_advanced_patterns"),
+                      "SessionPlan must direct the LLM to name the recently advanced patterns")
+        XCTAssertTrue(prompt.contains("sessions_since_triggered"),
+                      "SessionPlan must direct the LLM to calibrate emphasis from sessions_since_triggered")
+        XCTAssertTrue(prompt.contains("Do NOT\ngenerate new numerical targets"),
+                      "SessionPlan must explicitly prohibit inventing numerical goal targets — goal renegotiation is a UI flow per ADR-0005")
+        XCTAssertTrue(prompt.contains("Block absent → no reassessment commentary"),
+                      "SessionPlan must include the absent-block negative anchor — the LLM should not invent the trigger when the signal is missing")
+    }
+
     func test_inferencePrompt_containsPerPatternTrendBlock() {
         // Production Inference reads AIInferenceService.systemPrompt — now a
         // computed accessor backed by SystemPrompt_Inference.txt loaded from
