@@ -1336,21 +1336,43 @@ actor WorkoutSessionManager {
         let sevenDaysAgo = ISO8601DateFormatter().string(
             from: Date(timeIntervalSinceNow: -7 * 24 * 3600)
         )
-        let recentLogs: [SetLog]
         do {
-            recentLogs = try await supabase.fetch(
+            // set_logs has no user_id column — it is keyed by session_id
+            // (FK → workout_sessions). The prior single-query filter on
+            // set_logs.user_id returned HTTP 400 (#186), silently swallowed
+            // here so weekly fatigue was never populated. Two-query pattern
+            // (mirrors ProgressViewModel / ProgramViewModel): resolve the
+            // user's recent sessions, then fetch their set_logs by session_id.
+            // No `completed` filter — fatigue counts all recent logged work,
+            // matching the original logged_at-window semantics (and avoiding
+            // the #171 completion-drift undercount).
+            struct SessionIdRow: Decodable { let id: UUID }
+            let sessionRows: [SessionIdRow] = try await supabase.fetch(
+                SessionIdRow.self,
+                table: "workout_sessions",
+                filters: [
+                    Filter(column: "user_id",      op: .eq,  value: userId.uuidString),
+                    Filter(column: "session_date", op: .gte, value: sevenDaysAgo)
+                ],
+                select: "id"
+            )
+            guard !sessionRows.isEmpty else {
+                return WeekFatigueSignals.compute(from: [], sessionCount: 0)
+            }
+            let sessionIds = sessionRows.map { $0.id.uuidString }.joined(separator: ",")
+            let recentLogs: [SetLog] = try await supabase.fetch(
                 SetLog.self,
                 table: "set_logs",
                 filters: [
-                    Filter(column: "user_id",    op: .eq,  value: userId.uuidString),
+                    Filter(column: "session_id", op: .in,  value: "(\(sessionIds))"),
                     Filter(column: "logged_at",  op: .gte, value: sevenDaysAgo)
                 ]
             )
+            let sessionCount = Set(recentLogs.map(\.sessionId)).count
+            return WeekFatigueSignals.compute(from: recentLogs, sessionCount: sessionCount)
         } catch {
             return nil
         }
-        let sessionCount = Set(recentLogs.map(\.sessionId)).count
-        return WeekFatigueSignals.compute(from: recentLogs, sessionCount: sessionCount)
     }
 
     /// Fetches the top-K most relevant memory items for `exercise` via the

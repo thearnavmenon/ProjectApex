@@ -81,6 +81,69 @@ private func makeTestSupabase() -> SupabaseClient {
     )
 }
 
+// MARK: - Recording URLProtocol (#186 — captures request URLs to assert query shape)
+
+/// Records every request URL so a test can assert which columns a query filters
+/// on. Returns one workout_sessions row for GET session lookups (so the
+/// weekly-fatigue two-query path proceeds to query set_logs); everything else
+/// gets an empty array.
+private final class WSMRecordingURLProtocol: URLProtocol, @unchecked Sendable {
+    static let lock = NSLock()
+    nonisolated(unsafe) static var requestURLs: [URL] = []
+    static func reset() {
+        lock.lock(); requestURLs = []; lock.unlock()
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        if let url = request.url {
+            Self.lock.lock(); Self.requestURLs.append(url); Self.lock.unlock()
+        }
+        let path = request.url?.path ?? ""
+        let isGet = (request.httpMethod ?? "GET") == "GET"
+        let body = (isGet && path.contains("workout_sessions"))
+            ? "[{\"id\":\"00000000-0000-4000-8000-000000000001\"}]"
+            : "[]"
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200,
+            httpVersion: nil, headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private func makeRecordingManager() -> WorkoutSessionManager {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [WSMRecordingURLProtocol.self]
+    let supabase = SupabaseClient(
+        supabaseURL: URL(string: "https://test.supabase.co")!,
+        anonKey: "test-key",
+        urlSession: URLSession(configuration: config)
+    )
+    let inferenceService = AIInferenceService(
+        provider: MockLLMProvider(response: prescriptionJSON()),
+        gymProfile: nil,
+        maxRetries: 0
+    )
+    let memoryService = MemoryService(supabase: supabase, embeddingAPIKey: "")
+    let suiteName = "com.test.wsm.rec.\(UUID().uuidString)"
+    let testDefaults = UserDefaults(suiteName: suiteName)!
+    let gymFactStore = GymFactStore(userDefaults: testDefaults)
+    let waq = WriteAheadQueue(supabase: supabase, userDefaults: testDefaults)
+    return WorkoutSessionManager(
+        aiInference: inferenceService,
+        healthKit: HealthKitService(),
+        memoryService: memoryService,
+        supabase: supabase,
+        gymFactStore: gymFactStore,
+        writeAheadQueue: waq
+    )
+}
+
 // MARK: - JSON Fixture Builders
 
 /// Builds a valid set_prescription JSON response string.
@@ -403,5 +466,33 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertEqual(summary.setsCompleted, 1)
         // totalVolumeKg should be positive
         XCTAssertGreaterThan(summary.totalVolumeKg, 0)
+    }
+
+    // MARK: #186: weekly-fatigue fetch queries set_logs by session_id, not user_id
+
+    /// set_logs has no `user_id` column; the weekly-fatigue fetch must resolve
+    /// the user's sessions first and query set_logs by `session_id`. Pre-fix it
+    /// emitted `set_logs?user_id=eq...` → HTTP 400 (silently swallowed), so the
+    /// fatigue signal was never populated.
+    func testFetchWeeklyFatigue_queriesSetLogsBySessionId_notUserId() async throws {
+        WSMRecordingURLProtocol.reset()
+        let manager = makeRecordingManager()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        // Let the parallel fatigue fetch (two awaited queries) complete.
+        try await Task.sleep(nanoseconds: 400_000_000) // 0.4s
+
+        let setLogsRequests = WSMRecordingURLProtocol.requestURLs.filter {
+            $0.path.contains("set_logs")
+        }
+        XCTAssertFalse(
+            setLogsRequests.contains { ($0.query ?? "").contains("user_id") },
+            "set_logs must never be queried by user_id (no such column) — #186"
+        )
+        XCTAssertTrue(
+            setLogsRequests.contains { ($0.query ?? "").contains("session_id") },
+            "weekly-fatigue fetch must query set_logs by session_id"
+        )
     }
 }
