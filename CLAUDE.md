@@ -1,7 +1,7 @@
 # AI Co-Developer Instructions
 1. **Strictly Non-Autonomous:** You are an assistant, not an autonomous agent. ONLY work on the specific task I explicitly assign to you. Do NOT automatically start the next task on the backlog.
 2. **Context-Aware Coding:** Before writing code, consult the docs in the "Doc map" section below for the right canonical source. Don't grep `ARCHITECTURE.md` for current state — it's a Phase 1 reference, superseded by `CONTEXT.md` + `docs/adr/` for anything Phase 2.
-3. **Slice completion tracking:** When I confirm a tracer-bullet slice is complete and working, close the corresponding GitHub issue with a completion comment summarising what shipped, any pre-deploy reminders, and links to spinoff issues. (The Slice 1 closure pattern in #2 is the precedent — issue closure happens via a merged PR's Closes #N keyword per Process commitment rule 1, not before.) `BACKLOG.md` is the long-form work log: append phase/slice entries to it when a phase or major slice closes, and mark the things-to-do in §2D when the dispatch surfaces new follow-ups. Sweep cadence applies (re-read on phase boundary, prune what reality has moved past). The pre-2026-06-01 prohibition on touching `BACKLOG.md` is retired — reality moved past it.
+3. **Slice completion tracking:** When I confirm a tracer-bullet slice is complete and working, the corresponding GitHub issue closes automatically via the PR's `Closes #N` keyword on merge (see Process commitment rule 1). The PR description is where "what shipped + pre-deploy reminders + spinoff links" lives — there is no separate close-via-comment step. `BACKLOG.md` is the long-form work log: append a phase/slice entry on phase or major slice closure, and update the things-to-do section when the dispatch surfaces new follow-ups. Sweep cadence applies (re-read on phase boundary, prune what reality has moved past).
 4. **Wait for Commands:** After completing a coding task or closing the slice issue, simply tell me it is done and wait for my next instruction. Do not proceed on your own.
 
 ## Doc map — where each kind of information lives
@@ -19,15 +19,17 @@ Each doc has one job. When you need an answer, go to the doc whose job covers it
 
 ## Process commitment
 
-1. **Branch + commit per logical unit, PR-before-close.** Slice/issue work happens on a feature branch off `main`, never on `main` directly. Each logical unit gets its own commit and its own PR. GitHub issues close via the PR's Closes #N keyword on merge — never via standalone close-comment before the work is committed and merged. *Motivating failure (6h-19m incident):* four logical units (Slice 5, #23, #24.1, #24.2) conflated into a single uncommitted working-tree state on `main`, with issue #4 closed prematurely via a celebratory comment that pointed at no commit, no PR, and nothing on `origin/main`.
+1. **Branch + commit per logical unit, PR-before-close.** Slice/issue work happens on a feature branch off `main`, never on `main` directly. Each logical unit gets its own commit and its own PR. GitHub issues close via the PR's Closes #N keyword on merge — never via standalone close-comment before the work is committed and merged. *Motivating failure:* four logical units conflated into a single uncommitted working-tree state on `main`, with an issue closed prematurely via a celebratory comment that pointed at no commit, no PR, and nothing on `origin/main`.
 
-2. **Cross-cutting grep is grep-and-report, not grep-and-rewrite.** When the "Cross-cutting fixes — grep before declaring done" section below surfaces additional sites, list them with a recommendation and wait for explicit authorization before editing. The grep section finds the sites; this rule constrains what to do with them. *Motivating failure (four-cosmetic-test-files incident):* agent grepped for `URLError` mocks during #24.2, found four, edited all four without authorization. Three of the four had not been authorized — they were unilateral "consistency" rewrites of tests that were already passing.
+2. **Cross-cutting grep is grep-and-report, not grep-and-rewrite.** When the "Cross-cutting fixes — grep before declaring done" section below surfaces additional sites, list them with a recommendation and wait for explicit authorization before editing. The grep section finds the sites; this rule constrains what to do with them. *Motivating failure:* agent grepped for a mock-harness pattern, found four matching files, and edited all four without authorization. Three were unilateral "consistency" rewrites of tests that were already passing.
 
-3. **Surface ambiguity, don't fill it silently.** When an instruction has a hole or an "or" with an unspecified default, surface the ambiguity and ask before acting on a unilateral interpretation. Absence of explicit prohibition is not authorization. *Motivating failure (ADR-0007 form decision):* the directive "amend ADR-0001 or whichever ADR codifies no-silent-fallbacks" had a hole when grep showed no ADR explicitly codified the principle, and the agent unilaterally chose new-ADR rather than asking.
+3. **Surface ambiguity, don't fill it silently.** When an instruction has a hole or an "or" with an unspecified default, surface the ambiguity and ask before acting on a unilateral interpretation. Absence of explicit prohibition is not authorization. *Motivating failure:* the directive "amend the existing ADR _or_ write a new one" had a hole when grep showed no existing ADR codified the relevant principle, and the agent unilaterally chose new-ADR rather than asking.
+
+4. **Per-cycle commit discipline.** When running per-cycle TDD (RED → GREEN), commit the working tree before writing the next cycle's RED test. `git status` between cycles is the verification — a clean tree at the cycle boundary means the test that just passed reflects what will ship. *Motivating failure:* a multi-cycle slice passed local tests throughout because Deno read the working-tree files. Squash-merge collapsed the commits but never the uncommitted working-tree state — the merged commit on `main` was missing a function that all local tests had been calling, and the EF deploy gate blocked at CI with `does not provide an export named '<fn>'`. Hotfix required.
 
 ## Cross-cutting fixes — grep before declaring done
 
-When the fix is to a *pattern* rather than a single call site (test-harness bugs, Codable shape changes, retry-policy adjustments, lifecycle hooks, etc.), grep the codebase for every occurrence of that pattern before declaring the fix complete — not just the file that triggered the investigation. A near-miss happened in #23: the H1 stream-drain fix landed in `MockURLProtocol`, but `WAQMockURLProtocol` had identical code with the same bug; only a full-suite run caught it. The lesson: when the change is structural, the search radius is the whole codebase.
+When the fix is to a *pattern* rather than a single call site (test-harness bugs, Codable shape changes, retry-policy adjustments, lifecycle hooks, etc.), grep the codebase for every occurrence of that pattern before declaring the fix complete — not just the file that triggered the investigation. Near-miss: a stream-drain fix landed in `MockURLProtocol`, but `WAQMockURLProtocol` had identical code with the same bug; only a full-suite run caught it. The lesson: when the change is structural, the search radius is the whole codebase.
 
 Practical form: after writing the fix, grep for the pattern that motivated it (e.g. `request.httpBody` for URLProtocol mocks, `static var.*Handler` for shared mock state, `weightKg >=` for validation predicates) and confirm every hit either uses the fix or has a documented reason to differ. Report the grep result alongside the fix, not after the user notices the second site.
 
@@ -62,9 +64,7 @@ Each forward migration's first lines must include the pointer comment:
 -- (documentation only; not auto-applied by `supabase db push`)
 ```
 
-so a reader of the forward migration finds the reverse without needing the convention by memory. Convention established in PR #92 (slice A2).
-
-Stale references to a top-level `migrations/` directory should be removed if encountered — that path was retired in the 2026-05-06 recovery (PR #52, Step D); the canonical baseline is `supabase/migrations/20260506091314_remote_schema.sql`.
+so a reader of the forward migration finds the reverse without needing the convention by memory.
 
 ### Integration test flag
 
@@ -86,68 +86,11 @@ git -C /Users/arnav/Desktop/ProjectApex/.claude/worktrees/<name> push ...
 
 Same rule for `git status`, `git log`, `git diff` when you need them to reflect the worktree's state. Read tools (`Read`, `grep` on absolute paths) are unaffected — they don't depend on cwd.
 
-## Coding Discipline (Karpathy Guidelines)
+## Working pattern — goal-driven execution
 
-_Adapted from forrestchang/andrej-karpathy-skills, derived from Andrej Karpathy's observations on LLM coding pitfalls._
-
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
-
-### 1. Think Before Coding
-
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-### 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-### 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-### 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
+Transform tasks into verifiable goals before implementing:
+- "Add validation" → "Write tests for invalid inputs, then make them pass."
+- "Fix the bug" → "Write a test that reproduces it, then make it pass."
+- "Refactor X" → "Ensure tests pass before and after."
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
----
-
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
