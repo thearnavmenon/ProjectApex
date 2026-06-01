@@ -73,6 +73,15 @@ final class ProgramViewModel {
     /// Incremented by ContentView to tell ProgramOverviewView to scroll to the current week.
     var scrollToCurrentWeekTrigger: Int = 0
 
+    // MARK: Sync-error state (#188)
+    /// Non-nil when a background Supabase persist failed. The view renders a
+    /// non-blocking banner so the user is aware the sync failed. Local-first
+    /// design: local state remains valid; sync is the failure, not the local write.
+    var persistError: String?
+    /// Retry action captured at the time of failure. Invoking it re-runs the
+    /// deactivate → insert flow. Set to nil on banner dismissal.
+    var persistRetryAction: (@MainActor @Sendable () async -> Void)?
+
     // MARK: Private
 
     private let supabaseClient: SupabaseClient
@@ -188,19 +197,9 @@ final class ProgramViewModel {
         currentMesocycle = mesocycle
         viewState = .loaded(mesocycle)
 
-        // Also update the Supabase row in the background.
-        let capturedUserId = userId
-        let capturedClient = supabaseClient
-        let capturedMesocycle = mesocycle
-        Task.detached {
-            do {
-                try await capturedClient.deactivatePrograms(userId: capturedUserId)
-                let row = ProgramRow.forInsert(from: capturedMesocycle, userId: capturedUserId)
-                try await capturedClient.insert(row, table: "programs")
-            } catch {
-                programPersistLogger.error("program insert failed (regenerateProgram): \(error.localizedDescription, privacy: .public) — user_id=\(capturedUserId.uuidString, privacy: .public), program_id=\(capturedMesocycle.id.uuidString, privacy: .public). Local cache preserved; row will not exist server-side until a successful retry.")
-            }
-        }
+        // Persist to Supabase in the background. Failure surfaces via persistError
+        // banner (#188) — local-first design; local state is already updated above.
+        Task { await self.persistProgram(mesocycle, context: "regenerateProgram") }
     }
 
     /// Returns a flat list of all terminal TrainingDays (`.completed` or `.skipped`) in the
@@ -212,6 +211,46 @@ final class ProgramViewModel {
         return mesocycle.weeks.flatMap { week in
             week.trainingDays.filter { $0.status == .completed || $0.status == .skipped }
         }
+    }
+
+    // MARK: - Sync helper (#188)
+
+    /// Deactivates existing programs and inserts a new row server-side.
+    /// On failure, surfaces the error via `persistError` + `persistRetryAction`
+    /// rather than swallowing it. Local state is unaffected (local-first design).
+    ///
+    /// - Parameters:
+    ///   - mesocycle: The mesocycle to persist.
+    ///   - context: A short label for the logger (e.g. "regenerateProgram").
+    private func persistProgram(_ mesocycle: Mesocycle, context: String) async {
+        let capturedClient = supabaseClient
+        let capturedUserId = userId
+        let capturedMesocycle = mesocycle
+        do {
+            try await capturedClient.deactivatePrograms(userId: capturedUserId)
+            let row = ProgramRow.forInsert(from: capturedMesocycle, userId: capturedUserId)
+            try await capturedClient.insert(row, table: "programs")
+            // Success: clear any prior sync error.
+            persistError = nil
+            persistRetryAction = nil
+        } catch {
+            programPersistLogger.error(
+                "program insert failed (\(context)): \(error.localizedDescription, privacy: .public)"
+                + " — user_id=\(capturedUserId.uuidString, privacy: .public)"
+                + ", program_id=\(capturedMesocycle.id.uuidString, privacy: .public)"
+                + ". Local cache preserved; row will not exist server-side until a successful retry."
+            )
+            persistError = "Couldn't sync your program. Tap to retry."
+            persistRetryAction = { [weak self] in
+                await self?.persistProgram(capturedMesocycle, context: context)
+            }
+        }
+    }
+
+    /// Dismisses the sync-error banner without retrying.
+    func dismissPersistError() {
+        persistError = nil
+        persistRetryAction = nil
     }
 
     // MARK: - Generate (legacy static path — ProgramGenerationService)
@@ -253,18 +292,9 @@ final class ProgramViewModel {
                 trainingDaysPerWeek: daysPerWeek
             )
             if persistToSupabase {
-                // Persist to Supabase (fire-and-forget for UX speed)
-                let capturedUserId = userId
-                let capturedClient = supabaseClient
-                Task.detached {
-                    do {
-                        try await capturedClient.deactivatePrograms(userId: capturedUserId)
-                        let row = ProgramRow.forInsert(from: mesocycle, userId: capturedUserId)
-                        try await capturedClient.insert(row, table: "programs")
-                    } catch {
-                        programPersistLogger.error("program insert failed (generateProgram): \(error.localizedDescription, privacy: .public) — user_id=\(capturedUserId.uuidString, privacy: .public), program_id=\(mesocycle.id.uuidString, privacy: .public). Local cache preserved; row will not exist server-side until a successful retry.")
-                    }
-                }
+                // Persist to Supabase in the background. Failure surfaces via
+                // persistError banner (#188) — local-first design.
+                Task { await self.persistProgram(mesocycle, context: "generateProgram") }
             }
             mesocycle.saveToUserDefaults()
             currentMesocycle = mesocycle
@@ -316,18 +346,9 @@ final class ProgramViewModel {
             let mesocycle = MacroPlanService.buildPendingMesocycle(from: skeleton, userId: userId)
 
             if persistToSupabase {
-                // Persist to Supabase (fire-and-forget)
-                let capturedUserId = userId
-                let capturedClient = supabaseClient
-                Task.detached {
-                    do {
-                        try await capturedClient.deactivatePrograms(userId: capturedUserId)
-                        let row = ProgramRow.forInsert(from: mesocycle, userId: capturedUserId)
-                        try await capturedClient.insert(row, table: "programs")
-                    } catch {
-                        programPersistLogger.error("program insert failed (generateMacroSkeleton): \(error.localizedDescription, privacy: .public) — user_id=\(capturedUserId.uuidString, privacy: .public), program_id=\(mesocycle.id.uuidString, privacy: .public). Local cache preserved; row will not exist server-side until a successful retry.")
-                    }
-                }
+                // Persist to Supabase in the background. Failure surfaces via
+                // persistError banner (#188) — local-first design.
+                Task { await self.persistProgram(mesocycle, context: "generateMacroSkeleton") }
             }
             mesocycle.saveToUserDefaults()
             currentMesocycle = mesocycle
