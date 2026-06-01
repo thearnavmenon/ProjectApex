@@ -55,7 +55,7 @@ Stale references to a top-level `migrations/` directory should be removed if enc
 
 ### Integration test flag
 
-`APEX_INTEGRATION_TESTS=1` — environment variable that gates live-API tests requiring real credentials and network access. Set in the Xcode scheme's environment variables for local or CI runs. Tests gated by this flag:
+`APEX_INTEGRATION_TESTS=1` — environment variable that gates live-API tests requiring real credentials and network access. Default: `isEnabled = NO` in the shared scheme (PR #38). Opt-in: toggle via Scheme Editor or pass `xcodebuild -e APEX_INTEGRATION_TESTS=1`. CI omits the variable intentionally. Tests gated by this flag:
 - `AIInferenceServiceTests.test_liveAPI_*` — real Anthropic API round-trip
 - `AnthropicProviderCachingTests.test_smokeTest_cacheEffectiveness_*` — two identical Anthropic calls asserting `cache_read_input_tokens > 0` on the second call (verifies prompt-caching mechanism end-to-end; uses a padded system prompt to clear the 1,024-token cache minimum)
 
