@@ -104,22 +104,6 @@ struct LifeContextEventTests {
     }
 }
 
-@Suite("ReassessmentRecord")
-struct ReassessmentRecordTests {
-    @Test("Round-trip preserves advanced-patterns list order")
-    func roundTrip() throws {
-        let original = ReassessmentRecord(
-            triggeredAt: Date(timeIntervalSince1970: 1_750_000_000),
-            triggeringSessionCount: 24,
-            advancedPatterns: [.horizontalPush, .squat, .verticalPull, .hipHinge]
-        )
-        let data = try JSONEncoder().encode(original)
-        let decoded = try JSONDecoder().decode(ReassessmentRecord.self, from: data)
-        #expect(decoded == original)
-        #expect(decoded.advancedPatterns == [.horizontalPush, .squat, .verticalPull, .hipHinge])
-    }
-}
-
 @Suite("PatternProjection")
 struct PatternProjectionTests {
     @Test("Round-trip preserves floor/stretch/progress")

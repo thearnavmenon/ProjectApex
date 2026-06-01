@@ -123,22 +123,6 @@ struct LifeContextEvent: Codable, Sendable, Hashable {
     }
 }
 
-// MARK: - ReassessmentRecord
-
-/// Records a heavy reassessment firing — per ADR-0005, fires when ≥4 of
-/// 6 major patterns transition phase within a 6-session window.
-struct ReassessmentRecord: Codable, Sendable, Hashable {
-    var triggeredAt: Date
-    var triggeringSessionCount: Int
-    var advancedPatterns: [MovementPattern]
-
-    init(triggeredAt: Date, triggeringSessionCount: Int, advancedPatterns: [MovementPattern]) {
-        self.triggeredAt = triggeredAt
-        self.triggeringSessionCount = triggeringSessionCount
-        self.advancedPatterns = advancedPatterns
-    }
-}
-
 // MARK: - PatternProjection
 
 /// Per-pattern projection set at calibration review (or re-derived on
