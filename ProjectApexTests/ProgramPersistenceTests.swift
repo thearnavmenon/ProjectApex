@@ -378,8 +378,9 @@ final class ProgramPersistenceTests: XCTestCase {
         // Use a stable test user ID that exists in the test project
         let testUser = UUID(uuidString: "00000000-0000-0000-0000-000000000099") ?? UUID()
 
-        // Deactivate any existing programs for this test user
-        try await client.deactivatePrograms(userId: testUser)
+        // Deactivate any existing programs for this test user.
+        // try? — patchNoMatch is expected when the test user has no programs yet.
+        try? await client.deactivatePrograms(userId: testUser)
 
         // Insert a mock mesocycle
         var mesocycle = Mesocycle.mockMesocycle()
@@ -406,7 +407,8 @@ final class ProgramPersistenceTests: XCTestCase {
         XCTAssertEqual(decoded.weeks.count, mesocycle.weeks.count)
         XCTAssertTrue(fetchedRow.isActive)
 
-        // Cleanup: deactivate the test row
-        try await client.deactivatePrograms(userId: testUser)
+        // Cleanup: deactivate the test row.
+        // try? — patchNoMatch is swallowed; we only care that nothing remains.
+        try? await client.deactivatePrograms(userId: testUser)
     }
 }
