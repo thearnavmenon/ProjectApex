@@ -229,11 +229,76 @@ First end-to-end replay attempt for G1 surfaced 7 unwired rule modules: the HTTP
 - [x] P5-H06: Repo presentation pass — first-time README, charcoal + signal-yellow visual identity, ASCII architecture diagram, ADR-anchored architecture notes, status table; `NOTICE.md` (all rights reserved); `gh repo edit` description + 9 topics; 3 top-level orphan ruby script duplicates removed
 - [x] P5-H07: `.DS_Store` removed from disk (gitignored but lingering)
 
-### 2B — Legacy → trainee cutover (pending — gated on alpha cohort training data accrual)
+### 2B — Legacy → trainee cutover
 
-Trainee model now populates on every session-apply; iOS prompts still consume the legacy services. B1–B4 swap the consumers, then delete legacy. Empirically gated: plateau-verdict needs ≥3 e1RM sessions per pattern + 4 weekly volume-load aggregates before it can produce `.plateaued`/`.declining`. With n=1 alpha, ~3 weeks of consistent training before non-progressing trend values exist to validate against.
+Trainee model populates on every session-apply; iOS prompts swapped from legacy services to digest. B1–B4 ran 2026-05-13 → 2026-05-13, interleaved with the MuscleProfile producer slice (#156) between B1 and B2 (`model_json.muscles` was iOS-readable but EF never wrote it; B2 needed it).
 
-- [ ] P5-B01: B1 (#86) — stagnation cutover — replace `stagnation_signals` consumption in `SystemPrompt_Inference.txt` (v4.9 → v5.0) + `SystemPrompt_SessionPlan.txt` (v1.x → v2.0) with `trainee_model_digest.per_pattern_summary[].trend` + `per_muscle_summary[].stagnation_status`; surface `consecutiveForceDeloadsOnPattern` ≥ 2 coaching cue; delete `StagnationService.swift` + `StagnationServiceTests.swift`; remove call sites in `WorkoutSessionManager` + `SessionPlanService`; clean `apex.stagnation_signals` UserDefaults key on app launch; add prompt-regression golden suite
-- [ ] P5-B02: B2 (#87) — volume cutover — replace `volume_deficits` consumption with `per_muscle_summary[].volume_deficit`; delete `VolumeValidationService.swift`; same prompt-version-bump pattern as B1
-- [ ] P5-B03: B3 (#88) — pattern phase cutover — replace `pattern_phase_states` consumption with `per_pattern_summary[].current_phase` + `current_phase_session_count`; delete `PatternPhaseService.swift`; preserve force-deload-as-transition signal per ADR-0011
-- [ ] P5-B04: B4 (#89) — full digest collapse + final prompt v5.0/v2.0 cleanup — WorkoutContext payload restructuring around the digest projection; prescription-accuracy gap-bucket-divergence prompt rule; transfer-coefficient consumption rule; `lastGlobalPhaseAdvanceFiredAtSessionCount` detection; calibration review UI (separate slice, may defer)
+- [x] P5-B01: B1 (#86) — stagnation cutover, PR #160 + delete-StagnationService PR (closes #61). `SystemPrompt_Inference.txt` v4.9→v5.0 + `SystemPrompt_SessionPlan.txt` v1.x→v2.0 PER-PATTERN TREND block; `consecutiveForceDeloadsOnPattern≥2` coaching cue surfaced; `StagnationService.swift` + tests deleted; β prompt-anchor test suite added in `TraineeModelDigestTests`
+- [x] P5-B02: B2 (#87) — volume cutover, PR #170. `VOLUME DEFICIT` block now reads `per_muscle_summary[].volume_deficit`; `VolumeValidationService.swift` deleted; depended on #156's `MuscleProfile` producer landing first
+- [x] P5-B03: B3 (#88) — pattern phase cutover, PR #174. `per_pattern_summary[].current_phase` + `current_phase_session_count` replace `pattern_phase_states`; `PatternPhaseService.swift` deleted; force-deload-as-transition signal preserved per ADR-0011 §(b); `WorkoutSessionManager` PatternPhaseService advance hook removed
+- [x] P5-B04: B4 (#89) — full digest collapse, PR #179 + cycles 7-14 (`3cf4f06` Inference rewiring + `WeeklyFatigueSummary` delete; cycles 9b-14 added PRESCRIPTION ACCURACY / CROSS-EXERCISE TRANSFER / CROSS-PATTERN FATIGUE INTERACTIONS / ACTIVE LIMITATIONS / FORM-DEGRADATION FLAG blocks). `WorkoutContext` restructured around `TraineeModelDigest`; `lastGlobalPhaseAdvanceFiredAtSessionCount` surfaced. Calibration-review UI deliberately deferred (separate slice; depends on goal-renegotiation flow).
+
+### 2C — Post-B4 stabilisation + late-May/2026-06-01 dispatch
+
+Cleanup and bug-fix sweeps following B4. The 2026-05-31 operator audit surfaced ~10 issues filed between #185–#212; the 2026-06-01 dispatch closed them in batches.
+
+**EF / digest plumbing fixes:**
+
+- [x] P5-C01: #156 — MuscleProfile producer, PR #168. New `applyPerMuscleRules` + bootstrap + per-set muscle attribution; Q4 focusWeight + worst-across-patterns stagnation aggregation. Substantive slice surfaced as the fourth contract-drift gap during #146 work
+- [x] P5-C02: #146 contract-drift coordinated PR series (#149/#150/#152) — EF emits 5 PatternProfile shape-gaps; iOS defensive decode for `goal` with `GoalState.placeholder` sentinel; EF bootstrap now emits `pattern`/`rpeOffset`/`recovery`/`confidence` per-pattern. Sixth gap (casing) closed via separate spinoff
+- [x] P5-C03: #161 — canonicalise `exercise_id` at EF boundary + backfill legacy keys
+- [x] P5-C04: #169 — EF boot fix post-#156: missing `computeFocusWeight` export
+- [x] P5-C05: #175 / #176 — mirror `session_count` column → `model_json.totalSessionCount` JSONB key (cross-platform contract)
+- [x] P5-C06: #177 — collapse EF `transferRegressions` dict → `transfers` list to match cross-platform contract
+- [x] P5-C07: #194 — cleanup: drop transferRegressions legacy fallback + migration test (post-#177)
+
+**iOS / FK / persistence fixes:**
+
+- [x] P5-C08: #183 — use `mesocycle.id` as `programs.id` to prevent FK violations
+- [x] P5-C09: #182 — Clear button for Supabase service key in Developer Settings (precedes #191 deletion)
+- [x] P5-C10: #196 (#158) — update stale `XCTAssertNil` to assert placeholder semantics post-#149
+- [x] P5-C11: #197 (#173) — backfill null-confidence PatternProfiles to `bootstrapping` (EF)
+- [x] P5-C12: #199 (#38) — make `APEX_INTEGRATION_TESTS` opt-in (`isEnabled NO` in shared scheme) + CLAUDE.md doc update
+- [x] P5-C13: #200 (#39) — delete `XCTAssertLessThan(elapsed, 8.0)` from live API test (wrong for retry paths)
+- [x] P5-C14: #201 (#185) — detect PATCH 200 no-op via `performExpectingRow` + `SupabaseError.patchNoMatch`
+- [x] P5-C15: #202 (#188) — surface program-persist failures via non-blocking sync-error banner
+- [x] P5-C16: #207 (#205) — wrap integration teardown `deactivatePrograms` in `try?`
+
+**nonisolated-deinit series (#37 cascade — `swift_task_deinitOnExecutorImpl` crash prevention):**
+
+- [x] P5-C17: #198 (#37) — `nonisolated deinit {}` on 4 @MainActor view models (initial batch)
+- [x] P5-C18: #208 (#204) — `LiveSessionWatcher` (first wave grep-and-report)
+- [x] P5-C19: #209 (#203) — `AppDependencies`
+- [x] P5-C20: #214 (#210) — `ProgramViewModel`
+- [x] P5-C21: #215 (#212) — `LateArrivalNotificationQueue`
+- [x] P5-C22: #216 (#211) — `TraineeModelLocalStore` (closed the cascade; final unpatched site)
+- Verified-not-applicable (already patched, closed without PR): #217 `WorkoutViewModel`, #218 `ProgressViewModel`, #219 `ScannerViewModel`
+
+**Architecture / decisions:**
+
+- [x] P5-C23: #206 (#191) — remove `SupabaseClient.serviceKey` entirely — 5-layer architectural deletion of client-side service-role bypass path
+- [x] P5-C24: PR #213 — ADR-0016 (client cannot bypass RLS) codifies the invariant that landed in #191
+- [x] P5-C25: #223 (#159) — Inference prompt consolidation: `SystemPrompt_Inference.txt` becomes canonical source; loader wired; production callers propagate via new `.systemPromptUnavailable` `FallbackReason` per L6 grilling lock (ADR-0007 no-silent-fallback shape)
+- [x] P5-C26: #224 (#178) — HEAVY REASSESSMENT block + iOS `HeavyReassessmentSignal` digest projection derived from the existing server-side `lastGlobalPhaseAdvanceFiredAtSessionCount`; delete vestigial `TraineeModel.reassessmentRecords` field (write-orphan)
+
+### 2D — Open follow-ups (things to do)
+
+Captured here so the BACKLOG sweep on 2026-06-01 has a single landing surface. Each item is filed as a GitHub issue OR explicitly *not yet filed* below with a reason.
+
+**Filed / awaiting product or design direction:**
+
+- [ ] P5-D01: #220 — extract `PromptLoader` for three known consumers (Inference, SessionPlan, InferenceSpike). Deferred from #159 per L7 lock; surgical change once the right shape is agreed.
+- [ ] P5-D02: #221 — adopt `USER-REPORTED SIGNALS` section in production Inference prompt? Surfaced by #159 Path A as a .txt-only section that has never run in production. Needs product decision (is this a signal we want, and what's the input shape?).
+- [ ] P5-D03: #222 — adopt expanded equipment-aware weight-increment rules in production Inference prompt? Same shape as P5-D02 (.txt-only expansion surfaced by #159).
+- [ ] P5-D04: existing Tier 3 needs-triage spinoffs (`#184`, `#186`, `#187`, `#189`, `#190`, `#192`) — pre-existing from the 2026-05-31 operator audit; carry forward to Tier 3 expansion when user authorises.
+- [ ] P5-D05: existing Phase 2 follow-ups (`#164`, `#165`, `#166`, `#167`, `#151`) — pre-existing; same shape as P5-D04.
+
+**Not yet filed — surfaced in 2026-06-01 dispatch, awaiting decision:**
+
+- [ ] P5-D06: iOS UI for heavy-reassessment screen + ack-set writer. #178 ships the prompt signal but no UI surface; the AI may mention reassessment for ~6 consecutive sessions per fire event (matches server cooldown) until this lands. Adds `acknowledgedTriggeringSessionCounts: Set<Int>` to `TraineeModel` JSONB + iOS UI to dismiss. **File as an issue when ready to scope.**
+- [ ] P5-D07: One-shot DB migration to strip legacy `reassessmentRecords` JSONB key from existing alpha-cohort rows. Harmless dead-key drift until removed; recommended once #178 has shipped long enough that no client expects to round-trip it.
+- [ ] P5-D08: Cross-cutting `ExerciseSwapService.swift:102` carries its own `private static let systemPrompt: String = {...}` inline-prompt pattern. Reported by the #159 cross-cutting grep; candidate for future consolidation, likely batched with P5-D01 (PromptLoader extraction).
+
+**Operator actions (not code changes):**
+
+- [ ] Keychain cleanup: if `.supabaseServiceKey` is present on a user's machine from pre-#191 days, clear via Developer Settings → Clear button or `security delete-generic-password -s com.projectapex.keychain.supabaseServiceKey`. Verified absent on Arnav's machine 2026-06-01 (exit 44 = not found).
