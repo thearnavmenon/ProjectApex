@@ -70,6 +70,54 @@ struct ProgramOverviewView: View {
         // Live-session highlight + set-progress now come from
         // deps.liveSessionWatcher (a single 500ms poll owned by AppDependencies)
         // so this view no longer runs its own loop against the manager actor.
+        // #188: Non-blocking sync-error banner — shown while program remains usable.
+        .overlay(alignment: .top) {
+            if let message = viewModel.persistError {
+                syncErrorBanner(message: message)
+            }
+        }
+    }
+
+    // MARK: - Sync error banner (#188)
+
+    private func syncErrorBanner(message: String) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.icloud")
+                    .foregroundStyle(Color(red: 0.91, green: 0.63, blue: 0.19))
+
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+
+                Spacer()
+
+                if viewModel.persistRetryAction != nil {
+                    Button("Retry") {
+                        Task { await viewModel.persistRetryAction?() }
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
+                }
+
+                Button {
+                    viewModel.dismissPersistError()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.footnote)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color(red: 0.12, green: 0.12, blue: 0.16).opacity(0.95))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
+        .animation(.easeInOut(duration: 0.25), value: viewModel.persistError)
     }
 
     // MARK: - Loading
