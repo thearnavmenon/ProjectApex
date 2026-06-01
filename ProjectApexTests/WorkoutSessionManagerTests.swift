@@ -495,4 +495,101 @@ final class WorkoutSessionManagerTests: XCTestCase {
             "weekly-fatigue fetch must query set_logs by session_id"
         )
     }
+
+    // MARK: #171 — early-exit writes a consistent (status, completed) pair
+
+    /// Reproduces #171: finishSession hardcoded status="completed" while
+    /// completed=false on early exit. The pair must be internally consistent —
+    /// early exit writes status="partial" (not "completed").
+    func testFinishSession_earlyExit_writesPartialStatusConsistentWithCompletedFalse() async throws {
+        WSMBodyCaptureURLProtocol.reset()
+        let manager = makeBodyCaptureManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 3)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 300_000_000)
+        await manager.completeSet(actualReps: 10, rpeFelt: 6, intent: .top)
+        await manager.endSessionEarly()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        // The completion PATCH is the only one carrying a `summary` object.
+        let summaryPatch = WSMBodyCaptureURLProtocol.captured
+            .filter { $0.path.contains("workout_sessions") && $0.method == "PATCH" && !$0.body.isEmpty }
+            .compactMap { try? JSONSerialization.jsonObject(with: $0.body) as? [String: Any] }
+            .first { $0["summary"] != nil }
+        let patch = try XCTUnwrap(summaryPatch, "expected a workout_sessions completion PATCH")
+        XCTAssertEqual(patch["completed"] as? Bool, false, "early exit must not be completed=true")
+        XCTAssertEqual(
+            patch["status"] as? String, "partial",
+            "status must be consistent with completed=false, not the old hardcoded 'completed' (#171)"
+        )
+    }
+}
+
+// MARK: - Body-capturing URLProtocol (#171 — inspect the PATCH payload)
+
+private final class WSMBodyCaptureURLProtocol: URLProtocol, @unchecked Sendable {
+    static let lock = NSLock()
+    nonisolated(unsafe) static var captured: [(path: String, method: String, body: Data)] = []
+    static func reset() {
+        lock.lock(); captured = []; lock.unlock()
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        let method = request.httpMethod ?? "GET"
+        var body = request.httpBody ?? Data()
+        if body.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            let bufSize = 4096
+            let buf = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+            defer { buf.deallocate() }
+            while stream.hasBytesAvailable {
+                let n = stream.read(buf, maxLength: bufSize)
+                if n > 0 { body.append(buf, count: n) } else { break }
+            }
+        }
+        Self.lock.lock(); Self.captured.append((path, method, body)); Self.lock.unlock()
+
+        // Return one row for workout_sessions so the PATCH's performExpectingRow
+        // (return=representation) sees a match; empty array otherwise.
+        let respBody = path.contains("workout_sessions")
+            ? "[{\"id\":\"00000000-0000-4000-8000-000000000001\"}]"
+            : "[]"
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(respBody.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+private func makeBodyCaptureManager() -> WorkoutSessionManager {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [WSMBodyCaptureURLProtocol.self]
+    let supabase = SupabaseClient(
+        supabaseURL: URL(string: "https://test.supabase.co")!,
+        anonKey: "test-key",
+        urlSession: URLSession(configuration: config)
+    )
+    let inferenceService = AIInferenceService(
+        provider: MockLLMProvider(response: prescriptionJSON()),
+        gymProfile: nil,
+        maxRetries: 0
+    )
+    let memoryService = MemoryService(supabase: supabase, embeddingAPIKey: "")
+    let testDefaults = UserDefaults(suiteName: "com.test.wsm.body.\(UUID().uuidString)")!
+    let gymFactStore = GymFactStore(userDefaults: testDefaults)
+    let waq = WriteAheadQueue(supabase: supabase, userDefaults: testDefaults)
+    return WorkoutSessionManager(
+        aiInference: inferenceService,
+        healthKit: HealthKitService(),
+        memoryService: memoryService,
+        supabase: supabase,
+        gymFactStore: gymFactStore,
+        writeAheadQueue: waq
+    )
 }

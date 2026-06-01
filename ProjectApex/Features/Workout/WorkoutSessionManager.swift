@@ -1444,7 +1444,13 @@ actor WorkoutSessionManager {
 
         // Blocking write: patch workout_sessions with status + completed + summary (P3-T06 AC)
         // Must complete before PostWorkoutSummaryView is shown.
-        let patch = WorkoutSessionSummaryPatch(status: "completed", completed: finalSession.completed, summary: summary)
+        // Keep (status, completed) internally consistent (#171): an early exit is
+        // NOT a full completion, so don't hardcode status="completed" alongside
+        // completed=false. Use "partial" — not "abandoned", since the deep
+        // lift-history fetch excludes 'abandoned' but a partial session carries
+        // real logged sets we want the model and history to see.
+        let status = finalSession.completed ? "completed" : "partial"
+        let patch = WorkoutSessionSummaryPatch(status: status, completed: finalSession.completed, summary: summary)
         let sessionId = finalSession.id
         print("[WorkoutSessionManager] Writing session completion — id: \(sessionId), completed: \(finalSession.completed), sets: \(completedSets.count)")
         do {
@@ -1456,12 +1462,15 @@ actor WorkoutSessionManager {
             try? await writeAheadQueue.enqueue(patch, table: "workout_sessions")
         }
 
-        // Producer side of the trainee-model update pipeline (#135). Only fire
-        // on real completion — early exit leaves completed=false, which the
-        // digest pipeline treats as a non-event. Must run AFTER the PATCH so
-        // the session row exists when the WAQ flush dispatches this item to
-        // the Edge Function.
-        if finalSession.completed, let traineeModelService {
+        // Producer side of the trainee-model update pipeline (#135). Fire for
+        // ANY saved session, including early exits (#171). We only reach this
+        // point when completedSets is non-empty (guard at the top of this
+        // method), so the model always has real logged sets to learn from. The
+        // Edge Function aggregates actual logged sets and never reads
+        // workout_sessions.status/completed, so a partial session contributes
+        // accurately instead of vanishing. Must run AFTER the PATCH so the
+        // session row exists when the WAQ flush dispatches this item to the EF.
+        if let traineeModelService {
             try? await traineeModelService.enqueueUpdate(forSession: finalSession, setLogs: completedSets)
         }
 
