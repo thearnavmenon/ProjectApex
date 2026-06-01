@@ -220,4 +220,8 @@ final class AppDependencies {
             traineeModelService: traineeModelService
         )
     }
+
+    // MARK: - Lifecycle
+
+    nonisolated deinit {}
 }
