@@ -110,6 +110,7 @@ import {
   type NoteToClassify,
 } from "../_shared/note-classifier.ts";
 import { LLMPermanentError, LLMTransientError } from "../_shared/llm-retry.ts";
+import { backfillPatternConfidence } from "../_shared/pattern-confidence-backfill.ts";
 
 export interface UpdateTraineeModelRequest {
   user_id: string;
@@ -1655,8 +1656,19 @@ export async function applySession(
       // Per-pattern rule pipeline. Reads the post-A17 exercises for
       // plateau-verdict's e1rm history derivation (#122 / A20).
       const patternsIn = (modelJson.patterns as Record<string, Record<string, unknown>> | undefined) ?? {};
+
+      // #173: Backfill null-confidence entries on pre-existing patterns.
+      // Patterns created before PR #149/#146 landed the bootstrap producer
+      // carry confidence: null; the bootstrap path only runs for new patterns.
+      // backfillPatternConfidence is idempotent: already-set entries are unchanged.
+      const backfilled = backfillPatternConfidence(patternsIn);
+      if (backfilled.backfilledCount > 0) {
+        rulesFired.push("pattern-confidence-backfill");
+        fieldsChanged.push(`patterns.confidence-backfill.count=${backfilled.backfilledCount}`);
+      }
+
       const ruled = applyPerPatternRules(
-        patternsIn,
+        backfilled.patterns,
         trainedSets.patterns,
         incomingLoggedAt,
         newSessionCount,
