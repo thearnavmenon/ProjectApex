@@ -237,10 +237,13 @@ final class ProgramViewModel {
             persistRetryAction = nil
         } catch {
             programPersistLogger.error(
-                "program insert failed (\(context)): \(error.localizedDescription, privacy: .public)"
-                + " — user_id=\(capturedUserId.uuidString, privacy: .public)"
-                + ", program_id=\(capturedMesocycle.id.uuidString, privacy: .public)"
-                + ". Local cache preserved; row will not exist server-side until a successful retry."
+                """
+                program insert failed (\(context)): \
+                \(error.localizedDescription, privacy: .public) — \
+                user_id=\(capturedUserId.uuidString, privacy: .public), \
+                program_id=\(capturedMesocycle.id.uuidString, privacy: .public). \
+                Local cache preserved; row will not exist server-side until a successful retry.
+                """
             )
             persistError = "Couldn't sync your program. Tap to retry."
             persistRetryAction = { [weak self] in
@@ -720,8 +723,4 @@ final class ProgramViewModel {
         return nil
     }
 
-    // Prevents ___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED
-    // when @State releases this @MainActor class from a CFRunLoop layout-pass
-    // callback that is not inside a Swift Concurrency Task. See issue #37.
-    nonisolated deinit {}
 }
