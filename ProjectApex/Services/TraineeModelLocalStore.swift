@@ -59,6 +59,11 @@ final class TraineeModelLocalStore {
         self.container = container
     }
 
+    // Prevents dealloc crash when the OS releases this object off the main
+    // actor (e.g. from CFRunLoop callbacks). Stored properties are all Swift
+    // value types — safe to release on any thread.
+    nonisolated deinit {}
+
     // MARK: Factories
 
     /// Production store — persisted to the app's default SwiftData location.
