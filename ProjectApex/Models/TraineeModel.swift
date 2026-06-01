@@ -28,7 +28,6 @@ struct TraineeModel: Codable, Sendable, Hashable {
     var transfers: [ExerciseTransfer]
     var bodyweight: BodyweightHistory
     var lifeContextEvents: [LifeContextEvent]
-    var reassessmentRecords: [ReassessmentRecord]
     /// Total completed sessions across the user's history. Drives the
     /// 6-session-window check for shouldFireGlobalPhaseAdvance.
     var totalSessionCount: Int
@@ -56,7 +55,6 @@ struct TraineeModel: Codable, Sendable, Hashable {
         transfers: [ExerciseTransfer] = [],
         bodyweight: BodyweightHistory = BodyweightHistory(),
         lifeContextEvents: [LifeContextEvent] = [],
-        reassessmentRecords: [ReassessmentRecord] = [],
         totalSessionCount: Int = 0,
         lastClassifiedNoteCreatedAt: Date? = nil,
         lastGlobalPhaseAdvanceFiredAtSessionCount: Int? = nil
@@ -75,7 +73,6 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.transfers = transfers
         self.bodyweight = bodyweight
         self.lifeContextEvents = lifeContextEvents
-        self.reassessmentRecords = reassessmentRecords
         self.totalSessionCount = totalSessionCount
         self.lastClassifiedNoteCreatedAt = lastClassifiedNoteCreatedAt
         self.lastGlobalPhaseAdvanceFiredAtSessionCount = lastGlobalPhaseAdvanceFiredAtSessionCount
@@ -109,7 +106,6 @@ struct TraineeModel: Codable, Sendable, Hashable {
         case transfers
         case bodyweight
         case lifeContextEvents
-        case reassessmentRecords
         case totalSessionCount
         case lastClassifiedNoteCreatedAt
         case lastGlobalPhaseAdvanceFiredAtSessionCount
@@ -177,9 +173,10 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.lifeContextEvents = try c.decodeIfPresent(
             [LifeContextEvent].self, forKey: .lifeContextEvents
         ) ?? []
-        self.reassessmentRecords = try c.decodeIfPresent(
-            [ReassessmentRecord].self, forKey: .reassessmentRecords
-        ) ?? []
+        // Legacy JSONB rows may carry a `reassessmentRecords` key from
+        // before #178 (the field was declared but never written by any
+        // production path). The key is intentionally absent from CodingKeys
+        // now, so the decoder silently ignores it.
         self.totalSessionCount = try c.decodeIfPresent(
             Int.self, forKey: .totalSessionCount
         ) ?? 0
@@ -218,7 +215,6 @@ struct TraineeModel: Codable, Sendable, Hashable {
         try c.encode(transfers, forKey: .transfers)
         try c.encode(bodyweight, forKey: .bodyweight)
         try c.encode(lifeContextEvents, forKey: .lifeContextEvents)
-        try c.encode(reassessmentRecords, forKey: .reassessmentRecords)
         try c.encode(totalSessionCount, forKey: .totalSessionCount)
         try c.encodeIfPresent(lastClassifiedNoteCreatedAt, forKey: .lastClassifiedNoteCreatedAt)
         try c.encodeIfPresent(lastGlobalPhaseAdvanceFiredAtSessionCount, forKey: .lastGlobalPhaseAdvanceFiredAtSessionCount)

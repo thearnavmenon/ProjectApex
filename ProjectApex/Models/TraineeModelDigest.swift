@@ -74,6 +74,13 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// `WeekFatigueSignals` is substituted (both flags false → LLM falls
     /// through to normal behavior).
     var weeklyFatigue: WeekFatigueSignals
+    /// Present iff the global-phase-advance trigger fired within the
+    /// cooldown window per ADR-0005 / ADR-0012. When present, SessionPlan
+    /// prompts surface the HEAVY REASSESSMENT block. Nil otherwise. Trigger
+    /// detection is server-side (`lastGlobalPhaseAdvanceFiredAtSessionCount`);
+    /// this projection is derived at iOS digest-assembly time from that
+    /// persisted value plus the per-pattern transition log (#178).
+    var heavyReassessmentSignal: HeavyReassessmentSignal?
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
@@ -85,6 +92,16 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// Minimum paired-observation count (inclusive) for a transfer entry to
     /// surface (Q10 lock-in — guards against tiny-sample regressions).
     static let transferPairedObservationsThreshold: Int = 5
+
+    /// Sessions after `lastGlobalPhaseAdvanceFiredAtSessionCount` during
+    /// which the HEAVY REASSESSMENT block remains in the SessionPlan
+    /// prompt. Matches the server-side cooldown
+    /// (`GLOBAL_PHASE_ADVANCE_COOLDOWN_SESSIONS = 6` in
+    /// `supabase/functions/_shared/constants.ts`). #178 deliberately ships
+    /// without iOS-side acknowledgment state — the AI may mention
+    /// reassessment for up to this many consecutive sessions per fire event
+    /// until the UI screen + ack writer land in a follow-up.
+    static let heavyReassessmentCooldownWindow: Int = 6
 
     enum CodingKeys: String, CodingKey {
         case goal
@@ -100,6 +117,40 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case lastGlobalPhaseAdvanceFiredAtSessionCount = "last_global_phase_advance_fired_at_session_count"
         case perExerciseSummary        = "per_exercise_summary"
         case weeklyFatigue             = "weekly_fatigue"
+        case heavyReassessmentSignal   = "heavy_reassessment_signal"
+    }
+}
+
+// MARK: - HeavyReassessmentSignal
+
+/// Per ADR-0005: heavy reassessment is the UX event (UI screen + goal
+/// renegotiation) that fires when the global-phase-advance trigger predicate
+/// fires (ADR-0012: ≥4 of 6 major patterns transitioned phase within a
+/// trailing 6-session window; force-deload counts per ADR-0011 §(b)). Trigger
+/// detection and persistence happen server-side in the Edge Function
+/// orchestrator (`shouldFireGlobalPhaseAdvance` in `_shared/global-phase-
+/// advance.ts`); this digest projection is derived at iOS digest-assembly
+/// time from `TraineeModel.lastGlobalPhaseAdvanceFiredAtSessionCount` plus
+/// the per-pattern transition log, so SessionPlan can include the HEAVY
+/// REASSESSMENT prompt block during the cooldown window.
+struct HeavyReassessmentSignal: Codable, Sendable, Hashable {
+    /// Session-count at which the most recent global-phase-advance event
+    /// fired. Equal to `TraineeModel.lastGlobalPhaseAdvanceFiredAtSessionCount`.
+    var triggeringSessionCount: Int
+    /// Sessions elapsed since the trigger fired. 0 means GPA fired during
+    /// this digest's source session; 1 means one session has been logged
+    /// since. Always `< TraineeModelDigest.heavyReassessmentCooldownWindow`
+    /// when the signal is present.
+    var sessionsSinceTriggered: Int
+    /// Major patterns whose phase transitioned within the cooldown window
+    /// per ADR-0011 §(b) / ADR-0012 (force-deload counts as a transition).
+    /// Sorted by `rawValue` for deterministic JSON ordering.
+    var recentlyAdvancedPatterns: [MovementPattern]
+
+    enum CodingKeys: String, CodingKey {
+        case triggeringSessionCount   = "triggering_session_count"
+        case sessionsSinceTriggered   = "sessions_since_triggered"
+        case recentlyAdvancedPatterns = "recently_advanced_patterns"
     }
 }
 
@@ -155,6 +206,8 @@ extension TraineeModelDigest {
         let resolvedWeeklyFatigue = weeklyFatigue
             ?? WeekFatigueSignals.compute(from: [], sessionCount: 0)
 
+        let heavyReassessmentSignal = Self.deriveHeavyReassessmentSignal(from: model)
+
         self.init(
             goal: model.goal,
             projections: model.projections,
@@ -168,7 +221,37 @@ extension TraineeModelDigest {
             totalSessionCount: model.totalSessionCount,
             lastGlobalPhaseAdvanceFiredAtSessionCount: model.lastGlobalPhaseAdvanceFiredAtSessionCount,
             perExerciseSummary: perExerciseSummary,
-            weeklyFatigue: resolvedWeeklyFatigue
+            weeklyFatigue: resolvedWeeklyFatigue,
+            heavyReassessmentSignal: heavyReassessmentSignal
+        )
+    }
+
+    /// Returns a signal iff the server-side GPA trigger fired within the
+    /// cooldown window. Nil when GPA has never fired, when the cooldown has
+    /// elapsed since the last fire, or when (defensively) the persisted
+    /// fired-session-count is in the future relative to `totalSessionCount`.
+    static func deriveHeavyReassessmentSignal(
+        from model: TraineeModel
+    ) -> HeavyReassessmentSignal? {
+        guard let lastFired = model.lastGlobalPhaseAdvanceFiredAtSessionCount else {
+            return nil
+        }
+        let delta = model.totalSessionCount - lastFired
+        guard delta >= 0, delta < heavyReassessmentCooldownWindow else {
+            return nil
+        }
+        let recentPatterns = model.patterns
+            .filter { (pattern, profile) in
+                TraineeModel.majorPatterns.contains(pattern)
+                    && profile.lastPhaseTransitionAtSessionCount > 0
+                    && (model.totalSessionCount - profile.lastPhaseTransitionAtSessionCount) <= heavyReassessmentCooldownWindow
+            }
+            .map { $0.key }
+            .sorted { $0.rawValue < $1.rawValue }
+        return HeavyReassessmentSignal(
+            triggeringSessionCount: lastFired,
+            sessionsSinceTriggered: delta,
+            recentlyAdvancedPatterns: recentPatterns
         )
     }
 }

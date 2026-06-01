@@ -213,11 +213,6 @@ struct TraineeModelCodableTests {
         model.lifeContextEvents.append(LifeContextEvent(
             localDate: "2026-04-15", kind: "travel", notes: "10 days abroad"
         ))
-        model.reassessmentRecords.append(ReassessmentRecord(
-            triggeredAt: isoDate("2026-04-20"),
-            triggeringSessionCount: 18,
-            advancedPatterns: [.horizontalPush, .squat, .verticalPull, .hipHinge]
-        ))
         model.projections = ProjectionState(
             patternProjections: [
                 PatternProjection(pattern: .squat, floor: 140, stretch: 165, progress: .onTrack),

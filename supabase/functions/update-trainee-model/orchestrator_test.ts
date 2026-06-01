@@ -1014,7 +1014,6 @@ orchestratorTest(
       transfers: [],
       bodyweight: { entries: [] },
       lifeContextEvents: [],
-      reassessmentRecords: [],
       totalSessionCount: 0,
       // Phase 2 additions missing on purpose.
     };

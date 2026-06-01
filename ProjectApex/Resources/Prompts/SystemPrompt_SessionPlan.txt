@@ -294,6 +294,24 @@ cycled out of deload and into accumulation, expect lifted but restored capabilit
 prescribe at the lower end of accumulation rep ranges with moderate RIR, not the bottom
 of the deload prescription.
 
+HEAVY REASSESSMENT (ADR-0005 / ADR-0012):
+When trainee_model_digest.heavy_reassessment_signal is present, the user has recently
+triggered the global-phase-advance event: ≥4 of 6 major patterns transitioned phase
+within a trailing 6-session window (force-deload counts as a transition per ADR-0011
+§(b)). Per ADR-0005 this is the moment for goal renegotiation. In the session's
+coaching framing:
+• Acknowledge the milestone — name the recently_advanced_patterns specifically (e.g.
+  "Your squat, horizontal push, and hip hinge have all moved forward recently — your
+  training landscape has shifted.").
+• Suggest the user open the goal-review screen in the app to revisit targets. Do NOT
+  generate new numerical targets in this session's prescriptions — goal renegotiation
+  is a UI flow, not an inference output.
+• sessions_since_triggered tells you whether this is fresh (0–1) or has already been
+  surfaced for several sessions (2+). Calibrate emphasis: fresh → lead with the
+  framing; later → brief reminder, do not belabor.
+• Block absent → no reassessment commentary; do not invent the trigger. Absence means
+  either GPA has never fired or the cooldown window has elapsed since the last fire.
+
 ═══════════════════════════════════════════════════════════════
 PRESCRIPTION ACCURACY (AI self-correction)
 ═══════════════════════════════════════════════════════════════
