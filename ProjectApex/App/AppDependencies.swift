@@ -94,11 +94,7 @@ final class AppDependencies {
 
         // 2. Supabase — needs its anon key from Keychain; URL comes from Config
         let supabaseAnonKey = (try? keychain.retrieve(.supabaseAnonKey)) ?? ""
-        let supabaseServiceKey = (try? keychain.retrieve(.supabaseServiceKey)) ?? ""
         let client = SupabaseClient(supabaseURL: Config.supabaseURL, anonKey: supabaseAnonKey)
-        if !supabaseServiceKey.isEmpty {
-            Task { await client.set(serviceKey: supabaseServiceKey) }
-        }
         self.supabaseClient = client
 
         // 3. HealthKit — no dependencies
