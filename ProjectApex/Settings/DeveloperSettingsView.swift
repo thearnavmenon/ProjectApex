@@ -48,19 +48,16 @@ struct DeveloperSettingsView: View {
     @State private var anthropicKey: String    = ""
     @State private var openAIKey: String       = ""
     @State private var supabaseKey: String     = ""
-    @State private var supabaseServiceKey: String = ""
 
     /// Tracks which fields are revealing plain text.
     @State private var showAnthropic: Bool     = false
     @State private var showOpenAI: Bool        = false
     @State private var showSupabase: Bool      = false
-    @State private var showServiceKey: Bool    = false
 
     /// Keychain presence status loaded on appear / after save.
     @State private var anthropicStored: Bool      = false
     @State private var openAIStored: Bool         = false
     @State private var supabaseStored: Bool       = false
-    @State private var supabaseServiceStored: Bool = false
     @State private var supabaseAnonKeyValue: String? = nil
 
     /// Banner shown after a save attempt.
@@ -104,7 +101,6 @@ struct DeveloperSettingsView: View {
             anthropicSection
             openAISection
             supabaseSection
-            supabaseServiceSection
             saveSection
             developerToolsSection
         }
@@ -210,34 +206,6 @@ struct DeveloperSettingsView: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
-            HStack {
-                statusRow(label: "Supabase Service Key", isPresent: supabaseServiceStored)
-                if supabaseServiceStored {
-                    Button(role: .destructive) {
-                        Task { await clearSupabaseServiceKey() }
-                    } label: {
-                        Image(systemName: "trash")
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Delete Supabase service key from Keychain")
-                }
-            }
-        }
-    }
-
-    /// Deletes the stored Supabase service-role key from the Keychain and clears
-    /// it from the live `SupabaseClient` so subsequent requests fall back to the
-    /// anon key as the bearer.
-    @MainActor
-    private func clearSupabaseServiceKey() async {
-        do {
-            try keychain.delete(.supabaseServiceKey)
-            await deps.supabaseClient.set(serviceKey: nil)
-            refreshStoredStatus()
-            showBanner("Supabase service key cleared.", isError: false)
-        } catch {
-            showBanner("Failed to clear service key: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -338,23 +306,6 @@ struct DeveloperSettingsView: View {
             Text("Supabase")
         } footer: {
             Text("Anonymous key for database reads and RAG memory retrieval.")
-                .font(.caption)
-        }
-    }
-
-    private var supabaseServiceSection: some View {
-        Section {
-            apiKeyField(
-                label: "Supabase Service Key",
-                hint: "eyJ...",
-                text: $supabaseServiceKey,
-                showPlainText: $showServiceKey
-            )
-            formatHint("JWT — begins with \"eyJ\". Bypasses RLS for MVP writes.")
-        } header: {
-            Text("Supabase Service Role (MVP)")
-        } footer: {
-            Text("Required until Supabase Auth is wired. Allows the app to write embeddings and session data. Keep secret — never share publicly.")
                 .font(.caption)
         }
     }
@@ -564,30 +515,12 @@ struct DeveloperSettingsView: View {
             }
         }
 
-        // Supabase service role key (JWT)
-        if !supabaseServiceKey.isEmpty {
-            if !supabaseServiceKey.hasPrefix("eyJ") {
-                errors.append("Supabase service key must start with \"eyJ\" (JWT)")
-            } else {
-                do {
-                    try keychain.store(supabaseServiceKey, for: .supabaseServiceKey)
-                    savedCount += 1
-                    // Apply immediately to the live SupabaseClient so current session benefits.
-                    let key = supabaseServiceKey
-                    Task { await deps.supabaseClient.set(serviceKey: key) }
-                } catch {
-                    errors.append("Supabase Service: \(error.localizedDescription)")
-                }
-            }
-        }
-
         // Refresh stored-status indicators.
         refreshStoredStatus()
         // Clear text fields so the saved values are no longer visible.
         anthropicKey      = ""
         openAIKey         = ""
         supabaseKey       = ""
-        supabaseServiceKey = ""
 
         // Show banner.
         if errors.isEmpty {
@@ -607,7 +540,6 @@ struct DeveloperSettingsView: View {
         openAIStored         = (try? keychain.retrieve(.openAIAPIKey))       != nil
         supabaseAnonKeyValue  = try? keychain.retrieve(.supabaseAnonKey)
         supabaseStored       = supabaseAnonKeyValue != nil
-        supabaseServiceStored = (try? keychain.retrieve(.supabaseServiceKey)) != nil
     }
 
     /// Displays the banner for 3 seconds then hides it.
