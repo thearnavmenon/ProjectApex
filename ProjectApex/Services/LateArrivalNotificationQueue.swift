@@ -44,6 +44,8 @@ final class LateArrivalNotificationQueue {
         self.key      = key
     }
 
+    nonisolated deinit {}
+
     // MARK: - Factories
 
     /// Production queue persisted to `UserDefaults.standard`.
