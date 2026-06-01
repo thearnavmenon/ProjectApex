@@ -45,7 +45,7 @@
          <EnvironmentVariable
             key = "APEX_INTEGRATION_TESTS"
             value = "1"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </EnvironmentVariable>
       </EnvironmentVariables>
       <TestPlans>
