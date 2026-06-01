@@ -298,7 +298,7 @@ actor MacroPlanService {
             let days: [TrainingDay] = intent.dayFocus.enumerated().map { dayIndex, focus in
                 // Assign standard ISO-weekday slots: Mon=1, Tue=2, Wed=3, Thu=4, ...
                 let dayOfWeek = standardDayOfWeek(for: dayIndex, daysPerWeek: skeleton.trainingDaysPerWeek)
-                let label = focus.replacingOccurrences(of: " ", with: "_")
+                let label = normalizeDayLabel(focus)
                 return TrainingDay(
                     id: UUID(),
                     dayOfWeek: dayOfWeek,
@@ -343,6 +343,21 @@ actor MacroPlanService {
         let slots = table[daysPerWeek] ?? slots4
         guard dayIndex < slots.count else { return dayIndex + 1 }
         return slots[dayIndex]
+    }
+
+    /// Normalize a free-text day-focus string into a clean snake_case
+    /// `day_type` label. The macro-skeleton prompt lets the LLM emit focus
+    /// strings with spaces, ampersands, slashes, etc. (e.g. "Arms & Shoulders",
+    /// "Chest/Shoulders/Triceps"); the prior space-only substitution left the
+    /// `&` and `/` intact, producing non-standard values like `Arms_&_Shoulders`
+    /// (#192). Collapse every run of non-alphanumeric characters to a single
+    /// underscore and trim, so the stored label always matches `^[A-Za-z0-9_]+$`.
+    /// Case is preserved (the convention is `Push_A`/`Upper_Push`, not lowercase).
+    static func normalizeDayLabel(_ focus: String) -> String {
+        return focus
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+            .joined(separator: "_")
     }
 
     // MARK: - Private: Helpers
