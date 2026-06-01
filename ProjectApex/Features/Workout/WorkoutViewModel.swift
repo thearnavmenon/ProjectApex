@@ -448,6 +448,8 @@ final class WorkoutViewModel {
             return "Coach offline — using program defaults"
         case .malformedResponse:
             return "Coach offline — using program defaults"
+        case .systemPromptUnavailable:
+            return "Coach offline — using program defaults"
         }
     }
 
@@ -465,6 +467,8 @@ final class WorkoutViewModel {
             return ".encodingFailed(\(detail.prefix(80)))"
         case .malformedResponse(let detail):
             return ".malformedResponse(\(detail.prefix(80)))"
+        case .systemPromptUnavailable(let detail):
+            return ".systemPromptUnavailable(\(detail.prefix(80)))"
         }
     }
 
@@ -481,6 +485,8 @@ final class WorkoutViewModel {
             return "Internal error: \(String(d.prefix(80)))"
         case .malformedResponse(let d):
             return "Invalid response: \(String(d.prefix(80)))"
+        case .systemPromptUnavailable:
+            return "App misconfigured — contact support."
         }
     }
 

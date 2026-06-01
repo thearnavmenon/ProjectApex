@@ -116,6 +116,8 @@ nonisolated struct FallbackLogRecord: Codable, Sendable {
             reason = "encodingFailed: \(msg)"
         case .malformedResponse(let msg):
             reason = "malformedResponse: \(msg.prefix(200))"
+        case .systemPromptUnavailable(let msg):
+            reason = "systemPromptUnavailable: \(msg.prefix(200))"
         }
         return FallbackLogRecord(
             callSite: callSite,

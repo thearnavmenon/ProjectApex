@@ -659,9 +659,9 @@ final class TraineeModelDigestTests: XCTestCase {
     }
 
     func test_inferencePrompt_containsPerPatternTrendBlock() {
-        // Production Inference reads AIInferenceService.systemPrompt — the
-        // inline Swift string literal, not SystemPrompt_Inference.txt (which
-        // is a deprecated parallel mirror — see #159).
+        // Production Inference reads AIInferenceService.systemPrompt — now a
+        // computed accessor backed by SystemPrompt_Inference.txt loaded from
+        // the bundle resource at call time (per #159 consolidation).
         let prompt = AIInferenceService.systemPrompt
 
         XCTAssertTrue(prompt.contains("PER-PATTERN TREND"),

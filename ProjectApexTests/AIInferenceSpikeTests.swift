@@ -248,6 +248,8 @@ final class AIInferenceSpikeTests: XCTestCase {
                 XCTFail("Encoding should not have failed in this test path: \(reason)")
             case .malformedResponse:
                 XCTFail("Transient HTTP errors should not surface as malformedResponse: \(reason)")
+            case .systemPromptUnavailable:
+                XCTFail("Bundle resource should be present in test target: \(reason)")
             }
         }
     }

@@ -118,6 +118,8 @@ enum InferenceSpike {
                 print("\(tag) ❌ Fallback: encoding failed — \(msg)")
             case .malformedResponse(let msg):
                 print("\(tag) ❌ Fallback: malformed response — \(msg)")
+            case .systemPromptUnavailable(let msg):
+                print("\(tag) ❌ Fallback: system prompt unavailable — \(msg)")
             }
         }
 
