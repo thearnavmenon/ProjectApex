@@ -668,6 +668,12 @@ nonisolated enum FallbackReason: Sendable {
     /// no same-prompt retry. Surfaced via `InferenceRetrySheet` so the
     /// user gets agency rather than a silent default.
     case malformedResponse(String)
+    /// SystemPrompt_Inference.txt is missing from the app bundle — a
+    /// deploy-time misconfiguration. Per #159 / L6: production paths
+    /// propagate the loader throw to `.fallback(reason:)` rather than
+    /// `fatalError`-ing or silently degrading (ADR-0007 §1). Retry will
+    /// not help; the retry-sheet copy should direct the user to support.
+    case systemPromptUnavailable(String)
 }
 
 nonisolated enum PrescriptionResult: Sendable {
@@ -865,7 +871,12 @@ actor AIInferenceService {
             return .fallback(reason: .encodingFailed("Failed to encode WorkoutContext to JSON."))
         }
 
-        let systemPrompt = Self.systemPrompt
+        let systemPrompt: String
+        do {
+            systemPrompt = try Self.loadSystemPrompt()
+        } catch {
+            return .fallback(reason: .systemPromptUnavailable(error.localizedDescription))
+        }
         let userPayload = contextJSON
 
         // Per ADR-0007 §1: malformed-response and validation errors are
@@ -1009,7 +1020,12 @@ actor AIInferenceService {
         userPayload: String,
         workoutContext: WorkoutContext
     ) async -> PrescriptionResult {
-        let systemPrompt = Self.systemPrompt
+        let systemPrompt: String
+        do {
+            systemPrompt = try Self.loadSystemPrompt()
+        } catch {
+            return .fallback(reason: .systemPromptUnavailable(error.localizedDescription))
+        }
 
         do {
             let rawResponse = try await withTimeout(seconds: 8.0) {
