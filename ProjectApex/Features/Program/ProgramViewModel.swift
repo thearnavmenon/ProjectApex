@@ -696,4 +696,9 @@ final class ProgramViewModel {
         }
         return nil
     }
+
+    // Prevents ___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED
+    // when @State releases this @MainActor class from a CFRunLoop layout-pass
+    // callback that is not inside a Swift Concurrency Task. See issue #37.
+    nonisolated deinit {}
 }
