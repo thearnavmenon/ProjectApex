@@ -298,4 +298,51 @@ final class WriteAheadQueueTests: XCTestCase {
         let innerJSON = try JSONSerialization.jsonObject(with: decoded.payload) as? [String: Any]
         XCTAssertEqual(innerJSON?["set_number"] as? Int, 42)
     }
+
+    // MARK: Test 7 (#55): clearAll during an in-flight flush must not crash
+
+    /// Reproduces #55: flush() reads queue[0], awaits dispatch, and on transient
+    /// failure writes queue[0] back. If clearAll() empties the queue during that
+    /// await, the write-back previously trapped with index-out-of-range. The
+    /// clearRequested guard must abandon the in-flight item instead.
+    func testClearAll_duringInFlightFlush_doesNotCrash() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults)
+
+        // Handler that delays (widening the race window) then fails transiently,
+        // forcing the post-await queue[0] write-back path.
+        await queue.registerFlushHandler(forTable: "race") { _ in
+            try? await Task.sleep(nanoseconds: 150_000_000) // 0.15s
+            return .transientFailure
+        }
+
+        try await queue.enqueue(TestSetLogPayload.mock(), table: "race") // triggers flush()
+        try await Task.sleep(nanoseconds: 30_000_000)  // let flush enter the handler await
+        await queue.clearAll()                          // races with the in-flight item
+        try await Task.sleep(nanoseconds: 300_000_000)  // let flush unwind
+
+        let pending = await queue.pendingCount
+        XCTAssertEqual(pending, 0, "clearAll during in-flight flush must leave an empty queue without trapping")
+    }
+
+    // MARK: Test 8 (#184): retry-exhausted items are dead-lettered, not dropped
+
+    /// Reproduces #184: an item that exhausts its retries was silently removed
+    /// with no sink (permanent data loss). It must instead land in the
+    /// recoverable dead-letter store.
+    func testFlush_exhaustedRetries_movesItemToDeadLetter() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        // Tiny base delay so 6 attempts exhaust in milliseconds, not 31s.
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults, baseRetryDelay: 0.001)
+
+        await queue.registerFlushHandler(forTable: "set_logs") { _ in .transientFailure }
+
+        try await queue.enqueue(TestSetLogPayload.mock(), table: "set_logs") // triggers flush()
+        try await Task.sleep(nanoseconds: 400_000_000) // 0.4s — ample for the tiny-backoff retries
+
+        let pending = await queue.pendingCount
+        let dead = await queue.failedWrites()
+        XCTAssertEqual(pending, 0, "exhausted item must leave the pending queue")
+        XCTAssertEqual(dead.count, 1, "exhausted item must be dead-lettered, not silently dropped")
+    }
 }

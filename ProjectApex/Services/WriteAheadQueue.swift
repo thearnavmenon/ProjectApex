@@ -86,14 +86,21 @@ actor WriteAheadQueue {
     /// Maximum number of retry attempts per item (5 retries = 6 total attempts).
     static let maxRetries = 5
 
-    /// Base delay for exponential backoff (1 second).
-    static let baseRetryDelay: TimeInterval = 1.0
+    /// Default base delay for exponential backoff (1 second in production).
+    /// Injectable via init so tests can exercise retry-exhaustion without
+    /// waiting out the real 1+2+4+8+16s schedule.
+    static let defaultBaseRetryDelay: TimeInterval = 1.0
 
     /// Maximum number of items allowed in the queue before rejecting new writes.
     static let maxQueueSize = 500
 
     /// UserDefaults key for persisting the queue across launches.
     private static let persistenceKey = "com.projectapex.writeAheadQueue"
+
+    /// UserDefaults key for the dead-letter store (#184) — items that exhausted
+    /// retries or were permanently rejected, retained for recovery/inspection
+    /// instead of being silently lost.
+    private static let deadLetterKey = "com.projectapex.writeAheadQueue.deadLetter"
 
     // MARK: - State
 
@@ -102,6 +109,15 @@ actor WriteAheadQueue {
 
     /// True while flush() is actively processing the queue.
     private(set) var isFlushing: Bool = false
+
+    /// Set by clearAll() so an in-flight flush abandons its current item rather
+    /// than indexing a queue that clearAll just emptied (#55).
+    private var clearRequested = false
+
+    /// Dead-letter store (#184): writes that exhausted retries or were
+    /// permanently rejected. Persisted separately so they survive launches and
+    /// can be recovered (e.g. by session resume) instead of being silently lost.
+    private(set) var deadLetter: [QueuedWrite] = []
 
     /// Per-table flush handlers. When a table has a registered handler, the WAQ
     /// calls it instead of the default Supabase REST insert path. Registered at
@@ -114,14 +130,21 @@ actor WriteAheadQueue {
 
     private let supabase: SupabaseClient
     private let userDefaults: UserDefaults
+    private let baseRetryDelay: TimeInterval
 
     // MARK: - Init
 
-    init(supabase: SupabaseClient, userDefaults: UserDefaults = .standard) {
+    init(
+        supabase: SupabaseClient,
+        userDefaults: UserDefaults = .standard,
+        baseRetryDelay: TimeInterval = WriteAheadQueue.defaultBaseRetryDelay
+    ) {
         self.supabase = supabase
         self.userDefaults = userDefaults
-        // Restore any persisted queue items from a previous session
+        self.baseRetryDelay = baseRetryDelay
+        // Restore any persisted queue + dead-letter items from a previous session
         self.queue = Self.loadPersistedQueue(userDefaults: userDefaults)
+        self.deadLetter = Self.loadPersistedDeadLetter(userDefaults: userDefaults)
     }
 
     // MARK: - Handler Registration
@@ -176,6 +199,7 @@ actor WriteAheadQueue {
     func flush() async {
         guard !isFlushing else { return }
         isFlushing = true
+        clearRequested = false
         defer {
             isFlushing = false
             persistQueue()
@@ -186,6 +210,11 @@ actor WriteAheadQueue {
 
             let outcome = await dispatch(item)
 
+            // clearAll() may have emptied the queue during the await above;
+            // abandon the in-flight item rather than indexing a now-empty
+            // queue (which previously trapped with index-out-of-range). #55.
+            if clearRequested { break }
+
             switch outcome {
             case .success:
                 queue.removeFirst()
@@ -193,17 +222,20 @@ actor WriteAheadQueue {
 
             case .permanentFailure(let reason):
                 queue.removeFirst()
+                recordFailedWrite(item)
                 persistQueue()
-                Self.logger.error("[WriteAheadQueue] permanent failure, item \(item.id, privacy: .public), table: \(item.table, privacy: .public) — \(reason, privacy: .public)")
+                Self.logger.error("[WriteAheadQueue] permanent failure (dead-lettered), item \(item.id, privacy: .public), table: \(item.table, privacy: .public) — \(reason, privacy: .public)")
 
             case .transientFailure:
                 item.retryCount += 1
 
                 if item.retryCount > Self.maxRetries {
-                    // Exhausted retries — remove and log (data loss for this item)
+                    // Exhausted retries — move to the dead-letter store instead
+                    // of silently dropping, so the write can be recovered (#184).
                     queue.removeFirst()
+                    recordFailedWrite(item)
                     persistQueue()
-                    Self.logger.error("[WriteAheadQueue] dropped item \(item.id, privacy: .public) after \(Self.maxRetries) retries — table: \(item.table, privacy: .public)")
+                    Self.logger.error("[WriteAheadQueue] dead-lettered item \(item.id, privacy: .public) after \(Self.maxRetries) retries — table: \(item.table, privacy: .public)")
                     continue
                 }
 
@@ -212,10 +244,11 @@ actor WriteAheadQueue {
                 persistQueue()
 
                 // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                let delay = Self.baseRetryDelay * pow(2.0, Double(item.retryCount - 1))
+                let delay = baseRetryDelay * pow(2.0, Double(item.retryCount - 1))
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
 
-                // After the delay, loop will retry the same item
+                // clearAll() may have fired during the backoff sleep.
+                if clearRequested { break }
             }
         }
     }
@@ -250,10 +283,32 @@ actor WriteAheadQueue {
             }
     }
 
-    /// Clears all queued items (for testing / reset).
+    /// Returns the dead-lettered writes (#184): items that exhausted retries or
+    /// were permanently rejected. Retained so callers (e.g. session resume per
+    /// #190) can recover them instead of suffering silent data loss.
+    func failedWrites() -> [QueuedWrite] { deadLetter }
+
+    /// Removes a recovered/handled item from the dead-letter store.
+    func removeFailedWrite(id: UUID) {
+        deadLetter.removeAll { $0.id == id }
+        persistDeadLetter()
+    }
+
+    /// Clears the dead-letter store.
+    func clearFailedWrites() {
+        deadLetter.removeAll()
+        userDefaults.removeObject(forKey: Self.deadLetterKey)
+    }
+
+    /// Clears all queued items AND the dead-letter store (full reset — used on
+    /// logout/reset and in tests). Also signals any in-flight flush to abandon
+    /// its current item so it doesn't index the now-empty queue (#55).
     func clearAll() {
         queue.removeAll()
+        clearRequested = true
         userDefaults.removeObject(forKey: Self.persistenceKey)
+        deadLetter.removeAll()
+        userDefaults.removeObject(forKey: Self.deadLetterKey)
     }
 
     // MARK: - Blocking Write (for session summary)
@@ -306,6 +361,26 @@ actor WriteAheadQueue {
     /// Loads any previously persisted queue from UserDefaults.
     private nonisolated static func loadPersistedQueue(userDefaults: UserDefaults) -> [QueuedWrite] {
         guard let data = userDefaults.data(forKey: persistenceKey),
+              let items = try? JSONDecoder().decode([QueuedWrite].self, from: data)
+        else { return [] }
+        return items
+    }
+
+    /// Appends an item to the dead-letter store and persists it (#184).
+    private func recordFailedWrite(_ item: QueuedWrite) {
+        deadLetter.append(item)
+        persistDeadLetter()
+    }
+
+    /// Persists the current dead-letter store to UserDefaults.
+    private func persistDeadLetter() {
+        guard let data = try? JSONEncoder().encode(deadLetter) else { return }
+        userDefaults.set(data, forKey: Self.deadLetterKey)
+    }
+
+    /// Loads any previously persisted dead-letter store from UserDefaults.
+    private nonisolated static func loadPersistedDeadLetter(userDefaults: UserDefaults) -> [QueuedWrite] {
+        guard let data = userDefaults.data(forKey: deadLetterKey),
               let items = try? JSONDecoder().decode([QueuedWrite].self, from: data)
         else { return [] }
         return items
