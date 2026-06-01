@@ -98,10 +98,6 @@ actor SupabaseClient {
     /// request instead of (not in addition to) the anon key.
     var authToken: String?
 
-    /// Supabase service role key. When set, used as the bearer token on all
-    /// requests, bypassing RLS. For MVP use only — remove once real auth lands.
-    var serviceKey: String?
-
     // MARK: - Private helpers
 
     private let session: URLSession
@@ -122,12 +118,6 @@ actor SupabaseClient {
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
         self.decoder = dec
-    }
-
-    // MARK: - Setters (actor-isolated for external callers)
-
-    func set(serviceKey: String?) {
-        self.serviceKey = serviceKey
     }
 
     // MARK: - Public API
@@ -439,10 +429,8 @@ actor SupabaseClient {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        // Bearer priority: service key > user auth token > anon key.
-        if let key = serviceKey, !key.isEmpty {
-            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        } else if let token = authToken {
+        // Bearer priority: user auth token > anon key.
+        if let token = authToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         } else {
             request.setValue("Bearer \(anonKey)", forHTTPHeaderField: "Authorization")
