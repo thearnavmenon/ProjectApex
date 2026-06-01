@@ -38,9 +38,6 @@ enum KeychainKey: String, CaseIterable {
     case supabaseAnonKey  = "com.projectapex.keychain.supabaseAnonKey"
     /// Stable user identifier (UUID string) persisted between app reinstalls.
     case userId           = "com.projectapex.keychain.userId"
-    /// Supabase service role key (JWT). Bypasses RLS — used for MVP writes
-    /// until real Supabase Auth is wired. Never expose this to end users.
-    case supabaseServiceKey = "com.projectapex.keychain.supabaseServiceKey"
 }
 
 // MARK: - KeychainError
