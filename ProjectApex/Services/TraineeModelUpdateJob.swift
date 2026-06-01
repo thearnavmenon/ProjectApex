@@ -232,6 +232,13 @@ final class TraineeModelUpdateJob {
             let msg = "response decoding error: \(detail)"
             logger.error("[\(callSite)] \(msg, privacy: .public) for item \(item.id, privacy: .public)")
             return .permanentFailure(msg)
+
+        case .patchNoMatch(let table, let filter):
+            // A PATCH that matched zero rows (#185): the target row is missing
+            // server-side, so retrying cannot make it appear — treat as permanent.
+            let msg = "patch matched no rows on \(table) (filter: \(filter))"
+            logger.error("[\(callSite)] \(msg, privacy: .public) for item \(item.id, privacy: .public)")
+            return .permanentFailure(msg)
         }
     }
 }

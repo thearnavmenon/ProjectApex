@@ -237,10 +237,13 @@ final class ProgramViewModel {
             persistRetryAction = nil
         } catch {
             programPersistLogger.error(
-                "program insert failed (\(context)): \(error.localizedDescription, privacy: .public)"
-                + " — user_id=\(capturedUserId.uuidString, privacy: .public)"
-                + ", program_id=\(capturedMesocycle.id.uuidString, privacy: .public)"
-                + ". Local cache preserved; row will not exist server-side until a successful retry."
+                """
+                program insert failed (\(context)): \
+                \(error.localizedDescription, privacy: .public) — \
+                user_id=\(capturedUserId.uuidString, privacy: .public), \
+                program_id=\(capturedMesocycle.id.uuidString, privacy: .public). \
+                Local cache preserved; row will not exist server-side until a successful retry.
+                """
             )
             persistError = "Couldn't sync your program. Tap to retry."
             persistRetryAction = { [weak self] in
