@@ -215,7 +215,14 @@ final class TraineeModelUpdateJobTests: XCTestCase {
         let outcome = await handler(item)
 
         XCTAssertEqual(outcome, .success, "Phase 1 no-op 200 must still be treated as success")
-        XCTAssertNil(store.load(), "Store must remain empty when server returns an empty model")
+        // Post-#149: empty {} body now decodes to a TraineeModel with placeholder
+        // fields (GoalState.placeholder sentinel, empty patterns/muscles/exercises,
+        // totalSessionCount=0). Verify those placeholder semantics rather than
+        // asserting nil — the production store-persist is correct.
+        let loaded = store.load()
+        XCTAssertEqual(loaded?.goal, .placeholder)
+        XCTAssertEqual(loaded?.totalSessionCount, 0)
+        XCTAssertTrue(loaded?.patterns.isEmpty ?? false)
     }
 
     // MARK: ─── Test 4: HTTP 200 + missing trainee_model key → permanentFailure
