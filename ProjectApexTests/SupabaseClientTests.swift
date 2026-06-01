@@ -181,9 +181,12 @@ final class SupabaseClientTests: XCTestCase {
     }
 
     /// update() must PATCH to /rest/v1/<table>?id=eq.<uuid>.
+    /// Post-#185: Prefer: return=representation is required; stub must return
+    /// at least one row so performExpectingRow does not throw patchNoMatch.
     func test_update_usesPatchWithIdFilter() async throws {
         StubURLProtocol.stubbedStatusCode = 200
-        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+        // Return one row to satisfy performExpectingRow's non-empty check.
+        StubURLProtocol.stubbedData = #"[{"user_id":"11111111-1111-4111-8111-111111111111","day_type":"legs"}]"#.data(using: .utf8)!
 
         let rowId = UUID()
         let client = makeClient()
@@ -198,6 +201,28 @@ final class SupabaseClientTests: XCTestCase {
         let components = URLComponents(url: req.url!, resolvingAgainstBaseURL: false)
         let idItem = components?.queryItems?.first { $0.name == "id" }
         XCTAssertEqual(idItem?.value, "eq.\(rowId.uuidString)")
+    }
+
+    /// update() must throw SupabaseError.patchNoMatch when the server returns
+    /// an empty array (post-#185: zero rows matched the PATCH filter).
+    func test_update_emptyResponseThrowsPatchNoMatch() async throws {
+        StubURLProtocol.stubbedStatusCode = 200
+        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+
+        let rowId = UUID()
+        let client = makeClient()
+        do {
+            try await client.update(
+                TestRow(userId: UUID(), dayType: "legs"),
+                table: "workout_sessions",
+                id: rowId
+            )
+            XCTFail("Expected patchNoMatch to be thrown")
+        } catch SupabaseError.patchNoMatch(let table, _) {
+            XCTAssertEqual(table, "workout_sessions")
+        } catch {
+            XCTFail("Expected SupabaseError.patchNoMatch, got: \(error)")
+        }
     }
 
     /// rpc() must POST to /rest/v1/rpc/<function>.
@@ -280,9 +305,10 @@ final class SupabaseClientTests: XCTestCase {
     // MARK: ─── 4. GymProfile unit tests (stub) ───────────────────────────────
 
     /// deactivateGymProfiles() must PATCH gym_profiles with user_id filter.
+    /// Post-#185: stub must return at least one row so performExpectingRow does not throw.
     func test_deactivateGymProfiles_sendsPatchWithUserIdFilter() async throws {
         StubURLProtocol.stubbedStatusCode = 200
-        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+        StubURLProtocol.stubbedData = #"[{"id":"11111111-1111-4111-8111-111111111111","is_active":false}]"#.data(using: .utf8)!
 
         let uid = UUID()
         let client = makeClient()

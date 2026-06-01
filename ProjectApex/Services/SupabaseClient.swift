@@ -53,6 +53,11 @@ enum SupabaseError: LocalizedError, Equatable {
     case decodingError(String)
     /// A URL could not be constructed from the provided components.
     case invalidURL
+    /// A PATCH with `Prefer: return=representation` returned an empty array,
+    /// meaning zero rows matched the filter. The row does not exist server-side.
+    /// Callers should treat this as a hard failure and propagate through the
+    /// WAQ retry loop. Re-queuing as INSERT is out of scope for this error (#185).
+    case patchNoMatch(table: String, filter: String)
 
     var errorDescription: String? {
         switch self {
@@ -62,6 +67,8 @@ enum SupabaseError: LocalizedError, Equatable {
             return "Decoding error: \(detail)"
         case .invalidURL:
             return "Could not construct a valid request URL."
+        case .patchNoMatch(let table, let filter):
+            return "PATCH on \(table) matched zero rows (filter: \(filter)). Row does not exist server-side."
         }
     }
 
@@ -73,6 +80,8 @@ enum SupabaseError: LocalizedError, Equatable {
             return l == r
         case (.invalidURL, .invalidURL):
             return true
+        case (.patchNoMatch(let lt, let lf), .patchNoMatch(let rt, let rf)):
+            return lt == rt && lf == rf
         default:
             return false
         }
@@ -229,7 +238,7 @@ actor SupabaseClient {
         var request = baseRequest(url: url, method: "PATCH")
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
         request.httpBody = try encoder.encode(item)
-        try await perform(request)
+        try await performExpectingRow(request, table: table, filter: "id=eq.\(id.uuidString)")
     }
 
     // MARK: - Delete
@@ -319,7 +328,7 @@ actor SupabaseClient {
         var request = baseRequest(url: url, method: "PATCH")
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
         request.httpBody = try encoder.encode(IsActivePatch(isActive: false))
-        try await perform(request)
+        try await performExpectingRow(request, table: "programs", filter: "user_id=eq.\(userId.uuidString)")
     }
 
     /// Fetches the most recent `is_active = true` program row for `userId`.
@@ -371,7 +380,7 @@ actor SupabaseClient {
         var request = baseRequest(url: url, method: "PATCH")
         request.setValue("return=representation", forHTTPHeaderField: "Prefer")
         request.httpBody = try encoder.encode(IsActivePatch(isActive: false))
-        try await perform(request)
+        try await performExpectingRow(request, table: "gym_profiles", filter: "user_id=eq.\(userId.uuidString)")
     }
 
     /// Fetches the most recent `is_active = true` gym profile for `userId`.
@@ -469,6 +478,27 @@ actor SupabaseClient {
             throw SupabaseError.httpError(statusCode: http.statusCode, body: body)
         }
         return data
+    }
+
+    /// Performs a PATCH request that already carries `Prefer: return=representation`
+    /// and throws `SupabaseError.patchNoMatch` if the response body is an empty
+    /// JSON array (i.e. zero rows matched the filter).
+    ///
+    /// Use this instead of `perform(_:)` for all PATCH call sites so that
+    /// server-side no-ops (row not found) are surfaced immediately rather than
+    /// silently treated as success. See issue #185.
+    private func performExpectingRow(
+        _ request: URLRequest,
+        table: String,
+        filter: String
+    ) async throws {
+        let data = try await performReturningData(request)
+        // `Prefer: return=representation` makes PostgREST return a JSON array
+        // of the updated rows. An empty array means zero rows matched.
+        if let rows = try? JSONSerialization.jsonObject(with: data) as? [Any],
+           rows.isEmpty {
+            throw SupabaseError.patchNoMatch(table: table, filter: filter)
+        }
     }
 
     /// Decodes a JSON array from `data`, wrapping any Swift decoding error in

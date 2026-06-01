@@ -194,7 +194,8 @@ final class ProgramPersistenceTests: XCTestCase {
 
     func test_deactivatePrograms_sendsPatchToCorrectURL() async throws {
         ProgramStubURLProtocol.stubbedStatusCode = 200
-        ProgramStubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+        // Post-#185: return one row so performExpectingRow does not throw patchNoMatch.
+        ProgramStubURLProtocol.stubbedData = #"[{"id":"11111111-1111-4111-8111-111111111111","is_active":false}]"#.data(using: .utf8)!
 
         let client = makeProgramClient()
         try await client.deactivatePrograms(userId: testUserId)
@@ -213,7 +214,8 @@ final class ProgramPersistenceTests: XCTestCase {
 
     func test_deactivatePrograms_bodyContainsIsActiveFalse() async throws {
         ProgramStubURLProtocol.stubbedStatusCode = 200
-        ProgramStubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+        // Post-#185: return one row so performExpectingRow does not throw patchNoMatch.
+        ProgramStubURLProtocol.stubbedData = #"[{"id":"11111111-1111-4111-8111-111111111111","is_active":false}]"#.data(using: .utf8)!
 
         let client = makeProgramClient()
         try await client.deactivatePrograms(userId: testUserId)
