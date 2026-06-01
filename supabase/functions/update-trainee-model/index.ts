@@ -89,6 +89,7 @@ import {
   bootstrapMuscleProfile,
   computeFocusWeight,
   computeVolumeDeficit,
+  MUSCLE_GROUPS,
   MUSCLE_VOLUME_WINDOW,
   type AxisConfidence,
   type MuscleGroup,
@@ -1940,7 +1941,7 @@ export async function applySession(
  * over-detect → premature clearing, also silent in the AI-inferred path
  * which caps at .mild).
  */
-function derivedTrainedSets(
+export function derivedTrainedSets(
   sessionPayload: Record<string, unknown>,
 ): {
   exercises: Set<string>;
@@ -1980,9 +1981,14 @@ function derivedTrainedSets(
         const m = e.primary_muscle;
         if (["quads", "hamstrings", "glutes", "calves"].includes(m)) {
           muscleGroups.add("legs");
-        } else {
+        } else if ((MUSCLE_GROUPS as ReadonlySet<string>).has(m)) {
           muscleGroups.add(m);
         }
+        // else: a non-canonical primary_muscle string (e.g. "posterior_deltoid")
+        // — rejected per #167 so it cannot leak into trainedMuscleGroups and
+        // falsely satisfy the note-classifier auto-clear gate. Option (a)
+        // reject-unknown; remapping unknowns to a canonical group via
+        // EXERCISE_PRIMARY_MUSCLE_MAP is a possible follow-up (not done here).
       }
     }
   }

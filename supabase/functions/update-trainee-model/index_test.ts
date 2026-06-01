@@ -9,7 +9,7 @@
 //   deno test supabase/functions/update-trainee-model/index_test.ts
 
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { validateRequest } from "./index.ts";
+import { derivedTrainedSets, validateRequest } from "./index.ts";
 
 const VALID_USER_ID = "11111111-1111-4111-8111-111111111111";
 const VALID_SESSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -21,6 +21,35 @@ function baseRequest(payloadOverrides: Record<string, unknown> = {}) {
     session_payload: payloadOverrides,
   };
 }
+
+// ─── #167: derivedTrainedSets rejects non-canonical primary_muscle strings ───
+// posterior_deltoid is not a canonical MuscleGroup; before the fix the else
+// branch added it verbatim, leaking it into trainedMuscleGroups where it could
+// falsely satisfy the note-classifier auto-clear gate.
+Deno.test("derivedTrainedSets_rejects_unknown_primary_muscle", () => {
+  const trained = derivedTrainedSets({
+    set_logs: [
+      { exercise_id: "ex-1", primary_muscle: "posterior_deltoid", intent: "top" },
+    ],
+  });
+  assertEquals(
+    trained.muscleGroups.has("posterior_deltoid"),
+    false,
+    "unknown primary_muscle must not leak into muscleGroups",
+  );
+});
+
+// And a canonical primary_muscle still flows through unchanged.
+Deno.test("derivedTrainedSets_keeps_canonical_primary_muscle", () => {
+  const trained = derivedTrainedSets({
+    set_logs: [
+      { exercise_id: "ex-1", primary_muscle: "chest", intent: "top" },
+      { exercise_id: "ex-2", primary_muscle: "quads", intent: "top" },
+    ],
+  });
+  assertEquals(trained.muscleGroups.has("chest"), true, "canonical group retained");
+  assertEquals(trained.muscleGroups.has("legs"), true, "leg subgroup collapses to legs");
+});
 
 // ─── D1: no set_logs key — passes ────────────────────────────────────────────
 Deno.test("validateRequest_no_set_logs_field_returns_ok", () => {
