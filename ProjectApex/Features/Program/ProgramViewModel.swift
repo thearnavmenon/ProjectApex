@@ -116,6 +116,8 @@ final class ProgramViewModel {
         self.userId = userId
     }
 
+    nonisolated deinit {}
+
     // MARK: - Load
 
     /// Loads the active program: tries UserDefaults cache first, then Supabase.
