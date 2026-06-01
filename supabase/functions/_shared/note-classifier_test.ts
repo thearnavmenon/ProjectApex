@@ -254,6 +254,44 @@ Deno.test(
 );
 
 Deno.test(
+  "Q9 #151 regression: AI-inferred lower_back joint limitation auto-clears when the session trains squat — gate must route through derivedTrainedJoints",
+  () => {
+    // Reproduces #151: PATTERN_TRAINS_JOINTS once stored "lowerBack" (camelCase)
+    // while a joint subject.value is the BodyJoint rawValue "lower_back"
+    // (snake_case), so trainedJoints.has(subject.value) silently missed and a
+    // lower_back limitation never auto-cleared. Unlike the shoulder test above,
+    // this drives the REAL production derivation (derivedTrainedJoints) instead
+    // of hand-constructing trainedJoints — that hand-construction is precisely
+    // why the existing tests masked the bug.
+    const preExisting: ActiveLimitation = {
+      subject: { kind: "joint", value: "lower_back" },
+      severity: "mild",
+      onsetDate: ANCHOR.toISOString(),
+      evidenceCount: 2,
+      userConfirmed: false,
+      notes: null,
+      sessionsWithoutReMention: 2,
+    };
+    const sessionDate = new Date(ANCHOR.getTime() + 7 * 86400 * 1000);
+    const trainedPatterns = new Set(["squat"]);
+    const result = updateLimitationLifecycle({
+      active: [preExisting],
+      cleared: [],
+      classifierMentions: [], // no re-mention this session
+      trainedPatterns,
+      trainedMuscleGroups: new Set(),
+      trainedJoints: derivedTrainedJoints(trainedPatterns), // production path, not hand-built
+      notesProcessed: true,
+      now: sessionDate,
+    });
+    assertEquals(result.active.length, 0, "lower_back limitation must auto-clear when squat trains it");
+    assertEquals(result.cleared.length, 1);
+    assertEquals(result.cleared[0].subject.kind, "joint");
+    assertEquals(result.cleared[0].subject.value, "lower_back");
+  },
+);
+
+Deno.test(
   "Q9: user-reported limitation never auto-clears — even 10 sessions of subject-trained + notes-processed + no-mention leave it in active",
   () => {
     // userConfirmed=true → never auto-clear regardless of counter. Cycle 13
@@ -434,21 +472,21 @@ Deno.test(
     const joints = derivedTrainedJoints(new Set(["squat"]));
     assertEquals(joints.has("shoulder"), false, "squat is a lower-body pattern; doesn't train shoulder per Q9");
     assertEquals(joints.has("elbow"), false);
-    assertEquals(joints.has("hip"), true, "squat trains hip/knee/ankle/lowerBack per Q9");
+    assertEquals(joints.has("hip"), true, "squat trains hip/knee/ankle/lower_back per Q9");
     assertEquals(joints.has("knee"), true);
     assertEquals(joints.has("ankle"), true);
-    assertEquals(joints.has("lowerBack"), true);
+    assertEquals(joints.has("lower_back"), true);
   },
 );
 
 Deno.test(
-  "Q9 joint→pattern map: lowerBack is trained on hip_hinge (per Q9 lowerBack ↔ squat+hip_hinge+lunge+vertical_push)",
+  "Q9 joint→pattern map: lower_back is trained on hip_hinge (per Q9 lower_back ↔ squat+hip_hinge+lunge+vertical_push)",
   () => {
     const joints = derivedTrainedJoints(new Set(["hip_hinge"]));
-    assertEquals(joints.has("lowerBack"), true);
-    // Cross-check vertical_push also trains lowerBack per Q9 push extension.
+    assertEquals(joints.has("lower_back"), true);
+    // Cross-check vertical_push also trains lower_back per Q9 push extension.
     const jointsVP = derivedTrainedJoints(new Set(["vertical_push"]));
-    assertEquals(jointsVP.has("lowerBack"), true, "vertical_push trains lowerBack per Q9 push extension (OHP loads lumbar through bracing chain)");
+    assertEquals(jointsVP.has("lower_back"), true, "vertical_push trains lower_back per Q9 push extension (OHP loads lumbar through bracing chain)");
   },
 );
 
