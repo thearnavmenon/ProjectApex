@@ -479,3 +479,53 @@ private let validOneDayTemplateJSON = """
   }
 }
 """
+
+// MARK: - #192 day_type normalization
+
+@Suite("MacroPlanService — day_type normalization (#192)")
+struct MacroPlanServiceDayLabelNormalizationTests {
+
+    @Test("buildPendingMesocycle normalizes free-text focus into snake_case day labels")
+    func normalizesDayFocusLabels() {
+        let userId = UUID()
+        let skeleton = MesocycleSkeleton(
+            id: UUID(),
+            userId: userId,
+            createdAt: Date(timeIntervalSince1970: 0),
+            isActive: false,
+            trainingDaysPerWeek: 3,
+            periodizationModel: "linear_periodization",
+            weekIntents: [
+                WeekIntent(
+                    weekLabel: "Week 1",
+                    dayFocus: ["Arms & Shoulders", "Chest/Back", "Legs"],
+                    volumeLandmark: 0.5
+                )
+            ]
+        )
+
+        let meso = MacroPlanService.buildPendingMesocycle(from: skeleton, userId: userId)
+        let labels = meso.weeks[0].trainingDays.map(\.dayLabel)
+
+        // Before #192 the space-only substitution produced "Arms_&_Shoulders"
+        // and left the "/" intact ("Chest/Back").
+        #expect(labels[0] == "Arms_Shoulders")
+        #expect(labels[1] == "Chest_Back")
+        #expect(labels[2] == "Legs")
+        for label in labels {
+            #expect(
+                label.range(of: "^[A-Za-z0-9_]+$", options: .regularExpression) != nil,
+                "day label must be snake_case-safe, got \(label)"
+            )
+        }
+    }
+
+    @Test("normalizeDayLabel collapses runs of non-alphanumerics and trims")
+    func normalizerEdgeCases() {
+        #expect(MacroPlanService.normalizeDayLabel("Arms & Shoulders") == "Arms_Shoulders")
+        #expect(MacroPlanService.normalizeDayLabel("Chest/Shoulders/Triceps") == "Chest_Shoulders_Triceps")
+        #expect(MacroPlanService.normalizeDayLabel("Upper Push") == "Upper_Push")
+        #expect(MacroPlanService.normalizeDayLabel("  Legs  ") == "Legs")
+        #expect(MacroPlanService.normalizeDayLabel("Push_A") == "Push_A")
+    }
+}
