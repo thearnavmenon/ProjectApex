@@ -1,8 +1,21 @@
 # AI Co-Developer Instructions
 1. **Strictly Non-Autonomous:** You are an assistant, not an autonomous agent. ONLY work on the specific task I explicitly assign to you. Do NOT automatically start the next task on the backlog.
-2. **Context-Aware Coding:** When I assign you a task, use your file-reading tools to check `ARCHITECTURE.md` for the relevant database schemas, actor models, and UI/UX design tokens before writing code.
-3. **Slice completion tracking:** When I confirm a tracer-bullet slice is complete and working, close the corresponding GitHub issue with a completion comment summarising what shipped, any pre-deploy reminders, and links to spinoff issues. Do NOT modify `BACKLOG.md` — that file tracks product features (P0-T01, FB-XXX, etc.), not the per-slice issues that live in the GitHub tracker. (The Slice 1 closure pattern in #2 is the precedent — issue closure happens via a merged PR's Closes #N keyword per Process commitment rule 1, not before.)
+2. **Context-Aware Coding:** Before writing code, consult the docs in the "Doc map" section below for the right canonical source. Don't grep `ARCHITECTURE.md` for current state — it's a Phase 1 reference, superseded by `CONTEXT.md` + `docs/adr/` for anything Phase 2.
+3. **Slice completion tracking:** When I confirm a tracer-bullet slice is complete and working, close the corresponding GitHub issue with a completion comment summarising what shipped, any pre-deploy reminders, and links to spinoff issues. (The Slice 1 closure pattern in #2 is the precedent — issue closure happens via a merged PR's Closes #N keyword per Process commitment rule 1, not before.) `BACKLOG.md` is the long-form work log: append phase/slice entries to it when a phase or major slice closes, and mark the things-to-do in §2D when the dispatch surfaces new follow-ups. Sweep cadence applies (re-read on phase boundary, prune what reality has moved past). The pre-2026-06-01 prohibition on touching `BACKLOG.md` is retired — reality moved past it.
 4. **Wait for Commands:** After completing a coding task or closing the slice issue, simply tell me it is done and wait for my next instruction. Do not proceed on your own.
+
+## Doc map — where each kind of information lives
+
+Each doc has one job. When you need an answer, go to the doc whose job covers it; when you change reality, update only that doc.
+
+- **`CLAUDE.md`** (this file) — agent rules and conventions. Not project state.
+- **`CONTEXT.md`** — current state of the project (domain language, architecture as it stands today, active conventions). Replace in place when reality changes; do not append historical layers.
+- **`docs/adr/`** — append-only decision history. Each ADR captures *why* a decision was made and what it superseded. Old ADRs stay; supersession is via header link, not deletion.
+- **GitHub issues (`thearnavmenon/ProjectApex`)** — in-flight and recently-closed work. Self-pruning on close.
+- **`BACKLOG.md`** — long-form work log. Started as product-feature tracker (P0-T01, FB-XXX); evolved into the phase-by-phase log that records both shipped slices and open follow-ups (§2D in Phase 5 is the things-to-do section). Append on phase/slice closure; prune on sweep cadence.
+- **`ARCHITECTURE.md`** — Phase 1 reference, kept for legacy services and UI/UX spec only. Has a staleness banner; do not treat as current for Phase 2.
+
+**Sweep cadence.** At each phase or milestone boundary (e.g. when a Phase or major slice closes), re-read `CONTEXT.md` end-to-end and prune anything reality has moved past. If a fact is now wrong, replace it; if a decision motivated the change, append an ADR. Discipline is "prune on phase boundary," not "prune continuously."
 
 ## Process commitment
 
