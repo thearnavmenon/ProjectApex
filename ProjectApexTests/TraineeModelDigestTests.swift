@@ -669,7 +669,12 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must direct the LLM to name the recently advanced patterns")
         XCTAssertTrue(prompt.contains("sessions_since_triggered"),
                       "SessionPlan must direct the LLM to calibrate emphasis from sessions_since_triggered")
-        XCTAssertTrue(prompt.contains("Do NOT\ngenerate new numerical targets"),
+        // The prohibition wraps across a line in the prompt
+        // ("Do NOT\n  generate new numerical targets ..."), so match on
+        // whitespace-collapsed text rather than an exact newline/indent.
+        let collapsedWhitespace = prompt.replacingOccurrences(
+            of: "\\s+", with: " ", options: .regularExpression)
+        XCTAssertTrue(collapsedWhitespace.contains("Do NOT generate new numerical targets"),
                       "SessionPlan must explicitly prohibit inventing numerical goal targets — goal renegotiation is a UI flow per ADR-0005")
         XCTAssertTrue(prompt.contains("Block absent → no reassessment commentary"),
                       "SessionPlan must include the absent-block negative anchor — the LLM should not invent the trigger when the signal is missing")

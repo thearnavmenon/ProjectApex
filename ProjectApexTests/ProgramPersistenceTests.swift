@@ -115,11 +115,14 @@ final class ProgramPersistenceTests: XCTestCase {
 
     // MARK: ─── 1. ProgramRow Codable round-trip ───────────────────────────────
 
-    func test_programRow_forInsert_hasNilIdAndCreatedAt() {
+    func test_programRow_forInsert_usesMesocycleIdAndNilCreatedAt() {
         let mesocycle = Mesocycle.mockMesocycle()
         let row = ProgramRow.forInsert(from: mesocycle, userId: testUserId)
 
-        XCTAssertNil(row.id,        "Insert row must have nil id (server-generated).")
+        // #181: programs.id is set to the local mesocycle.id (not server-generated)
+        // so the local mesocycle ↔ programs row stay reconcilable. createdAt is
+        // still server-generated (nil on insert).
+        XCTAssertEqual(row.id, mesocycle.id, "Insert row id must equal the local mesocycle id (#181).")
         XCTAssertNil(row.createdAt, "Insert row must have nil createdAt (server-generated).")
         XCTAssertEqual(row.userId, testUserId)
         XCTAssertTrue(row.isActive)
