@@ -321,6 +321,50 @@ actor SupabaseClient {
         try await performExpectingRow(request, table: "programs", filter: "user_id=eq.\(userId.uuidString)")
     }
 
+    /// Atomically deactivates the user's existing program(s) and upserts
+    /// `mesocycle` as the new active program in a single server-side transaction
+    /// (#189), returning the persisted program id. Replaces the non-transactional
+    /// `deactivatePrograms()`-then-`insert()` sequence, whose partial failure
+    /// could leave the user with no active program at all. Idempotent on retry —
+    /// the server upserts on the client-generated program id.
+    ///
+    /// - Returns: The id of the persisted program (equals `mesocycle.id`).
+    /// - Throws: `SupabaseError` on HTTP/encoding/decoding failure.
+    @discardableResult
+    func deactivateAndInsertProgram(_ mesocycle: Mesocycle, userId: UUID) async throws -> UUID {
+        struct Params: Encodable {
+            let pUserId: UUID
+            let pProgramId: UUID
+            let pMesocycleJson: Mesocycle
+            let pWeeks: Int
+            enum CodingKeys: String, CodingKey {
+                case pUserId        = "p_user_id"
+                case pProgramId     = "p_program_id"
+                case pMesocycleJson = "p_mesocycle_json"
+                case pWeeks         = "p_weeks"
+            }
+        }
+        struct InsertedProgram: Decodable {
+            let programId: UUID
+            enum CodingKeys: String, CodingKey { case programId = "program_id" }
+        }
+        let params = Params(
+            pUserId: userId,
+            pProgramId: mesocycle.id,
+            pMesocycleJson: mesocycle,
+            pWeeks: mesocycle.totalWeeks
+        )
+        let rows = try await rpc(
+            "deactivate_and_insert_program",
+            params: params,
+            returning: [InsertedProgram].self
+        )
+        guard let id = rows.first?.programId else {
+            throw SupabaseError.decodingError("deactivate_and_insert_program returned no row")
+        }
+        return id
+    }
+
     /// Fetches the most recent `is_active = true` program row for `userId`.
     ///
     /// Returns `nil` when no active program exists (e.g. first-time user or
