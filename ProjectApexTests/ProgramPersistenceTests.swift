@@ -231,6 +231,45 @@ final class ProgramPersistenceTests: XCTestCase {
                        "Deactivation body must set is_active = false.")
     }
 
+    // MARK: ─── 2b. SupabaseClient.deactivateAndInsertProgram() (#189) ─────────
+
+    /// #189: regen-persist must be ONE atomic server-side call (deactivate + new
+    /// program in a single transaction) — not a separate PATCH-then-POST whose
+    /// partial failure left the user with no active program. Verifies the client
+    /// routes through the `deactivate_and_insert_program` RPC with the right
+    /// params and surfaces the returned program id.
+    func test_deactivateAndInsertProgram_callsAtomicRPC_returningProgramId() async throws {
+        let mesocycle = Mesocycle.mockMesocycle()
+        // The RPC RETURNS TABLE(program_id uuid) → PostgREST replies with a JSON array.
+        ProgramStubURLProtocol.stubbedStatusCode = 200
+        ProgramStubURLProtocol.stubbedData =
+            #"[{"program_id":"\#(mesocycle.id.uuidString)"}]"#.data(using: .utf8)!
+
+        let client = makeProgramClient()
+        let returnedId = try await client.deactivateAndInsertProgram(mesocycle, userId: testUserId)
+
+        // 1. A single POST to the atomic RPC endpoint — not PATCH + POST.
+        let req = try XCTUnwrap(ProgramStubURLProtocol.lastRequest)
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertTrue(
+            req.url?.absoluteString.contains("/rpc/deactivate_and_insert_program") == true,
+            "Persist must go through the atomic RPC, got \(req.url?.absoluteString ?? "nil")"
+        )
+
+        // 2. Params carry the user id, client program id, weeks, and mesocycle JSONB.
+        let bodyData = try XCTUnwrap(ProgramStubURLProtocol.requestBodies.last)
+        let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+        XCTAssertEqual(body["p_user_id"] as? String, testUserId.uuidString)
+        XCTAssertEqual(body["p_program_id"] as? String, mesocycle.id.uuidString,
+                       "program id must be the client-generated mesocycle id (#181)")
+        XCTAssertEqual(body["p_weeks"] as? Int, mesocycle.totalWeeks)
+        XCTAssertNotNil(body["p_mesocycle_json"] as? [String: Any],
+                        "the full mesocycle must be sent as the jsonb param")
+
+        // 3. The persisted program id is returned (for #181 stale-id reconciliation).
+        XCTAssertEqual(returnedId, mesocycle.id)
+    }
+
     // MARK: ─── 3. SupabaseClient.fetchActiveProgram() ─────────────────────────
 
     func test_fetchActiveProgram_sendsGetToCorrectURL() async throws {

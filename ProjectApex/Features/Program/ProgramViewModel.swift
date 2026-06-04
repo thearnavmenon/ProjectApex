@@ -229,9 +229,11 @@ final class ProgramViewModel {
         let capturedUserId = userId
         let capturedMesocycle = mesocycle
         do {
-            try await capturedClient.deactivatePrograms(userId: capturedUserId)
-            let row = ProgramRow.forInsert(from: capturedMesocycle, userId: capturedUserId)
-            try await capturedClient.insert(row, table: "programs")
+            // Atomic server-side deactivate-old + upsert-new in one transaction
+            // (#189): replaces the non-transactional PATCH-then-POST whose partial
+            // failure could leave the user with zero active programs. Idempotent
+            // on retry (upsert on the client-generated program id).
+            try await capturedClient.deactivateAndInsertProgram(capturedMesocycle, userId: capturedUserId)
             // Success: clear any prior sync error.
             persistError = nil
             persistRetryAction = nil
