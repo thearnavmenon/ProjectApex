@@ -529,3 +529,56 @@ struct MacroPlanServiceDayLabelNormalizationTests {
         #expect(MacroPlanService.normalizeDayLabel("Push_A") == "Push_A")
     }
 }
+
+// MARK: - Historical day-label continuity (#172)
+
+private func parseMacroPlanPayload(_ json: String) throws -> [String: Any] {
+    let data = try #require(json.data(using: .utf8))
+    return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+}
+
+/// #172: a regen must carry the user's established day-label convention into the
+/// macro-plan LLM payload so it reuses those labels instead of inventing a fresh
+/// convention that detaches lift history (#141). The threading is asserted at the
+/// payload boundary (same altitude as the training_days_per_week tests above).
+@Suite("MacroPlanService — historical day-label continuity (#172)")
+struct MacroPlanServiceHistoricalLabelsTests {
+
+    @Test("generateSkeleton threads historicalDayLabels into history.recent_day_labels verbatim")
+    func threadsHistoricalLabels() async throws {
+        let provider = CapturingMockProvider(daysPerWeek: 4)
+        let service = MacroPlanService(provider: provider)
+        let historical = ["Push_A", "Pull_A", "Push_B", "Pull_B"]
+
+        _ = try await service.generateSkeleton(
+            userId: UUID(),
+            gymProfile: makeGymProfile(),
+            trainingDaysPerWeek: 4,
+            historicalDayLabels: historical
+        )
+
+        let root = try parseMacroPlanPayload(provider.lastUserPayload)
+        let history = try #require(root["history"] as? [String: Any],
+                                   "payload must include a history block when labels are supplied")
+        let labels = try #require(history["recent_day_labels"] as? [String])
+        #expect(labels == historical,
+                "history.recent_day_labels must carry the user's labels verbatim, got \(labels)")
+    }
+
+    @Test("generateSkeleton omits the history block for a user with no training history")
+    func omitsHistoryWhenEmpty() async throws {
+        let provider = CapturingMockProvider(daysPerWeek: 4)
+        let service = MacroPlanService(provider: provider)
+
+        _ = try await service.generateSkeleton(
+            userId: UUID(),
+            gymProfile: makeGymProfile(),
+            trainingDaysPerWeek: 4
+            // historicalDayLabels defaults to [] — first program, no history.
+        )
+
+        let root = try parseMacroPlanPayload(provider.lastUserPayload)
+        #expect(root["history"] == nil,
+                "history must be omitted (not null) when the user has no established labels")
+    }
+}

@@ -75,6 +75,30 @@ DAY FOCUS (day_focus array)
   The session AI adapts exercise selection within each focus, not the structure.
 
 ═══════════════════════════════════════════════════════════════
+DAY-LABEL CONTINUITY (history.recent_day_labels)
+═══════════════════════════════════════════════════════════════
+When history.recent_day_labels is present, the user ALREADY has training history
+under an established day-label convention. Per-exercise progression is looked up
+by day label, so a fresh convention would silently detach all of that history.
+You MUST preserve the user's convention:
+
+• REUSE the exact strings in history.recent_day_labels as your day_focus values —
+  same spelling — for ALL 12 weeks. Arrange them into a sensible weekly order.
+• These historical labels TAKE PRECEDENCE over the "derive from first principles /
+  do not use named splits" rule above. If the user's convention is a named split
+  like "Push_A"/"Pull_A"/"Legs_A", reuse it verbatim.
+• Still honor the hard training_days_per_week count. Use exactly
+  training_days_per_week labels. If the user has FEWER distinct historical labels
+  than training_days_per_week, extend the convention in the SAME naming style
+  (e.g. add "Push_B"/"Pull_B"). If MORE, pick the training_days_per_week that best
+  cover the user's split.
+• When history.recent_day_labels is ABSENT, derive day_focus from first principles
+  exactly as described in the DAY FOCUS section above.
+
+This keeps one consistent label convention across the whole mesocycle and across
+regenerations, so the user's lift history stays attached to each day.
+
+═══════════════════════════════════════════════════════════════
 WEEK LABELS
 ═══════════════════════════════════════════════════════════════
 week_label must be concise (≤8 words) and descriptive, e.g.:

@@ -333,7 +333,12 @@ final class ProgramViewModel {
             return v > 0 ? v : 4
         }()
 
-        print("[ProgramViewModel] generateMacroSkeleton — training_days_per_week: \(daysPerWeek)")
+        // Carry the user's established day-label convention into generation so a
+        // regen reuses it instead of inventing a fresh one that detaches lift
+        // history (#172/#141). Empty for a first program — the LLM derives labels.
+        let historicalDayLabels = await fetchHistoricalDayLabels()
+
+        print("[ProgramViewModel] generateMacroSkeleton — training_days_per_week: \(daysPerWeek), historical_day_labels: \(historicalDayLabels)")
 
         do {
             let skeleton = try await macroPlanService.generateSkeleton(
@@ -344,7 +349,8 @@ final class ProgramViewModel {
                 bodyweightKg: bwKg,
                 ageYears: ageYears,
                 trainingAge: trainingAge,
-                trainingDaysPerWeek: daysPerWeek
+                trainingDaysPerWeek: daysPerWeek,
+                historicalDayLabels: historicalDayLabels
             )
 
             // Build pending mesocycle from skeleton
@@ -360,6 +366,35 @@ final class ProgramViewModel {
             viewState = .loaded(mesocycle)
         } catch {
             viewState = .error(error.localizedDescription)
+        }
+    }
+
+    /// Fetches the user's established day-label convention from past sessions so a
+    /// regenerated program reuses it instead of inventing a fresh convention (#172).
+    /// Returns the distinct `day_type` values from the user's recent sessions,
+    /// most-recent-first, or `[]` for a user with no history (first program).
+    /// Best-effort: a fetch failure just falls back to LLM-derived labels.
+    private func fetchHistoricalDayLabels() async -> [String] {
+        do {
+            let sessions = try await supabaseClient.fetch(
+                SessionMetaRow.self,
+                table: "workout_sessions",
+                filters: [
+                    Filter(column: "user_id", op: .eq,  value: userId.uuidString),
+                    Filter(column: "status",  op: .neq, value: "abandoned")
+                ],
+                order: "session_date.desc",
+                limit: 30
+            )
+            // Distinct labels, preserving most-recent-first order.
+            var seen = Set<String>()
+            var labels: [String] = []
+            for session in sessions where !session.dayType.isEmpty {
+                if seen.insert(session.dayType).inserted { labels.append(session.dayType) }
+            }
+            return labels
+        } catch {
+            return []
         }
     }
 
