@@ -229,6 +229,20 @@ private func makeManager(
 
 final class WorkoutSessionManagerTests: XCTestCase {
 
+    // pauseSession persists a PausedSessionState to UserDefaults.standard
+    // (PausedSessionState.save uses the shared suite). Clear it around every
+    // test so the #190 snapshot assertion can't read a stale entry and a real
+    // pause in one test can't leak into another. (#190)
+    override func setUp() {
+        super.setUp()
+        PausedSessionState.clear()
+    }
+
+    override func tearDown() {
+        PausedSessionState.clear()
+        super.tearDown()
+    }
+
     // MARK: Test 1: startSession → .active state transition
 
     /// Verifies the happy path:
@@ -524,6 +538,59 @@ final class WorkoutSessionManagerTests: XCTestCase {
             "status must be consistent with completed=false, not the old hardcoded 'completed' (#171)"
         )
     }
+
+    // MARK: #190 — pauseSession must not block on the network
+
+    /// Reproduces #190: pauseSession used to `await writeAheadQueue.flush()`
+    /// (up to 1+2+4+8+16s of backoff) and then a blocking PATCH before saving
+    /// the durable PausedSessionState. A freeze / background during that window
+    /// lost the pause point. The fix saves the snapshot FIRST and fires the
+    /// server sync off in a detached Task, so pauseSession returns immediately.
+    ///
+    /// Verification approach: the mock delays the workout_sessions status PATCH
+    /// (the call pauseSession blocked on) by 0.6s while serving everything else
+    /// instantly. The fix is proven by pauseSession returning well under that
+    /// delay (it no longer awaits the PATCH) with the snapshot already persisted
+    /// and the actor reset to .idle. Pre-fix, the call would block ≥0.6s.
+    func testPauseSession_doesNotBlockOnNetwork() async throws {
+        WSMDelayedPatchURLProtocol.patchDelaySeconds = 0.6
+        let manager = makeDelayManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 3)
+        let programId = UUID()
+        let userId = UUID()
+
+        await manager.startSession(trainingDay: day, programId: programId, userId: userId)
+        try await Task.sleep(nanoseconds: 200_000_000) // let startSession settle to .active
+
+        let beforePause = await manager.sessionState
+        guard case .active = beforePause else {
+            XCTFail("Expected .active before pause, got \(beforePause)")
+            return
+        }
+
+        let start = Date()
+        await manager.pauseSession()
+        let elapsed = Date().timeIntervalSince(start)
+
+        // 1. pauseSession returned before the 0.6s PATCH could resolve — it no
+        //    longer awaits the network sync.
+        XCTAssertLessThan(
+            elapsed, 0.3,
+            "pauseSession must not block on the workout_sessions PATCH (#190); took \(elapsed)s"
+        )
+
+        // 2. Actor state was reset synchronously.
+        let state = await manager.sessionState
+        XCTAssertEqual(state, .idle, "pauseSession should reset to idle")
+
+        // 3. The durable snapshot was persisted before returning (the record the
+        //    resume path reads — written ahead of any network work).
+        let snapshot = PausedSessionState.load()
+        XCTAssertNotNil(snapshot, "pauseSession must persist a PausedSessionState before returning")
+        XCTAssertEqual(snapshot?.trainingDayId, day.id, "snapshot must reference the paused training day")
+        XCTAssertEqual(snapshot?.programId, programId, "snapshot must reference the active program")
+        XCTAssertEqual(snapshot?.userId, userId, "snapshot must reference the user")
+    }
 }
 
 // MARK: - Body-capturing URLProtocol (#171 — inspect the PATCH payload)
@@ -582,6 +649,73 @@ private func makeBodyCaptureManager() -> WorkoutSessionManager {
     )
     let memoryService = MemoryService(supabase: supabase, embeddingAPIKey: "")
     let testDefaults = UserDefaults(suiteName: "com.test.wsm.body.\(UUID().uuidString)")!
+    let gymFactStore = GymFactStore(userDefaults: testDefaults)
+    let waq = WriteAheadQueue(supabase: supabase, userDefaults: testDefaults)
+    return WorkoutSessionManager(
+        aiInference: inferenceService,
+        healthKit: HealthKitService(),
+        memoryService: memoryService,
+        supabase: supabase,
+        gymFactStore: gymFactStore,
+        writeAheadQueue: waq
+    )
+}
+
+// MARK: - Delayed-PATCH URLProtocol (#190 — make the workout_sessions status PATCH slow)
+
+/// Serves every request instantly EXCEPT the `workout_sessions` PATCH (the
+/// status="paused" write that pauseSession used to block on), which is delayed
+/// by `patchDelaySeconds`. Lets a test prove pauseSession returns before that
+/// PATCH resolves. workout_sessions requests return a single-row representation
+/// so the PATCH's `performExpectingRow` sees a match; everything else gets `[]`.
+private final class WSMDelayedPatchURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var patchDelaySeconds: TimeInterval = 0.6
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let method = request.httpMethod ?? "GET"
+        let path = request.url?.path ?? ""
+        let isWorkoutSessions = path.contains("workout_sessions")
+        let body = isWorkoutSessions
+            ? "[{\"id\":\"00000000-0000-4000-8000-000000000001\"}]"
+            : "[]"
+        let deliver: @Sendable () -> Void = { [weak self] in
+            guard let self else { return }
+            let response = HTTPURLResponse(
+                url: self.request.url!, statusCode: 200,
+                httpVersion: nil, headerFields: nil
+            )!
+            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: Data(body.utf8))
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        if method == "PATCH" && isWorkoutSessions {
+            DispatchQueue.global().asyncAfter(
+                deadline: .now() + Self.patchDelaySeconds, execute: deliver
+            )
+        } else {
+            deliver()
+        }
+    }
+    override func stopLoading() {}
+}
+
+private func makeDelayManager() -> WorkoutSessionManager {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [WSMDelayedPatchURLProtocol.self]
+    let supabase = SupabaseClient(
+        supabaseURL: URL(string: "https://test.supabase.co")!,
+        anonKey: "test-key",
+        urlSession: URLSession(configuration: config)
+    )
+    let inferenceService = AIInferenceService(
+        provider: MockLLMProvider(response: prescriptionJSON()),
+        gymProfile: nil,
+        maxRetries: 0
+    )
+    let memoryService = MemoryService(supabase: supabase, embeddingAPIKey: "")
+    let testDefaults = UserDefaults(suiteName: "com.test.wsm.delay.\(UUID().uuidString)")!
     let gymFactStore = GymFactStore(userDefaults: testDefaults)
     let waq = WriteAheadQueue(supabase: supabase, userDefaults: testDefaults)
     return WorkoutSessionManager(
