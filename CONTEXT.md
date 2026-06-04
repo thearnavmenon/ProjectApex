@@ -24,6 +24,10 @@ _Avoid_: programme phase, training block
 The current phase position for a single movement pattern within the mesocycle phase progression. Stored on `PatternProfile.currentPhase`.
 _Avoid_: phase (when ambiguous)
 
+**Day label**:
+The label identifying a kind of training day (e.g. `Push_A`, `Upper_Push`). One concept under three layer-specific names: `day_focus` (the free-text string the macro-plan LLM emits per day) → `dayLabel` (`TrainingDay.dayLabel`, snake_case-normalized via `MacroPlanService.normalizeDayLabel`) → `day_type` (`workout_sessions.day_type`, persisted per logged session). It is the join key for per-day lift history (`deepLiftHistory` filters `day_type = dayLabel`), so the convention is a stable per-user key preserved across regen — not free LLM output. See ADR-0017.
+_Avoid_: day name, split name (and don't use `day_focus`/`day_type` interchangeably without naming the layer)
+
 ### Trainee model
 
 **Trainee model**:
@@ -142,6 +146,7 @@ _Avoid_: feature, ticket, story, horizontal slice
 - A **Form degradation flag** widens **e1RM** SE; an **active limitation** gates exercises and prescription.
 - **Calibration review** sets **floor projection** and **stretch projection** using current **EWMA** capability.
 - **Movement pattern** and **muscle group** are independent taxonomies — a set is associated with both via its exercise.
+- A **Day label** is the join key between a planned training day and the user's historical sessions of that kind; program regeneration must preserve the user's existing labels so the join keeps resolving. See ADR-0017.
 
 ## Example dialogue
 
