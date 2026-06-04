@@ -608,19 +608,12 @@ actor WorkoutSessionManager {
         restTimerTask?.cancel()
         restTimerTask = nil
 
-        // 2. Flush WAQ — ensures all queued set_log writes land before we mark paused.
-        await writeAheadQueue.flush()
-
-        // 3. PATCH workout_sessions → status: "paused", completed: false
-        let patch = WorkoutSessionStatusPatch(status: "paused", completed: false)
-        do {
-            try await writeAheadQueue.updateBlocking(patch, table: "workout_sessions", id: sess.id)
-        } catch {
-            // Best-effort: enqueue will retry when connectivity is restored
-            print("[WorkoutSessionManager] pauseSession — PATCH failed, state saved to UserDefaults: \(error)")
-        }
-
-        // 4. Save PausedSessionState to UserDefaults (the resume path reads this).
+        // 2. Save PausedSessionState to UserDefaults FIRST — this is the durable
+        //    record the resume path reads. Persisting before any network work
+        //    means a freeze / background / kill during the (now non-blocking)
+        //    sync can no longer lose the pause point (#190). Queued set_logs are
+        //    already persisted in the WAQ (and dead-lettered if retries exhaust,
+        //    #184), so they are safe regardless.
         PausedSessionState(
             sessionId: sess.id,
             trainingDayId: day.id,
@@ -634,9 +627,24 @@ actor WorkoutSessionManager {
             pausedAt: Date()
         ).save()
 
+        // 3. Sync to the server WITHOUT blocking the UI (#190): pauseSession
+        //    previously awaited writeAheadQueue.flush() (up to 1+2+4+8+16s of
+        //    backoff on a bad network) and then a blocking PATCH, which froze the
+        //    pause — and if the user backgrounded during that freeze, the pause
+        //    point was lost. Both are best-effort and now fire-and-forget: the
+        //    set_logs live in the WAQ, and the paused status is recovered from
+        //    the UserDefaults snapshot saved above (not from the DB row).
+        let patch = WorkoutSessionStatusPatch(status: "paused", completed: false)
+        let sessionId = sess.id
+        let waq = writeAheadQueue
+        Task.detached {
+            await waq.flush()
+            try? await waq.updateBlocking(patch, table: "workout_sessions", id: sessionId)
+        }
+
         print("[WorkoutSessionManager] pauseSession ✓ — sessionId: \(sess.id), exerciseIndex: \(exerciseIndex), setNumber: \(currentSetNumber)")
 
-        // 5. Reset actor state to idle (does not affect the DB row we just patched).
+        // 4. Reset actor state to idle (does not affect the saved paused state).
         resetToIdle()
     }
 
