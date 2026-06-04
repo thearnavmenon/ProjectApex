@@ -36,6 +36,24 @@ export type MovementPattern =
   | "isolation";
 
 /**
+ * Runtime single-source-of-truth for the `MovementPattern` vocabulary. The
+ * type above is compile-time only, so a client-supplied `pattern` string can't
+ * be validated against it at runtime (#228's lesson, mirrored from #167's
+ * MUSCLE_GROUPS set). Consumed by `derivedTrainedSets` to reject non-canonical
+ * client patterns before they leak into `trainedPatterns` (#239).
+ */
+export const MOVEMENT_PATTERNS: ReadonlySet<MovementPattern> = new Set<MovementPattern>([
+  "horizontal_push",
+  "vertical_push",
+  "horizontal_pull",
+  "vertical_pull",
+  "squat",
+  "hip_hinge",
+  "lunge",
+  "isolation",
+]);
+
+/**
  * Map from `exercise_id` (snake_case canonical IDs from `set_logs.exercise_id`)
  * to `MovementPattern`. Pinned at 71 entries as of 2026-05-10. Bumping this
  * map MUST also bump `EXERCISE_LIBRARY_ENTRY_COUNT` and the corresponding
