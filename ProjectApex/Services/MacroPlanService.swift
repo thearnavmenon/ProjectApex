@@ -48,11 +48,28 @@ nonisolated struct MacroPlanRequest: Codable, Sendable {
     let userProfile: MacroPlanUserProfile
     let gymProfile: MacroPlanGymProfile
     let constraints: MacroPlanConstraints
+    /// The user's established day-label convention, carried over so regen reuses
+    /// it instead of inventing a fresh one (#172). Optional → the key is omitted
+    /// (encodeIfPresent) for a user with no training history (first program).
+    let history: MacroPlanHistory?
 
     enum CodingKeys: String, CodingKey {
         case userProfile  = "user_profile"
         case gymProfile   = "gym_profile"
         case constraints
+        case history
+    }
+}
+
+/// Carries the user's existing day-label convention into the macro-plan prompt
+/// so a regenerated mesocycle preserves it across all weeks (#172). Without this,
+/// regen let the LLM invent a new convention (e.g. "Lower"/"Upper_Push") that no
+/// longer matched the user's history, detaching per-exercise lift history (#141).
+nonisolated struct MacroPlanHistory: Codable, Sendable {
+    let recentDayLabels: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case recentDayLabels = "recent_day_labels"
     }
 }
 
@@ -164,14 +181,15 @@ actor MacroPlanService {
         bodyweightKg: Double? = nil,
         ageYears: Int? = nil,
         trainingAge: String? = nil,
-        trainingDaysPerWeek: Int = 4
+        trainingDaysPerWeek: Int = 4,
+        historicalDayLabels: [String] = []
     ) async throws -> MesocycleSkeleton {
         isGenerating = true
         defer { isGenerating = false }
 
         let systemPrompt = try Self.loadSystemPrompt()
 
-        print("[MacroPlanService] Generating macro skeleton — training_days_per_week: \(trainingDaysPerWeek)")
+        print("[MacroPlanService] Generating macro skeleton — training_days_per_week: \(trainingDaysPerWeek), historical_day_labels: \(historicalDayLabels)")
 
         let request = MacroPlanRequest(
             userProfile: MacroPlanUserProfile(
@@ -186,7 +204,12 @@ actor MacroPlanService {
             constraints: MacroPlanConstraints(
                 trainingDaysPerWeek: trainingDaysPerWeek,
                 totalWeeks: 12
-            )
+            ),
+            // Pass the user's established labels so regen reuses their convention
+            // (#172); omit the block entirely for a user with no history.
+            history: historicalDayLabels.isEmpty
+                ? nil
+                : MacroPlanHistory(recentDayLabels: historicalDayLabels)
         )
 
         let encoder = JSONEncoder()
