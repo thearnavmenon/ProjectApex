@@ -290,8 +290,8 @@ Captured here so the BACKLOG sweep on 2026-06-01 has a single landing surface. E
 - [ ] P5-D01: #220 — extract `PromptLoader` for three known consumers (Inference, SessionPlan, InferenceSpike). Deferred from #159 per L7 lock; surgical change once the right shape is agreed.
 - [ ] P5-D02: #221 — adopt `USER-REPORTED SIGNALS` section in production Inference prompt? Surfaced by #159 Path A as a .txt-only section that has never run in production. Needs product decision (is this a signal we want, and what's the input shape?).
 - [ ] P5-D03: #222 — adopt expanded equipment-aware weight-increment rules in production Inference prompt? Same shape as P5-D02 (.txt-only expansion surfaced by #159).
-- [ ] P5-D04: existing Tier 3 needs-triage spinoffs (`#184`, `#186`, `#187`, `#189`, `#190`, `#192`) — pre-existing from the 2026-05-31 operator audit; carry forward to Tier 3 expansion when user authorises.
-- [ ] P5-D05: existing Phase 2 follow-ups (`#164`, `#165`, `#166`, `#167`, `#151`) — pre-existing; same shape as P5-D04.
+- [x] P5-D04: Tier 3 needs-triage spinoffs (`#184`, `#186`, `#187`, `#189`, `#190`, `#192`) — all closed in the 2026-06-02 → 2026-06-04 functional-defect sweep (§2E).
+- [ ] P5-D05: Phase 2 follow-ups — `#167` and `#151` closed in the functional-defect sweep (§2E); `#164`, `#165`, `#166` (MuscleProfile `volumeTolerance` cadence-scaling / EWMA-update / `confidence` lifecycle) remain open.
 
 **Not yet filed — surfaced in 2026-06-01 dispatch, awaiting decision:**
 
@@ -302,3 +302,25 @@ Captured here so the BACKLOG sweep on 2026-06-01 has a single landing surface. E
 **Operator actions (not code changes):**
 
 - [ ] Keychain cleanup: if `.supabaseServiceKey` is present on a user's machine from pre-#191 days, clear via Developer Settings → Clear button or `security delete-generic-password -s com.projectapex.keychain.supabaseServiceKey`. Verified absent on Arnav's machine 2026-06-01 (exit 44 = not found).
+
+### 2E — Functional-defect bug sweep (2026-06-02 → 2026-06-04)
+
+The 12 functional-defect issues from the 2026-05-31 operator audit (carried in §2D as P5-D04/P5-D05), fixed branch-per-issue with PR-before-close. Local test suite is the source of truth — the CI iOS "Build & Test" job is known-flaky and gates nothing. Each issue closed via its PR's `Closes #N` keyword unless noted.
+
+- [x] P5-E01: #151 — EF `PATTERN_TRAINS_JOINTS` joint-key drift → snake_case `lower_back`. PR #227.
+- [x] P5-E02: #167 — `derivedTrainedSets` rejects non-canonical `primary_muscle`. PR #228. (Sibling leak ~`update-trainee-model/index.ts:1968` flagged grep-and-report, not fixed.)
+- [x] P5-E03: #192 — macro-skeleton `normalizeDayLabel` collapses non-alphanumerics to snake_case. PR #229. (Sibling day-label mint point in `ProgramGenerationService` flagged grep-and-report.)
+- [x] P5-E04: #186 — weekly-fatigue fetch queries `set_logs` by `session_id`, not `user_id` (no such column → had been a swallowed HTTP 400). PR #230.
+- [x] P5-E05: #55 + #184 — WAQ `clearAll()`/`flush()` mid-retry race + dead-letter store instead of silent drop after retry exhaustion. PR #232.
+- [x] P5-E06: #171 — early-exit writes a consistent `(status, completed)` pair (`partial`/`false`, not the hardcoded `completed`) + feeds early-exit sets to the model. PR #233.
+- [x] P5-E07: #190 — `pauseSession` is non-blocking: persist `PausedSessionState` first, fire the server sync (flush + status PATCH) in a detached Task, then reset to idle. Regression test proven to fail pre-fix (0.64 s) / pass post-fix. PR #235.
+- [x] P5-E08: #172 + #141 — regen feeds the user's historical `day_type` labels into the macro-plan prompt so it reuses their convention instead of inventing a fresh one that detaches lift history. **ADR-0017.** PR #236. (#141 closed as a duplicate — its real cause was this label drift, not `program_id` scoping.)
+- [x] P5-E09: #189 — atomic `deactivate_and_insert_program` `SECURITY INVOKER` RPC (one transaction; upsert-idempotent on retry; returns the program id) replaces the non-transactional deactivate-then-insert. Forward migration `20260604061428_…` + doc-only reverse migration; deployed to the linked Supabase (db push + EF tests green). **ADR-0018.** PR #237.
+- [x] P5-E10: #187 — closed as **not-a-bug** (wontfix): `mesocycle_json` stores `total_weeks` (snake_case, consistent with the whole blob); the report queried `'totalWeeks'` (camelCase). The model round-trips cleanly and `programs.weeks` is the source of truth. No code change.
+
+Supporting work in the same window:
+
+- [x] Build hotfix: removed 2 illegal `nonisolated deinit`s that had broken `main`. PR #231.
+- [x] Greened 2 pre-existing failing tests (#181 stale id, #178 brittle whitespace). PR #234.
+
+Cross-cutting sites surfaced but left **grep-and-report** (awaiting authorization, per CLAUDE.md Process commitment 2): #167 sibling `primary_muscle` leak in `update-trainee-model/index.ts`; #192 sibling day-label mint point in `ProgramGenerationService`; #172 second `generateSkeleton` caller in `OnboardingView` (safe as-is — no history at onboarding); #189 `SupabaseClient.deactivatePrograms` now production-unused but test-covered (retained, not deleted).
