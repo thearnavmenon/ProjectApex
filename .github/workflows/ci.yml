@@ -128,6 +128,12 @@ jobs:
         working-directory: supabase/functions/update-trainee-model
         run: deno test --allow-net --allow-env --allow-read --no-check
 
+      - name: Run update-trainee-goal EF tests (validator + DB integration)
+        # Direct upsertGoal() call against local Postgres (54322) — no served
+        # function needed, so this runs without the functions-serve step above.
+        working-directory: supabase/functions/update-trainee-goal
+        run: deno test --allow-net --allow-env --allow-read --no-check
+
       - name: Show EF log on failure
         if: failure()
         run: cat ef.log || true
