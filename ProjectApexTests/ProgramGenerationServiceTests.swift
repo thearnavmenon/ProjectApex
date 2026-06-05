@@ -16,6 +16,7 @@
 //      f. isGenerating flag transitions correctly (false → true → false).
 
 import XCTest
+import Testing
 @testable import ProjectApex
 
 // MARK: - Mock providers
@@ -574,6 +575,195 @@ final class ProgramGenerationServiceTests: XCTestCase {
                 payload.availableEquipment.contains(item.equipmentType.typeKey),
                 "GymProfilePayload must contain type key '\(item.equipmentType.typeKey)'."
             )
+        }
+    }
+}
+
+// MARK: - #192 sibling: day_label normalization in the legacy static path
+
+/// Variant of `validMesocycleJSON` whose accumulation phase carries free-text
+/// day labels with special characters ("Arms & Shoulders", "Chest/Back"). The
+/// legacy static `generate()` path mints `TrainingDay.dayLabel` in
+/// `ProgramGenerationService.buildTrainingDay`; before the #192 sibling fix
+/// (issue #243) it passed `template.dayLabel` through unnormalized, detaching the
+/// day from history (the #172 / ADR-0017 concern) and reintroducing the exact
+/// drift #192 fixed in the macro-skeleton path (PR #229).
+private let specialCharDayLabelJSON = """
+{
+  "mesocycle_template": {
+    "periodization_model": "linear_periodization",
+    "phase_templates": [
+      {
+        "phase": "accumulation",
+        "training_days": [
+          {
+            "day_of_week": 1,
+            "day_label": "Arms & Shoulders",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 3,
+                "rep_range": { "min": 8, "max": 12 },
+                "tempo": "3-1-2-0",
+                "rest_seconds": 90,
+                "rir_target": 3,
+                "coaching_cues": ["Retract scapula", "Control the descent"]
+              }
+            ]
+          },
+          {
+            "day_of_week": 2,
+            "day_label": "Chest/Back",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 3,
+                "rep_range": { "min": 8, "max": 12 },
+                "tempo": "3-1-2-0",
+                "rest_seconds": 90,
+                "rir_target": 3,
+                "coaching_cues": ["Retract scapula", "Control the descent"]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "phase": "intensification",
+        "training_days": [
+          {
+            "day_of_week": 1,
+            "day_label": "Arms & Shoulders",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 3,
+                "rep_range": { "min": 6, "max": 10 },
+                "tempo": "3-1-2-0",
+                "rest_seconds": 120,
+                "rir_target": 2,
+                "coaching_cues": ["Retract scapula", "Control the descent"]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "phase": "peaking",
+        "training_days": [
+          {
+            "day_of_week": 1,
+            "day_label": "Arms & Shoulders",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 3,
+                "rep_range": { "min": 4, "max": 8 },
+                "tempo": "3-1-2-0",
+                "rest_seconds": 150,
+                "rir_target": 1,
+                "coaching_cues": ["Retract scapula", "Maximal intent"]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "phase": "deload",
+        "training_days": [
+          {
+            "day_of_week": 1,
+            "day_label": "Arms & Shoulders",
+            "session_notes": null,
+            "exercises": [
+              {
+                "exercise_id": "dumbbell_bench_press",
+                "name": "Dumbbell Bench Press",
+                "primary_muscle": "pectoralis_major",
+                "synergists": ["anterior_deltoid", "triceps_brachii"],
+                "equipment_required": "dumbbell_set",
+                "sets": 2,
+                "rep_range": { "min": 10, "max": 15 },
+                "tempo": "2-1-2-0",
+                "rest_seconds": 60,
+                "rir_target": 4,
+                "coaching_cues": ["Easy effort", "Focus on form"]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+"""
+
+/// Mirrors `MacroPlanServiceDayLabelNormalizationTests` for the sibling mint
+/// point in the legacy static `ProgramGenerationService.generate()` path
+/// (issue #243). Asserts PARITY with the canonical `MacroPlanService.normalizeDayLabel`
+/// rather than re-deriving the algorithm, plus one explicit literal example.
+@Suite("ProgramGenerationService — day_label normalization (#192 sibling, #243)")
+struct ProgramGenerationServiceDayLabelNormalizationTests {
+
+    private func makeUserProfile() -> UserProfile {
+        UserProfile(
+            userId: "test-user",
+            experienceLevel: "intermediate",
+            goals: ["hypertrophy"],
+            bodyweightKg: nil,
+            ageYears: nil
+        )
+    }
+
+    @Test("generate normalizes free-text day_label through the legacy static expansion path")
+    func normalizesDayLabelOnExpansion() async throws {
+        let service = ProgramGenerationService(
+            provider: MockLLMProvider(response: specialCharDayLabelJSON)
+        )
+
+        let meso = try await service.generate(
+            userProfile: makeUserProfile(),
+            gymProfile: GymProfile.mockProfile()
+        )
+
+        let labels = meso.weeks[0].trainingDays.map(\.dayLabel)
+        try #require(labels.count == 2, "accumulation week must expand to its two template days")
+
+        // Parity with the canonical normalizer — do not hardcode the algorithm here.
+        #expect(labels[0] == MacroPlanService.normalizeDayLabel("Arms & Shoulders"))
+        #expect(labels[1] == MacroPlanService.normalizeDayLabel("Chest/Back"))
+
+        // Plus one explicit literal example (before the fix this was "Arms & Shoulders").
+        #expect(labels[0] == "Arms_Shoulders")
+
+        // Every minted label must be snake_case-safe across all 12 expanded weeks.
+        for week in meso.weeks {
+            for label in week.trainingDays.map(\.dayLabel) {
+                #expect(
+                    label.range(of: "^[A-Za-z0-9_]+$", options: .regularExpression) != nil,
+                    "day label must be snake_case-safe, got \(label)"
+                )
+            }
         }
     }
 }
