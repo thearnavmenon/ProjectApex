@@ -1743,7 +1743,8 @@ nonisolated struct WorkoutSessionStatusPatch: Encodable {
     let completed: Bool
 }
 
-nonisolated private struct SetLogPayload: Encodable {
+// internal (not private): exposed for encoder regression tests (#66).
+nonisolated struct SetLogPayload: Encodable {
     let id: String
     let sessionId: String
     let exerciseId: String

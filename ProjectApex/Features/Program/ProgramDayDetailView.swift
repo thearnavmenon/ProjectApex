@@ -1099,23 +1099,6 @@ struct ProgramDayDetailView: View {
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.timeZone = TimeZone.current
 
-        struct NewSetLogPayload: Encodable {
-            let id, sessionId, exerciseId, loggedAt: String
-            let setNumber, repsCompleted: Int
-            let weightKg: Double
-            let rpeFelt, rirEstimated: Int?
-            let primaryMuscle: String?
-            let localDate: String
-            let intent: String
-            enum CodingKeys: String, CodingKey {
-                case id; case sessionId = "session_id"; case exerciseId = "exercise_id"
-                case setNumber = "set_number"; case weightKg = "weight_kg"
-                case repsCompleted = "reps_completed"; case rpeFelt = "rpe_felt"
-                case rirEstimated = "rir_estimated"; case loggedAt = "logged_at"
-                case primaryMuscle = "primary_muscle"
-                case localDate = "local_date"; case intent
-            }
-        }
         let exerciseForLog = currentDay.exercises.first(where: { $0.exerciseId == newLog.exerciseId })
         let payload = NewSetLogPayload(
             id: newLog.id.uuidString,
@@ -1576,6 +1559,27 @@ private struct SetLogEditPatch: Encodable {
         case repsCompleted  = "reps_completed"
         case rpeFelt        = "rpe_felt"
         case rirEstimated   = "rir_estimated"
+    }
+}
+
+/// set_logs row for a set added to an already-completed session (no ai_prescribed column).
+// internal (not private) and hoisted to file scope (was nested in `addNewSetLog`):
+// exposed for encoder regression tests (#66).
+struct NewSetLogPayload: Encodable {
+    let id, sessionId, exerciseId, loggedAt: String
+    let setNumber, repsCompleted: Int
+    let weightKg: Double
+    let rpeFelt, rirEstimated: Int?
+    let primaryMuscle: String?
+    let localDate: String
+    let intent: String
+    enum CodingKeys: String, CodingKey {
+        case id; case sessionId = "session_id"; case exerciseId = "exercise_id"
+        case setNumber = "set_number"; case weightKg = "weight_kg"
+        case repsCompleted = "reps_completed"; case rpeFelt = "rpe_felt"
+        case rirEstimated = "rir_estimated"; case loggedAt = "logged_at"
+        case primaryMuscle = "primary_muscle"
+        case localDate = "local_date"; case intent
     }
 }
 
