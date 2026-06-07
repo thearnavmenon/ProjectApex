@@ -124,3 +124,64 @@ Deno.test("validateRequest_focusAreas_with_muscle_groups_accepted", () => {
   });
   assertEquals("error" in result, false);
 });
+
+// ─── #258 Slice B: optional acknowledge_triggering_session_count ─────────────
+
+Deno.test("validateRequest_ack_valid_nonNegativeInt_accepted", () => {
+  const result = validateRequest(
+    baseRequest({ acknowledge_triggering_session_count: 5 }),
+  );
+  assertEquals("error" in result, false);
+  if ("error" in result) return;
+  assertEquals(result.acknowledge_triggering_session_count, 5);
+});
+
+Deno.test("validateRequest_ack_zero_accepted", () => {
+  // 0 is a valid session count (>= 0); the lower bound is inclusive.
+  const result = validateRequest(
+    baseRequest({ acknowledge_triggering_session_count: 0 }),
+  );
+  assertEquals("error" in result, false);
+});
+
+Deno.test("validateRequest_ack_absent_still_valid", () => {
+  // Back-compat: onboarding omits the field and must remain valid.
+  const result = validateRequest(baseRequest());
+  assertEquals("error" in result, false);
+  if ("error" in result) return;
+  assertEquals(result.acknowledge_triggering_session_count, undefined);
+});
+
+Deno.test("validateRequest_ack_negative_returns_400", () => {
+  const result = validateRequest(
+    baseRequest({ acknowledge_triggering_session_count: -1 }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(
+    result.error.includes("acknowledge_triggering_session_count"),
+    true,
+  );
+});
+
+Deno.test("validateRequest_ack_nonInteger_returns_400", () => {
+  const result = validateRequest(
+    baseRequest({ acknowledge_triggering_session_count: 3.5 }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(
+    result.error.includes("acknowledge_triggering_session_count"),
+    true,
+  );
+});
+
+Deno.test("validateRequest_ack_nonNumber_returns_400", () => {
+  // A numeric-looking string must be rejected (Number.isInteger("5") is false).
+  const result = validateRequest(
+    baseRequest({ acknowledge_triggering_session_count: "5" }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(
+    result.error.includes("acknowledge_triggering_session_count"),
+    true,
+  );
+});

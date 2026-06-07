@@ -43,7 +43,8 @@ final class OnboardingGoalPayloadTests: XCTestCase {
     /// `Date` for determinism.
     private func encodeCallSitePayload(
         userId: UUID,
-        at date: Date
+        at date: Date,
+        acknowledge: Int? = nil
     ) throws -> [String: Any] {
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -53,7 +54,8 @@ final class OnboardingGoalPayloadTests: XCTestCase {
                 statement: "Hypertrophy",
                 focusAreas: ["legs", "back"],
                 updatedAt: isoFormatter.string(from: date)
-            )
+            ),
+            acknowledgeTriggeringSessionCount: acknowledge
         )
         let data = try JSONEncoder().encode(payload)
         return try XCTUnwrap(
@@ -77,6 +79,44 @@ final class OnboardingGoalPayloadTests: XCTestCase {
             "`userId` leak or any extra key would be rejected by validateRequest"
         )
         XCTAssertNil(json["userId"], "no camelCase `userId` may leak to the wire")
+        // #258 Slice B: the new OPTIONAL ack field must encode as ABSENT (not
+        // `null`) when nil, or onboarding's wire shape would no longer be
+        // exactly {user_id, goal}. The synthesized `encodeIfPresent` omits it.
+        XCTAssertNil(
+            json["acknowledge_triggering_session_count"],
+            "nil ack must omit the key entirely (no `null`) so onboarding stays {user_id, goal}"
+        )
+    }
+
+    func test_payload_withAck_topLevelKeys_includeSnakeCaseAck() throws {
+        let json = try encodeCallSitePayload(
+            userId: UUID(),
+            at: Date(timeIntervalSinceReferenceDate: 800_000_000),
+            acknowledge: 42
+        )
+
+        // #258 Slice B: a non-nil ack adds EXACTLY one top-level snake_case key.
+        XCTAssertEqual(
+            Set(json.keys), ["user_id", "goal", "acknowledge_triggering_session_count"],
+            "EF reads top-level `acknowledge_triggering_session_count` (snake_case)"
+        )
+        XCTAssertNil(
+            json["acknowledgeTriggeringSessionCount"],
+            "no camelCase `acknowledgeTriggeringSessionCount` may leak to the wire"
+        )
+
+        // Value encodes as an Int (JSON number) == 42.
+        XCTAssertEqual(
+            json["acknowledge_triggering_session_count"] as? Int, 42,
+            "ack must encode as the integer value, snake_case key"
+        )
+
+        // The goal sub-object is unaffected — still the #154-locked camelCase set.
+        let goal = try XCTUnwrap(json["goal"] as? [String: Any])
+        XCTAssertEqual(
+            Set(goal.keys), ["statement", "focusAreas", "updatedAt"],
+            "ack must not perturb the goal sub-object shape"
+        )
     }
 
     func test_payload_userId_matchesEFUUIDRegex() throws {
