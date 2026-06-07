@@ -264,6 +264,36 @@ struct TraineeModelCodableTests {
         #expect(decoded.lastClassifiedNoteCreatedAt == isoDate("2026-04-30"))
         #expect(decoded.lastGlobalPhaseAdvanceFiredAtSessionCount == 18)
     }
+
+    @Test("acknowledgedTriggeringSessionCounts (#258) encodes SORTED and round-trips")
+    func acknowledgedTriggeringSessionCountsEncodesSortedAndRoundTrips() throws {
+        var model = TraineeModel(goal: defaultGoal())
+        // Set literal order is hash-ordered (randomized per-process); the
+        // custom encoder must sort for deterministic JSONB parity.
+        model.acknowledgedTriggeringSessionCounts = [12, 3, 7]
+
+        let data = try JSONEncoder().encode(model)
+
+        // The persisted array must be ascending-sorted, NOT hash-ordered.
+        let dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let encodedArray = dict["acknowledgedTriggeringSessionCounts"] as? [Int]
+        #expect(encodedArray == [3, 7, 12])
+
+        // Decoding reconstructs the Set unchanged.
+        let decoded = try JSONDecoder().decode(TraineeModel.self, from: data)
+        #expect(decoded.acknowledgedTriggeringSessionCounts == [12, 3, 7])
+    }
+
+    @Test("Legacy JSON (no acknowledgedTriggeringSessionCounts key) decodes to empty set")
+    func decodesMissingAcknowledgedTriggeringSessionCountsAsEmpty() throws {
+        let model = TraineeModel(goal: defaultGoal())
+        let data = try JSONEncoder().encode(model)
+        var dict = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        dict.removeValue(forKey: "acknowledgedTriggeringSessionCounts")
+        let stripped = try JSONSerialization.data(withJSONObject: dict)
+        let decoded = try JSONDecoder().decode(TraineeModel.self, from: stripped)
+        #expect(decoded.acknowledgedTriggeringSessionCounts.isEmpty)
+    }
 }
 
 // MARK: - Helpers

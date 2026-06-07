@@ -39,6 +39,12 @@ struct TraineeModel: Codable, Sendable, Hashable {
     /// fired per ADR-0012. nil for users that have never triggered the
     /// 6-session cooldown gate.
     var lastGlobalPhaseAdvanceFiredAtSessionCount: Int?
+    /// Per-trigger acknowledgment of heavy-reassessment GPA fires (#258): each
+    /// member is a `lastGlobalPhaseAdvanceFiredAtSessionCount` the user has
+    /// acknowledged, which suppresses the signal via
+    /// `TraineeModelDigest.deriveHeavyReassessmentSignal`. Grows ~1 int per GPA
+    /// event (≤ ~40/yr), so no pruning is needed.
+    var acknowledgedTriggeringSessionCounts: Set<Int>
 
     init(
         activeProgramId: UUID? = nil,
@@ -57,7 +63,8 @@ struct TraineeModel: Codable, Sendable, Hashable {
         lifeContextEvents: [LifeContextEvent] = [],
         totalSessionCount: Int = 0,
         lastClassifiedNoteCreatedAt: Date? = nil,
-        lastGlobalPhaseAdvanceFiredAtSessionCount: Int? = nil
+        lastGlobalPhaseAdvanceFiredAtSessionCount: Int? = nil,
+        acknowledgedTriggeringSessionCounts: Set<Int> = []
     ) {
         self.activeProgramId = activeProgramId
         self.goal = goal
@@ -76,6 +83,7 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.totalSessionCount = totalSessionCount
         self.lastClassifiedNoteCreatedAt = lastClassifiedNoteCreatedAt
         self.lastGlobalPhaseAdvanceFiredAtSessionCount = lastGlobalPhaseAdvanceFiredAtSessionCount
+        self.acknowledgedTriggeringSessionCounts = acknowledgedTriggeringSessionCounts
     }
 
     // MARK: Custom Codable for JSONB shape parity (slice A12 / #83)
@@ -109,6 +117,7 @@ struct TraineeModel: Codable, Sendable, Hashable {
         case totalSessionCount
         case lastClassifiedNoteCreatedAt
         case lastGlobalPhaseAdvanceFiredAtSessionCount
+        case acknowledgedTriggeringSessionCounts
     }
 
     init(from decoder: Decoder) throws {
@@ -186,6 +195,11 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.lastGlobalPhaseAdvanceFiredAtSessionCount = try c.decodeIfPresent(
             Int.self, forKey: .lastGlobalPhaseAdvanceFiredAtSessionCount
         )
+        // Tolerant decode (#258): older rows / server JSON lack the key — mirror
+        // the model's other collections defaulting to empty.
+        self.acknowledgedTriggeringSessionCounts = Set(try c.decodeIfPresent(
+            [Int].self, forKey: .acknowledgedTriggeringSessionCounts
+        ) ?? [])
     }
 
     func encode(to encoder: Encoder) throws {
@@ -218,6 +232,10 @@ struct TraineeModel: Codable, Sendable, Hashable {
         try c.encode(totalSessionCount, forKey: .totalSessionCount)
         try c.encodeIfPresent(lastClassifiedNoteCreatedAt, forKey: .lastClassifiedNoteCreatedAt)
         try c.encodeIfPresent(lastGlobalPhaseAdvanceFiredAtSessionCount, forKey: .lastGlobalPhaseAdvanceFiredAtSessionCount)
+        // Encode SORTED for deterministic JSONB — Swift `Set` Codable is
+        // hash-ordered (randomized per-process), which breaks model_json parity
+        // (cf. prescriptionAccuracy / recentlyAdvancedPatterns sorting). #258.
+        try c.encode(acknowledgedTriggeringSessionCounts.sorted(), forKey: .acknowledgedTriggeringSessionCounts)
     }
 
     // MARK: Major patterns (calibration / phase-advance gating)
