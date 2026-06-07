@@ -285,6 +285,11 @@ actor ProgramGenerationService {
         var mesocycle = Self.expandTemplate(template, userId: userId)
 
         // Stage 2.5: Empty-training-day validation.
+        // Both correction passes below use the single-shot corrective re-prompt
+        // pattern ratified by ADR-0019: one attempt, a *different* correction
+        // payload naming the violations, and a throw on persistence — never a
+        // loop and never a synthesized fallback. This is distinct from ADR-0007
+        // provider-error retry (that governs unparseable/transport failures).
         // The LLM occasionally produces training_day stubs with no exercises;
         // `expandTemplate` propagates that empty state across all 4 weeks of
         // the phase, leaving the user with no plan on those days. Catch it
