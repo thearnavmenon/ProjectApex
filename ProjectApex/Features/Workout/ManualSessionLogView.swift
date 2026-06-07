@@ -774,7 +774,8 @@ private struct ManualSessionPayload: Encodable {
 }
 
 /// set_logs row for manually entered sets (no ai_prescribed column).
-private struct ManualSetLogPayload: Encodable {
+// internal (not private): exposed for encoder regression tests (#66).
+struct ManualSetLogPayload: Encodable {
     let id: String
     let sessionId: String
     let exerciseId: String
