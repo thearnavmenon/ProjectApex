@@ -27,7 +27,7 @@ answer.
 I wrote three tests first. Two of them failed before the fix (which proved the bug was
 real), then passed after. All the important tests pass (91 out of 91).
 
-**Status:** Filed as issue #239, fix is in pull request #240. Pushed, waiting to be merged.
+**Status:** Done and merged. Filed as issue #239, fixed in pull request #240, now merged into the main branch — issue #239 is closed.
 
 *(This is also the day the diary started.)*
 
