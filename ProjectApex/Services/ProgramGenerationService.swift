@@ -501,7 +501,10 @@ actor ProgramGenerationService {
         return TrainingDay(
             id: UUID(),
             dayOfWeek: template.dayOfWeek,
-            dayLabel: template.dayLabel,
+            // #192 sibling (#243): normalize the LLM's free-text day label into a
+            // snake_case-safe `day_type` so it stays attached to history (#172 /
+            // ADR-0017), mirroring the macro-skeleton path fixed in PR #229.
+            dayLabel: MacroPlanService.normalizeDayLabel(template.dayLabel),
             exercises: exercises,
             sessionNotes: template.sessionNotes
         )
