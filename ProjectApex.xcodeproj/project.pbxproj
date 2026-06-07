@@ -48,6 +48,7 @@
 		A12FA719C0DE0001CAFE0001 /* TraineeModelSnapshotsCrossValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12FA719C0DE0002CAFE0002 /* TraineeModelSnapshotsCrossValidationTests.swift */; };
 		A1B2C3D4E5F6A7B8C9D0E1F2 /* TopSetSnapshotFactoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */; };
 		A3741A0001CAFE0001CAFE01 /* LateArrivalNotificationQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3741A0001CAFE0001CAFE02 /* LateArrivalNotificationQueueTests.swift */; };
+		A1540154CAFE0154CAFE0001 /* OnboardingGoalPayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1540154CAFE0154CAFE0002 /* OnboardingGoalPayloadTests.swift */; };
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 		C0D12694855E73899CCFE137 /* TraineeModelDigestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */; };
@@ -106,6 +107,7 @@
 		A11FA719C0DE0002CAFE0002 /* FatigueInteractionCrossValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FatigueInteractionCrossValidationTests.swift; sourceTree = "<group>"; };
 		A12FA719C0DE0002CAFE0002 /* TraineeModelSnapshotsCrossValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelSnapshotsCrossValidationTests.swift; sourceTree = "<group>"; };
 		A3741A0001CAFE0001CAFE02 /* LateArrivalNotificationQueueTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LateArrivalNotificationQueueTests.swift; sourceTree = "<group>"; };
+		A1540154CAFE0154CAFE0002 /* OnboardingGoalPayloadTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OnboardingGoalPayloadTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
 		DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SetPrescriptionIntentValidationTests.swift; sourceTree = "<group>"; };
 		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
@@ -248,6 +250,7 @@
 				6437BED8DCD7F98C80FF4377 /* TraineeModelServiceTests.swift */,
 				862D553D94F677C0BB009B74 /* TraineeModelUpdateJobTests.swift */,
 				A3741A0001CAFE0001CAFE02 /* LateArrivalNotificationQueueTests.swift */,
+				A1540154CAFE0154CAFE0002 /* OnboardingGoalPayloadTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -395,6 +398,7 @@
 				6587F62EDC961A3C558A6226 /* TraineeModelServiceTests.swift in Sources */,
 				C88AB47564E9AD1E0A3C2197 /* TraineeModelUpdateJobTests.swift in Sources */,
 				A3741A0001CAFE0001CAFE01 /* LateArrivalNotificationQueueTests.swift in Sources */,
+				A1540154CAFE0154CAFE0001 /* OnboardingGoalPayloadTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
