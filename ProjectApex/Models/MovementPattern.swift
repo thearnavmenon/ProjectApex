@@ -20,4 +20,20 @@ enum MovementPattern: String, Codable, Sendable, Hashable, CaseIterable {
     case squat
     case verticalPull   = "vertical_pull"
     case verticalPush   = "vertical_push"
+
+    /// Human-readable label for UI surfaces (e.g. the heavy-reassessment banner, #258).
+    /// Title-cased, space-separated — consistent with how SystemPrompt_SessionPlan.txt
+    /// already refers to patterns ("horizontal push", "hip hinge").
+    var displayName: String {
+        switch self {
+        case .hipHinge:       return "Hip Hinge"
+        case .horizontalPull: return "Horizontal Pull"
+        case .horizontalPush: return "Horizontal Push"
+        case .isolation:      return "Isolation"
+        case .lunge:          return "Lunge"
+        case .squat:          return "Squat"
+        case .verticalPull:   return "Vertical Pull"
+        case .verticalPush:   return "Vertical Push"
+        }
+    }
 }
