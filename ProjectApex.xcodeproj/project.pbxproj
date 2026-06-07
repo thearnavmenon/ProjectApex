@@ -54,6 +54,7 @@
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 		C0D12694855E73899CCFE137 /* TraineeModelDigestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */; };
+		258DE1F12E000000000000A2 /* HeavyReassessmentBannerCopyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 258DE1F12E000000000000A1 /* HeavyReassessmentBannerCopyTests.swift */; };
 		C88AB47564E9AD1E0A3C2197 /* TraineeModelUpdateJobTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 862D553D94F677C0BB009B74 /* TraineeModelUpdateJobTests.swift */; };
 		E50E3B4CBD53ED7ABE725DB8 /* EquipmentCatalogSeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18DB10776DEDCE5720292FE8 /* EquipmentCatalogSeedTests.swift */; };
 /* End PBXBuildFile section */
@@ -103,6 +104,7 @@
 		6DC23D0A3EB460CF97B18574 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		70E3BA94C76430CACFD657B5 /* EquipmentRounderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EquipmentRounderTests.swift; sourceTree = "<group>"; };
 		7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelDigestTests.swift; sourceTree = "<group>"; };
+		258DE1F12E000000000000A1 /* HeavyReassessmentBannerCopyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeavyReassessmentBannerCopyTests.swift; sourceTree = "<group>"; };
 		85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelInteractionsTests.swift; sourceTree = "<group>"; };
 		862D553D94F677C0BB009B74 /* TraineeModelUpdateJobTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelUpdateJobTests.swift; sourceTree = "<group>"; };
 		878B35DC7A9EFE48E1A0B285 /* TraineeModelProfilesTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelProfilesTests.swift; sourceTree = "<group>"; };
@@ -253,6 +255,7 @@
 				ED8AB93C545B445971A78F14 /* ManualLogIntentGateTests.swift */,
 				66C0DE0066C0DE0066C0DE01 /* SetLogPayloadEncoderTests.swift */,
 				7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */,
+				258DE1F12E000000000000A1 /* HeavyReassessmentBannerCopyTests.swift */,
 				6437BED8DCD7F98C80FF4377 /* TraineeModelServiceTests.swift */,
 				862D553D94F677C0BB009B74 /* TraineeModelUpdateJobTests.swift */,
 				A3741A0001CAFE0001CAFE02 /* LateArrivalNotificationQueueTests.swift */,
@@ -403,6 +406,7 @@
 				7D8C4E6ADC8DEDCA31B72B1D /* ManualLogIntentGateTests.swift in Sources */,
 				66C0DE0066C0DE0066C0DE02 /* SetLogPayloadEncoderTests.swift in Sources */,
 				C0D12694855E73899CCFE137 /* TraineeModelDigestTests.swift in Sources */,
+				258DE1F12E000000000000A2 /* HeavyReassessmentBannerCopyTests.swift in Sources */,
 				6587F62EDC961A3C558A6226 /* TraineeModelServiceTests.swift in Sources */,
 				C88AB47564E9AD1E0A3C2197 /* TraineeModelUpdateJobTests.swift in Sources */,
 				A3741A0001CAFE0001CAFE01 /* LateArrivalNotificationQueueTests.swift in Sources */,
