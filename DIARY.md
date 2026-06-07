@@ -7,6 +7,44 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-07 — Closed out four "is the AI being honest?" decisions
+
+**The problem (in plain words):**
+Four loose ends were all about the same theme: when the AI fails or behaves oddly, does
+the app stay honest about it? A couple were real decisions, not just code edits, so I
+talked through each one before changing anything.
+
+**What I changed (four fixes):**
+- **Fixed misleading comments in the set-suggestion code.** The comments claimed the app
+  "retries" when the AI gives a bad answer. It doesn't — on purpose, it fails fast and
+  shows you a retry button instead. I corrected the comments. There's a setting in there
+  that looks unused; it turned out a test deliberately uses it to *prove* the app never
+  retries, so I kept it and wrote a note explaining why. (#42)
+- **Settled a real rule question and wrote it down.** When the program-builder AI returns
+  a plan with an empty day or equipment your gym doesn't have, the code asks the AI *once*
+  to fix that specific problem, then gives up loudly if it still fails. I decided this is
+  fine — it's a one-shot correction with a clear ask, not the kind of blind "keep
+  retrying" loop we banned — and recorded it as a written rule (ADR-0019) so no one
+  strips it out later by mistake. (#241)
+- **Cleaned up the last workout day-label slip-through.** This was the third and final
+  spot where a raw label could sneak past un-tidied; now all three match. Day-label
+  cleanup is fully done. (#246)
+- **Made the post-workout summary honest.** After a workout the app shows "insights." If
+  the AI failed, it used to quietly show a basic backup summary that looked *exactly* like
+  real AI insights — so you couldn't tell the AI didn't run. Now it adds a small note:
+  "couldn't generate AI insights — showing a basic summary." Honest instead of silently
+  faking it. (#242)
+
+**How I made sure it works:**
+Each code fix has its own test (the day-label and honest-summary fixes were written
+test-first — fail, then fix, then pass). The full app test suite passes (237 tests).
+The two "decision" items (#42 comments, #241 rule) changed no behavior.
+
+**Status:** All four merged into main. Pull requests #253, #254, #255, #256 —
+closing issues #42, #241, #246, and #242.
+
+---
+
 ## 2026-06-07 — Merged a batch of five safety-net fixes
 
 **The problem (in plain words):**
