@@ -7,8 +7,9 @@
 // Key design decisions:
 //   • Swift actor for safe concurrent LLM calls (no data races on callCount, etc.)
 //   • 8-second per-call timeout enforced via Task.detached + withTaskCancellationHandler
-//   • Retries up to `maxRetries` times on decode / validation failure, appending
-//     the previous error to the follow-up prompt for in-context correction.
+//   • Decode / validation failures are PERMANENT (ADR-0007 §1): they return
+//     `.fallback` immediately and surface the retry sheet — no same-prompt retry.
+//     Only transient HTTP errors are retried, inside `TransientRetryPolicy`.
 //   • Safety gate: if safetyFlags contains .painReported, rest is raised to ≥180 s.
 //   • Weight rounding is NOT done here — the GymFactStore + WeightCorrectionView
 //     handle unavailable weights at runtime during active sets.
@@ -832,6 +833,10 @@ actor AIInferenceService {
     // MARK: Dependencies
 
     private let provider: any LLMProvider
+    /// Retained as a deliberate ADR-0007 §1 anchor, NOT dead config: `prescribe`
+    /// does not consume it (decode/validation failures fail fast — see below), and
+    /// a test passes a non-zero value to PROVE it is ignored. Removing it would
+    /// delete that regression guard against re-introducing a validate-retry loop.
     let maxRetries: Int
     /// The user's gym profile — used to scope the AI's equipment awareness.
     /// Stored for future use in payload construction; currently included in
@@ -853,8 +858,9 @@ actor AIInferenceService {
     // MARK: Public API
 
     /// Produces a `SetPrescription` for the given `WorkoutContext`.
-    /// Retries up to `maxRetries` times on validation failure before returning
-    /// a `.fallback` result.
+    /// Decode / validation failures are permanent (ADR-0007 §1): this returns
+    /// `.fallback` immediately without retrying. Only transient HTTP errors are
+    /// retried, inside the 8-second timeout via `TransientRetryPolicy`.
     func prescribe(context: WorkoutContext) async -> PrescriptionResult {
 
         // 1. Encode context to JSON (user payload for the LLM)
