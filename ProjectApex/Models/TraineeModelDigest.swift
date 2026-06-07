@@ -97,10 +97,11 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// which the HEAVY REASSESSMENT block remains in the SessionPlan
     /// prompt. Matches the server-side cooldown
     /// (`GLOBAL_PHASE_ADVANCE_COOLDOWN_SESSIONS = 6` in
-    /// `supabase/functions/_shared/constants.ts`). #178 deliberately ships
-    /// without iOS-side acknowledgment state — the AI may mention
+    /// `supabase/functions/_shared/constants.ts`). The AI may mention
     /// reassessment for up to this many consecutive sessions per fire event
-    /// until the UI screen + ack writer land in a follow-up.
+    /// — unless the user acknowledges it: `TraineeModel`'s
+    /// `acknowledgedTriggeringSessionCounts` suppresses the signal early via
+    /// `deriveHeavyReassessmentSignal` (#258 added that iOS-side ack state).
     static let heavyReassessmentCooldownWindow: Int = 6
 
     enum CodingKeys: String, CodingKey {
@@ -240,6 +241,10 @@ extension TraineeModelDigest {
         guard delta >= 0, delta < heavyReassessmentCooldownWindow else {
             return nil
         }
+        // #258: an acknowledged fire-event is silenced for BOTH the banner and the
+        // LLM prompt (both derive from this single function). Check the CURRENT
+        // triggering count specifically — a LATER GPA fire (new count) must still surface.
+        guard !model.acknowledgedTriggeringSessionCounts.contains(lastFired) else { return nil }
         let recentPatterns = model.patterns
             .filter { (pattern, profile) in
                 TraineeModel.majorPatterns.contains(pattern)

@@ -123,5 +123,6 @@
   "reassessmentRecords": [],
   "totalSessionCount": 24,
   "lastClassifiedNoteCreatedAt": "2026-01-04T18:00:00.000Z",
-  "lastGlobalPhaseAdvanceFiredAtSessionCount": 18
+  "lastGlobalPhaseAdvanceFiredAtSessionCount": 18,
+  "acknowledgedTriggeringSessionCounts": []
 }
