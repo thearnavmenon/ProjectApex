@@ -51,6 +51,59 @@ Deno.test("derivedTrainedSets_keeps_canonical_primary_muscle", () => {
   assertEquals(trained.muscleGroups.has("legs"), true, "leg subgroup collapses to legs");
 });
 
+// ─── #239 (#167 sibling): derivedTrainedSets rejects non-canonical e.pattern ──
+// "bench" is not a canonical MovementPattern; before the fix the client-string
+// branch added it verbatim, leaking it into trainedPatterns where it could
+// falsely satisfy the note-classifier auto-clear gate. With no exercise_id
+// there is no library fallback, so a rejected pattern leaves patterns empty.
+Deno.test("derivedTrainedSets_rejects_unknown_pattern", () => {
+  const trained = derivedTrainedSets({
+    set_logs: [
+      { pattern: "bench", intent: "top" },
+    ],
+  });
+  assertEquals(
+    trained.patterns.has("bench"),
+    false,
+    "unknown pattern must not leak into patterns",
+  );
+  assertEquals(trained.patterns.size, 0, "no library fallback without exercise_id");
+});
+
+// A canonical client pattern still flows through unchanged.
+Deno.test("derivedTrainedSets_keeps_canonical_pattern", () => {
+  const trained = derivedTrainedSets({
+    set_logs: [
+      { pattern: "horizontal_push", intent: "top" },
+    ],
+  });
+  assertEquals(
+    trained.patterns.has("horizontal_push"),
+    true,
+    "canonical pattern retained",
+  );
+});
+
+// Highest-value assertion: a bogus client pattern must neither leak nor suppress
+// the real pattern — it falls through to the trustworthy ExerciseLibrary lookup.
+Deno.test("derivedTrainedSets_falls_through_to_library_on_unknown_pattern", () => {
+  const trained = derivedTrainedSets({
+    set_logs: [
+      { exercise_id: "barbell_bench_press", pattern: "bogus", intent: "top" },
+    ],
+  });
+  assertEquals(
+    trained.patterns.has("horizontal_push"),
+    true,
+    "bogus client pattern falls through to lookupPattern",
+  );
+  assertEquals(
+    trained.patterns.has("bogus"),
+    false,
+    "bogus client pattern must not leak into patterns",
+  );
+});
+
 // ─── D1: no set_logs key — passes ────────────────────────────────────────────
 Deno.test("validateRequest_no_set_logs_field_returns_ok", () => {
   const result = validateRequest(baseRequest({}));

@@ -30,7 +30,11 @@
 //   - docs/agents/edge-functions.md (secrets, deploy, local dev)
 
 import postgres from "postgres";
-import { canonicalizeExerciseId, lookupPattern } from "../_shared/exercise-library.ts";
+import {
+  canonicalizeExerciseId,
+  lookupPattern,
+  MOVEMENT_PATTERNS,
+} from "../_shared/exercise-library.ts";
 import {
   computeE1RM,
   type TopSet as EwmaTopSet,
@@ -1966,12 +1970,17 @@ export function derivedTrainedSets(
         // preference (under-bootstrap silent; over-bootstrap creates
         // phantom profiles).
         const fromExercise = lookupPattern(e.exercise_id);
-        if (typeof e.pattern === "string") {
+        // A non-canonical client pattern falls through to the trustworthy
+        // ExerciseLibrary lookup rather than leaking verbatim — a bogus
+        // client value can't leak into trainedPatterns / derivedTrainedJoints
+        // and falsely satisfy the auto-clear gate, nor suppress the real
+        // pattern (#239, mirroring #167's reject-unknown for primary_muscle).
+        if (typeof e.pattern === "string" && (MOVEMENT_PATTERNS as ReadonlySet<string>).has(e.pattern)) {
           patterns.add(e.pattern);
         } else if (fromExercise) {
           patterns.add(fromExercise);
         }
-      } else if (typeof e.pattern === "string") {
+      } else if (typeof e.pattern === "string" && (MOVEMENT_PATTERNS as ReadonlySet<string>).has(e.pattern)) {
         patterns.add(e.pattern);
       }
       if (typeof e.primary_muscle === "string") {
