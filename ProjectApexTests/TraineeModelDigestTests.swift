@@ -1657,6 +1657,50 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(sq?.formDegradationFlag, false)
     }
 
+    // MARK: ─── #258: acknowledgment suppresses the heavy-reassessment signal ──
+
+    /// Builds a model whose GPA fired at `firedAt` and whose `totalSessionCount`
+    /// puts it `delta` sessions into the cooldown window (delta < 6 ⇒ in-window).
+    private func makeInWindowGPAModel(firedAt: Int = 18, delta: Int = 2) -> TraineeModel {
+        var model = makeBaselineModel()
+        model.lastGlobalPhaseAdvanceFiredAtSessionCount = firedAt
+        model.totalSessionCount = firedAt + delta
+        return model
+    }
+
+    func test_deriveSignal_suppressedWhenTriggeringCountAcknowledged() {
+        var model = makeInWindowGPAModel(firedAt: 18, delta: 2)
+        model.acknowledgedTriggeringSessionCounts = [18]   // the CURRENT fire
+
+        let signal = TraineeModelDigest.deriveHeavyReassessmentSignal(from: model)
+
+        XCTAssertNil(signal,
+            "An acknowledged triggering count (18) must silence the signal for both banner and LLM")
+    }
+
+    func test_deriveSignal_stillFiresWhenADifferentCountAcknowledged() {
+        var model = makeInWindowGPAModel(firedAt: 18, delta: 2)
+        model.acknowledgedTriggeringSessionCounts = [12]   // an EARLIER fire, not 18
+
+        let signal = TraineeModelDigest.deriveHeavyReassessmentSignal(from: model)
+
+        XCTAssertNotNil(signal,
+            "Acking a different count must NOT suppress a later GPA fire — guards against a naive any-ack-suppresses bug")
+        XCTAssertEqual(signal?.triggeringSessionCount, 18)
+    }
+
+    func test_deriveSignal_emptyAckSet_unchangedInWindowAndOut() {
+        // In-window, no acks → signal present (regression guard).
+        let inWindow = makeInWindowGPAModel(firedAt: 18, delta: 2)
+        XCTAssertNotNil(TraineeModelDigest.deriveHeavyReassessmentSignal(from: inWindow),
+            "Empty ack set in-window must behave exactly as before #258 (signal present)")
+
+        // Out-of-window, no acks → nil (regression guard).
+        let outOfWindow = makeInWindowGPAModel(firedAt: 18, delta: 6) // delta == window ⇒ out
+        XCTAssertNil(TraineeModelDigest.deriveHeavyReassessmentSignal(from: outOfWindow),
+            "Empty ack set out-of-window must remain nil")
+    }
+
     // MARK: ─── B4 (#89) cycle 4: lastGlobalPhaseAdvance pass-through ──────────
 
     func test_digest_lastGlobalPhaseAdvanceFiredAt_passesThroughWhenSet() {
