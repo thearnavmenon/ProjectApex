@@ -39,6 +39,10 @@ struct WorkoutView: View {
     /// Days since the user's last completed session — nil on first-ever session.
     /// Used by PreWorkoutView to show the welcome-back banner after a long gap.
     @State private var daysSinceLastSession: Int? = nil
+    /// Heavy-reassessment signal derived from the cached trainee model (#258).
+    /// Drives the level-up banner in PreWorkoutView. Nil when no model / out of
+    /// the cooldown window / acknowledged.
+    @State private var heavyReassessmentSignal: HeavyReassessmentSignal? = nil
     /// True when a crash-recovered PausedSessionState exists but its trainingDayId
     /// does not match the current day (and ContentView hasn't handled it via Path A).
     /// Shows a recovery dialog so the user can choose how to proceed.
@@ -135,6 +139,11 @@ struct WorkoutView: View {
                     daysSinceLastSession = Calendar.current.dateComponents([.day], from: date, to: Date()).day
                 }
             }
+
+            // Heavy-reassessment signal for the pre-workout level-up banner (#258).
+            // Read the cached trainee-model digest (minimal existing path — no new
+            // service plumbing). Nil model / out-of-window / acknowledged → nil → no banner.
+            heavyReassessmentSignal = await deps.traineeModelService.digest()?.heavyReassessmentSignal
 
             guard let vm = viewModel else { return }
 
@@ -290,6 +299,10 @@ struct WorkoutView: View {
                 completedDayCount: completedDayCount,
                 totalDayCount: totalDayCount,
                 daysSinceLastSession: daysSinceLastSession,
+                heavyReassessmentSignal: heavyReassessmentSignal,
+                onReviewGoals: {
+                    // TODO(#258 E2): present goal-review screen
+                },
                 onSkipSession: onSkipSession,
                 onBack: onBack,
                 onCloseToTab0: onCloseToTab0
