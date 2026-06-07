@@ -35,6 +35,8 @@ struct PostWorkoutSummaryView: View {
 
     // MARK: - AI Insights State
 
+    // `internal` (not `private`) so PostWorkoutSummaryInsightsTests can exercise
+    // the fail-loud helper via `@testable import` (#242).
     enum InsightsState {
         case loading
         case loaded([String])
@@ -42,6 +44,18 @@ struct PostWorkoutSummaryView: View {
     }
 
     @State private var insightsState: InsightsState = .loading
+
+    /// The fail-loud notice shown when AI insights couldn't be generated (#242, ADR-0007 §3).
+    /// `nil` when the AI succeeded (or is still loading) — non-nil only for `.failed`.
+    /// Single source of truth for the badge copy; the `.failed` render branch reads from here.
+    static func insightsFallbackNotice(for state: InsightsState) -> String? {
+        switch state {
+        case .loading, .loaded:
+            return nil
+        case .failed:
+            return "Couldn't generate AI insights — showing a basic summary."
+        }
+    }
 
     // MARK: - Late-Arrival Notifications (Slice A3 / ADR-0008)
 
@@ -471,28 +485,53 @@ struct PostWorkoutSummaryView: View {
                 .padding(.vertical, 14)
                 .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            case .loaded(let insights), .failed(let insights):
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(insights.enumerated()), id: \.offset) { _, insight in
-                        HStack(alignment: .top, spacing: 10) {
-                            Circle()
-                                .fill(streak.tintColor)
-                                .frame(width: 5, height: 5)
-                                .padding(.top, 6)
-                            Text(insight)
-                                .font(.system(size: 13, weight: .regular))
-                                .foregroundStyle(.white.opacity(0.75))
-                                .lineLimit(4)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            case .loaded(let insights):
+                // AI succeeded — bullet list only, no notice.
+                insightsListCard(insights, notice: nil)
+
+            case .failed(let insights):
+                // Fail loud (#242, ADR-0007 §3): still show the deterministic
+                // fallback insights, but surface that the AI didn't run.
+                insightsListCard(insights, notice: Self.insightsFallbackNotice(for: insightsState))
             }
         }
+    }
+
+    /// Insights bullet card. When `notice` is non-nil (the `.failed` fail-loud
+    /// path), a small warning row is prepended above the list (#242).
+    @ViewBuilder
+    private func insightsListCard(_ insights: [String], notice: String?) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let notice {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                    Text(notice)
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.bottom, 2)
+            }
+            ForEach(Array(insights.enumerated()), id: \.offset) { _, insight in
+                HStack(alignment: .top, spacing: 10) {
+                    Circle()
+                        .fill(streak.tintColor)
+                        .frame(width: 5, height: 5)
+                        .padding(.top, 6)
+                    Text(insight)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Insights Loading
