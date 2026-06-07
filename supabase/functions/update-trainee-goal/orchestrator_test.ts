@@ -228,6 +228,128 @@ goalTest(
   },
 );
 
+// ─── #258 Slice B: acknowledgment write path ────────────────────────────────
+//
+// The goal-review Save POSTs `acknowledge_triggering_session_count`; the EF
+// array-appends it to the Slice-A camelCase key
+// `acknowledgedTriggeringSessionCounts`. Like the goal path, the jsonb
+// COALESCE / `NOT @>` semantics are only meaningful against real Postgres.
+
+goalTest(
+  "#258 (B1): existing row, goal-save WITH ack → acknowledgedTriggeringSessionCounts contains the count AND the goal is written",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ totalSessionCount: 5 });
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_triggering_session_count: 42 },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    assertEquals(modelJson.goal, GOAL_A);
+    assertEquals(modelJson.acknowledgedTriggeringSessionCounts, [42]);
+  },
+);
+
+goalTest(
+  "#258 (B2): idempotent → calling twice with the same count appends it exactly once",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ totalSessionCount: 5 });
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_triggering_session_count: 42 },
+      sql,
+    );
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_triggering_session_count: 42 },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    // The `WHERE NOT @>` guard makes the second ack a no-op.
+    assertEquals(modelJson.acknowledgedTriggeringSessionCounts, [42]);
+  },
+);
+
+goalTest(
+  "#258 (B3): append preserves prior acks → seed [10], ack 20 → [10, 20]",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({
+      acknowledgedTriggeringSessionCounts: [10],
+    });
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_triggering_session_count: 20 },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    assertEquals(modelJson.acknowledgedTriggeringSessionCounts, [10, 20]);
+  },
+);
+
+goalTest(
+  "#258 (B4): ack does NOT clobber other top-level model_json keys",
+  async () => {
+    const seed = {
+      patterns: {
+        squat: { currentPhase: "accumulation", sessionsInPhase: 3, trend: "progressing" },
+      },
+      exercises: {
+        barbell_back_squat: { e1rmCurrent: 151.6667, sessionCount: 2 },
+      },
+    };
+    const userId = await seedFreshUserWithExistingModel(seed);
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_triggering_session_count: 7 },
+      sql,
+    );
+
+    // patterns + exercises subtrees jsonb-equal to the seed after the ack write.
+    const cmp = await sql`
+      SELECT
+        (model_json -> 'patterns')  = ${sql.json(seed.patterns)}::jsonb  AS patterns_equal,
+        (model_json -> 'exercises') = ${sql.json(seed.exercises)}::jsonb AS exercises_equal
+      FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    assertEquals(cmp[0].patterns_equal, true, "patterns subtree must be untouched");
+    assertEquals(cmp[0].exercises_equal, true, "exercises subtree must be untouched");
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    assertEquals(modelJson.acknowledgedTriggeringSessionCounts, [7]);
+  },
+);
+
+goalTest(
+  "#258 (B5): goal-save WITHOUT the ack field → acknowledgedTriggeringSessionCounts unchanged (remains absent)",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ totalSessionCount: 5 });
+
+    await upsertGoal({ user_id: userId, goal: GOAL_A }, sql);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    assertEquals(modelJson.goal, GOAL_A);
+    // No ack sent → the conditional UPDATE never ran → key stays absent.
+    assertEquals("acknowledgedTriggeringSessionCounts" in modelJson, false);
+  },
+);
+
 // Sentinel "test" that runs last — closes the shared pool so the connection
 // lifecycle stays local to this file rather than relying on process-exit.
 Deno.test({

@@ -45,6 +45,12 @@ export interface UpdateTraineeGoalRequest {
     focusAreas: string[];
     updatedAt: string;
   };
+  // P5-D06 Slice B (#258): OPTIONAL. When present, the EF idempotently
+  // appends this triggering-session count to
+  // `model_json.acknowledgedTriggeringSessionCounts` (the Slice-A camelCase
+  // key). Absent for onboarding (a brand-new user cannot have a GPA fire);
+  // sent only by the goal-review screen's Save (a later slice).
+  acknowledge_triggering_session_count?: number;
 }
 
 const ISO_DATE_RE =
@@ -56,7 +62,8 @@ export function validateRequest(
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { error: "request body must be a JSON object" };
   }
-  const { user_id, goal } = body as Record<string, unknown>;
+  const { user_id, goal, acknowledge_triggering_session_count } =
+    body as Record<string, unknown>;
   if (typeof user_id !== "string" || !UUID_RE.test(user_id)) {
     return { error: "user_id must be a UUID string" };
   }
@@ -80,7 +87,23 @@ export function validateRequest(
   if (typeof g.updatedAt !== "string" || !ISO_DATE_RE.test(g.updatedAt)) {
     return { error: "goal.updatedAt must be an ISO 8601 timestamp string" };
   }
-  return {
+  // P5-D06 Slice B (#258): OPTIONAL ack. Absent → valid exactly as before
+  // (back-compat: onboarding never sends it). Present → must be a
+  // non-negative integer.
+  if (
+    acknowledge_triggering_session_count !== undefined &&
+    !(
+      typeof acknowledge_triggering_session_count === "number" &&
+      Number.isInteger(acknowledge_triggering_session_count) &&
+      acknowledge_triggering_session_count >= 0
+    )
+  ) {
+    return {
+      error:
+        "acknowledge_triggering_session_count must be a non-negative integer",
+    };
+  }
+  const validated: UpdateTraineeGoalRequest = {
     user_id,
     goal: {
       statement: g.statement,
@@ -88,6 +111,11 @@ export function validateRequest(
       updatedAt: g.updatedAt,
     },
   };
+  if (acknowledge_triggering_session_count !== undefined) {
+    validated.acknowledge_triggering_session_count =
+      acknowledge_triggering_session_count as number;
+  }
+  return validated;
 }
 
 // deno-lint-ignore no-explicit-any
@@ -130,6 +158,36 @@ export async function upsertGoal(
       ),
       updated_at = NOW()
   `;
+
+  // P5-D06 Slice B (#258): when the goal-review Save acknowledges a
+  // heavy-reassessment trigger, idempotently array-append the triggering
+  // session count to the Slice-A camelCase key. Separate statement, same
+  // connection — the goal write above stays byte-for-byte unchanged.
+  //
+  // The COALESCE(..., '[]') on BOTH the read and the @> containment guard is
+  // load-bearing: a bare `model_json->'key' @> x` is NULL (not false) when
+  // the key is absent, and `NOT NULL` is NULL — so without the COALESCE the
+  // first-ever ack would silently never append. The `NOT @>` guard makes
+  // re-acking an already-present count a no-op.
+  if (req.acknowledge_triggering_session_count !== undefined) {
+    const ack = req.acknowledge_triggering_session_count;
+    await sql`
+      UPDATE public.trainee_models
+      SET model_json = jsonb_set(
+        COALESCE(model_json, '{}'::jsonb),
+        '{acknowledgedTriggeringSessionCounts}',
+        COALESCE(model_json -> 'acknowledgedTriggeringSessionCounts', '[]'::jsonb)
+          || to_jsonb(${ack}::int),
+        true
+      )
+      WHERE user_id = ${req.user_id}
+        AND NOT (
+          COALESCE(model_json -> 'acknowledgedTriggeringSessionCounts', '[]'::jsonb)
+            @> to_jsonb(${ack}::int)
+        )
+    `;
+  }
+
   return { ok: true, goal: req.goal };
 }
 

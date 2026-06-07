@@ -944,7 +944,8 @@ struct OnboardingView: View {
                 statement: profile.primaryGoal.rawValue,
                 focusAreas: [],
                 updatedAt: isoFormatter.string(from: Date())
-            )
+            ),
+            acknowledgeTriggeringSessionCount: nil
         )
         if let encoded = try? JSONEncoder().encode(goalPayload) {
             _ = try? await deps.supabaseClient.invokeFunction(
@@ -1019,10 +1020,17 @@ private struct UserInsertRow: Codable, Sendable {
 struct TraineeGoalUpsertPayload: Codable, Sendable {
     let userId: UUID
     let goal: GoalUpsertBody
+    /// P5-D06 Slice B (#258): OPTIONAL top-level field. When non-nil, the EF
+    /// idempotently appends this triggering-session count to
+    /// `model_json.acknowledgedTriggeringSessionCounts`. Onboarding always
+    /// passes `nil` — the synthesized `encodeIfPresent` then OMITS the key,
+    /// keeping the onboarding wire shape exactly `{user_id, goal}`.
+    let acknowledgeTriggeringSessionCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case goal
+        case acknowledgeTriggeringSessionCount = "acknowledge_triggering_session_count"
     }
 }
 
