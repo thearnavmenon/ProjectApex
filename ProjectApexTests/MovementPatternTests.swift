@@ -31,4 +31,31 @@ struct MovementPatternTests {
         #expect(!actualRawValues.contains("calves"))
         #expect(!actualRawValues.contains("core"))
     }
+
+    @Test("displayName humanizes a representative sample (#258)")
+    func displayNameRepresentativeSample() {
+        #expect(MovementPattern.squat.displayName == "Squat")
+        #expect(MovementPattern.horizontalPush.displayName == "Horizontal Push")
+        #expect(MovementPattern.hipHinge.displayName == "Hip Hinge")
+        #expect(MovementPattern.verticalPull.displayName == "Vertical Pull")
+    }
+
+    @Test("every case's displayName is humanized — no underscores, no raw machine token leaks")
+    func displayNameExhaustivenessGuard() {
+        for pattern in MovementPattern.allCases {
+            // No display name should leak the snake_case machine token.
+            #expect(
+                !pattern.displayName.contains("_"),
+                "displayName for \(pattern) contains an underscore: \(pattern.displayName)"
+            )
+            // Multi-token patterns must not equal their raw value verbatim
+            // (i.e. they got humanized rather than falling back to the token).
+            if pattern.rawValue.contains("_") {
+                #expect(
+                    pattern.displayName != pattern.rawValue,
+                    "displayName for \(pattern) equals its raw token: \(pattern.rawValue)"
+                )
+            }
+        }
+    }
 }
