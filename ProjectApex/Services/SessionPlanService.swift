@@ -496,7 +496,9 @@ actor SessionPlanService {
 
     // MARK: - Private: Build TrainingDay
 
-    private func buildTrainingDay(
+    // #246: relaxed from `private` to internal so SessionPlanServiceTests can drive the
+    // payload→TrainingDay mapping directly (the day_label normalization seam). Nothing else touched.
+    func buildTrainingDay(
         from payload: SessionPlanPayload,
         stub: TrainingDay,
         fatigue: WeekFatigueSignals
@@ -536,7 +538,7 @@ actor SessionPlanService {
         return TrainingDay(
             id: stub.id,
             dayOfWeek: stub.dayOfWeek,
-            dayLabel: payload.dayLabel,
+            dayLabel: MacroPlanService.normalizeDayLabel(payload.dayLabel),   // #246: normalize the third (final) mint point
             exercises: exercises,
             sessionNotes: notes?.trimmingCharacters(in: .whitespaces),
             status: .generated
