@@ -309,6 +309,99 @@ final class TraineeModelServiceTests: XCTestCase {
         XCTAssertEqual(second["intent"] as? String, "backoff")
     }
 
+    // MARK: ─── acknowledgeReassessment — local banner-hide (#258 Slice F1) ──────
+    //
+    // The goal-review Save (Slice F2) must hide the heavy-reassessment banner
+    // immediately. The update-trainee-goal EF returns no model, so the local
+    // cache can't refresh from the server; this method is the client-side write
+    // that inserts the acknowledged triggeringSessionCount and persists it, after
+    // which deriveHeavyReassessmentSignal returns nil for that trigger (the
+    // suppression shipped in Slice A).
+
+    /// Builds a model whose GPA fire is inside the cooldown window, so
+    /// deriveHeavyReassessmentSignal is non-nil unless the trigger is acked.
+    private func makeReassessmentModel(
+        lastFired: Int?,
+        totalSessions: Int,
+        acked: Set<Int> = []
+    ) -> TraineeModel {
+        TraineeModel(
+            goal: GoalState(statement: "Strength + size",
+                            focusAreas: [.legs, .back],
+                            updatedAt: ref),
+            totalSessionCount: totalSessions,
+            lastGlobalPhaseAdvanceFiredAtSessionCount: lastFired,
+            acknowledgedTriggeringSessionCounts: acked
+        )
+    }
+
+    func test_acknowledgeReassessment_recordsTrigger_andHidesSignal() async throws {
+        // GPA fired at session 5; total is 8 → delta 3, inside the 6-session
+        // cooldown window. Empty ack set → signal must be present first.
+        try store.save(makeReassessmentModel(lastFired: 5, totalSessions: 8))
+
+        let beforeRead = await service.read()
+        let before = try XCTUnwrap(beforeRead)
+        XCTAssertNotNil(
+            TraineeModelDigest.deriveHeavyReassessmentSignal(from: before),
+            "Pre-ack: signal must be present so the banner shows"
+        )
+
+        try await service.acknowledgeReassessment(triggeringSessionCount: 5)
+
+        let afterRead = await service.read()
+        let after = try XCTUnwrap(afterRead)
+        XCTAssertTrue(after.acknowledgedTriggeringSessionCounts.contains(5),
+                      "Ack must persist the triggering session count")
+        XCTAssertNil(
+            TraineeModelDigest.deriveHeavyReassessmentSignal(from: after),
+            "Post-ack: signal must vanish — this is the load-bearing banner-hide invariant"
+        )
+    }
+
+    func test_acknowledgeReassessment_noModel_isNoOp() async throws {
+        // Empty store (setUp leaves it empty). Must not throw, must leave nothing.
+        try await service.acknowledgeReassessment(triggeringSessionCount: 1)
+
+        let result = await service.read()
+        XCTAssertNil(result, "No cached model → ack is a no-op, store stays empty")
+    }
+
+    func test_acknowledgeReassessment_isIdempotent() async throws {
+        try store.save(makeReassessmentModel(lastFired: 5, totalSessions: 8))
+
+        try await service.acknowledgeReassessment(triggeringSessionCount: 5)
+        try await service.acknowledgeReassessment(triggeringSessionCount: 5)
+
+        let afterRead = await service.read()
+        let after = try XCTUnwrap(afterRead)
+        XCTAssertEqual(after.acknowledgedTriggeringSessionCounts, [5],
+                       "Set insert: acking twice must not duplicate or grow the set")
+    }
+
+    func test_acknowledgeReassessment_doesNotSuppressLaterFire() async throws {
+        // Ack trigger 5, then a NEW GPA fires at session 11 (total 14 → delta 3,
+        // inside the window) which has NOT been acked. The signal must return —
+        // ack is per-trigger ("current count, not any-ack"), the Slice A contract.
+        try store.save(makeReassessmentModel(lastFired: 5, totalSessions: 8))
+        try await service.acknowledgeReassessment(triggeringSessionCount: 5)
+
+        let ackedRead = await service.read()
+        var model = try XCTUnwrap(ackedRead)
+        model.lastGlobalPhaseAdvanceFiredAtSessionCount = 11
+        model.totalSessionCount = 14
+        try store.save(model)
+
+        let afterRead = await service.read()
+        let after = try XCTUnwrap(afterRead)
+        XCTAssertTrue(after.acknowledgedTriggeringSessionCounts.contains(5),
+                      "The earlier ack of 5 must still be on record")
+        XCTAssertNotNil(
+            TraineeModelDigest.deriveHeavyReassessmentSignal(from: after),
+            "A later, un-acked fire (11) must still surface despite 5 being acked"
+        )
+    }
+
     func test_enqueueUpdate_setLogs_skipsEntriesMissingIntent() async throws {
         let session = makeSession()
         // Mix of valid + nil-intent sets — the latter must be filtered out so
