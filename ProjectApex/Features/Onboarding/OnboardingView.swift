@@ -1013,7 +1013,10 @@ private struct UserInsertRow: Codable, Sendable {
 /// validator contract in `supabase/functions/update-trainee-goal/index.ts`:
 /// top-level `user_id` (UUID string) and `goal` object carrying the
 /// GoalState shape (statement + focusAreas + ISO-8601 updatedAt).
-private struct TraineeGoalUpsertPayload: Codable, Sendable {
+///
+/// `internal` (not `private`) so the EF-contract parity test can encode it
+/// directly and assert the wire shape the validator accepts (#154).
+struct TraineeGoalUpsertPayload: Codable, Sendable {
     let userId: UUID
     let goal: GoalUpsertBody
 
@@ -1023,7 +1026,10 @@ private struct TraineeGoalUpsertPayload: Codable, Sendable {
     }
 }
 
-private struct GoalUpsertBody: Codable, Sendable {
+/// `internal` (not `private`) so the EF-contract parity test can assert the
+/// camelCase wire shape (`statement`/`focusAreas`/`updatedAt`) the validator
+/// requires — adding snake_case CodingKeys here would BREAK the EF (#154).
+struct GoalUpsertBody: Codable, Sendable {
     let statement: String
     let focusAreas: [String]
     let updatedAt: String
