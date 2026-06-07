@@ -93,6 +93,19 @@ actor TraineeModelService {
         return TraineeModelDigest(from: model, weeklyFatigue: weeklyFatigue, asOf: now())
     }
 
+    // MARK: - Write — local acknowledgment
+
+    /// #258: records local acknowledgment of a heavy-reassessment GPA fire so the
+    /// pre-workout banner and the LLM prompt block disappear immediately on Save —
+    /// the `update-trainee-goal` EF returns no model, so the cache can't refresh from
+    /// the server round-trip; this is the client-side write that hides the banner.
+    /// No-op if no model is cached. Idempotent (Set insert).
+    func acknowledgeReassessment(triggeringSessionCount: Int) async throws {
+        guard var model = await store.load() else { return }
+        model.acknowledgedTriggeringSessionCounts.insert(triggeringSessionCount)
+        try await store.save(model)
+    }
+
     // MARK: - Write — enqueue path
 
     /// Enqueues a `trainee_model_update` item carrying the session-
