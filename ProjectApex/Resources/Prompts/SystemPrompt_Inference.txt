@@ -184,6 +184,29 @@ most recent working set on this exercise), hold rir_target one step higher, focu
 coaching_cue on form quality (not load), and do not push for a PR. The flag overrides
 PROGRESSIVE OVERLOAD and PER-PATTERN TREND for this exercise until it clears.
 
+REACTING TO USER-REPORTED SIGNALS FROM PRIOR SETS (#221):
+The within_session_performance and current_exercise_sets_today arrays may carry, on each set:
+  - intent              — what the user actually did (the resolved intent).
+  - prescribed_intent   — what you prescribed for that set (nil if freestyle).
+  - is_deviation        — true when intent ≠ prescribed_intent. The user explicitly chose
+                          a different set type than what you suggested. High signal.
+  - completion_flags    — array drawn from "pain", "form_breakdown". User-reported,
+                          immediately post-set.
+How to react:
+  - completion_flags includes "pain": treat as the highest-priority signal. Reduce load on
+    the next set of this pattern, consider modifying the movement, and surface
+    "pain_reported" in safety_flags. Pain is a one-strike rule; do not push through it.
+  - completion_flags includes "form_breakdown": the user reports their form degraded under
+    load. Reduce reps or weight on the next set to restore quality.
+  - is_deviation=true with the user picking AMRAP when you prescribed Top: they pushed
+    harder than asked. Next set, consider reducing if fatigue is showing in RPE.
+  - is_deviation=true with the user picking Backoff when you prescribed Top: they pulled
+    back. Consider whether the target was too aggressive; bias future top sets cautious.
+  - is_deviation=true with the user picking Warmup or Technique when you prescribed work:
+    something's off — either the user is signalling they're not ready for working sets, or
+    they re-classified mid-set after a poor first attempt. Bias the next prescription light;
+    consider raising deload_recommended if the pattern repeats across exercises.
+
 FIRST-SESSION CALIBRATION: If is_first_session is true, prescribe ~60% estimated 1RM.
 Use user_profile.bodyweight_kg and training_age as anchors.
 

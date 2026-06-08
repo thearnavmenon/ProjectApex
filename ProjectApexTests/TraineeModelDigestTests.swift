@@ -717,6 +717,27 @@ final class TraineeModelDigestTests: XCTestCase {
                       "Inference must include the asymmetric-error override clause")
     }
 
+    func test_inferencePrompt_containsUserReportedSignalsBlock() {
+        // #221: the LLM must be told to react to within-session pain /
+        // form_breakdown / intent-deviation signals (the fields already ship in
+        // the payload; only the interpretation guidance was missing).
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("REACTING TO USER-REPORTED SIGNALS FROM PRIOR SETS"),
+                      "Inference prompt must include the USER-REPORTED SIGNALS section header (#221)")
+        // Reads the arrays that actually carry the per-set fields — NOT session_log.
+        XCTAssertTrue(prompt.contains("within_session_performance") && prompt.contains("current_exercise_sets_today"),
+                      "Section must reference the arrays that carry the per-set signal fields")
+        XCTAssertTrue(prompt.contains("completion_flags includes \"pain\""),
+                      "Section must include the pain one-strike rule")
+        XCTAssertTrue(prompt.contains("Pain is a one-strike rule"),
+                      "Section must state pain is one-strike (back off, do not push through)")
+        XCTAssertTrue(prompt.contains("completion_flags includes \"form_breakdown\""),
+                      "Section must include the form-breakdown reaction")
+        XCTAssertTrue(prompt.contains("is_deviation=true"),
+                      "Section must include the intent-deviation reactions")
+    }
+
     // MARK: ─── B2 (#87): VOLUME DEFICIT block — prompt-shape anchors ──────────
 
     func test_sessionPlanPrompt_containsVolumeDeficitBlock_andLacksLegacyVolumeDeficitsPhrases() throws {
