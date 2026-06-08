@@ -7,6 +7,52 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-08 — Taught the app to actually grow more sure of itself over time
+
+**The problem (in plain words):**
+The app keeps a "how sure am I about this?" rating for every exercise, every movement
+pattern (squat, hinge, the presses and pulls), and every muscle group. The rating is
+supposed to climb from "no idea yet" → "getting a feel for it" → "I know this now" as you
+train. Except it never climbed. Every rating was stuck on "no idea yet" forever — the steps
+that would move it up were designed a long time ago but never actually built. So the coach
+treated even someone with months of history as a total stranger, and a downstream feature
+(letting you review your projected targets) was stuck waiting for ratings that never moved.
+
+**What I changed:**
+I built the whole "grow more sure" system for all three: exercises, patterns, and muscles.
+- **Exercises** become "known" once you've done them enough times *and* your estimated
+  strength has settled down (stopped bouncing around).
+- **Patterns** become "known" after about six sessions with a real, data-backed read on how
+  they're trending. This is the important one: once enough of your main patterns are "known,"
+  the app can finally offer to review your targets — the thing that was blocked.
+- **Muscles** don't judge themselves; they inherit confidence from the patterns that train
+  them. A nice catch here: biceps only get trained by isolation moves, so an earlier "only
+  count the big patterns" idea would have left biceps permanently stuck — the final rule
+  counts all the patterns a muscle actually uses.
+
+A rating only ever goes up, never sneaks back down (going backwards would yank away targets
+you'd already been shown). And the whole thing is conservative on purpose: it would rather
+say "not sure yet" than wrongly claim "I know this" off thin data.
+
+**How it was decided:**
+Before writing code I ran a long structured design interview, and for every question I got
+three independent takes — my own, a reviewer starting fresh each time, and a reviewer that
+remembered the whole conversation — then picked the best. All the decisions are written down
+in a new decision record (ADR-0020).
+
+**How it was checked:**
+Built in five small, separately-shipped pieces, each test-first. 81 fast unit tests plus
+end-to-end tests that drive real sessions and watch the ratings climb. Every piece passed
+the reliable server test before merging. No database change and no iPhone-app change needed —
+it's all server logic.
+
+**Status:** Done. All five pieces merged (#287–#291), umbrella #166 closed. This unblocks
+the target-review feature (#269). Two related volume items (#164/#165) stay separate on
+purpose. Found and filed one pre-existing bug along the way (#292: a list that grows without
+limit).
+
+---
+
 ## 2026-06-08 — Turned on two coaching rules the AI already had the data for
 
 **The problem (in plain words):**
