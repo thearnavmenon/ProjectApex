@@ -66,6 +66,12 @@ export interface UpdateTraineeGoalRequest {
   // the server clamps upward-only (never below the stored value) and never
   // accepts a floor. Absent for onboarding / heavy-reassessment saves.
   stretch_edits?: StretchEdit[];
+  // #269 S4: OPTIONAL. When true, the EF durably records that the athlete has
+  // seen the one-time calibration-review screen by setting
+  // `model_json.calibrationReviewAcknowledged = true`, so the pre-workout
+  // calibration banner does not reappear after a session sync rehydrates the
+  // local cache. Absent for onboarding / goal-review saves.
+  acknowledge_calibration_review?: boolean;
 }
 
 const ISO_DATE_RE =
@@ -77,8 +83,13 @@ export function validateRequest(
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { error: "request body must be a JSON object" };
   }
-  const { user_id, goal, acknowledge_triggering_session_count, stretch_edits } =
-    body as Record<string, unknown>;
+  const {
+    user_id,
+    goal,
+    acknowledge_triggering_session_count,
+    stretch_edits,
+    acknowledge_calibration_review,
+  } = body as Record<string, unknown>;
   if (typeof user_id !== "string" || !UUID_RE.test(user_id)) {
     return { error: "user_id must be a UUID string" };
   }
@@ -146,6 +157,14 @@ export function validateRequest(
       validatedEdits.push({ pattern: er.pattern, stretch: er.stretch });
     }
   }
+  // #269 S4: OPTIONAL calibration-review ack. Absent → valid exactly as before.
+  // Present → must be a boolean.
+  if (
+    acknowledge_calibration_review !== undefined &&
+    typeof acknowledge_calibration_review !== "boolean"
+  ) {
+    return { error: "acknowledge_calibration_review must be a boolean" };
+  }
   const validated: UpdateTraineeGoalRequest = {
     user_id,
     goal: {
@@ -160,6 +179,10 @@ export function validateRequest(
   }
   if (validatedEdits !== undefined) {
     validated.stretch_edits = validatedEdits;
+  }
+  if (acknowledge_calibration_review !== undefined) {
+    validated.acknowledge_calibration_review =
+      acknowledge_calibration_review as boolean;
   }
   return validated;
 }
@@ -237,6 +260,25 @@ export async function upsertGoal(
   // #296 (#269): apply athlete-raised stretch targets (upward-only clamp).
   if (req.stretch_edits !== undefined && req.stretch_edits.length > 0) {
     await applyStretchEdits(req.user_id, req.stretch_edits, sql);
+  }
+
+  // #269 S4: durably record that the athlete has seen the one-time
+  // calibration-review screen so the pre-workout banner does not reappear after
+  // a session sync rehydrates the local cache. Separate statement, same
+  // connection — like the ack-append block above. Idempotent: re-running with
+  // the flag set leaves the value at `true`. The goal write above stays
+  // byte-for-byte unchanged.
+  if (req.acknowledge_calibration_review === true) {
+    await sql`
+      UPDATE public.trainee_models
+      SET model_json = jsonb_set(
+        COALESCE(model_json, '{}'::jsonb),
+        '{calibrationReviewAcknowledged}',
+        'true'::jsonb,
+        true
+      )
+      WHERE user_id = ${req.user_id}
+    `;
   }
 
   return { ok: true, goal: req.goal };

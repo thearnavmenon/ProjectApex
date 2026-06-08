@@ -450,6 +450,46 @@ goalTest(
   },
 );
 
+// #269 S4: acknowledge_calibration_review write-path — durably sets
+// model_json.calibrationReviewAcknowledged so the pre-workout banner does not
+// reappear after a session sync rehydrates the local cache.
+
+goalTest(
+  "#269 S4: acknowledge_calibration_review:true sets model_json.calibrationReviewAcknowledged === true",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ goal: GOAL_A });
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_calibration_review: true },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    assertEquals(modelJson.goal, GOAL_A);
+    assertEquals(modelJson.calibrationReviewAcknowledged, true);
+  },
+);
+
+goalTest(
+  "#269 S4: goal-save WITHOUT acknowledge_calibration_review leaves the key untouched (absent)",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ goal: GOAL_A });
+
+    await upsertGoal({ user_id: userId, goal: GOAL_A }, sql);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    assertEquals(modelJson.goal, GOAL_A);
+    // No ack sent → the conditional UPDATE never ran → key stays absent.
+    assertEquals("calibrationReviewAcknowledged" in modelJson, false);
+  },
+);
+
 // Sentinel "test" that runs last — closes the shared pool so the connection
 // lifecycle stays local to this file rather than relying on process-exit.
 Deno.test({
