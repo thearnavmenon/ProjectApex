@@ -378,7 +378,7 @@ struct ProgramOverviewView: View {
     private func patternPhaseRow(_ summary: PatternSummary) -> some View {
         HStack(spacing: 10) {
             // Human-readable pattern name (e.g. "Horizontal Push")
-            Text(formatPatternName(summary.pattern.rawValue))
+            Text(summary.pattern.displayName)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.white.opacity(0.75))
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -400,10 +400,6 @@ struct ProgramOverviewView: View {
         case .peaking:         return "PEAK"
         case .deload:          return "DELOAD"
         }
-    }
-
-    private func formatPatternName(_ pattern: String) -> String {
-        pattern.split(separator: "_").map { $0.capitalized }.joined(separator: " ")
     }
 
     // MARK: - Phase Progress Bar
