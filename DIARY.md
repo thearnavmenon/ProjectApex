@@ -7,6 +7,31 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-08 — Finished the prompt-loader cleanup (the 6th copy)
+
+**The problem (in plain words):**
+Earlier today I merged five copies of "find and read a prompt file" into one shared
+helper, but left a sixth, odder copy in the exercise-swap code for its own ticket. This
+finishes that — folds the sixth one in too, so there's now exactly one place that does it.
+
+**What I changed (P5-D08):**
+Pointed the exercise-swap prompt at the shared `PromptLoader`. The tricky part: unlike the
+other five, this one is meant to *not* error — if the file is missing it quietly falls back
+to a short default prompt. I kept that exact behaviour (both "file missing" and "couldn't
+read it" still land on the fallback), along with its little habit of stripping comment lines.
+Before changing it I checked where the prompt files actually live in the built app — they sit
+flat at the top, not in a sub-folder — which confirmed the swap doesn't change which file
+gets loaded.
+
+**How it was checked:**
+App builds clean. A grep confirms the low-level "open a bundled file" call now appears in only
+one file (the shared loader); the shared loader already has its own tests from earlier today.
+
+**Status:** merged (PR #274). Backlog P5-D08 ticked done — the prompt-loader consolidation is
+fully complete across all six places.
+
+---
+
 ## 2026-06-08 — Two small cleanups: tidy lift names, and one prompt loader
 
 **The problem (in plain words):**

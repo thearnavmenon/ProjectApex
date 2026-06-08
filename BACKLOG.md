@@ -299,7 +299,7 @@ Captured here so the BACKLOG sweep on 2026-06-01 has a single landing surface. E
 
 - [x] P5-D06: heavy-reassessment banner + goal-review screen + ack writer — **SHIPPED & CLOSED 2026-06-08** as #258 (8 slices, PRs #259–#266). Full build narrative in §2F. Spinoffs filed: P5-D09 (#268), P5-D10 (#269).
 - [ ] P5-D07: One-shot DB migration to strip legacy `reassessmentRecords` JSONB key from existing alpha-cohort rows. Harmless dead-key drift until removed; recommended once #178 has shipped long enough that no client expects to round-trip it.
-- [ ] P5-D08: Cross-cutting `ExerciseSwapService.swift:103` carries its own `private static let systemPrompt: String = {...}` inline-prompt pattern. Reported again by the #220 grep. **`PromptLoader` (P5-D01, #272) now exists to adopt** — but this site is structurally different (graceful FALLBACK string instead of throw, plus `//`-comment stripping), so adoption must preserve that fallback behavior, not just swap the resolver.
+- [x] P5-D08: `ExerciseSwapService` adopted `PromptLoader` (the 6th/last prompt site). **DONE 2026-06-08** (PR #274). Preserved its graceful fallback via `(try? PromptLoader.load(...)) ?? nil` (both read-error throw and not-found collapse to the stub) + comment-stripping. Verified behavior-preserving (all prompt `.txt` ship flat at the bundle root). `Bundle.main.url(forResource:` now lives ONLY in `PromptLoader.swift` — every prompt site consolidated.
 
 **Operator actions (not code changes):**
 
