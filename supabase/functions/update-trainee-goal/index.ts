@@ -27,9 +27,19 @@
 //   - docs/agents/edge-functions.md — secrets, deploy, local dev
 
 import postgres from "postgres";
+import { MAJOR_PATTERNS } from "../_shared/constants.ts";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Membership set for validating `stretch_edits[].pattern` (#296, #269). */
+const MAJOR_PATTERN_SET: ReadonlySet<string> = new Set(MAJOR_PATTERNS);
+
+/** A single edit raising one major pattern's stretch target (#296, #269). */
+export interface StretchEdit {
+  pattern: string;
+  stretch: number;
+}
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -51,6 +61,11 @@ export interface UpdateTraineeGoalRequest {
   // key). Absent for onboarding (a brand-new user cannot have a GPA fire);
   // sent only by the goal-review screen's Save (a later slice).
   acknowledge_triggering_session_count?: number;
+  // #296 (#269): OPTIONAL. Athlete-raised stretch targets from the
+  // calibration-review screen. Each entry raises ONE major pattern's stretch;
+  // the server clamps upward-only (never below the stored value) and never
+  // accepts a floor. Absent for onboarding / heavy-reassessment saves.
+  stretch_edits?: StretchEdit[];
 }
 
 const ISO_DATE_RE =
@@ -62,7 +77,7 @@ export function validateRequest(
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     return { error: "request body must be a JSON object" };
   }
-  const { user_id, goal, acknowledge_triggering_session_count } =
+  const { user_id, goal, acknowledge_triggering_session_count, stretch_edits } =
     body as Record<string, unknown>;
   if (typeof user_id !== "string" || !UUID_RE.test(user_id)) {
     return { error: "user_id must be a UUID string" };
@@ -103,6 +118,34 @@ export function validateRequest(
         "acknowledge_triggering_session_count must be a non-negative integer",
     };
   }
+  // #296 (#269): OPTIONAL stretch_edits. Absent → valid exactly as before.
+  // Present → an array of { pattern (a major movement pattern), stretch
+  // (a positive number) }. Upward-only clamping is enforced server-side at
+  // write time, not here.
+  let validatedEdits: StretchEdit[] | undefined;
+  if (stretch_edits !== undefined) {
+    if (!Array.isArray(stretch_edits)) {
+      return { error: "stretch_edits must be an array" };
+    }
+    validatedEdits = [];
+    for (let i = 0; i < stretch_edits.length; i++) {
+      const e = stretch_edits[i];
+      if (typeof e !== "object" || e === null || Array.isArray(e)) {
+        return { error: `stretch_edits[${i}] must be an object` };
+      }
+      const er = e as Record<string, unknown>;
+      if (typeof er.pattern !== "string" || !MAJOR_PATTERN_SET.has(er.pattern)) {
+        return { error: `stretch_edits[${i}].pattern must be a major movement pattern` };
+      }
+      if (
+        typeof er.stretch !== "number" || !Number.isFinite(er.stretch) ||
+        er.stretch <= 0
+      ) {
+        return { error: `stretch_edits[${i}].stretch must be a positive number` };
+      }
+      validatedEdits.push({ pattern: er.pattern, stretch: er.stretch });
+    }
+  }
   const validated: UpdateTraineeGoalRequest = {
     user_id,
     goal: {
@@ -114,6 +157,9 @@ export function validateRequest(
   if (acknowledge_triggering_session_count !== undefined) {
     validated.acknowledge_triggering_session_count =
       acknowledge_triggering_session_count as number;
+  }
+  if (validatedEdits !== undefined) {
+    validated.stretch_edits = validatedEdits;
   }
   return validated;
 }
@@ -188,7 +234,75 @@ export async function upsertGoal(
     `;
   }
 
+  // #296 (#269): apply athlete-raised stretch targets (upward-only clamp).
+  if (req.stretch_edits !== undefined && req.stretch_edits.length > 0) {
+    await applyStretchEdits(req.user_id, req.stretch_edits, sql);
+  }
+
   return { ok: true, goal: req.goal };
+}
+
+/**
+ * Apply athlete-raised stretch targets to `model_json.projections.
+ * patternProjections` (#296, #269). Upward-only: each edit is clamped to
+ * `max(stored_stretch, edited)` — a lower (or below-floor) value is a no-op,
+ * and the immovable `floor` is never touched (the client cannot lower a target
+ * or misstate capability). Runs in a `FOR UPDATE` transaction so a concurrent
+ * session-apply (which also writes `projections`) cannot clobber the edit, and
+ * vice-versa. Writes only the `projections.patternProjections` leaf.
+ *
+ * Progress is intentionally NOT recomputed here (it needs the live per-pattern
+ * e1RM history the session-apply pipeline owns); the next session-apply's
+ * progress-recompute arm refreshes it. Patterns with no existing projection,
+ * or a model with no projections yet, are no-ops.
+ */
+export async function applyStretchEdits(
+  userId: string,
+  edits: StretchEdit[],
+  sql: Sql,
+): Promise<void> {
+  if (edits.length === 0) return;
+  const editMap = new Map(edits.map((e) => [e.pattern, e.stretch]));
+  await sql.begin(async (tx: Sql) => {
+    const rows = await tx`
+      SELECT model_json FROM public.trainee_models
+      WHERE user_id = ${userId}
+      FOR UPDATE
+    `;
+    if (rows.length === 0) return;
+    const modelJson = (rows[0].model_json ?? {}) as Record<string, unknown>;
+    const projections = modelJson.projections as {
+      patternProjections?: Array<Record<string, unknown>>;
+    } | undefined;
+    const list = projections?.patternProjections;
+    if (!Array.isArray(list) || list.length === 0) return;
+
+    let changed = false;
+    const updated = list.map((p) => {
+      const edited = editMap.get(p.pattern as string);
+      if (edited === undefined) return p;
+      const stored = p.stretch as number;
+      const accepted = Math.max(stored, edited); // upward-only clamp
+      if (accepted !== stored) {
+        changed = true;
+        return { ...p, stretch: accepted };
+      }
+      return p;
+    });
+    if (!changed) return;
+
+    await tx`
+      UPDATE public.trainee_models
+      SET model_json = jsonb_set(
+        COALESCE(model_json, '{}'::jsonb),
+        '{projections,patternProjections}',
+        ${tx.json(updated)},
+        true
+      ),
+      updated_at = NOW()
+      WHERE user_id = ${userId}
+    `;
+  });
 }
 
 let cachedSql: Sql | undefined;
