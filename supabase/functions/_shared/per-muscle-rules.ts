@@ -17,6 +17,7 @@ import {
   type MovementPattern,
   type PrimaryMuscle,
 } from "./exercise-library.ts";
+import type { ConfidenceWriteState } from "./confidence-lifecycle.ts";
 
 /** ADR-0005 ProgressionTrend enum — must mirror Swift rawValues. */
 export type ProgressionTrend = "progressing" | "plateaued" | "declining";
@@ -280,4 +281,48 @@ export function aggregateStagnationStatus(
     if (profile.trend === "plateaued") sawPlateau = true;
   }
   return sawPlateau ? "plateaued" : "progressing";
+}
+
+/**
+ * Propose a muscle's confidence by AGGREGATING from its participating
+ * movement patterns' confidence (ADR-0020 §"Per-axis gate table"; #286).
+ * Reuses the same `MUSCLE_PARTICIPATING_PATTERNS` walk as
+ * `aggregateStagnationStatus`, and the same convention of skipping patterns
+ * with no profile (never trained). Muscle confidence is parasitic on its
+ * patterns and never exceeds the evidence beneath it.
+ *
+ * - `.established` when at least `ceil(2/3)` of the muscle's participating
+ *   patterns that have a profile are `.established`. The 2/3 supermajority
+ *   mirrors the calibration-review ≥4/6 (=2/3) major-pattern bar; `ceil`
+ *   keeps small participating sets under-claiming.
+ * - `.calibrating` when ≥1 participating pattern has left `.bootstrapping`.
+ * - `.bootstrapping` otherwise — including the empty-effective-set case
+ *   (no participating pattern has a profile yet), which is guarded
+ *   explicitly to avoid the `ceil(0) >= 0` vacuous-truth trap.
+ *
+ * Counts the FULL participating set (incl. isolation / accessory patterns),
+ * NOT just the 6 major patterns — muscles like biceps participate in zero
+ * major patterns, so a major-only rule would make them un-establishable.
+ *
+ * Returns the PROPOSED state (pre-clamp); the caller applies `monotonicAdvance`.
+ */
+export function proposeMuscleConfidence(
+  muscleGroup: MuscleGroup,
+  patternProfiles: Record<string, { confidence: AxisConfidence }>,
+): ConfidenceWriteState {
+  const participating = MUSCLE_PARTICIPATING_PATTERNS[muscleGroup];
+  let withProfile = 0;
+  let established = 0;
+  let pastBootstrap = 0;
+  for (const pattern of participating) {
+    const profile = patternProfiles[pattern];
+    if (profile === undefined) continue; // never trained → not in the effective set
+    withProfile++;
+    if (profile.confidence === "established") established++;
+    if (profile.confidence !== "bootstrapping") pastBootstrap++;
+  }
+  if (withProfile === 0) return "bootstrapping"; // empty-effective-set guard
+  if (established >= Math.ceil(withProfile * (2 / 3))) return "established";
+  if (pastBootstrap >= 1) return "calibrating";
+  return "bootstrapping";
 }

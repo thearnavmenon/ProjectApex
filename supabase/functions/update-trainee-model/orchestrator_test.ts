@@ -2186,6 +2186,49 @@ orchestratorTest(
   },
 );
 
+orchestratorTest(
+  "#286 (ADR-0020): muscle confidence aggregates from its patterns — calibrating then established as its pattern matures",
+  async () => {
+    const userId = await seedFreshUser();
+
+    async function applyBench(day: number): Promise<Record<string, unknown>> {
+      await applySession(
+        {
+          user_id: userId,
+          session_id: crypto.randomUUID(),
+          session_payload: {
+            logged_at: `2026-08-${String(day).padStart(2, "0")}T10:00:00Z`,
+            set_logs: [
+              { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" },
+            ],
+          },
+        },
+        sql,
+        { stage2Hook: noopStage2 },
+      );
+      const rows = await sql`
+        SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+      `;
+      return rows[0].model_json as Record<string, unknown>;
+    }
+
+    function muscle(modelJson: Record<string, unknown>): Record<string, unknown> {
+      return (modelJson.muscles as Record<string, Record<string, unknown>>)["chest"];
+    }
+
+    // Chest's only trained participating pattern is horizontal_push (bench).
+    // 3 sessions: pattern calibrating → chest aggregates to calibrating.
+    let modelJson: Record<string, unknown> = {};
+    for (let d = 1; d <= 3; d++) modelJson = await applyBench(d);
+    assertEquals(muscle(modelJson).confidence, "calibrating");
+
+    // 6 sessions: pattern established → chest aggregates to established
+    // (2/3 of its 1 profiled participating pattern = 1).
+    for (let d = 4; d <= 6; d++) modelJson = await applyBench(d);
+    assertEquals(muscle(modelJson).confidence, "established");
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).

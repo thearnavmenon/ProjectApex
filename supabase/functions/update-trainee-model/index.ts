@@ -100,6 +100,7 @@ import {
   bootstrapMuscleProfile,
   computeFocusWeight,
   computeVolumeDeficit,
+  proposeMuscleConfidence,
   MUSCLE_GROUPS,
   MUSCLE_VOLUME_WINDOW,
   type AxisConfidence,
@@ -1138,6 +1139,23 @@ function applyPerMuscleRules(
       profile.focusWeight = newFocusWeight;
       rulesFired.add("muscle-focus-weight");
       fieldsChanged.push(`muscles.${muscleKey}.focusWeight`);
+    }
+
+    // (e) Advance muscle confidence by aggregating from participating
+    // patterns' confidence (ADR-0020 / #286). Reuses the same participating-
+    // patterns walk as stagnationStatus; reads the post-pattern-pipeline
+    // confidence (this pipeline runs after applyPerPatternRules), so a muscle
+    // never claims more confidence than the evidence beneath it. Forward-only.
+    const currentMuscleConfidence =
+      (profile.confidence as ConfidenceWriteState | undefined) ?? "bootstrapping";
+    const advancedMuscleConfidence = monotonicAdvance(
+      currentMuscleConfidence,
+      proposeMuscleConfidence(muscleGroup, patternProfilesForAggregation),
+    );
+    if (advancedMuscleConfidence !== currentMuscleConfidence) {
+      profile.confidence = advancedMuscleConfidence;
+      rulesFired.add("muscle-confidence");
+      fieldsChanged.push(`muscles.${muscleKey}.confidence`);
     }
 
     merged[muscleKey] = profile;
