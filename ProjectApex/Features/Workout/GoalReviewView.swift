@@ -72,7 +72,9 @@ struct GoalReviewView: View {
                 focusAreas: focusAreas.map(\.rawValue).sorted(),
                 updatedAt: isoFormatter.string(from: now)
             ),
-            acknowledgeTriggeringSessionCount: triggeringSessionCount
+            acknowledgeTriggeringSessionCount: triggeringSessionCount,
+            stretchEdits: nil,
+            acknowledgeCalibrationReview: nil
         )
     }
 

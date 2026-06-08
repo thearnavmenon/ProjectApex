@@ -55,7 +55,9 @@ final class OnboardingGoalPayloadTests: XCTestCase {
                 focusAreas: ["legs", "back"],
                 updatedAt: isoFormatter.string(from: date)
             ),
-            acknowledgeTriggeringSessionCount: acknowledge
+            acknowledgeTriggeringSessionCount: acknowledge,
+            stretchEdits: nil,
+            acknowledgeCalibrationReview: nil
         )
         let data = try JSONEncoder().encode(payload)
         return try XCTUnwrap(

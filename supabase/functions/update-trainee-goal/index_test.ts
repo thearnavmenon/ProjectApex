@@ -226,3 +226,41 @@ Deno.test("validateRequest_stretch_edits_non_object_entry_returns_400", () => {
   const result = validateRequest(baseRequest({ stretch_edits: ["squat"] }));
   assertEquals("error" in result, true);
 });
+
+// #269 S4: acknowledge_calibration_review validation.
+
+Deno.test("validateRequest_ack_calibration_review_absent_still_valid", () => {
+  // Back-compat: onboarding / goal-review omit the field and must remain valid.
+  const result = validateRequest(baseRequest());
+  assertEquals("error" in result, false);
+  if ("error" in result) return;
+  assertEquals(result.acknowledge_calibration_review, undefined);
+});
+
+Deno.test("validateRequest_ack_calibration_review_true_accepted", () => {
+  const result = validateRequest(
+    baseRequest({ acknowledge_calibration_review: true }),
+  );
+  assertEquals("error" in result, false);
+  if ("error" in result) return;
+  assertEquals(result.acknowledge_calibration_review, true);
+});
+
+Deno.test("validateRequest_ack_calibration_review_false_accepted", () => {
+  // false is a valid boolean; the write only fires on === true.
+  const result = validateRequest(
+    baseRequest({ acknowledge_calibration_review: false }),
+  );
+  assertEquals("error" in result, false);
+  if ("error" in result) return;
+  assertEquals(result.acknowledge_calibration_review, false);
+});
+
+Deno.test("validateRequest_ack_calibration_review_nonBoolean_returns_400", () => {
+  // A truthy string must be rejected (typeof "true" !== "boolean").
+  const result = validateRequest(
+    baseRequest({ acknowledge_calibration_review: "true" }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("acknowledge_calibration_review"), true);
+});

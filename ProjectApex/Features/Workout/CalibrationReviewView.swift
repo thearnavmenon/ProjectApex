@@ -1,15 +1,23 @@
 // CalibrationReviewView.swift
 // ProjectApex — Features/Workout
 //
-// #269 S2: the read-only calibration-review display the pre-workout
-// calibration banner's "Review targets" CTA presents. "Your starting targets
-// are ready" — this screen shows the per-pattern floor/stretch projections set
-// at calibration review, plus each pattern's progress state. Nothing is
-// editable here.
+// #269 S2 / S4: the calibration-review screen the pre-workout calibration
+// banner's "Review targets" CTA presents. "Your starting targets are ready" —
+// this screen shows the per-pattern floor/stretch projections set at
+// calibration review, plus each pattern's progress state.
 //
-// On "Got it" it calls the local `acknowledgeCalibrationReview()` (mirrors the
-// heavy-reassessment local ack) so the banner disappears immediately, then
-// dismisses.
+// S4 makes the STRETCH target editable (upward-only). The floor stays
+// read-only (it is the immovable level we keep the athlete at). On "Save
+// targets" the screen:
+//   1. POSTs the raised stretches + acknowledge_calibration_review:true to the
+//      `update-trainee-goal` Edge Function (best-effort, mirrors GoalReviewView).
+//   2. applies the same upward-only clamp to the local cache and records the
+//      local calibration-review ack, so the banner disappears immediately (the
+//      EF returns no model, so the cache can't refresh from the round-trip).
+//   3. dismisses.
+//
+// Even with zero edits, Save still acknowledges the review so "review and
+// accept as-is" hides the banner durably.
 
 import SwiftUI
 
@@ -22,13 +30,55 @@ struct CalibrationReviewView: View {
     @Environment(AppDependencies.self) private var deps
     @Environment(\.dismiss) private var dismiss
 
-    @State private var isAcknowledging: Bool = false
+    @State private var isSaving: Bool = false
+    /// Live, athlete-editable stretch targets keyed by pattern, seeded from the
+    /// injected projections on appear. Upward-only — never drops below the
+    /// original stretch.
+    @State private var editedStretch: [MovementPattern: Double] = [:]
+
+    /// Increment used by the +/- stretch controls.
+    private static let stretchStep: Double = 2.5
 
     private static let accentPurple = Color(red: 0.58, green: 0.45, blue: 0.95)
     private static let darkChrome = Color(red: 0.04, green: 0.04, blue: 0.06)
 
     init(projections: [PatternProjection]) {
         self.projections = projections
+    }
+
+    // MARK: - Pure payload helper (the seam under TDD)
+
+    /// Builds the `update-trainee-goal` payload for a calibration-review Save
+    /// (#269 S4). `stretchEdits` includes ONLY patterns whose `editedStretch`
+    /// is strictly greater than the original stretch (an unchanged or — never
+    /// reachable from the UI — lowered value is omitted; the server applies its
+    /// own upward-only clamp regardless). `acknowledgeCalibrationReview` is
+    /// ALWAYS true so "review and accept as-is" still hides the banner durably.
+    /// Mirrors GoalReviewView.makeGoalPayload's style.
+    static func makeCalibrationStretchPayload(
+        userId: UUID,
+        goal: GoalUpsertBody,
+        editedStretch: [MovementPattern: Double],
+        original: [PatternProjection],
+        now: Date
+    ) -> TraineeGoalUpsertPayload {
+        let originalStretch = Dictionary(
+            original.map { ($0.pattern, $0.stretch) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let raised: [StretchEditBody] = original.compactMap { projection in
+            guard let edited = editedStretch[projection.pattern] else { return nil }
+            let base = originalStretch[projection.pattern] ?? projection.stretch
+            guard edited > base else { return nil }
+            return StretchEditBody(pattern: projection.pattern.rawValue, stretch: edited)
+        }
+        return TraineeGoalUpsertPayload(
+            userId: userId,
+            goal: goal,
+            acknowledgeTriggeringSessionCount: nil,
+            stretchEdits: raised.isEmpty ? nil : raised,
+            acknowledgeCalibrationReview: true
+        )
     }
 
     // MARK: - Body
@@ -42,7 +92,7 @@ struct CalibrationReviewView: View {
                     LazyVStack(spacing: 16) {
                         introCard
                         projectionsCard
-                        gotItButton
+                        saveButton
                         Color.clear.frame(height: 24)
                     }
                     .padding(.horizontal, 16)
@@ -55,6 +105,15 @@ struct CalibrationReviewView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .onAppear {
+            // Seed the editable stretch state from the injected projections once.
+            if editedStretch.isEmpty {
+                editedStretch = Dictionary(
+                    projections.map { ($0.pattern, $0.stretch) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+            }
+        }
     }
 
     // MARK: - Intro
@@ -62,14 +121,14 @@ struct CalibrationReviewView: View {
     private var introCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("WHAT THIS MEANS")
-            Text("Your starting targets are ready. Floor is the level we'll keep you at; stretch is the next milestone to aim for.")
+            Text("Your starting targets are ready. Floor is the level we'll keep you at; stretch is the next milestone to aim for — nudge it up if you want a bigger goal.")
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.55))
         }
         .calibrationCardChrome()
     }
 
-    // MARK: - Projections (read-only)
+    // MARK: - Projections (stretch editable)
 
     private var projectionsCard: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -95,7 +154,10 @@ struct CalibrationReviewView: View {
     }
 
     private func projectionRow(_ projection: PatternProjection) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let current = editedStretch[projection.pattern] ?? projection.stretch
+        // Lowering is clamped at the original stretch — never below it.
+        let canLower = current - Self.stretchStep >= projection.stretch
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(projection.pattern.displayName)
                     .font(.system(size: 15, weight: .semibold))
@@ -108,47 +170,110 @@ struct CalibrationReviewView: View {
                     .padding(.vertical, 4)
                     .background(Self.accentPurple.opacity(0.14), in: Capsule())
             }
-            HStack(spacing: 16) {
-                Text("Floor: \(Self.formatWeight(projection.floor)) kg")
-                    .font(.system(size: 13).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.65))
-                Text("Stretch: \(Self.formatWeight(projection.stretch)) kg")
-                    .font(.system(size: 13).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.65))
+            Text("Floor: \(Self.formatWeight(projection.floor)) kg")
+                .font(.system(size: 13).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.65))
+            HStack(spacing: 12) {
+                Text("Stretch: \(Self.formatWeight(current)) kg")
+                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+                stretchStepButton(label: "\u{2212}2.5 kg", enabled: canLower) {
+                    editedStretch[projection.pattern] = max(projection.stretch, current - Self.stretchStep)
+                }
+                stretchStepButton(label: "+2.5 kg", enabled: true) {
+                    editedStretch[projection.pattern] = current + Self.stretchStep
+                }
             }
         }
         .padding(.vertical, 12)
     }
 
-    // MARK: - Got it
+    private func stretchStepButton(label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .foregroundStyle(enabled ? Self.accentPurple : .white.opacity(0.25))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    (enabled ? Self.accentPurple.opacity(0.14) : Color.white.opacity(0.04)),
+                    in: Capsule()
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
+    }
 
-    private var gotItButton: some View {
+    // MARK: - Save targets
+
+    private var saveButton: some View {
         Button {
-            Task { await acknowledge() }
+            Task { await save() }
         } label: {
-            Text(isAcknowledging ? "Saving\u{2026}" : "Got it")
+            Text(isSaving ? "Saving\u{2026}" : "Save targets")
                 .font(.system(size: 17, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(height: 56)
-                .background(Self.accentPurple.opacity(isAcknowledging ? 0.40 : 0.85),
+                .background(Self.accentPurple.opacity(isSaving ? 0.40 : 0.85),
                            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(.white.opacity(0.20), lineWidth: 0.5)
                 )
         }
-        .disabled(isAcknowledging)
+        .disabled(isSaving)
         .padding(.top, 8)
     }
 
-    // MARK: - Acknowledge
+    // MARK: - Save
 
     @MainActor
-    private func acknowledge() async {
-        isAcknowledging = true
-        defer { isAcknowledging = false }
+    private func save() async {
+        isSaving = true
+        defer { isSaving = false }
+
+        // The current goal carried through unchanged (this screen doesn't edit
+        // it). Read it from the cached model; fall back to the placeholder shape
+        // if the cache is cold.
+        let model = await deps.traineeModelService.read()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let goalState = model?.goal ?? GoalState.placeholder
+        let goalBody = GoalUpsertBody(
+            statement: goalState.statement,
+            focusAreas: goalState.focusAreas.map(\.rawValue).sorted(),
+            updatedAt: isoFormatter.string(from: goalState.updatedAt)
+        )
+
+        let payload = Self.makeCalibrationStretchPayload(
+            userId: deps.resolvedUserId,
+            goal: goalBody,
+            editedStretch: editedStretch,
+            original: projections,
+            now: Date()
+        )
+
+        // Best-effort server write, mirroring GoalReviewView.save().
+        if let encoded = try? JSONEncoder().encode(payload) {
+            _ = try? await deps.supabaseClient.invokeFunction(
+                "update-trainee-goal",
+                body: encoded
+            )
+        }
+
+        // Local cache update + ack so the banner hides immediately. Apply only
+        // the raised stretches (the service mirrors the upward-only clamp).
+        let raisedEdits: [MovementPattern: Double] = projections.reduce(into: [:]) { acc, projection in
+            if let edited = editedStretch[projection.pattern], edited > projection.stretch {
+                acc[projection.pattern] = edited
+            }
+        }
+        try? await deps.traineeModelService.applyStretchEdits(raisedEdits)
         try? await deps.traineeModelService.acknowledgeCalibrationReview()
+
         dismiss()
     }
 

@@ -945,7 +945,9 @@ struct OnboardingView: View {
                 focusAreas: [],
                 updatedAt: isoFormatter.string(from: Date())
             ),
-            acknowledgeTriggeringSessionCount: nil
+            acknowledgeTriggeringSessionCount: nil,
+            stretchEdits: nil,
+            acknowledgeCalibrationReview: nil
         )
         if let encoded = try? JSONEncoder().encode(goalPayload) {
             _ = try? await deps.supabaseClient.invokeFunction(
@@ -1026,12 +1028,34 @@ struct TraineeGoalUpsertPayload: Codable, Sendable {
     /// passes `nil` — the synthesized `encodeIfPresent` then OMITS the key,
     /// keeping the onboarding wire shape exactly `{user_id, goal}`.
     let acknowledgeTriggeringSessionCount: Int?
+    /// #269 S4: OPTIONAL. Athlete-raised stretch targets from the
+    /// calibration-review screen. When non-nil the EF applies an upward-only
+    /// clamp on `model_json.projections.patternProjections`. Synthesized
+    /// `encodeIfPresent` OMITS the key when nil, so other call sites keep their
+    /// exact wire shape.
+    let stretchEdits: [StretchEditBody]?
+    /// #269 S4: OPTIONAL. When true, the EF durably sets
+    /// `model_json.calibrationReviewAcknowledged = true` so the pre-workout
+    /// calibration banner does not reappear after a session sync. Omitted from
+    /// the wire when nil.
+    let acknowledgeCalibrationReview: Bool?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
         case goal
         case acknowledgeTriggeringSessionCount = "acknowledge_triggering_session_count"
+        case stretchEdits = "stretch_edits"
+        case acknowledgeCalibrationReview = "acknowledge_calibration_review"
     }
+}
+
+/// #269 S4: a single athlete-raised stretch target. Mirrors the EF's
+/// `StretchEdit` shape (`pattern` rawValue + `stretch` kg). The default
+/// member-name CodingKeys match the validator's expected camelCase-free
+/// `{pattern, stretch}` wire shape.
+struct StretchEditBody: Codable, Sendable {
+    let pattern: String
+    let stretch: Double
 }
 
 /// `internal` (not `private`) so the EF-contract parity test can assert the

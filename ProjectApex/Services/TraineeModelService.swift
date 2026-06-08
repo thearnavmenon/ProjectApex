@@ -116,6 +116,25 @@ actor TraineeModelService {
         try await store.save(model)
     }
 
+    /// #269 S4: client mirror of the server's upward-only stretch clamp. Raises
+    /// each targeted pattern's `stretch` to `max(currentStretch, edited)` on the
+    /// cached model so the calibration-review screen reflects the new targets
+    /// immediately (the EF returns no model, so the cache can't refresh from the
+    /// round-trip). Floors are never touched. No-op if no model is cached, the
+    /// model has no projections, or no edit raises a target. Idempotent.
+    func applyStretchEdits(_ edits: [MovementPattern: Double]) async throws {
+        guard var model = await store.load() else { return }
+        guard var projections = model.projections else { return }
+        projections.patternProjections = projections.patternProjections.map { p in
+            guard let edited = edits[p.pattern] else { return p }
+            var updated = p
+            updated.stretch = max(p.stretch, edited) // upward-only clamp
+            return updated
+        }
+        model.projections = projections
+        try await store.save(model)
+    }
+
     // MARK: - Write — enqueue path
 
     /// Enqueues a `trainee_model_update` item carrying the session-
