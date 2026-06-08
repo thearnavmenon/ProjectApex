@@ -386,17 +386,10 @@ actor MacroPlanService {
     // MARK: - Private: Helpers
 
     private static func loadSystemPrompt() throws -> String {
-        if let url = Bundle.main.url(
-            forResource: "SystemPrompt_MacroPlan",
-            withExtension: "txt",
-            subdirectory: "Prompts"
-        ) ?? Bundle.main.url(
-            forResource: "SystemPrompt_MacroPlan",
-            withExtension: "txt"
-        ) {
-            return try String(contentsOf: url, encoding: .utf8)
+        guard let prompt = try PromptLoader.load("SystemPrompt_MacroPlan") else {
+            throw MacroPlanError.systemPromptNotFound
         }
-        throw MacroPlanError.systemPromptNotFound
+        return prompt
     }
 
     private static func stripMarkdownFences(_ input: String) -> String {

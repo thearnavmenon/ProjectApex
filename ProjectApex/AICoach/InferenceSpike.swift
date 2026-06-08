@@ -130,17 +130,10 @@ enum InferenceSpike {
 
     /// Loads `SystemPrompt_Inference.txt` from the main bundle.
     static func loadSystemPrompt() throws -> String {
-        guard let url = Bundle.main.url(
-            forResource: "SystemPrompt_Inference",
-            withExtension: "txt",
-            subdirectory: "Prompts"
-        ) ?? Bundle.main.url(
-            forResource: "SystemPrompt_Inference",
-            withExtension: "txt"
-        ) else {
+        guard let prompt = try PromptLoader.load("SystemPrompt_Inference") else {
             throw SystemPromptError.fileNotFound
         }
-        return try String(contentsOf: url, encoding: .utf8)
+        return prompt
     }
 
     enum SystemPromptError: LocalizedError {

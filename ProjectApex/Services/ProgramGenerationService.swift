@@ -632,18 +632,10 @@ actor ProgramGenerationService {
     // MARK: - Private: System Prompt
 
     private static func loadSystemPrompt() throws -> String {
-        if let url = Bundle.main.url(
-            forResource: "SystemPrompt_MacroGeneration",
-            withExtension: "txt",
-            subdirectory: "Prompts"
-        ) ?? Bundle.main.url(
-            forResource: "SystemPrompt_MacroGeneration",
-            withExtension: "txt"
-        ) {
-            let base = try String(contentsOf: url, encoding: .utf8)
-            return base + ExerciseLibrary.promptReferenceBlock()
+        guard let base = try PromptLoader.load("SystemPrompt_MacroGeneration") else {
+            throw ProgramGenerationError.systemPromptNotFound
         }
-        throw ProgramGenerationError.systemPromptNotFound
+        return base + ExerciseLibrary.promptReferenceBlock()
     }
 
     // MARK: - Private: LLM JSON repair

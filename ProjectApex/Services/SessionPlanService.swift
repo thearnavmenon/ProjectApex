@@ -669,18 +669,10 @@ actor SessionPlanService {
     }
 
     private static func loadSystemPrompt() throws -> String {
-        if let url = Bundle.main.url(
-            forResource: "SystemPrompt_SessionPlan",
-            withExtension: "txt",
-            subdirectory: "Prompts"
-        ) ?? Bundle.main.url(
-            forResource: "SystemPrompt_SessionPlan",
-            withExtension: "txt"
-        ) {
-            let base = try String(contentsOf: url, encoding: .utf8)
-            return base + ExerciseLibrary.promptReferenceBlock()
+        guard let base = try PromptLoader.load("SystemPrompt_SessionPlan") else {
+            throw SessionPlanError.systemPromptNotFound
         }
-        throw SessionPlanError.systemPromptNotFound
+        return base + ExerciseLibrary.promptReferenceBlock()
     }
 
     private static func stripMarkdownFences(_ input: String) -> String {
