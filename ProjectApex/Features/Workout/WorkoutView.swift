@@ -43,6 +43,10 @@ struct WorkoutView: View {
     /// Drives the level-up banner in PreWorkoutView. Nil when no model / out of
     /// the cooldown window / acknowledged.
     @State private var heavyReassessmentSignal: HeavyReassessmentSignal? = nil
+    /// True while the goal-review screen is presented from the heavy-reassessment
+    /// banner CTA (#258 E2). On dismiss the signal is re-derived; a saved goal will
+    /// have acknowledged the trigger (Slice F1), so the banner then disappears.
+    @State private var showGoalReview = false
     /// True when a crash-recovered PausedSessionState exists but its trainingDayId
     /// does not match the current day (and ContentView hasn't handled it via Path A).
     /// Shows a recovery dialog so the user can choose how to proceed.
@@ -262,6 +266,18 @@ struct WorkoutView: View {
                 .presentationCornerRadius(24)
             }
         }
+        .sheet(isPresented: $showGoalReview, onDismiss: {
+            // Re-derive the signal: a goal saved in GoalReviewView acknowledged
+            // the trigger (Slice F1), so deriveHeavyReassessmentSignal now returns
+            // nil and the banner disappears. A mere cancel leaves it unchanged.
+            Task {
+                heavyReassessmentSignal = await deps.traineeModelService.digest()?.heavyReassessmentSignal
+            }
+        }) {
+            GoalReviewView(triggeringSessionCount: heavyReassessmentSignal?.triggeringSessionCount)
+                .presentationDetents([.large])
+                .presentationCornerRadius(24)
+        }
         .alert("Session Mismatch", isPresented: $showMismatchRecoveryAlert) {
             Button("Start Fresh") {
                 // Clear the orphaned sentinel so the user can start a new session.
@@ -301,7 +317,7 @@ struct WorkoutView: View {
                 daysSinceLastSession: daysSinceLastSession,
                 heavyReassessmentSignal: heavyReassessmentSignal,
                 onReviewGoals: {
-                    // TODO(#258 E2): present goal-review screen
+                    showGoalReview = true
                 },
                 onSkipSession: onSkipSession,
                 onBack: onBack,
