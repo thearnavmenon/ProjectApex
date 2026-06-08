@@ -738,6 +738,23 @@ final class TraineeModelDigestTests: XCTestCase {
                       "Section must include the intent-deviation reactions")
     }
 
+    func test_inferencePrompt_machineWeightsRoundToNearest5() {
+        // #222: weight-stack / plate-loaded machines step in 5 kg, not 2.5 kg —
+        // the prompt must forbid impossible half-kg machine prescriptions.
+        let prompt = AIInferenceService.systemPrompt
+
+        XCTAssertTrue(prompt.contains("weight-stack / plate-loaded machine"),
+                      "Inference prompt must carry the machine-specific increment rule (#222)")
+        // The rounding instruction wraps across a line in the prompt, so match on
+        // whitespace-collapsed text rather than an exact newline/indent.
+        let collapsed = prompt.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        XCTAssertTrue(collapsed.contains("Round any machine prescription to the nearest 5 kg"),
+                      "Machine rule must instruct rounding to the nearest 5 kg")
+        // The old line lumped machine into the 2.5 kg bucket — must be gone.
+        XCTAssertFalse(prompt.contains("dumbbell / kettlebell / cable / machine"),
+                       "Legacy line lumping machine into the 2.5 kg bucket must be removed (#222)")
+    }
+
     // MARK: ─── B2 (#87): VOLUME DEFICIT block — prompt-shape anchors ──────────
 
     func test_sessionPlanPrompt_containsVolumeDeficitBlock_andLacksLegacyVolumeDeficitsPhrases() throws {

@@ -1161,6 +1161,12 @@ actor AIInferenceService {
 
     // MARK: - System Prompt
     //
+    // VERSION: 8.0 — 2026-06-08 — #222: split weight-stack / plate-loaded
+    // machines out of the 2.5 kg increment bucket into a 5 kg rule + round-to-
+    // nearest-5 (stacks have no 2.5 kg steps; 32.5/37.5 kg on a machine is
+    // impossible). Matches DefaultWeightIncrements.machineStack. Cumulative
+    // cache-bust on top of v7.0.
+    //
     // VERSION: 7.0 — 2026-06-08 — #221: added REACTING TO USER-REPORTED SIGNALS
     // FROM PRIOR SETS block (pain / form_breakdown / intent-deviation reactions
     // off within_session_performance + current_exercise_sets_today — those
