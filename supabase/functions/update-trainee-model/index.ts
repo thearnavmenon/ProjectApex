@@ -40,6 +40,11 @@ import {
   type TopSet as EwmaTopSet,
 } from "../_shared/ewma-engine.ts";
 import {
+  type ConfidenceWriteState,
+  monotonicAdvance,
+} from "../_shared/confidence-lifecycle.ts";
+import { proposeExerciseConfidence } from "../_shared/exercise-confidence.ts";
+import {
   classifyStimulus,
   type SetIntent,
 } from "../_shared/stimulus-classifier.ts";
@@ -446,6 +451,23 @@ function applyPerExerciseRules(
         newProfile.e1rmCurrent = newE1RM;
         rulesFired.add("ewma");
         fieldsChanged.push(`exercises.${exerciseId}.e1rmCurrent`);
+      }
+
+      // ADR-0020: advance exercise confidence on capability stability.
+      // Proposed state is clamped forward-only via monotonicAdvance.
+      const currentConfidence =
+        (profile.confidence as ConfidenceWriteState | undefined) ?? "bootstrapping";
+      const advancedConfidence = monotonicAdvance(
+        currentConfidence,
+        proposeExerciseConfidence({
+          sessionCount: newProfile.sessionCount as number,
+          topSets: ewmaInput,
+        }),
+      );
+      if (advancedConfidence !== currentConfidence) {
+        newProfile.confidence = advancedConfidence;
+        rulesFired.add("exercise-confidence");
+        fieldsChanged.push(`exercises.${exerciseId}.confidence`);
       }
     }
 
