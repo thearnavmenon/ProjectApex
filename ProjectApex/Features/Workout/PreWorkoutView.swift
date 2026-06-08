@@ -51,6 +51,13 @@ struct PreWorkoutView: View {
     /// Called when the user taps "Review goals" on the heavy-reassessment banner.
     /// Injected; a later slice (#258 E2) wires it to the goal-review screen. Default no-op.
     var onReviewGoals: () -> Void = {}
+    /// Calibration-review signal (#269). When present (and not locally dismissed),
+    /// shows the one-time targets banner. Takes precedence over the heavy-
+    /// reassessment banner when both are present. Nil → no calibration banner.
+    var calibrationReviewSignal: CalibrationReviewSignal? = nil
+    /// Called when the user taps "Review targets" on the calibration banner (#269).
+    /// Wired to the read-only calibration screen. Default no-op.
+    var onReviewCalibration: () -> Void = {}
     /// Called when the user taps "Skip this session". Defers this day without recording
     /// any session data — the next pending non-skipped day becomes the active session.
     var onSkipSession: (() -> Void)? = nil
@@ -63,6 +70,7 @@ struct PreWorkoutView: View {
     @State private var showSkipConfirmation: Bool = false
     @State private var welcomeBackBannerDismissed: Bool = false
     @State private var heavyReassessmentBannerDismissed: Bool = false
+    @State private var calibrationBannerDismissed: Bool = false
 
     // MARK: - Body
 
@@ -80,7 +88,12 @@ struct PreWorkoutView: View {
                         if isFirstSession {
                             firstSessionBanner
                         }
-                        if let signal = heavyReassessmentSignal, !heavyReassessmentBannerDismissed {
+                        // Precedence (#269): the calibration banner takes priority; the
+                        // heavy-reassessment banner shows only when the calibration banner
+                        // is not currently shown.
+                        if let calibration = calibrationReviewSignal, !calibrationBannerDismissed {
+                            calibrationReviewBanner(calibration)
+                        } else if let signal = heavyReassessmentSignal, !heavyReassessmentBannerDismissed {
                             heavyReassessmentBanner(signal)
                         }
                         if let days = daysSinceLastSession, days >= 14, !welcomeBackBannerDismissed {
@@ -396,6 +409,56 @@ struct PreWorkoutView: View {
             Spacer(minLength: 0)
             Button {
                 heavyReassessmentBannerDismissed = true
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.40))
+                    .padding(6)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            accentColor.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(accentColor.opacity(0.25), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Calibration Review Banner (#269)
+
+    private func calibrationReviewBanner(_ signal: CalibrationReviewSignal) -> some View {
+        // Distinct blue/purple accent so this card reads apart from the amber
+        // firstSession/welcomeBack banners and the green heavy-reassessment one (#269).
+        let accentColor = Color(red: 0.58, green: 0.45, blue: 0.95)
+        return HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "target")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(accentColor)
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(CalibrationReviewBannerCopy.title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                    Text(CalibrationReviewBannerCopy.body(for: signal))
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.80))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button {
+                    onReviewCalibration()
+                } label: {
+                    Text("Review targets")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(accentColor)
+                }
+            }
+            Spacer(minLength: 0)
+            Button {
+                calibrationBannerDismissed = true
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))

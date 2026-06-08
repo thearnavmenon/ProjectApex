@@ -47,6 +47,14 @@ struct WorkoutView: View {
     /// banner CTA (#258 E2). On dismiss the signal is re-derived; a saved goal will
     /// have acknowledged the trigger (Slice F1), so the banner then disappears.
     @State private var showGoalReview = false
+    /// Calibration-review signal derived from the cached trainee model (#269).
+    /// Drives the one-time targets banner in PreWorkoutView. Nil when no model /
+    /// review not fired / already acknowledged.
+    @State private var calibrationReviewSignal: CalibrationReviewSignal? = nil
+    /// True while the read-only calibration-review screen is presented from the
+    /// banner CTA (#269). On dismiss the signal is re-derived; acknowledging the
+    /// screen sets calibrationReviewAcknowledged, so the banner then disappears.
+    @State private var showCalibrationReview = false
     /// True when a crash-recovered PausedSessionState exists but its trainingDayId
     /// does not match the current day (and ContentView hasn't handled it via Path A).
     /// Shows a recovery dialog so the user can choose how to proceed.
@@ -148,6 +156,10 @@ struct WorkoutView: View {
             // Read the cached trainee-model digest (minimal existing path — no new
             // service plumbing). Nil model / out-of-window / acknowledged → nil → no banner.
             heavyReassessmentSignal = await deps.traineeModelService.digest()?.heavyReassessmentSignal
+
+            // Calibration-review signal for the pre-workout one-time targets banner (#269).
+            // Same cached-digest path. Nil model / not-fired / acknowledged → nil → no banner.
+            calibrationReviewSignal = await deps.traineeModelService.digest()?.calibrationReviewSignal
 
             guard let vm = viewModel else { return }
 
@@ -278,6 +290,17 @@ struct WorkoutView: View {
                 .presentationDetents([.large])
                 .presentationCornerRadius(24)
         }
+        .sheet(isPresented: $showCalibrationReview, onDismiss: {
+            // Re-derive: the read-only screen's "Got it" acknowledges the review
+            // (#269), so deriveCalibrationReviewSignal now returns nil and the
+            // banner disappears. A mere swipe-dismiss leaves it unchanged.
+            Task {
+                calibrationReviewSignal = await deps.traineeModelService.digest()?.calibrationReviewSignal
+            }
+        }) {
+            CalibrationReviewView(projections: calibrationReviewSignal?.projections ?? [])
+                .presentationDetents([.large])
+        }
         .alert("Session Mismatch", isPresented: $showMismatchRecoveryAlert) {
             Button("Start Fresh") {
                 // Clear the orphaned sentinel so the user can start a new session.
@@ -318,6 +341,10 @@ struct WorkoutView: View {
                 heavyReassessmentSignal: heavyReassessmentSignal,
                 onReviewGoals: {
                     showGoalReview = true
+                },
+                calibrationReviewSignal: calibrationReviewSignal,
+                onReviewCalibration: {
+                    showCalibrationReview = true
                 },
                 onSkipSession: onSkipSession,
                 onBack: onBack,
