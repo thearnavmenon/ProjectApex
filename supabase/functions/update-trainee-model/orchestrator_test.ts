@@ -2026,6 +2026,57 @@ orchestratorTest(
   },
 );
 
+orchestratorTest(
+  "#283 (ADR-0020): exercise confidence advances bootstrapping → calibrating → established over repeated stable sessions",
+  async () => {
+    const userId = await seedFreshUser();
+
+    // Apply `count` sessions of one stable top set (100kg × 5) for bench,
+    // starting at `dayOffset` days past a base date. Returns the bench
+    // ExerciseProfile after the last apply.
+    async function applyStableSessions(
+      count: number,
+      dayOffset: number,
+    ): Promise<Record<string, unknown>> {
+      for (let i = 0; i < count; i++) {
+        const day = String(8 + dayOffset + i).padStart(2, "0");
+        await applySession(
+          {
+            user_id: userId,
+            session_id: crypto.randomUUID(),
+            session_payload: {
+              logged_at: `2026-05-${day}T10:00:00Z`,
+              set_logs: [
+                { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" },
+              ],
+            },
+          },
+          sql,
+          { stage2Hook: noopStage2 },
+        );
+      }
+      const rows = await sql`
+        SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+      `;
+      const exercises = (rows[0].model_json as Record<string, unknown>)
+        .exercises as Record<string, Record<string, unknown>>;
+      return exercises["barbell_bench_press"];
+    }
+
+    // After 3 stable sessions: calibrating (sessionCount≥3 AND ≥3 valid top sets).
+    const afterThree = await applyStableSessions(3, 0);
+    assertEquals(afterThree.sessionCount, 3);
+    assertEquals(afterThree.confidence, "calibrating");
+
+    // 5 more (total 8) stable sessions: established (sessionCount≥8 AND e1RM
+    // CV ≤ 7.5% over ≥4 distinct sessions). calibrating→established is one
+    // monotonicAdvance step, so it lands on the 8th apply.
+    const afterEight = await applyStableSessions(5, 3);
+    assertEquals(afterEight.sessionCount, 8);
+    assertEquals(afterEight.confidence, "established");
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).

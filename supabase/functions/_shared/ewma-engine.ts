@@ -81,13 +81,19 @@ export interface TransitionModeResult {
 
 /**
  * Transition-mode mean per ADR-0005: plain mean of the heaviest e1RM per
- * session across the 3 most recent SESSIONS (not top sets), with sample
- * variance using Bessel correction.
+ * session across the most recent `window` SESSIONS (not top sets), with
+ * sample variance using Bessel correction.
+ *
+ * `window` defaults to `TRANSITION_MODE_WINDOW_N` (=3 per ADR-0005's
+ * transition-mode collapse). The exercise confidence gate (ADR-0020) passes
+ * a wider window to measure e1RM stability over more sessions; the variance
+ * it reads is the same Bessel-corrected sample variance.
  *
  * @returns null when no valid top sets exist.
  */
 export function transitionModeMean(
   topSets: TopSet[],
+  window: number = TRANSITION_MODE_WINDOW_N,
 ): TransitionModeResult | null {
   const valid = topSets.filter(
     (s) => s.reps >= TOP_SET_REP_VALIDITY_MIN &&
@@ -106,7 +112,7 @@ export function transitionModeMean(
     }
   }
   const values = Array.from(sessionValues.values()).slice(
-    -TRANSITION_MODE_WINDOW_N,
+    -window,
   );
   const n = values.length;
   const mean = values.reduce((a, b) => a + b, 0) / n;
