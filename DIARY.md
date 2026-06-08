@@ -7,6 +7,49 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-09 — Gave the athlete real strength targets to review and reach for
+
+**The problem (in plain words):**
+The app was always *meant* to show you concrete strength targets per movement once it
+knew you well enough — a "floor" (what you can reliably do) and a "stretch" (what you're
+reaching for). But that whole layer was never built: the targets were always empty, and
+the screen that would show them didn't exist. Last entry I switched on the "how sure am I"
+ratings; this builds the thing those ratings unlock — once your main lifts are "known," the
+app can finally put real numbers in front of you.
+
+**What I built:**
+- **The numbers (server).** When at least 4 of your 6 big movements are "known," the app
+  works out, for each: a **floor** = a rounded-down typical of your recent best lifts (so it
+  never overstates what you've shown), and a **stretch** = a bit above that, scaled to how
+  you're trending (more if you're climbing, less if you're stalling). It also tracks whether
+  you're behind / on track / ahead / there. Late-blooming lifts get targets too, the moment
+  they qualify.
+- **The screen (app).** A one-time "your targets are ready" banner → a review screen showing
+  each lift's floor, stretch, and progress.
+- **Editing (app + server).** You can nudge a stretch target **up** (never down, and you
+  can't touch the floor — it reflects what you've actually lifted). The server enforces that
+  upward-only rule so a bad app version can't cheat it. Once you've reviewed, the banner
+  stays gone for good.
+- A nice catch from the design pass: two "capability" fields the old formulas wanted to use
+  turned out to be dead (always zero), so everything was re-grounded on the live lift history
+  instead — caught before it shipped a screen full of zeros.
+
+**How it was decided:**
+Same rigorous design interview as last time — every question got three independent takes
+(mine, a fresh reviewer, and one that remembered the whole conversation), best answer taken.
+Written up in a new decision record (ADR-0021).
+
+**How it was checked:**
+Five small pieces, each shipped on its own. Server logic has unit + end-to-end tests (drove
+real sessions until the targets appeared); the app code was compiled and its logic unit-
+tested locally. Every server piece passed the reliable server test before merging.
+
+**Status:** Done. All five pieces merged (#294–#298 via PRs #299–#302 + this docs PR);
+umbrella #269 closed. Note: the app screens are compiled and logic-tested but I couldn't
+eyeball them rendered, so a quick visual once-over on a device is worth doing.
+
+---
+
 ## 2026-06-08 — Taught the app to actually grow more sure of itself over time
 
 **The problem (in plain words):**
