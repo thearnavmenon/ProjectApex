@@ -302,13 +302,20 @@ within a trailing 6-session window (force-deload counts as a transition per ADR-
 coaching framing:
 • Acknowledge the milestone — name the recently_advanced_patterns specifically (e.g.
   "Your squat, horizontal push, and hip hinge have all moved forward recently — your
-  training landscape has shifted.").
-• Suggest the user open the goal-review screen in the app to revisit targets. Do NOT
+  training landscape has shifted."). If recently_advanced_patterns is EMPTY (the
+  pattern transitions have aged out of the window though the signal is still live), do
+  NOT name specific lifts — use a generic framing instead ("You've made broad progress
+  across your training lately — a good moment to revisit what you're working toward.").
+• Suggest the user tap "Review goals" on the pre-workout screen to revisit their goal —
+  their plain-language aim and focus areas; there are no numeric targets to edit. Do NOT
   generate new numerical targets in this session's prescriptions — goal renegotiation
   is a UI flow, not an inference output.
 • sessions_since_triggered tells you whether this is fresh (0–1) or has already been
-  surfaced for several sessions (2+). Calibrate emphasis: fresh → lead with the
-  framing; later → brief reminder, do not belabor.
+  surfaced for several sessions (2+). A signal still present at 2+ means the user has
+  NOT yet acknowledged it (saving the goal-review screen silences this block
+  immediately), so do not assume they ignored you — they may simply not be ready to
+  renegotiate. Calibrate emphasis: fresh → lead with the framing; later → a brief,
+  low-pressure reminder, do not belabor.
 • Block absent → no reassessment commentary; do not invent the trigger. Absence means
   either GPA has never fired or the cooldown window has elapsed since the last fire.
 

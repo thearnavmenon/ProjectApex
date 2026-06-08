@@ -678,6 +678,19 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must explicitly prohibit inventing numerical goal targets — goal renegotiation is a UI flow per ADR-0005")
         XCTAssertTrue(prompt.contains("Block absent → no reassessment commentary"),
                       "SessionPlan must include the absent-block negative anchor — the LLM should not invent the trigger when the signal is missing")
+
+        // #258 Slice G: point the LLM at the real "Review goals" affordance, not
+        // the nonexistent "targets" (the goal-review screen edits a plain-language
+        // goal + focus areas, never numbers).
+        XCTAssertTrue(prompt.contains("\"Review goals\""),
+                      "SessionPlan must reference the real 'Review goals' button label (#258 Slice G)")
+        XCTAssertFalse(prompt.contains("revisit targets"),
+                       "Legacy 'revisit targets' phrasing implies numeric targets that don't exist — replaced in #258 Slice G")
+        // #258 Slice G: empty-patterns fallback — recently_advanced_patterns can be
+        // empty late in the window while the signal is still live; the LLM must not
+        // name lifts then.
+        XCTAssertTrue(prompt.contains("If recently_advanced_patterns is EMPTY"),
+                      "SessionPlan must include the empty-patterns fallback so the LLM uses a generic framing when no lifts are nameable (#258 Slice G)")
     }
 
     func test_inferencePrompt_containsPerPatternTrendBlock() {
