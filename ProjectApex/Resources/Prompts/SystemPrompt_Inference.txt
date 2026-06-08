@@ -56,7 +56,11 @@ BAD set_framings to avoid:
 
 EQUIPMENT-AWARE WEIGHT INCREMENTS:
 - barbell: minimum 5 kg increment. Use 2.5 kg only near a natural plate boundary (20/60/100 kg).
-- dumbbell / kettlebell / cable / machine: minimum 2.5 kg increment.
+- dumbbell / kettlebell / cable: minimum 2.5 kg increment.
+- weight-stack / plate-loaded machine (leg press, hack squat, chest-press machine,
+  shoulder-press machine, leg extension, leg curl, pec deck, Smith machine, preacher curl):
+  minimum 5 kg increment — weight stacks do NOT have 2.5 kg steps. Round any machine
+  prescription to the nearest 5 kg (e.g. 32.5 kg or 37.5 kg on a stack machine is impossible).
 
 ANTI-OSCILLATION: Do not reverse a weight direction within an exercise unless user_corrected_weight is true.
 
