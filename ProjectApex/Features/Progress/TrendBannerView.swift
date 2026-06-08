@@ -24,7 +24,7 @@ struct TrendBannerView: View {
                 .foregroundStyle(iconColor)
                 .font(.system(size: 20))
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayPatternName)
+                Text(summary.pattern.displayName)
                     .font(.subheadline.bold())
                     .foregroundStyle(.white)
                 Text(bannerMessage)
@@ -35,14 +35,6 @@ struct TrendBannerView: View {
         }
         .padding(12)
         .background(bannerBackground, in: RoundedRectangle(cornerRadius: 10))
-    }
-
-    // Format snake_case pattern rawValue as "Horizontal Push" etc.
-    private var displayPatternName: String {
-        summary.pattern.rawValue
-            .split(separator: "_")
-            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            .joined(separator: " ")
     }
 
     private var iconName: String {
