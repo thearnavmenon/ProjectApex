@@ -1181,17 +1181,10 @@ actor AIInferenceService {
     internal static var systemPrompt: String { try! loadSystemPrompt() }
 
     internal static func loadSystemPrompt() throws -> String {
-        if let url = Bundle.main.url(
-            forResource: "SystemPrompt_Inference",
-            withExtension: "txt",
-            subdirectory: "Prompts"
-        ) ?? Bundle.main.url(
-            forResource: "SystemPrompt_Inference",
-            withExtension: "txt"
-        ) {
-            return try String(contentsOf: url, encoding: .utf8)
+        guard let prompt = try PromptLoader.load("SystemPrompt_Inference") else {
+            throw AIInferenceError.systemPromptNotFound
         }
-        throw AIInferenceError.systemPromptNotFound
+        return prompt
     }
 }
 
