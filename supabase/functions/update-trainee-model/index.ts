@@ -65,11 +65,13 @@ import {
 } from "../_shared/phase-advance.ts";
 import { computeTransitionModeUntil } from "../_shared/transition-mode-expiry.ts";
 import {
+  isTrendEvaluable,
   plateauVerdict,
   type E1RMSession,
   type ProgressionTrend,
   type VolumeLoadSession,
 } from "../_shared/plateau-verdict.ts";
+import { proposePatternConfidence } from "../_shared/pattern-confidence.ts";
 import {
   appendObservation,
   shouldContribute,
@@ -954,6 +956,31 @@ function applyPerPatternRules(
       fieldsChanged.push(`patterns.${patternKey}.trend`);
     }
 
+    // #285 (ADR-0020): advance pattern confidence. established requires a
+    // data-backed trend (not the bootstrap-default "progressing"), so it gates
+    // on isTrendEvaluable over the same plateau-track inputs. Clamped forward-
+    // only via monotonicAdvance. At ≥4/6 major patterns established this flips
+    // the client-derived isReadyForCalibrationReview (#269). This rule advances
+    // confidence ONLY — it never writes projections / calibrationReviewFiredAt.
+    const trendEvaluable = isTrendEvaluable(
+      e1rmSessionsForPattern,
+      volumeSessionsForPattern,
+      cadenceDays,
+    );
+    const currentPatternConfidence =
+      (profile.confidence as ConfidenceWriteState | undefined) ?? "bootstrapping";
+    const advancedPatternConfidence = monotonicAdvance(
+      currentPatternConfidence,
+      proposePatternConfidence({
+        sessionCount: patternSessionCount,
+        trendEvaluable,
+      }),
+    );
+    if (advancedPatternConfidence !== currentPatternConfidence) {
+      rulesFired.add("pattern-confidence");
+      fieldsChanged.push(`patterns.${patternKey}.confidence`);
+    }
+
     newPatterns[patternKey] = {
       ...profile,
       currentPhase: advanced.newPhase,
@@ -966,6 +993,7 @@ function applyPerPatternRules(
       recentSessionDates: recentDates,
       weeklyVolumeLoadHistory: newVolumeHistory,
       trend: newTrend,
+      confidence: advancedPatternConfidence,
     };
   }
 

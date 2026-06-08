@@ -2137,6 +2137,55 @@ orchestratorTest(
   },
 );
 
+orchestratorTest(
+  "#285 (ADR-0020): pattern confidence advances to established; feature never writes projections",
+  async () => {
+    const userId = await seedFreshUser();
+
+    async function applyBench(day: number): Promise<Record<string, unknown>> {
+      await applySession(
+        {
+          user_id: userId,
+          session_id: crypto.randomUUID(),
+          session_payload: {
+            logged_at: `2026-07-${String(day).padStart(2, "0")}T10:00:00Z`,
+            set_logs: [
+              { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" },
+            ],
+          },
+        },
+        sql,
+        { stage2Hook: noopStage2 },
+      );
+      const rows = await sql`
+        SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+      `;
+      return rows[0].model_json as Record<string, unknown>;
+    }
+
+    // 3 sessions → calibrating.
+    let modelJson: Record<string, unknown> = {};
+    for (let d = 1; d <= 3; d++) modelJson = await applyBench(d);
+    let push = (modelJson.patterns as Record<string, Record<string, unknown>>)[
+      "horizontal_push"
+    ];
+    assertEquals(push.confidence, "calibrating");
+
+    // 3 more (total 6) with a data-backed trend → established (calibrating→
+    // established is one monotonicAdvance step, landing on the 6th apply).
+    for (let d = 4; d <= 6; d++) modelJson = await applyBench(d);
+    push = (modelJson.patterns as Record<string, Record<string, unknown>>)[
+      "horizontal_push"
+    ];
+    assertEquals(push.sessionCount, 6);
+    assertEquals(push.confidence, "established");
+
+    // Boundary guard (ADR-0020 / #269): advancing confidence must NOT derive
+    // projections or set calibrationReviewFiredAt — that is #269's job.
+    assertEquals(modelJson.projections, undefined);
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).

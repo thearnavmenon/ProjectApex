@@ -212,6 +212,28 @@ export function plateauVerdict(
 }
 
 /**
+ * Whether `plateauVerdict` is DATA-BACKED rather than the insufficient-data
+ * default. The verdict returns "progressing" both when a pattern has too little
+ * history (each track falls back to "improving") AND when it is genuinely
+ * progressing — so the verdict value alone cannot distinguish the two. This
+ * predicate is true once at least one track has enough observations to emit a
+ * real reading: the e1RM track needs `windowSize(cadence)` sessions (3 or 4),
+ * the volume-load track needs `VOLUME_LOAD_PLATEAU_WINDOW_N` (4) weekly buckets.
+ * Used by the pattern confidence gate (ADR-0020) so a pattern never reaches
+ * `.established` on a fabricated default trend.
+ */
+export function isTrendEvaluable(
+  e1rmSessions: E1RMSession[],
+  volumeLoadSessions: VolumeLoadSession[],
+  cadenceDays: number | null,
+): boolean {
+  return (
+    e1rmSessions.length >= windowSize(cadenceDays) ||
+    volumeLoadSessions.length >= VOLUME_LOAD_PLATEAU_WINDOW_N
+  );
+}
+
+/**
  * Per-pattern trend + confidence used for muscle-level aggregation.
  * `confidence` is the `PatternProfile.confidence` field; only patterns
  * above `bootstrapping` participate per the ADR-0009 amendment.
