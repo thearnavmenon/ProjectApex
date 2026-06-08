@@ -287,19 +287,19 @@ Captured here so the BACKLOG sweep on 2026-06-01 has a single landing surface. E
 
 **Filed / awaiting product or design direction:**
 
-- [ ] P5-D01: #220 — extract `PromptLoader` for three known consumers (Inference, SessionPlan, InferenceSpike). Deferred from #159 per L7 lock; surgical change once the right shape is agreed.
+- [x] P5-D01: #220 — extract `PromptLoader`. **DONE 2026-06-08** (PR #272). Consolidated **5** identical `loadSystemPrompt() throws` loaders (the 3 named + `ProgramGenerationService` + `MacroPlanService`, found by grep) onto `PromptLoader.load(_:)`. Behavior-preserving; each keeps its typed error + post-processing. The 6th site (ExerciseSwapService, P5-D08) is structurally different and left for that ticket.
 - [ ] P5-D02: #221 — adopt `USER-REPORTED SIGNALS` section in production Inference prompt? Surfaced by #159 Path A as a .txt-only section that has never run in production. Needs product decision (is this a signal we want, and what's the input shape?).
 - [ ] P5-D03: #222 — adopt expanded equipment-aware weight-increment rules in production Inference prompt? Same shape as P5-D02 (.txt-only expansion surfaced by #159).
 - [x] P5-D04: Tier 3 needs-triage spinoffs (`#184`, `#186`, `#187`, `#189`, `#190`, `#192`) — all closed in the 2026-06-02 → 2026-06-04 functional-defect sweep (§2E).
 - [ ] P5-D05: Phase 2 follow-ups — `#167` and `#151` closed in the functional-defect sweep (§2E); `#164`, `#165`, `#166` (MuscleProfile `volumeTolerance` cadence-scaling / EWMA-update / `confidence` lifecycle) remain open.
-- [ ] P5-D09: #268 — consolidate the two ad-hoc `MovementPattern` humanizers (`TrendBannerView`, `ProgramOverviewView`) onto `.displayName` (#258 Slice C, #261). `ready-for-agent`, behavior-preserving.
+- [x] P5-D09: #268 — consolidate the two ad-hoc `MovementPattern` humanizers (`TrendBannerView`, `ProgramOverviewView`) onto `.displayName` (#258 Slice C, #261). **DONE 2026-06-08** (PR #271). Behavior-preserving.
 - [ ] P5-D10: #269 — numeric-projection EDITING on the goal-review screen, deferred from #258 Q1. **Blocked on #166** (confidence lifecycle): `patternProjections` never populates until confidence advances past `bootstrapping`, so there is nothing to edit yet.
 
 **Not yet filed — surfaced in 2026-06-01 dispatch, awaiting decision:**
 
 - [x] P5-D06: heavy-reassessment banner + goal-review screen + ack writer — **SHIPPED & CLOSED 2026-06-08** as #258 (8 slices, PRs #259–#266). Full build narrative in §2F. Spinoffs filed: P5-D09 (#268), P5-D10 (#269).
 - [ ] P5-D07: One-shot DB migration to strip legacy `reassessmentRecords` JSONB key from existing alpha-cohort rows. Harmless dead-key drift until removed; recommended once #178 has shipped long enough that no client expects to round-trip it.
-- [ ] P5-D08: Cross-cutting `ExerciseSwapService.swift:102` carries its own `private static let systemPrompt: String = {...}` inline-prompt pattern. Reported by the #159 cross-cutting grep; candidate for future consolidation, likely batched with P5-D01 (PromptLoader extraction).
+- [ ] P5-D08: Cross-cutting `ExerciseSwapService.swift:103` carries its own `private static let systemPrompt: String = {...}` inline-prompt pattern. Reported again by the #220 grep. **`PromptLoader` (P5-D01, #272) now exists to adopt** — but this site is structurally different (graceful FALLBACK string instead of throw, plus `//`-comment stripping), so adoption must preserve that fallback behavior, not just swap the resolver.
 
 **Operator actions (not code changes):**
 
