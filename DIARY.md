@@ -7,6 +7,49 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-08 — Built the "your training leveled up" goal check-in
+
+**The problem (in plain words):**
+When someone's lifts all move up around the same time, the app treats it as a milestone —
+a good moment to step back and rethink what you're training for. But the old version was
+broken: the coach would nudge you every single workout for about six sessions to "go
+revisit your targets," except there was no screen to do that, no numeric targets to set,
+and no way to tell the app "okay, got it." So it just nagged. This was the whole job:
+build the real check-in, end to end.
+
+**What I changed (one feature, built in eight small safe steps):**
+- **Remembering you dealt with it.** Added a record of which level-up moments you've
+  already acknowledged, so the coach stops bringing it up once you've handled it. (A)
+- **Saving that on the server.** When you update your goal, the server now also files the
+  acknowledgment. (B)
+- **Human-readable lift names.** "Hip Hinge" instead of "hip_hinge" for anything shown to
+  you. (C)
+- **The banner.** A friendly "your training has leveled up" card on the pre-workout
+  screen that names the lifts that moved up, in its own colour so it doesn't blur into the
+  other cards. (D+E1)
+- **Hiding it instantly.** The logic that makes the banner disappear the moment you save,
+  without waiting on the server. (F1)
+- **The goal-review screen itself.** Edit your goal in plain words, pick your focus areas,
+  see your current strength numbers for context, and save. (F2)
+- **Connecting the button.** Wired the banner's "Review goals" button to open that screen,
+  and made the banner vanish after you save (a plain cancel leaves it up). (E2)
+- **Fixing the coach's script.** Pointed the AI at the real "Review goals" button instead
+  of nonexistent "targets," taught it what to say when there aren't specific lifts to name,
+  and made it stay gentle (not pushy) if you haven't gotten around to it yet. (G)
+
+**How it was checked:**
+Every step was written test-first and merged green on its own. Then — because the pieces
+had each been built against a moving baseline — I rebuilt the whole app with all eight
+together and ran every related test suite at once: 122 tests plus the banner-copy and
+lift-name suites, all passing, app builds clean.
+
+**Status:**
+All eight slices merged — PRs #259, #260, #261, #262, #263, #264, #265, #266. The umbrella
+issue #258 now has every box ticked and is ready to close once you've confirmed it feels
+right in the app. Built from the plan we grilled out and wrote up in #258.
+
+---
+
 ## 2026-06-07 — Closed out four "is the AI being honest?" decisions
 
 **The problem (in plain words):**
