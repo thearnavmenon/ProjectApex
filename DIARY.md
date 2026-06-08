@@ -7,6 +7,33 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-08 — Swept an old dead label out of saved user data
+
+**The problem (in plain words):**
+Way back, each saved "trainee model" carried a label called `reassessmentRecords`. The app
+stopped using it months ago and removed it from the code, but the label could still be
+sitting inside existing users' saved rows in the database — harmless clutter, but clutter.
+
+**What I changed (P5-D07):**
+A one-time database cleanup that deletes that dead label from any rows that still have it.
+I copied an already-proven cleanup we'd done before (same exact shape, just a different
+label name), so there were no surprises. I left one copy of the old label alone on purpose —
+it lives in a test file where it actually does a job: it proves the app safely ignores old
+labels it no longer understands.
+
+**How it was checked (this one got the full treatment, since it touches real user data):**
+- One agent traced every place the label is used and confirmed nothing reads or writes it
+  anymore — truly dead.
+- A second agent did an adversarial review of the cleanup, poking at eight different ways it
+  could go wrong (could it run twice safely? could it touch the wrong data? etc.) — all clean.
+- The build system spun up a real throwaway database, applied the cleanup, and it worked.
+- Then the live deploy applied it to the real database — I watched the "apply" step go green
+  (it needed one re-run because an unrelated setup step flaked the first time).
+
+**Status:** merged and live (PR #276). Backlog P5-D07 ticked done.
+
+---
+
 ## 2026-06-08 — Finished the prompt-loader cleanup (the 6th copy)
 
 **The problem (in plain words):**

@@ -298,7 +298,7 @@ Captured here so the BACKLOG sweep on 2026-06-01 has a single landing surface. E
 **Not yet filed — surfaced in 2026-06-01 dispatch, awaiting decision:**
 
 - [x] P5-D06: heavy-reassessment banner + goal-review screen + ack writer — **SHIPPED & CLOSED 2026-06-08** as #258 (8 slices, PRs #259–#266). Full build narrative in §2F. Spinoffs filed: P5-D09 (#268), P5-D10 (#269).
-- [ ] P5-D07: One-shot DB migration to strip legacy `reassessmentRecords` JSONB key from existing alpha-cohort rows. Harmless dead-key drift until removed; recommended once #178 has shipped long enough that no client expects to round-trip it.
+- [x] P5-D07: One-shot DB migration to strip legacy `reassessmentRecords` JSONB key from existing rows. **DONE 2026-06-08** (PR #276, migration `20260608120000_strip_legacy_reassessment_records.sql` + doc-only reverse). Applied to prod (deploy job "Apply migrations" green after an ef-test "Setup Supabase CLI" flake re-run). Verbatim clone of the proven `drop_orphan_top_level_recovery` idiom; adversarially reviewed clean. The fixture `docs/fixtures/trainee-model-snapshot.json` keeps its `reassessmentRecords: []` deliberately — decode-tolerance coverage.
 - [x] P5-D08: `ExerciseSwapService` adopted `PromptLoader` (the 6th/last prompt site). **DONE 2026-06-08** (PR #274). Preserved its graceful fallback via `(try? PromptLoader.load(...)) ?? nil` (both read-error throw and not-found collapse to the stub) + comment-stripping. Verified behavior-preserving (all prompt `.txt` ship flat at the bundle root). `Bundle.main.url(forResource:` now lives ONLY in `PromptLoader.swift` — every prompt site consolidated.
 
 **Operator actions (not code changes):**
