@@ -45,7 +45,7 @@ export interface E1RMSession {
  * for the wider between-session noise floor). Nil cadence (no
  * derived value yet) defaults to the 3-session window.
  */
-const windowSize = (cadenceDays: number | null): number => {
+export const windowSize = (cadenceDays: number | null): number => {
   if (cadenceDays === null) return 3;
   return cadenceDays <= FREQUENCY_SCALED_WINDOW_CADENCE_THRESHOLD_DAYS ? 3 : 4;
 };

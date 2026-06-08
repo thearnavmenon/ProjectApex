@@ -73,6 +73,13 @@ import {
 } from "../_shared/plateau-verdict.ts";
 import { proposePatternConfidence } from "../_shared/pattern-confidence.ts";
 import {
+  CALIBRATION_REVIEW_MIN_ESTABLISHED_MAJORS,
+  currentCapability,
+  deriveProgress,
+  deriveProjection,
+  type PatternProjection,
+} from "../_shared/calibration-projection.ts";
+import {
   appendObservation,
   shouldContribute,
   type InterSessionGapBucket,
@@ -110,6 +117,7 @@ import {
 import {
   CLASSIFIER_BOOTSTRAP_MAX_NOTES,
   CLASSIFIER_BOOTSTRAP_MAX_SESSIONS,
+  MAJOR_PATTERNS,
 } from "../_shared/constants.ts";
 import {
   derivedTrainedJoints,
@@ -1927,6 +1935,90 @@ export async function applySession(
         };
         rulesFired.push("global-phase-advance");
         fieldsChanged.push("lastGlobalPhaseAdvanceFiredAtSessionCount");
+      }
+
+      // #294 (#269): calibration-review projection derivation. Runs at the
+      // pipeline tail so it reads FINALIZED pattern confidence. Once ≥4/6 major
+      // patterns are .established the review is active: set calibrationReviewFiredAt
+      // once (drives the one-time banner), lazily derive a projection for each
+      // established major lacking one (so late-maturing majors get one too;
+      // existing floors are never re-derived), and recompute each projection's
+      // progress (current capability moves). Advance/derive-only — never writes
+      // goal/renegotiation state. Per the #269 grilling + ADR-0005 §projections.
+      const patternsForProj =
+        (newModelJson.patterns as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const exercisesForProj =
+        (newModelJson.exercises as Record<string, Record<string, unknown>> | undefined) ?? {};
+      const priorProjections = newModelJson.projections as {
+        patternProjections?: PatternProjection[];
+        calibrationReviewFiredAt?: string | null;
+        goalLastRenegotiatedAt?: string | null;
+      } | undefined;
+      const establishedMajors = MAJOR_PATTERNS.filter(
+        (mp) => (patternsForProj[mp]?.confidence as string | undefined) === "established",
+      );
+      let calibrationFiredAt = priorProjections?.calibrationReviewFiredAt ?? null;
+      const reviewActive = calibrationFiredAt !== null ||
+        establishedMajors.length >= CALIBRATION_REVIEW_MIN_ESTABLISHED_MAJORS;
+
+      if (reviewActive) {
+        const cadenceFor = (mp: string): number | null =>
+          sessionsCadenceDays(
+            (patternsForProj[mp]?.recentSessionDates as string[] | undefined) ?? [],
+          );
+        const projById = new Map<string, PatternProjection>();
+        for (const p of priorProjections?.patternProjections ?? []) {
+          projById.set(p.pattern, p);
+        }
+        let projectionsChanged = false;
+
+        if (calibrationFiredAt === null) {
+          calibrationFiredAt = incomingLoggedAt.toISOString();
+          projectionsChanged = true;
+          rulesFired.push("calibration-review-fired");
+        }
+
+        // Lazy-derive established majors that lack a projection.
+        for (const mp of establishedMajors) {
+          if (projById.has(mp)) continue;
+          const derived = deriveProjection(
+            mp,
+            patternE1RMSessions(mp, exercisesForProj),
+            cadenceFor(mp),
+            (patternsForProj[mp]?.trend as ProgressionTrend) ?? "progressing",
+          );
+          if (derived !== null) {
+            projById.set(mp, derived);
+            projectionsChanged = true;
+          }
+        }
+
+        // Recompute progress for every existing projection.
+        for (const [mp, proj] of projById) {
+          const current = currentCapability(
+            patternE1RMSessions(mp, exercisesForProj),
+            cadenceFor(mp),
+          );
+          if (current === null) continue;
+          const newProgress = deriveProgress(current, proj.floor, proj.stretch);
+          if (newProgress !== proj.progress) {
+            projById.set(mp, { ...proj, progress: newProgress });
+            projectionsChanged = true;
+          }
+        }
+
+        if (projectionsChanged) {
+          newModelJson = {
+            ...newModelJson,
+            projections: {
+              patternProjections: Array.from(projById.values()),
+              calibrationReviewFiredAt: calibrationFiredAt,
+              goalLastRenegotiatedAt: priorProjections?.goalLastRenegotiatedAt ?? null,
+            },
+          };
+          rulesFired.push("calibration-projection");
+          fieldsChanged.push("projections");
+        }
       }
     }
 

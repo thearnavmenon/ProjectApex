@@ -2229,6 +2229,70 @@ orchestratorTest(
   },
 );
 
+orchestratorTest(
+  "#294 (#269): calibration review fires + derives projections once ≥4/6 major patterns establish; never before",
+  async () => {
+    const userId = await seedFreshUser();
+
+    // A full-body session training 4 distinct major patterns with stable loads.
+    async function applyFullBody(day: number): Promise<Record<string, unknown>> {
+      await applySession(
+        {
+          user_id: userId,
+          session_id: crypto.randomUUID(),
+          session_payload: {
+            logged_at: `2026-09-${String(day).padStart(2, "0")}T10:00:00Z`,
+            set_logs: [
+              { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" }, // horizontal_push
+              { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 140, reps_completed: 5, intent: "top" }, // squat
+              { exercise_id: "barbell_row", set_number: 1, weight_kg: 80, reps_completed: 5, intent: "top" }, // horizontal_pull
+              { exercise_id: "overhead_press", set_number: 1, weight_kg: 60, reps_completed: 5, intent: "top" }, // vertical_push
+            ],
+          },
+        },
+        sql,
+        { stage2Hook: noopStage2 },
+      );
+      const rows = await sql`
+        SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+      `;
+      return rows[0].model_json as Record<string, unknown>;
+    }
+
+    // After 5 sessions the 4 majors are still .calibrating → review NOT fired,
+    // no projections.
+    let modelJson: Record<string, unknown> = {};
+    for (let d = 1; d <= 5; d++) modelJson = await applyFullBody(d);
+    const before = modelJson.projections as Record<string, unknown> | undefined;
+    if (before !== undefined) {
+      assertEquals(before.calibrationReviewFiredAt ?? null, null);
+      assertEquals((before.patternProjections as unknown[] | undefined)?.length ?? 0, 0);
+    }
+
+    // 6th session: all 4 majors reach .established → ≥4/6 → review fires + derives.
+    modelJson = await applyFullBody(6);
+    const proj = modelJson.projections as {
+      patternProjections: Array<Record<string, unknown>>;
+      calibrationReviewFiredAt: string | null;
+    };
+    assertExists(proj);
+    assertEquals(proj.calibrationReviewFiredAt !== null, true);
+    assertEquals(proj.patternProjections.length, 4);
+    const patterns = proj.patternProjections.map((p) => p.pattern as string).sort();
+    assertEquals(patterns, ["horizontal_pull", "horizontal_push", "squat", "vertical_push"]);
+    for (const p of proj.patternProjections) {
+      const floor = p.floor as number;
+      const stretch = p.stretch as number;
+      assertEquals(floor > 0, true);
+      assertEquals(stretch > floor, true);
+      assertEquals(
+        ["behind", "on_track", "ahead", "achieved"].includes(p.progress as string),
+        true,
+      );
+    }
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).
