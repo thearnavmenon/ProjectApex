@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-08 — Turned on two coaching rules the AI already had the data for
+
+**The problem (in plain words):**
+Two bits of coaching guidance had been written months ago but never actually switched on in
+the live AI. The interesting part: in both cases the app was already *sending* the AI the
+data it needed — it just wasn't told to use it. So we were paying to ship the data and
+getting nothing back.
+
+**What I changed:**
+- **#221 — react to what you tell it mid-workout.** If you flag "that hurt" or "my form
+  broke down" on a set, or you swap to a different set type than it suggested, the AI now
+  reacts on your next set. Pain is one-strike: it backs off the weight and flags it, rather
+  than pushing you through. This was close to a safety gap before — the app knew you'd
+  flagged pain but never told the coach to do anything about it. (One small correction baked
+  in: the old draft pointed the AI at the wrong part of the data; I fixed it to read the
+  arrays that actually carry those signals.)
+- **#222 — stop prescribing impossible machine weights.** Gym weight-stack machines go up in
+  5 kg steps, but the AI's rules wrongly let it ask for things like 37.5 kg on a leg press —
+  a weight that physically isn't on the stack. I split machines into their own "round to the
+  nearest 5 kg" rule. This matches what the app already knows in its own weight tables.
+
+**How it was checked:**
+I had two fresh agents research each one first — confirming the data already flows and the
+change is low-risk — then you made the product calls (adopt the full pain/form/deviation set;
+prompt-fix the machines now). Both changes are golden-locked with tests that assert the new
+rules are actually in the live prompt. Tests green.
+
+**Status:** both merged and closed — #221 (PR #278), #222 (PR #280). Filed a follow-up
+(#279) to make the machine-weight rounding bulletproof in code (right now it's the AI's
+best effort). Also flagged that cable machines have the same 5-kg-vs-2.5-kg question — left
+that one for a separate decision since it's genuinely debatable.
+
+---
+
 ## 2026-06-08 — Swept an old dead label out of saved user data
 
 **The problem (in plain words):**
