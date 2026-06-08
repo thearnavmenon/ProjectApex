@@ -121,6 +121,7 @@ import {
 } from "../_shared/note-classifier.ts";
 import { LLMPermanentError, LLMTransientError } from "../_shared/llm-retry.ts";
 import { backfillPatternConfidence } from "../_shared/pattern-confidence-backfill.ts";
+import { backfillPatternSessionCount } from "../_shared/pattern-session-count-backfill.ts";
 
 export interface UpdateTraineeModelRequest {
   user_id: string;
@@ -815,6 +816,11 @@ function applyPerPatternRules(
         pattern,
         currentPhase: "accumulation",
         sessionsInPhase: 0,
+        // #284 (ADR-0020): per-pattern total session counter (EF-only),
+        // distinct from sessionsInPhase (which resets on phase transition).
+        // Drives pattern confidence advancement; incremented below per
+        // session-apply that trains the pattern.
+        sessionCount: 0,
         consecutiveForceDeloadsOnPattern: 0,
         lastPhaseTransitionAtSessionCount: 0,
         recentSessionDates: [],
@@ -854,6 +860,14 @@ function applyPerPatternRules(
     const sessionsInPhase = wasTrainedThisSession
       ? baseSessionsInPhase + 1
       : baseSessionsInPhase;
+
+    // #284 (ADR-0020): per-pattern total session counter (drives pattern
+    // confidence). Pre-existing patterns are seeded by backfillPatternSessionCount
+    // upstream, so `profile.sessionCount` is defined here.
+    const basePatternSessionCount = (profile.sessionCount as number) ?? 0;
+    const patternSessionCount = wasTrainedThisSession
+      ? basePatternSessionCount + 1
+      : basePatternSessionCount;
 
     const baseRecentDates =
       (profile.recentSessionDates as string[] | undefined) ?? [];
@@ -944,6 +958,7 @@ function applyPerPatternRules(
       ...profile,
       currentPhase: advanced.newPhase,
       sessionsInPhase: advanced.newSessionsInPhase,
+      sessionCount: patternSessionCount,
       consecutiveForceDeloadsOnPattern: advanced.newConsecutiveForceDeloads,
       lastPhaseTransitionAtSessionCount:
         advanced.newLastPhaseTransitionAtSessionCount,
@@ -1694,8 +1709,20 @@ export async function applySession(
         fieldsChanged.push(`patterns.confidence-backfill.count=${backfilled.backfilledCount}`);
       }
 
+      // #284 (ADR-0020): backfill the per-pattern sessionCount on pre-existing
+      // patterns from recentSessionDates.length (conservative floor). Idempotent:
+      // already-set entries are unchanged. Runs before applyPerPatternRules so
+      // the increment reads a seeded value.
+      const sessionCountBackfilled = backfillPatternSessionCount(backfilled.patterns);
+      if (sessionCountBackfilled.backfilledCount > 0) {
+        rulesFired.push("pattern-session-count-backfill");
+        fieldsChanged.push(
+          `patterns.session-count-backfill.count=${sessionCountBackfilled.backfilledCount}`,
+        );
+      }
+
       const ruled = applyPerPatternRules(
-        backfilled.patterns,
+        sessionCountBackfilled.patterns,
         trainedSets.patterns,
         incomingLoggedAt,
         newSessionCount,

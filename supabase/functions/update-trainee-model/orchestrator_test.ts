@@ -2077,6 +2077,66 @@ orchestratorTest(
   },
 );
 
+orchestratorTest(
+  "#284 (ADR-0020): per-pattern sessionCount increments once per trained apply; untrained patterns hold",
+  async () => {
+    const userId = await seedFreshUser();
+
+    async function applyBench(day: string): Promise<void> {
+      await applySession(
+        {
+          user_id: userId,
+          session_id: crypto.randomUUID(),
+          session_payload: {
+            logged_at: `2026-06-${day}T10:00:00Z`,
+            set_logs: [
+              { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" },
+            ],
+          },
+        },
+        sql,
+        { stage2Hook: noopStage2 },
+      );
+    }
+
+    async function patterns(): Promise<Record<string, Record<string, unknown>>> {
+      const rows = await sql`
+        SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+      `;
+      return (rows[0].model_json as Record<string, unknown>).patterns as Record<
+        string,
+        Record<string, unknown>
+      >;
+    }
+
+    await applyBench("01");
+    assertEquals((await patterns())["horizontal_push"].sessionCount, 1);
+
+    await applyBench("02");
+    assertEquals((await patterns())["horizontal_push"].sessionCount, 2);
+
+    // A squat-only session must not bump the (untrained) horizontal_push counter,
+    // while squat's own counter starts at 1.
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: {
+          logged_at: "2026-06-03T10:00:00Z",
+          set_logs: [
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 140, reps_completed: 5, intent: "top" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+    const after = await patterns();
+    assertEquals(after["horizontal_push"].sessionCount, 2);
+    assertEquals(after["squat"].sessionCount, 1);
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).
