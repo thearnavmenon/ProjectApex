@@ -1161,6 +1161,12 @@ actor AIInferenceService {
 
     // MARK: - System Prompt
     //
+    // VERSION: 7.0 — 2026-06-08 — #221: added REACTING TO USER-REPORTED SIGNALS
+    // FROM PRIOR SETS block (pain / form_breakdown / intent-deviation reactions
+    // off within_session_performance + current_exercise_sets_today — those
+    // fields already shipped in the payload; only the guidance was missing).
+    // Cumulative cache-bust on top of v6.0.
+    //
     // VERSION: 6.0 — 2026-05-13 — B4 (#89) digest collapse: added PRESCRIPTION
     // ACCURACY, CROSS-EXERCISE TRANSFER, CROSS-PATTERN FATIGUE INTERACTIONS,
     // ACTIVE LIMITATIONS, FORM-DEGRADATION FLAG blocks; rewrote DELOAD DETECTION
