@@ -292,10 +292,12 @@ Captured here so the BACKLOG sweep on 2026-06-01 has a single landing surface. E
 - [ ] P5-D03: #222 — adopt expanded equipment-aware weight-increment rules in production Inference prompt? Same shape as P5-D02 (.txt-only expansion surfaced by #159).
 - [x] P5-D04: Tier 3 needs-triage spinoffs (`#184`, `#186`, `#187`, `#189`, `#190`, `#192`) — all closed in the 2026-06-02 → 2026-06-04 functional-defect sweep (§2E).
 - [ ] P5-D05: Phase 2 follow-ups — `#167` and `#151` closed in the functional-defect sweep (§2E); `#164`, `#165`, `#166` (MuscleProfile `volumeTolerance` cadence-scaling / EWMA-update / `confidence` lifecycle) remain open.
+- [ ] P5-D09: #268 — consolidate the two ad-hoc `MovementPattern` humanizers (`TrendBannerView`, `ProgramOverviewView`) onto `.displayName` (#258 Slice C, #261). `ready-for-agent`, behavior-preserving.
+- [ ] P5-D10: #269 — numeric-projection EDITING on the goal-review screen, deferred from #258 Q1. **Blocked on #166** (confidence lifecycle): `patternProjections` never populates until confidence advances past `bootstrapping`, so there is nothing to edit yet.
 
 **Not yet filed — surfaced in 2026-06-01 dispatch, awaiting decision:**
 
-- [ ] P5-D06: iOS UI for heavy-reassessment screen + ack-set writer. #178 ships the prompt signal but no UI surface; the AI may mention reassessment for ~6 consecutive sessions per fire event (matches server cooldown) until this lands. Adds `acknowledgedTriggeringSessionCounts: Set<Int>` to `TraineeModel` JSONB + iOS UI to dismiss. **File as an issue when ready to scope.**
+- [x] P5-D06: heavy-reassessment banner + goal-review screen + ack writer — **SHIPPED & CLOSED 2026-06-08** as #258 (8 slices, PRs #259–#266). Full build narrative in §2F. Spinoffs filed: P5-D09 (#268), P5-D10 (#269).
 - [ ] P5-D07: One-shot DB migration to strip legacy `reassessmentRecords` JSONB key from existing alpha-cohort rows. Harmless dead-key drift until removed; recommended once #178 has shipped long enough that no client expects to round-trip it.
 - [ ] P5-D08: Cross-cutting `ExerciseSwapService.swift:102` carries its own `private static let systemPrompt: String = {...}` inline-prompt pattern. Reported by the #159 cross-cutting grep; candidate for future consolidation, likely batched with P5-D01 (PromptLoader extraction).
 
@@ -324,3 +326,18 @@ Supporting work in the same window:
 - [x] Greened 2 pre-existing failing tests (#181 stale id, #178 brittle whitespace). PR #234.
 
 Cross-cutting sites surfaced but left **grep-and-report** (awaiting authorization, per CLAUDE.md Process commitment 2): #167 sibling `primary_muscle` leak in `update-trainee-model/index.ts`; #192 sibling day-label mint point in `ProgramGenerationService`; #172 second `generateSkeleton` caller in `OnboardingView` (safe as-is — no history at onboarding); #189 `SupabaseClient.deactivatePrograms` now production-unused but test-covered (retained, not deleted).
+
+### 2F — P5-D06 heavy-reassessment feature (2026-06-08)
+
+The "your training leveled up" goal check-in (#258). The server's global-phase-advance (GPA) signal already fed the SessionPlan LLM prompt (#178), but with no UI surface, no acknowledgment, and no goal-review screen — so the coach nagged "revisit your targets" for ~6 sessions per fire with nowhere to go. Scoped via a 6-question `grill-me` session (each question independently reviewed by a second agent — two recommendations per question, best one taken), locked to a PRD, and built as 8 tracer-bullet slices: branch-per-slice, PR-before-merge, auto-merged on local-green (iOS Build & Test is the known flake; EF deploy is gated only on the reliable `ef-test`).
+
+- [x] A: #259 — `acknowledgedTriggeringSessionCounts: Set<Int>` on `TraineeModel` (camelCase JSONB, `.sorted()` encode, tolerant `decodeIfPresent ?? []`) + suppression in `deriveHeavyReassessmentSignal` (checks the *current* triggering count, so a later GPA fire still surfaces) + fixed the now-false comment at `TraineeModelDigest.swift:96-103`.
+- [x] B: #260 — ack write path. `update-trainee-goal` EF gains optional `acknowledge_triggering_session_count`; idempotent `COALESCE(...,'[]') || to_jsonb(ack)` append guarded by `WHERE NOT (... @> ...)` (the COALESCE is load-bearing — bare `->` `@>` returns NULL, a three-valued-logic trap that would silently never append the first ack). iOS top-level snake_case payload field, absent-when-nil. DB integration tests in `orchestrator_test.ts`.
+- [x] C: #261 — `MovementPattern.displayName` (exhaustive title-cased map). Grep flagged two ad-hoc humanizers → spinoff #268 (P5-D09).
+- [x] D+E1: #262 — pre-workout "leveled up" banner (distinct non-amber accent, names ≤3 patterns + "and more", mandatory empty-list fallback) + tested pure `HeavyReassessmentBannerCopy` helper. Dismiss is transient (no ack).
+- [x] F1: #263 — `TraineeModelService.acknowledgeReassessment` — the load-bearing LOCAL-cache banner-hide. The EF returns `{ok, goal}`, not the model, so the server round-trip can't refresh the cache; Save mutates the cached model + `store.save()` so the banner (and the LLM block) vanish immediately.
+- [x] F2: #264 — `GoalReviewView` screen (edit goal statement + focus-area multi-select, read-only capability numbers) + tested pure `makeGoalPayload` helper.
+- [x] E2: #265 — wire the banner "Review goals" CTA → the screen carrying `triggeringSessionCount`; re-derive the signal on sheet dismiss so a saved goal hides the banner (a cancel leaves it).
+- [x] G: #266 — prompt edits: `revisit targets` → the real "Review goals" label, empty-patterns fallback, re-blessed the `sessions_since_triggered` 2+ branch for the ack world, kept the no-numeric-targets guardrail. Golden-locked with anchors.
+
+Verification: each slice TDD-first; final integration build on merged `main` green (122 XCTest + the MovementPattern/HeavyReassessmentBannerCopy Swift-Testing suites, 0 failures). EF live via CI deploy on merge to `main`. Diary entry #267. Slice resequencing vs the locked plan: F split into F1 (logic) + F2 (UI); D folded into D+E1; Q5's false-comment fix landed in A, so G was prompt-text only. Closed after in-app confirmation. Spinoffs filed: #268 (P5-D09, humanizer consolidation, `ready-for-agent`), #269 (P5-D10, numeric-projection editing, blocked on #166).
