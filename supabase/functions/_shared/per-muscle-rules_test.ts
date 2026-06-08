@@ -16,6 +16,7 @@ import {
   bootstrapMuscleProfile,
   computeFocusWeight,
   computeVolumeDeficit,
+  proposeMuscleConfidence,
 } from "./per-muscle-rules.ts";
 
 Deno.test("bootstrapMuscleProfile: legs returns ADR-0005 defaults + Q1-locked MEV threshold", () => {
@@ -179,4 +180,57 @@ Deno.test("computeFocusWeight: 1.0 iff muscleGroup ∈ goal.focusAreas (Q4 binar
   assertEquals(computeFocusWeight("legs", ["legs", "back"]), 1.0);
   // Non-membership → 0.0.
   assertEquals(computeFocusWeight("chest", ["legs", "back"]), 0.0);
+});
+
+Deno.test("proposeMuscleConfidence: empty effective set (no participating pattern has a profile) → bootstrapping", () => {
+  assertEquals(proposeMuscleConfidence("legs", {}), "bootstrapping");
+});
+
+Deno.test("proposeMuscleConfidence: all participating patterns still bootstrapping → bootstrapping (no vacuous established)", () => {
+  assertEquals(
+    proposeMuscleConfidence("legs", {
+      squat: { confidence: "bootstrapping" },
+      hip_hinge: { confidence: "bootstrapping" },
+    }),
+    "bootstrapping",
+  );
+});
+
+Deno.test("proposeMuscleConfidence: ≥1 participating pattern past bootstrapping → calibrating", () => {
+  assertEquals(
+    proposeMuscleConfidence("legs", {
+      squat: { confidence: "calibrating" },
+      hip_hinge: { confidence: "bootstrapping" },
+    }),
+    "calibrating",
+  );
+});
+
+Deno.test("proposeMuscleConfidence: 2/3 supermajority established (2 of 2 trained) → established", () => {
+  assertEquals(
+    proposeMuscleConfidence("legs", {
+      squat: { confidence: "established" },
+      hip_hinge: { confidence: "established" },
+    }),
+    "established",
+  );
+});
+
+Deno.test("proposeMuscleConfidence: short of 2/3 (1 of 2 established) → calibrating", () => {
+  assertEquals(
+    proposeMuscleConfidence("legs", {
+      squat: { confidence: "established" },
+      hip_hinge: { confidence: "calibrating" },
+    }),
+    "calibrating",
+  );
+});
+
+Deno.test("proposeMuscleConfidence: biceps (zero major patterns; isolation only) CAN reach established", () => {
+  assertEquals(
+    proposeMuscleConfidence("biceps", {
+      isolation: { confidence: "established" },
+    }),
+    "established",
+  );
 });
