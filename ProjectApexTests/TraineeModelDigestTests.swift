@@ -1803,4 +1803,79 @@ final class TraineeModelDigestTests: XCTestCase {
                         "overhead_press→incline_bench_press"],
                        "Only transfers with R²≥0.4 AND pairedObservations≥5 should surface in the digest")
     }
+
+    // MARK: ─── #269: deriveCalibrationReviewSignal ──────────────────────────
+
+    private func makeProjection(_ pattern: MovementPattern) -> PatternProjection {
+        PatternProjection(pattern: pattern, floor: 100, stretch: 110, progress: .onTrack)
+    }
+
+    func test_deriveCalibrationReviewSignal_nilWhenReviewNeverFired() {
+        var model = makeBaselineModel()
+        // Projections present but calibrationReviewFiredAt nil → no signal.
+        model.projections = ProjectionState(
+            patternProjections: [makeProjection(.squat)],
+            calibrationReviewFiredAt: nil
+        )
+
+        XCTAssertNil(TraineeModelDigest.deriveCalibrationReviewSignal(from: model),
+            "No signal until calibration review has fired")
+    }
+
+    func test_deriveCalibrationReviewSignal_nilWhenAcknowledged() {
+        var model = makeBaselineModel()
+        model.projections = ProjectionState(
+            patternProjections: [makeProjection(.squat)],
+            calibrationReviewFiredAt: ref
+        )
+        model.calibrationReviewAcknowledged = true
+
+        XCTAssertNil(TraineeModelDigest.deriveCalibrationReviewSignal(from: model),
+            "An acknowledged calibration review must silence the banner signal")
+    }
+
+    func test_deriveCalibrationReviewSignal_nilWhenProjectionsEmpty() {
+        var model = makeBaselineModel()
+        model.projections = ProjectionState(
+            patternProjections: [],
+            calibrationReviewFiredAt: ref
+        )
+
+        XCTAssertNil(TraineeModelDigest.deriveCalibrationReviewSignal(from: model),
+            "No signal when there are no projections to display")
+    }
+
+    func test_deriveCalibrationReviewSignal_returnsSortedProjectionsWhenEligible() {
+        var model = makeBaselineModel()
+        // Out-of-rawValue order on input — derive must sort by pattern.rawValue.
+        model.projections = ProjectionState(
+            patternProjections: [
+                makeProjection(.squat),          // "squat"
+                makeProjection(.hipHinge),       // "hip_hinge"
+                makeProjection(.horizontalPush), // "horizontal_push"
+            ],
+            calibrationReviewFiredAt: ref
+        )
+        model.calibrationReviewAcknowledged = false
+
+        let signal = TraineeModelDigest.deriveCalibrationReviewSignal(from: model)
+
+        XCTAssertNotNil(signal)
+        XCTAssertEqual(signal?.projections.map(\.pattern),
+                       [.hipHinge, .horizontalPush, .squat],
+                       "Projections must be sorted by pattern.rawValue")
+    }
+
+    func test_digest_calibrationReviewSignal_assignedFromDerive() {
+        var model = makeBaselineModel()
+        model.projections = ProjectionState(
+            patternProjections: [makeProjection(.squat)],
+            calibrationReviewFiredAt: ref
+        )
+
+        let digest = TraineeModelDigest(from: model, asOf: ref)
+
+        XCTAssertEqual(digest.calibrationReviewSignal?.projections.map(\.pattern), [.squat],
+            "init(from:) must assign the derived calibration-review signal")
+    }
 }

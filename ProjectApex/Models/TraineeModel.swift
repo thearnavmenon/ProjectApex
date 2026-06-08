@@ -45,6 +45,10 @@ struct TraineeModel: Codable, Sendable, Hashable {
     /// `TraineeModelDigest.deriveHeavyReassessmentSignal`. Grows ~1 int per GPA
     /// event (≤ ~40/yr), so no pruning is needed.
     var acknowledgedTriggeringSessionCounts: Set<Int>
+    /// Whether the user has seen the one-time calibration-review display (#269).
+    /// Set true once they acknowledge the read-only projection screen, which
+    /// suppresses the banner via `TraineeModelDigest.deriveCalibrationReviewSignal`.
+    var calibrationReviewAcknowledged: Bool
 
     init(
         activeProgramId: UUID? = nil,
@@ -64,7 +68,8 @@ struct TraineeModel: Codable, Sendable, Hashable {
         totalSessionCount: Int = 0,
         lastClassifiedNoteCreatedAt: Date? = nil,
         lastGlobalPhaseAdvanceFiredAtSessionCount: Int? = nil,
-        acknowledgedTriggeringSessionCounts: Set<Int> = []
+        acknowledgedTriggeringSessionCounts: Set<Int> = [],
+        calibrationReviewAcknowledged: Bool = false
     ) {
         self.activeProgramId = activeProgramId
         self.goal = goal
@@ -84,6 +89,7 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.lastClassifiedNoteCreatedAt = lastClassifiedNoteCreatedAt
         self.lastGlobalPhaseAdvanceFiredAtSessionCount = lastGlobalPhaseAdvanceFiredAtSessionCount
         self.acknowledgedTriggeringSessionCounts = acknowledgedTriggeringSessionCounts
+        self.calibrationReviewAcknowledged = calibrationReviewAcknowledged
     }
 
     // MARK: Custom Codable for JSONB shape parity (slice A12 / #83)
@@ -118,6 +124,7 @@ struct TraineeModel: Codable, Sendable, Hashable {
         case lastClassifiedNoteCreatedAt
         case lastGlobalPhaseAdvanceFiredAtSessionCount
         case acknowledgedTriggeringSessionCounts
+        case calibrationReviewAcknowledged = "calibration_review_acknowledged"
     }
 
     init(from decoder: Decoder) throws {
@@ -200,6 +207,11 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.acknowledgedTriggeringSessionCounts = Set(try c.decodeIfPresent(
             [Int].self, forKey: .acknowledgedTriggeringSessionCounts
         ) ?? [])
+        // Tolerant decode (#269): older rows / server JSON lack the key — default
+        // to false (the banner is still eligible to fire).
+        self.calibrationReviewAcknowledged = try c.decodeIfPresent(
+            Bool.self, forKey: .calibrationReviewAcknowledged
+        ) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -236,6 +248,7 @@ struct TraineeModel: Codable, Sendable, Hashable {
         // hash-ordered (randomized per-process), which breaks model_json parity
         // (cf. prescriptionAccuracy / recentlyAdvancedPatterns sorting). #258.
         try c.encode(acknowledgedTriggeringSessionCounts.sorted(), forKey: .acknowledgedTriggeringSessionCounts)
+        try c.encode(calibrationReviewAcknowledged, forKey: .calibrationReviewAcknowledged)
     }
 
     // MARK: Major patterns (calibration / phase-advance gating)

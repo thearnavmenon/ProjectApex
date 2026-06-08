@@ -81,6 +81,10 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
     /// this projection is derived at iOS digest-assembly time from that
     /// persisted value plus the per-pattern transition log (#178).
     var heavyReassessmentSignal: HeavyReassessmentSignal?
+    /// Present iff the calibration review has fired and the user has not yet
+    /// acknowledged the one-time read-only projection display (#269). Drives the
+    /// pre-workout calibration banner + read-only target screen. Nil otherwise.
+    var calibrationReviewSignal: CalibrationReviewSignal?
 
     /// Threshold below which a fatigue interaction is excluded from
     /// coaching prompts per ADR-0005.
@@ -119,7 +123,22 @@ struct TraineeModelDigest: Codable, Sendable, Hashable {
         case perExerciseSummary        = "per_exercise_summary"
         case weeklyFatigue             = "weekly_fatigue"
         case heavyReassessmentSignal   = "heavy_reassessment_signal"
+        case calibrationReviewSignal   = "calibration_review_signal"
     }
+}
+
+// MARK: - CalibrationReviewSignal
+
+/// Present iff calibration review has fired (server set
+/// `ProjectionState.calibrationReviewFiredAt`) and the user has not yet
+/// acknowledged the one-time read-only projection display (#269). Carries the
+/// per-pattern floor/stretch projections to render the read-only target screen.
+struct CalibrationReviewSignal: Codable, Sendable, Hashable {
+    /// Per-pattern floor/stretch projections, sorted by `pattern.rawValue` for
+    /// deterministic ordering.
+    var projections: [PatternProjection]
+
+    enum CodingKeys: String, CodingKey { case projections }
 }
 
 // MARK: - HeavyReassessmentSignal
@@ -208,6 +227,7 @@ extension TraineeModelDigest {
             ?? WeekFatigueSignals.compute(from: [], sessionCount: 0)
 
         let heavyReassessmentSignal = Self.deriveHeavyReassessmentSignal(from: model)
+        let calibrationReviewSignal = Self.deriveCalibrationReviewSignal(from: model)
 
         self.init(
             goal: model.goal,
@@ -223,7 +243,8 @@ extension TraineeModelDigest {
             lastGlobalPhaseAdvanceFiredAtSessionCount: model.lastGlobalPhaseAdvanceFiredAtSessionCount,
             perExerciseSummary: perExerciseSummary,
             weeklyFatigue: resolvedWeeklyFatigue,
-            heavyReassessmentSignal: heavyReassessmentSignal
+            heavyReassessmentSignal: heavyReassessmentSignal,
+            calibrationReviewSignal: calibrationReviewSignal
         )
     }
 
@@ -258,6 +279,19 @@ extension TraineeModelDigest {
             sessionsSinceTriggered: delta,
             recentlyAdvancedPatterns: recentPatterns
         )
+    }
+
+    /// Returns a signal iff calibration review has fired and the user has not yet
+    /// acknowledged the one-time read-only display (#269). Nil when review hasn't
+    /// fired, when already acknowledged, or when there are no projections to show.
+    static func deriveCalibrationReviewSignal(
+        from model: TraineeModel
+    ) -> CalibrationReviewSignal? {
+        guard let proj = model.projections, proj.calibrationReviewFiredAt != nil else { return nil }
+        guard !model.calibrationReviewAcknowledged else { return nil }
+        let ps = proj.patternProjections.sorted { $0.pattern.rawValue < $1.pattern.rawValue }
+        guard !ps.isEmpty else { return nil }
+        return CalibrationReviewSignal(projections: ps)
     }
 }
 

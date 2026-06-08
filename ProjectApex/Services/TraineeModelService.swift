@@ -106,6 +106,16 @@ actor TraineeModelService {
         try await store.save(model)
     }
 
+    /// #269: records local acknowledgment of the one-time calibration-review
+    /// display so the pre-workout calibration banner disappears immediately once
+    /// the user has seen the read-only projection screen. No-op if no model is
+    /// cached. Idempotent (a plain Bool set).
+    func acknowledgeCalibrationReview() async throws {
+        guard var model = await store.load() else { return }
+        model.calibrationReviewAcknowledged = true
+        try await store.save(model)
+    }
+
     // MARK: - Write — enqueue path
 
     /// Enqueues a `trainee_model_update` item carrying the session-
