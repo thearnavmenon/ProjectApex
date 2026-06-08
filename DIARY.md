@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-08 — Two small cleanups: tidy lift names, and one prompt loader
+
+**The problem (in plain words):**
+Two bits of leftover duplication, both loose ends from earlier work.
+1. Movement names like "hip_hinge" were being turned into "Hip Hinge" by hand in two
+   different screens — even though we'd just built one proper place to do that.
+2. Five different services each kept their own near-identical copy of the code that finds
+   and reads a prompt file out of the app bundle.
+
+**What I changed:**
+- **#268 — lift names.** Pointed both screens at the shared `displayName` and deleted the
+  two hand-rolled helpers. Same words on screen, less code.
+- **#220 — one prompt loader.** Made one small `PromptLoader` that finds and reads a
+  bundled prompt, and had all five services call it instead of repeating themselves. Each
+  service keeps its own error message and any extra tweaks it makes to the text, so nothing
+  behaves differently. The ticket only named three services; I found two more identical
+  copies and folded them in too (you okayed doing all five). While in there I spotted a
+  sixth, odder copy in the exercise-swap code — it quietly falls back to a default instead
+  of erroring — so I left that one for its own ticket (P5-D08) rather than force it into the
+  same mould.
+
+**How it was checked:**
+Both built clean. #268: app builds, no test depended on the old text. #220: a new little
+test (a real prompt loads; a missing one returns nothing instead of crashing) plus the
+existing prompt-content tests stayed green — 97 + 9 tests passing. (One gotcha: the test
+target doesn't auto-pick-up new test files like the app does, so I had to register the new
+test in the Xcode project by hand before it would run.)
+
+**Status:** both merged and closed — #268 (PR #271), #220 (PR #272).
+
+---
+
 ## 2026-06-08 — Built the "your training leveled up" goal check-in
 
 **The problem (in plain words):**
