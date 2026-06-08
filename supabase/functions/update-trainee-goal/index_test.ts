@@ -185,3 +185,44 @@ Deno.test("validateRequest_ack_nonNumber_returns_400", () => {
     true,
   );
 });
+
+// #296 (#269): stretch_edits validation.
+
+Deno.test("validateRequest_stretch_edits_absent_still_valid", () => {
+  const result = validateRequest(baseRequest());
+  assertEquals("error" in result, false);
+});
+
+Deno.test("validateRequest_stretch_edits_valid_accepted", () => {
+  const result = validateRequest(
+    baseRequest({ stretch_edits: [{ pattern: "squat", stretch: 150 }] }),
+  );
+  assertEquals("error" in result, false);
+  if (!("error" in result)) {
+    assertEquals(result.stretch_edits, [{ pattern: "squat", stretch: 150 }]);
+  }
+});
+
+Deno.test("validateRequest_stretch_edits_non_array_returns_400", () => {
+  const result = validateRequest(baseRequest({ stretch_edits: { pattern: "squat", stretch: 150 } }));
+  assertEquals("error" in result, true);
+});
+
+Deno.test("validateRequest_stretch_edits_non_major_pattern_returns_400", () => {
+  const result = validateRequest(
+    baseRequest({ stretch_edits: [{ pattern: "isolation", stretch: 30 }] }),
+  );
+  assertEquals("error" in result, true);
+});
+
+Deno.test("validateRequest_stretch_edits_non_positive_stretch_returns_400", () => {
+  const zero = validateRequest(baseRequest({ stretch_edits: [{ pattern: "squat", stretch: 0 }] }));
+  const neg = validateRequest(baseRequest({ stretch_edits: [{ pattern: "squat", stretch: -5 }] }));
+  assertEquals("error" in zero, true);
+  assertEquals("error" in neg, true);
+});
+
+Deno.test("validateRequest_stretch_edits_non_object_entry_returns_400", () => {
+  const result = validateRequest(baseRequest({ stretch_edits: ["squat"] }));
+  assertEquals("error" in result, true);
+});

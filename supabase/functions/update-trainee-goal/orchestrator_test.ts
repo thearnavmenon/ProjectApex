@@ -350,6 +350,106 @@ goalTest(
   },
 );
 
+// #296 (#269): stretch_edits write-path — upward-only clamp on
+// projections.patternProjections.
+
+const PROJECTIONS_SEED = {
+  goal: GOAL_A,
+  projections: {
+    patternProjections: [
+      { pattern: "squat", floor: 140, stretch: 150, progress: "on_track" },
+      { pattern: "horizontal_push", floor: 100, stretch: 107.5, progress: "on_track" },
+    ],
+    calibrationReviewFiredAt: "2026-05-12T10:00:00.000Z",
+    goalLastRenegotiatedAt: null,
+  },
+};
+
+async function readProjections(
+  userId: string,
+): Promise<Array<Record<string, unknown>>> {
+  const rows = await sql`
+    SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+  `;
+  const proj = (rows[0].model_json as Record<string, unknown>).projections as {
+    patternProjections: Array<Record<string, unknown>>;
+  };
+  return proj.patternProjections;
+}
+
+goalTest(
+  "#296: an upward stretch edit is accepted; the floor is untouched",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(PROJECTIONS_SEED);
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, stretch_edits: [{ pattern: "squat", stretch: 160 }] },
+      sql,
+    );
+    const squat = (await readProjections(userId)).find((p) => p.pattern === "squat")!;
+    assertEquals(squat.stretch, 160);
+    assertEquals(squat.floor, 140); // immovable
+  },
+);
+
+goalTest(
+  "#296: a downward (or below-floor) stretch edit is clamped to a no-op",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(PROJECTIONS_SEED);
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, stretch_edits: [{ pattern: "squat", stretch: 145 }] },
+      sql,
+    );
+    const squat = (await readProjections(userId)).find((p) => p.pattern === "squat")!;
+    assertEquals(squat.stretch, 150); // unchanged — upward-only
+  },
+);
+
+goalTest(
+  "#296: only the targeted pattern's stretch changes; others are preserved",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(PROJECTIONS_SEED);
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, stretch_edits: [{ pattern: "squat", stretch: 170 }] },
+      sql,
+    );
+    const proj = await readProjections(userId);
+    assertEquals(proj.find((p) => p.pattern === "squat")!.stretch, 170);
+    assertEquals(proj.find((p) => p.pattern === "horizontal_push")!.stretch, 107.5);
+  },
+);
+
+goalTest(
+  "#296: edit on a model with no projections is a safe no-op",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ goal: GOAL_A });
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, stretch_edits: [{ pattern: "squat", stretch: 160 }] },
+      sql,
+    );
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    // No projections key created; the goal write still landed.
+    assertEquals("projections" in (rows[0].model_json as Record<string, unknown>), false);
+  },
+);
+
+goalTest(
+  "#296: re-applying the same upward edit is idempotent",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(PROJECTIONS_SEED);
+    const req = {
+      user_id: userId,
+      goal: GOAL_A,
+      stretch_edits: [{ pattern: "squat", stretch: 165 }],
+    };
+    await upsertGoal(req, sql);
+    await upsertGoal(req, sql);
+    const squat = (await readProjections(userId)).find((p) => p.pattern === "squat")!;
+    assertEquals(squat.stretch, 165);
+  },
+);
+
 // Sentinel "test" that runs last — closes the shared pool so the connection
 // lifecycle stays local to this file rather than relying on process-exit.
 Deno.test({
