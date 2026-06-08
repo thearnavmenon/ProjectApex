@@ -100,8 +100,12 @@ actor ExerciseSwapService {
     private let provider: any LLMProvider
 
     private static let systemPrompt: String = {
-        guard let url = Bundle.main.url(forResource: "SystemPrompt_ExerciseSwap", withExtension: "txt"),
-              let raw = try? String(contentsOf: url, encoding: .utf8) else {
+        // Resolve via the shared PromptLoader (#220). The graceful fallback is
+        // preserved: PromptLoader.load returns nil when the resource is absent
+        // and throws on a read failure, so `try?` + `?? nil` collapse BOTH to
+        // nil → the stub prompt (this site intentionally does not throw, unlike
+        // the five `loadSystemPrompt() throws` callers).
+        guard let raw = (try? PromptLoader.load("SystemPrompt_ExerciseSwap")) ?? nil else {
             return "You are an exercise swap assistant. Return JSON with display_message and optional suggestion."
         }
         // Strip comment lines, then append the canonical exercise library block
