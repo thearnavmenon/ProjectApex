@@ -11,9 +11,12 @@
 // matching the same writer-class contract as update-trainee-model.
 //
 // Permissive semantics: re-onboarding (DeveloperSettingsView "Reset
-// Onboarding") replays the write, overwriting any prior goal. Goal
-// renegotiation lifecycle (ADR-0005 §goalLastRenegotiatedAt) is a
-// separate future feature; this slice does not pre-build for it.
+// Onboarding") replays the write, overwriting any prior goal. When the goal
+// genuinely changes and projections already exist, this is a goal
+// RENEGOTIATION (#304, ADR-0022): each projection's stretch is silently
+// re-derived upward-only and `goalLastRenegotiatedAt` is stamped, atomic with
+// the goal write (see applyGoalWrite + renegotiation.ts). The goal-AWARE
+// version — where the new goal itself moves targets — is deferred to #305.
 //
 // Atomic merge: jsonb_set on the existing model_json so the EF
 // session-apply pipeline's writes are not stomped if a session has
@@ -28,6 +31,12 @@
 
 import postgres from "postgres";
 import { MAJOR_PATTERNS } from "../_shared/constants.ts";
+import type { PatternProjection } from "../_shared/calibration-projection.ts";
+import {
+  isRenegotiation,
+  rederiveStretchOnRenegotiation,
+  type RenegotiableGoal,
+} from "./renegotiation.ts";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -198,8 +207,9 @@ export interface UpsertGoalResult {
 /**
  * Upserts `model_json.goal` for the user. Idempotent: re-running with the
  * same payload yields the same end state. Permissive: re-running with a
- * different `goal` overwrites the prior value (renegotiation lifecycle is
- * not enforced here per #147 scope).
+ * different `goal` overwrites the prior value — and, when projections exist,
+ * triggers the silent renegotiation stretch re-derivation in `applyGoalWrite`
+ * (#304, ADR-0022).
  *
  * On the INSERT path (no existing trainee_models row), `model_json` is
  * seeded with just `{ "goal": <goal> }`. The session-apply pipeline's
@@ -211,22 +221,7 @@ export async function upsertGoal(
   req: UpdateTraineeGoalRequest,
   sql: Sql,
 ): Promise<UpsertGoalResult> {
-  await sql`
-    INSERT INTO public.trainee_models (user_id, model_json, updated_at)
-    VALUES (
-      ${req.user_id},
-      ${sql.json({ goal: req.goal })},
-      NOW()
-    )
-    ON CONFLICT (user_id) DO UPDATE SET
-      model_json = jsonb_set(
-        COALESCE(public.trainee_models.model_json, '{}'::jsonb),
-        '{goal}',
-        ${sql.json(req.goal)},
-        true
-      ),
-      updated_at = NOW()
-  `;
+  await applyGoalWrite(req, sql);
 
   // P5-D06 Slice B (#258): when the goal-review Save acknowledges a
   // heavy-reassessment trigger, idempotently array-append the triggering
@@ -282,6 +277,94 @@ export async function upsertGoal(
   }
 
   return { ok: true, goal: req.goal };
+}
+
+/**
+ * Goal write + (when the goal genuinely changed) silent renegotiation stretch
+ * re-derivation, in ONE `FOR UPDATE` transaction so the new goal, the
+ * re-derived stretch, and `goalLastRenegotiatedAt` commit atomically (#304,
+ * ADR-0022). The prior goal is read BEFORE the overwrite — this is the only
+ * writer that sees old + new goal together, which is what makes
+ * "the goal actually changed" detectable (a later session-apply has already
+ * lost the prior goal).
+ *
+ * Renegotiation re-derivation is skipped (and the timestamp NOT stamped) unless
+ * a prior non-placeholder goal existed, it differs from the incoming goal, and
+ * projections already exist. So onboarding's first goal-set (no prior goal) and
+ * the calibration-review save (goal byte-identical) never trigger it. The
+ * re-derive is computed from the locked prior snapshot and is upward-only
+ * (floor immovable); progress is left for the next session-apply to refresh,
+ * matching the #296 manual-edit path.
+ */
+async function applyGoalWrite(
+  req: UpdateTraineeGoalRequest,
+  sql: Sql,
+): Promise<void> {
+  await sql.begin(async (tx: Sql) => {
+    const rows = await tx`
+      SELECT model_json FROM public.trainee_models
+      WHERE user_id = ${req.user_id}
+      FOR UPDATE
+    `;
+    const priorJson =
+      (rows[0]?.model_json ?? null) as Record<string, unknown> | null;
+
+    // Goal write — same jsonb_set merge / COALESCE-NULL defense as before,
+    // now inside the transaction so it commits atomically with the re-derive.
+    await tx`
+      INSERT INTO public.trainee_models (user_id, model_json, updated_at)
+      VALUES (
+        ${req.user_id},
+        ${tx.json({ goal: req.goal })},
+        NOW()
+      )
+      ON CONFLICT (user_id) DO UPDATE SET
+        model_json = jsonb_set(
+          COALESCE(public.trainee_models.model_json, '{}'::jsonb),
+          '{goal}',
+          ${tx.json(req.goal)},
+          true
+        ),
+        updated_at = NOW()
+    `;
+
+    // Silent renegotiation re-derivation (computed from the LOCKED prior
+    // snapshot, so a concurrent session-apply cannot clobber it).
+    if (priorJson === null) return; // brand-new user → nothing to renegotiate
+    const priorGoal = priorJson.goal as RenegotiableGoal | undefined;
+    if (!isRenegotiation(priorGoal, req.goal)) return;
+
+    const projections = (priorJson.projections as {
+      patternProjections?: PatternProjection[];
+    } | undefined)?.patternProjections;
+    if (!Array.isArray(projections) || projections.length === 0) return;
+
+    const patterns =
+      (priorJson.patterns ?? {}) as Record<string, Record<string, unknown>>;
+    const trendByPattern: Record<string, string | undefined> = {};
+    for (const [pattern, profile] of Object.entries(patterns)) {
+      trendByPattern[pattern] = profile.trend as string | undefined;
+    }
+
+    const rederived = rederiveStretchOnRenegotiation(projections, trendByPattern);
+    const renegotiatedAt = new Date().toISOString();
+    await tx`
+      UPDATE public.trainee_models
+      SET model_json = jsonb_set(
+        jsonb_set(
+          model_json,
+          '{projections,patternProjections}',
+          ${tx.json(rederived)},
+          true
+        ),
+        '{projections,goalLastRenegotiatedAt}',
+        ${tx.json(renegotiatedAt)},
+        true
+      ),
+      updated_at = NOW()
+      WHERE user_id = ${req.user_id}
+    `;
+  });
 }
 
 /**

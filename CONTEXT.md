@@ -47,11 +47,11 @@ A session-completion event whose `loggedAt` is earlier than the trainee model's 
 _Avoid_: out-of-order session (overloaded — ADR-0001's queue-position semantics are a different concept)
 
 **Floor projection**:
-The capability-based realistic target — immovable on goal renegotiation. See ADR-0005.
+The capability-based realistic target — immovable on goal renegotiation. See ADR-0005, ADR-0022.
 _Avoid_: target, conservative goal
 
 **Stretch projection**:
-The user-adjustable-upward target — re-derived silently on goal renegotiation. See ADR-0005.
+The user-adjustable-upward target — re-derived silently (upward-only, floor untouched) on goal renegotiation; the re-derive is nearly inert by design (the formula reads only floor + trend), so it moves only when trend shifted. See ADR-0005, ADR-0021, ADR-0022.
 _Avoid_: ambitious target, max goal
 
 ### Movement & sets

@@ -490,6 +490,163 @@ goalTest(
   },
 );
 
+// #304 (ADR-0022): goal-renegotiation stretch re-derivation. When the goal
+// genuinely changes (statement or focusAreas) AND projections exist, each
+// projection's stretch is re-derived upward-only (floor immovable) and
+// goalLastRenegotiatedAt is stamped — all atomic with the goal write.
+
+// Seed modelling a post-calibration user whose squat trend has IMPROVED to
+// progressing since its stretch (147.5) was derived in a plateaued era — so a
+// renegotiation re-derive raises it to 152.5. horizontal_push is already at its
+// progressing value (107.5) and should not move.
+const RENEG_SEED = {
+  goal: GOAL_A,
+  patterns: {
+    squat: { trend: "progressing", sessionsInPhase: 4 },
+    horizontal_push: { trend: "progressing", sessionsInPhase: 4 },
+  },
+  exercises: {
+    barbell_back_squat: { e1rmCurrent: 151.6667, sessionCount: 6 },
+  },
+  projections: {
+    patternProjections: [
+      { pattern: "squat", floor: 140, stretch: 147.5, progress: "on_track" },
+      { pattern: "horizontal_push", floor: 100, stretch: 107.5, progress: "on_track" },
+    ],
+    calibrationReviewFiredAt: "2026-05-12T10:00:00.000Z",
+    goalLastRenegotiatedAt: null,
+  },
+};
+
+async function readProjectionState(
+  userId: string,
+): Promise<Record<string, unknown>> {
+  const rows = await sql`
+    SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+  `;
+  return (rows[0].model_json as Record<string, unknown>).projections as Record<
+    string,
+    unknown
+  >;
+}
+
+goalTest(
+  "#304: a statement change re-derives stretch upward-only and stamps goalLastRenegotiatedAt",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(RENEG_SEED);
+
+    await upsertGoal({ user_id: userId, goal: GOAL_B }, sql); // different statement
+
+    const ps = await readProjectionState(userId);
+    const list = ps.patternProjections as Array<Record<string, unknown>>;
+    const squat = list.find((p) => p.pattern === "squat")!;
+    const push = list.find((p) => p.pattern === "horizontal_push")!;
+
+    assertEquals(squat.stretch, 152.5); // progressing re-derive raised it
+    assertEquals(squat.floor, 140); // immovable
+    assertEquals(squat.progress, "on_track"); // NOT recomputed here
+    assertEquals(push.stretch, 107.5); // already at value → unchanged
+
+    // The renegotiation moment is recorded (a valid, recent ISO timestamp).
+    const stamp = ps.goalLastRenegotiatedAt as string | null;
+    assertEquals(typeof stamp, "string");
+    assertEquals(Number.isFinite(Date.parse(stamp as string)), true);
+  },
+);
+
+goalTest(
+  "#304: a focusAreas-only change still counts as renegotiation (timestamp stamped)",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(RENEG_SEED);
+
+    // Same statement as GOAL_A, different focus areas.
+    await upsertGoal(
+      {
+        user_id: userId,
+        goal: { ...GOAL_A, focusAreas: ["legs"], updatedAt: GOAL_B.updatedAt },
+      },
+      sql,
+    );
+
+    const ps = await readProjectionState(userId);
+    assertEquals(typeof ps.goalLastRenegotiatedAt, "string");
+  },
+);
+
+goalTest(
+  "#304: an unchanged goal (calibration-screen save) does NOT re-derive or stamp",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(RENEG_SEED);
+
+    await upsertGoal({ user_id: userId, goal: GOAL_A }, sql); // identical goal
+
+    const ps = await readProjectionState(userId);
+    const list = ps.patternProjections as Array<Record<string, unknown>>;
+    assertEquals(list.find((p) => p.pattern === "squat")!.stretch, 147.5); // unchanged
+    assertEquals(ps.goalLastRenegotiatedAt, null); // never stamped
+  },
+);
+
+goalTest(
+  "#304: renegotiation never lowers a user-raised stretch (upward-only clamp)",
+  async () => {
+    const seed = {
+      ...RENEG_SEED,
+      projections: {
+        ...RENEG_SEED.projections,
+        patternProjections: [
+          // Athlete raised squat to 200 (well above any re-derive).
+          { pattern: "squat", floor: 140, stretch: 200, progress: "ahead" },
+        ],
+      },
+    };
+    const userId = await seedFreshUserWithExistingModel(seed);
+
+    await upsertGoal({ user_id: userId, goal: GOAL_B }, sql);
+
+    const ps = await readProjectionState(userId);
+    const squat = (ps.patternProjections as Array<Record<string, unknown>>)[0];
+    assertEquals(squat.stretch, 200); // max(200, 152.5) — not lowered
+    // ...but the renegotiation still happened, so the marker is stamped.
+    assertEquals(typeof ps.goalLastRenegotiatedAt, "string");
+  },
+);
+
+goalTest(
+  "#304: a goal change with NO projections yet is a safe no-op (no projections key, no marker)",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ goal: GOAL_A });
+
+    await upsertGoal({ user_id: userId, goal: GOAL_B }, sql);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const modelJson = rows[0].model_json as Record<string, unknown>;
+    assertEquals(modelJson.goal, GOAL_B);
+    assertEquals("projections" in modelJson, false);
+  },
+);
+
+goalTest(
+  "#304: the renegotiation write leaves non-projection subtrees untouched",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel(RENEG_SEED);
+
+    await upsertGoal({ user_id: userId, goal: GOAL_B }, sql);
+
+    // exercises + patterns subtrees jsonb-equal to the seed after re-derive.
+    const cmp = await sql`
+      SELECT
+        (model_json -> 'exercises') = ${sql.json(RENEG_SEED.exercises)}::jsonb AS exercises_equal,
+        (model_json -> 'patterns')  = ${sql.json(RENEG_SEED.patterns)}::jsonb  AS patterns_equal
+      FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    assertEquals(cmp[0].exercises_equal, true, "exercises must be untouched");
+    assertEquals(cmp[0].patterns_equal, true, "patterns must be untouched");
+  },
+);
+
 // Sentinel "test" that runs last — closes the shared pool so the connection
 // lifecycle stays local to this file rather than relying on process-exit.
 Deno.test({

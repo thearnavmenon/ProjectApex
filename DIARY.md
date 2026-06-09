@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-09 — When you change your goal, your targets quietly catch up
+
+**The problem (in plain words):**
+A while back I gave each athlete two strength numbers per movement: a floor (the level
+we keep them at) and a stretch (the next milestone to aim for). The plan always said:
+if the athlete later changes their goal, re-work the stretch number to match — but
+leave the floor alone. That part was never built. There was even an empty slot in the
+data for "when did they last change their goal," and nothing ever filled it in.
+
+**What I changed:**
+Now, when an athlete edits their goal (the wording or the body parts they want to focus
+on), the app quietly re-works each stretch number and records the moment they changed
+their goal. Two rules keep it safe: the floor never moves, and the stretch can only go
+**up** — if the athlete had already nudged a target higher, we never pull it back down.
+
+One honest thing I found while planning: the way we calculate a stretch only looks at
+how strong you are and which way your strength is trending — it doesn't read your goal
+words at all. So changing your goal mostly just refreshes the date and only nudges a
+number if your trend has moved. That turns out to be exactly what the original plan
+meant by doing it "silently." I built that honest, quiet version, and filed a separate
+note (#305) for the bigger question — should changing your goal actually move the
+numbers more? — because that needs real data before it's worth guessing at.
+
+**How I made sure it works:**
+I wrote the tests first. 15 small tests for the core logic (all pass on my machine),
+plus 6 database tests that the build server runs. I also checked that all the old
+goal-saving tests still pass, so nothing that already worked got broken.
+
+**Status:** Done. Built in pull request #306 (issue #304), spun off #305 for the
+bigger "make it actually move the numbers" question. No app change and no database
+change were needed — it's all on the server.
+
+---
+
 ## 2026-06-09 — Gave the athlete real strength targets to review and reach for
 
 **The problem (in plain words):**
