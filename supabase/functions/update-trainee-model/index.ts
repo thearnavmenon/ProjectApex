@@ -79,6 +79,7 @@ import {
   deriveProjection,
   type PatternProjection,
 } from "../_shared/calibration-projection.ts";
+import { rederiveOutgrownProjection } from "./recalibration.ts";
 import {
   appendObservation,
   shouldContribute,
@@ -1953,6 +1954,8 @@ export async function applySession(
         patternProjections?: PatternProjection[];
         calibrationReviewFiredAt?: string | null;
         goalLastRenegotiatedAt?: string | null;
+        lastRecalibratedAtSessionCount?: number | null;
+        lastRecalibratedPatterns?: string[];
       } | undefined;
       const establishedMajors = MAJOR_PATTERNS.filter(
         (mp) => (patternsForProj[mp]?.confidence as string | undefined) === "established",
@@ -1993,6 +1996,29 @@ export async function applySession(
           }
         }
 
+        // #305 (ADR-0023): re-calibrate established majors whose demonstrated
+        // capability has outgrown their band (median a full band-width past
+        // stretch). Floor steps up (monotonic, never overstates), stretch +
+        // progress re-derive; idempotent by construction. Per-pattern, here in
+        // session-apply where capability is computed. Runs before the progress
+        // recompute so that arm sees the new bands.
+        const recalibratedPatterns: string[] = [];
+        for (const mp of establishedMajors) {
+          const existing = projById.get(mp);
+          if (existing === undefined) continue;
+          const recal = rederiveOutgrownProjection(
+            existing,
+            patternE1RMSessions(mp, exercisesForProj),
+            cadenceFor(mp),
+            (patternsForProj[mp]?.trend as ProgressionTrend) ?? "progressing",
+          );
+          if (recal !== null) {
+            projById.set(mp, recal);
+            recalibratedPatterns.push(mp);
+            projectionsChanged = true;
+          }
+        }
+
         // Recompute progress for every existing projection.
         for (const [mp, proj] of projById) {
           const current = currentCapability(
@@ -2007,6 +2033,19 @@ export async function applySession(
           }
         }
 
+        // Re-calibration watermark: advance only when a pattern actually
+        // re-calibrated this apply; otherwise carry the prior watermark through
+        // so the projections write never drops it. The watermark + the list of
+        // patterns that moved drive the surfaced re-calibration banner (Slice 2).
+        let lastRecalibratedAtSessionCount =
+          priorProjections?.lastRecalibratedAtSessionCount ?? null;
+        let lastRecalibratedPatterns = priorProjections?.lastRecalibratedPatterns ?? [];
+        if (recalibratedPatterns.length > 0) {
+          lastRecalibratedAtSessionCount = newSessionCount;
+          lastRecalibratedPatterns = [...recalibratedPatterns].sort();
+          rulesFired.push("calibration-recalibrated");
+        }
+
         if (projectionsChanged) {
           newModelJson = {
             ...newModelJson,
@@ -2014,6 +2053,8 @@ export async function applySession(
               patternProjections: Array.from(projById.values()),
               calibrationReviewFiredAt: calibrationFiredAt,
               goalLastRenegotiatedAt: priorProjections?.goalLastRenegotiatedAt ?? null,
+              lastRecalibratedAtSessionCount,
+              lastRecalibratedPatterns,
             },
           };
           rulesFired.push("calibration-projection");

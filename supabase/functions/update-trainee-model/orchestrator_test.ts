@@ -2293,6 +2293,72 @@ orchestratorTest(
   },
 );
 
+orchestratorTest(
+  "#305 (ADR-0023): a major pattern whose capability outgrows its band re-calibrates (floor steps up) + stamps the re-calibration watermark; other patterns untouched",
+  async () => {
+    const userId = await seedFreshUser();
+
+    // Full-body session; squat load is parameterised so we can ramp it.
+    async function applyDay(day: number, squatKg: number): Promise<Record<string, unknown>> {
+      await applySession(
+        {
+          user_id: userId,
+          session_id: crypto.randomUUID(),
+          session_payload: {
+            logged_at: `2026-10-${String(day).padStart(2, "0")}T10:00:00Z`,
+            set_logs: [
+              { exercise_id: "barbell_bench_press", set_number: 1, weight_kg: 100, reps_completed: 5, intent: "top" },
+              { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: squatKg, reps_completed: 5, intent: "top" },
+              { exercise_id: "barbell_row", set_number: 1, weight_kg: 80, reps_completed: 5, intent: "top" },
+              { exercise_id: "overhead_press", set_number: 1, weight_kg: 60, reps_completed: 5, intent: "top" },
+            ],
+          },
+        },
+        sql,
+        { stage2Hook: noopStage2 },
+      );
+      const rows = await sql`
+        SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+      `;
+      return rows[0].model_json as Record<string, unknown>;
+    }
+
+    const squatFloor = (m: Record<string, unknown>): number => {
+      const proj = (m.projections as { patternProjections: Array<Record<string, unknown>> })
+        .patternProjections.find((p) => p.pattern === "squat")!;
+      return proj.floor as number;
+    };
+
+    // Days 1-6 at a stable squat load → 4 majors establish → calibration fires.
+    let modelJson: Record<string, unknown> = {};
+    for (let d = 1; d <= 6; d++) modelJson = await applyDay(d, 140);
+    const proj0 = modelJson.projections as {
+      patternProjections: Array<Record<string, unknown>>;
+      lastRecalibratedAtSessionCount?: number | null;
+    };
+    assertExists(proj0.patternProjections.find((p) => p.pattern === "squat"));
+    const floorBefore = squatFloor(modelJson);
+    // No re-calibration has happened yet (capability sits inside the fresh band).
+    assertEquals(proj0.lastRecalibratedAtSessionCount ?? null, null);
+
+    // Days 7-12: squat load jumps well past its band; other patterns hold.
+    for (let d = 7; d <= 12; d++) modelJson = await applyDay(d, 170);
+
+    const proj = modelJson.projections as {
+      patternProjections: Array<Record<string, unknown>>;
+      lastRecalibratedAtSessionCount: number | null;
+      lastRecalibratedPatterns: string[];
+    };
+    // Squat's floor stepped UP to demonstrated capability.
+    assertEquals(squatFloor(modelJson) > floorBefore, true);
+    // The watermark + the moved-pattern list are stamped.
+    assertEquals(proj.lastRecalibratedAtSessionCount !== null, true);
+    assertEquals(proj.lastRecalibratedPatterns.includes("squat"), true);
+    // Patterns that did NOT outgrow their band are not in the list.
+    assertEquals(proj.lastRecalibratedPatterns.includes("horizontal_push"), false);
+  },
+);
+
 // Sentinel "test" that runs last (alphabetically — Deno runs tests in file
 // order, but this trailing close keeps the connection lifecycle local to
 // the test file rather than relying on process-exit cleanup).
