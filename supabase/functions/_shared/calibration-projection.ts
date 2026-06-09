@@ -38,7 +38,11 @@ export const STRETCH_MARGIN_BY_TREND: Record<ProgressionTrend, number> = {
 /** Calibration review fires once ≥ this many of the 6 major patterns establish. */
 export const CALIBRATION_REVIEW_MIN_ESTABLISHED_MAJORS = 4;
 
-function roundTo(value: number, increment: number, dir: "down" | "up"): number {
+export function roundTo(
+  value: number,
+  increment: number,
+  dir: "down" | "up",
+): number {
   const q = value / increment;
   return (dir === "down" ? Math.floor(q) : Math.ceil(q)) * increment;
 }
