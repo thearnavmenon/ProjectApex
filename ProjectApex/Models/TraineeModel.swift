@@ -132,11 +132,20 @@ struct TraineeModel: Codable, Sendable, Hashable {
         case lastClassifiedNoteCreatedAt
         case lastGlobalPhaseAdvanceFiredAtSessionCount
         case acknowledgedTriggeringSessionCounts
-        case calibrationReviewAcknowledged = "calibration_review_acknowledged"
-        // camelCase (no override) so the goal-EF write and this decode agree —
-        // consistent with totalSessionCount / projections.* (see #305 report on
-        // the legacy calibration_review_acknowledged snake-case mismatch).
+        // #309: camelCase — matches what the goal EF writes
+        // (`model_json.calibrationReviewAcknowledged`) and the dominant model_json
+        // convention (totalSessionCount / projections.*). Was snake_case, which
+        // silently never decoded the SERVER ack (no snake decoding strategy on the
+        // sync path); a legacy snake fallback in init(from:) preserves prior
+        // local-cache acks.
+        case calibrationReviewAcknowledged
         case acknowledgedRecalibrationSessionCount
+    }
+
+    /// #309: decode-only key for the pre-fix snake_case spelling, so a prior ack
+    /// cached locally under the old key is not dropped on upgrade.
+    private enum LegacyCodingKeys: String, CodingKey {
+        case calibrationReviewAcknowledged = "calibration_review_acknowledged"
     }
 
     init(from decoder: Decoder) throws {
@@ -219,11 +228,14 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.acknowledgedTriggeringSessionCounts = Set(try c.decodeIfPresent(
             [Int].self, forKey: .acknowledgedTriggeringSessionCounts
         ) ?? [])
-        // Tolerant decode (#269): older rows / server JSON lack the key — default
-        // to false (the banner is still eligible to fire).
+        // Tolerant decode (#269 / #309): read the camelCase key the EF writes;
+        // fall back to the legacy snake_case key so a prior local-cache ack
+        // survives the #309 key-casing fix; default false (banner still eligible).
+        let legacyAck = try decoder.container(keyedBy: LegacyCodingKeys.self)
+            .decodeIfPresent(Bool.self, forKey: .calibrationReviewAcknowledged)
         self.calibrationReviewAcknowledged = try c.decodeIfPresent(
             Bool.self, forKey: .calibrationReviewAcknowledged
-        ) ?? false
+        ) ?? legacyAck ?? false
         // Tolerant decode (#305): absent on rows predating re-calibration → nil
         // (no watermark acknowledged yet, so a re-calibration is eligible to fire).
         self.acknowledgedRecalibrationSessionCount = try c.decodeIfPresent(
