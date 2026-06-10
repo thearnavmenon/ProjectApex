@@ -148,5 +148,6 @@ let both fail loudly instead of silently.*
 2. ~~Splash / brand moment + Today screen~~ — specced in `splash-today.md`
    (includes the wordmark/app-icon asset deliverable: the aperture-A).
 3. ~~Live-loop screen~~ — specced in `live-loop.md`.
-4. Post-workout summary (bookend #3); Progress; Train.
-5. Per-screen specs then get broken into issues/slices for implementation.
+4. ~~Post-workout summary (bookend #3)~~ — specced in `post-workout.md`.
+5. Progress; Train.
+6. Per-screen specs then get broken into issues/slices for implementation.

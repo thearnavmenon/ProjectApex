@@ -115,6 +115,14 @@ accent-colored words inside a sentence read as tappable (the accent means "act
 here"). Two-tone emphasis is sanctioned: key numbers in full ink/heavier weight,
 connective tissue in `ink-muted`.
 
+**Work is ink, time is pencil** (system law, promoted from `live-loop.md` §1):
+all work numbers — prescriptions, logged sets, evidence — render in `ink`; all
+time digits — clocks, countdowns — render in `ink-muted`, same Space Grotesk
+tnum cut. The pencil side extends to **plans**: where plan and actual differ,
+actual is ink, plan is pencil ("100 kg × 6 · plan 5" — done work is the
+most-true data in the app; the plan is not work). Holds at every scale, down
+to 13pt stat lines (digits ink, words pencil).
+
 ### Dynamic Type & localization (review P2)
 
 - Body, labels, and UI text track Dynamic Type through the AX sizes.
@@ -168,6 +176,32 @@ data-viz:
   point-estimated:  "hollow dot (ink stroke) — low-confidence data LOOKS less certain"
   axis:             "label type, ink-muted; hairline gridlines, horizontal only"
 ```
+
+Dim remaps (added with `post-workout.md` — the small-scale accent cut lifts,
+exactly as `accent-ink` does):
+
+```yaml
+data-viz-dim:
+  series-primary:   "#7B85FF line, 2pt"
+  band:             "#7B85FF at 12% fill, hairline #2A2D36 edges"
+  point-measured:   "solid #7B85FF dot"
+  point-estimated:  "hollow dot (dim-ink #F6F2E8 stroke)"
+```
+
+**The capability band is one component, three contexts** — the onboarding
+model reveal, the post-workout evidence strip, and Progress's pattern detail:
+same anatomy (band fill, edge ticks — floor 2px full ink, stretch 1px
+hairline — dot, dimension-bracket movement, caption slot), differing only in
+scale and caption. Full anatomy in `post-workout.md` §6.
+
+## Tags
+
+The tag family (established in `splash-today.md`, extended through the loop
+and the summary): a **1px `ink` rectangle, 2pt corner radius, tracked caps at
+11pt** (Inter 500). Tags state classification facts only — `WARM-UP`, `AMRAP`,
+`UPPER A`, `AMENDED` — and never carry metadata (dates sit beside the tag,
+unboxed). The **PR stamp is the family's only inverted member**: ink-filled
+rectangle, paper text — a notary stamp, reserved for genuine e1RM/rep PRs.
 
 ## Iconography
 
@@ -228,4 +262,5 @@ haptics:
 | 2026-06-10 | Motion: drain-and-rise restricted to ≤4 bookend moments; 150ms workhorse nav; Reduce Motion fallback mandatory. |
 | 2026-06-11 | Second two-agent review (UI craft + UX/product) of the 16 Mobbin onboarding references — all proposals accepted into `docs/design/onboarding-calibration.md` (record in its §8). Headlines: the model reveal gets a full layout + honesty-rendering spec and is designed first; equipment gates capability seeding; single-selects auto-advance; progress honesty (full denominator, ~10% endowed start); honest-labor pacing for the drawing beat; pre-filled weights banned; protected zone before Today; adidas step-checklist + wheels rejected. |
 | 2026-06-11 | Splash + Today locked (`docs/design/splash-today.md`) after a **three-agent** review (UI craft + UX/product + visual/art-direction). **Wordmark: caps APEX with the custom aperture-A** — the A's counter drawn as the 6-blade iris (2–1 panel call; the iris integration is load-bearing). Cross-screen iris travel cut for v1 (in-place focus instead). Motion canon added ("the ink lives at the bottom of the world"). Today gains the drafting-rule hairline system, the evidence-number lockup (SG 600 tnum), the Lens unknown/calibrating state, and a full state machine (back-off day, session-not-generated + pre-generation policy, program complete, gap return). Inline emphasis = weight, never hue. |
+| 2026-06-11 | Post-workout summary locked (`docs/design/post-workout.md`) after the **four-agent** panel. Two-deck read — claim ≤45 chars `display` + proof ≤90 chars `body` (the draft's single 34pt hero failed its own type math; caught by all four). **The amended record replaces sealed-at-Finish**: facts (weight/reps) correctable from history with struck-not-erased provenance + AMENDED tag until next-session-or-48h; feel sealed forever; the stored read never rewrites. Bookend #3 = one ballistic arc (apex hang, finished-page law, tide line); the dot landing, conversion beat, and ratchet sequence locked (witness rule: never fired unseen, never replayed). Band strip respecced as a drawn instrument and promoted to **one component, three contexts**. Exit control named "Today" ("Done" was spent). Promotions landed here: work-is-ink/time-is-pencil (+ plan-is-pencil), the tag family, dim data-viz tokens. |
 | 2026-06-11 | Live loop locked (`docs/design/live-loop.md`) after a **four-agent** review (+ motion/animation, new). Headlines: **every logged set is editable until Finish** (the correction surface — undo, didn't-finish, symmetric over/under, pain flag); last-time anchor under the prescription; prescriptions pre-snap to gym-loadable; **Done is a full-bleed bottom ink slab** that relabels to Finish; **"work is ink, time is pencil"** (time digits always `ink-muted`); locked morph timelines, hard-swap timer digits, no idle animation, overshoot banned loop-wide; feel pill = ruled three-cell row (Easy/Solid/Grind), ignored = unknown; PR = inverted ink stamp, no celebration; warm-ups get compact rests and no pill. Candidates for app-wide promotion next round: work-ink/time-pencil, the tag family. |
