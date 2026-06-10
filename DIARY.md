@@ -7,6 +7,34 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The welcome-flow blueprint got a hard second look and grew much sharper
+
+**What happened (in plain words):**
+Yesterday we drafted the design for a new user's first three minutes in the app.
+Today two expert agents (one for looks, one for experience) studied the 16 real app
+screenshots that design was based on — from apps like Fitbod and Yazio — and tore
+into them: what those apps get right, where they cheat or annoy people, and what our
+version must do differently.
+
+**The biggest finds:**
+The most important screen — where the app draws its first picture of you — had no
+good example anywhere, so it now has the most detailed plan instead of the thinnest.
+A real logic hole got caught: the old draft would ask someone with no barbell about
+their barbell lifts — now the equipment answer shapes which questions get asked. And
+a stack of smaller rules landed: progress bars that never lie, questions that answer
+themselves with one tap, never pre-filling a number (people just accept suggestions,
+which poisons the data), and no sign-up screens, pop-ups, or paywalls between the
+last question and the first workout.
+
+**How it landed:**
+All of it is folded into the design documents. By coincidence this rode into main
+inside pull request #316 (another work stream branched off these changes and its
+merge carried them in) — the content landed exactly as written.
+
+**Status:** Merged into main via pull request #316; design docs only, no app code.
+
+---
+
 ## 2026-06-11 — Three expert reviewers walked through the whole app and wrote down everything wrong
 
 **What happened (in plain words):**
