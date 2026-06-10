@@ -198,6 +198,14 @@ actor WorkoutSessionManager {
     func startSession(trainingDay: TrainingDay, programId: UUID, userId: UUID = UUID(), weekId: UUID = UUID(), weekNumber: Int = 1, startingExerciseIndex: Int = 0) async {
         guard case .idle = sessionState else { return }
 
+        // An errored start must mutate NOTHING — no state reset, no crash sentinel,
+        // no enqueued session row. A day with no generated exercises can't be started;
+        // this guard runs BEFORE any mutation so a failed start leaves zero durable traces.
+        guard !trainingDay.exercises.isEmpty else {
+            sessionState = .error("Training day has no exercises.")
+            return
+        }
+
         // Reset all session state
         self.trainingDay = trainingDay
         self.currentTrainingDayId = trainingDay.id
@@ -260,10 +268,6 @@ actor WorkoutSessionManager {
         print("[WorkoutSessionManager] Enqueuing session row — id: \(newSession.id), userId: \(newSession.userId), programId: \(programId), dayType: \(trainingDay.dayLabel)")
         try? await writeAheadQueue.enqueue(sessionPayload, table: "workout_sessions")
 
-        guard !trainingDay.exercises.isEmpty else {
-            sessionState = .error("Training day has no exercises.")
-            return
-        }
         let firstExercise = trainingDay.exercises[self.exerciseIndex]
 
         // Fetch streak, RAG memory, weekly fatigue, and session count in parallel

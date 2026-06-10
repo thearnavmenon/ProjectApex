@@ -65,12 +65,23 @@ struct PreWorkoutView: View {
     var onBack: (() -> Void)? = nil
     /// Called when the user taps the × close button on the Tab 1 entry path (idle only).
     var onCloseToTab0: (() -> Void)? = nil
+    /// True while a pending day's session is being generated in place. Shows a spinner
+    /// on the "Generate Session" CTA and disables it.
+    var isGeneratingSession: Bool = false
+    /// Called when the user taps "Generate Session" on a pending day. Non-nil only when
+    /// a gym profile is confirmed; nil renders the CTA disabled with a "set up your gym"
+    /// hint instead of routing to a no-op.
+    var onGenerateSession: (() -> Void)? = nil
 
     // MARK: - Private state
     @State private var showSkipConfirmation: Bool = false
     @State private var welcomeBackBannerDismissed: Bool = false
     @State private var heavyReassessmentBannerDismissed: Bool = false
     @State private var calibrationBannerDismissed: Bool = false
+    /// Set true once the user taps "Generate Session". Combined with the day still being
+    /// pending and generation no longer in progress, this surfaces the inline failure
+    /// line — generateDaySession restores .loaded silently on error (amendment 2.2).
+    @State private var generationAttempted: Bool = false
 
     // MARK: - Body
 
@@ -257,52 +268,69 @@ struct PreWorkoutView: View {
                         .tracking(0.3)
                 }
                 Spacer()
-                // Exercise count badge
-                Text("\(trainingDay.exercises.count) exercises")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(streak.tintColor)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(streak.tintColor.opacity(0.12), in: Capsule())
+                // Exercise count badge — only meaningful once the session is generated.
+                if !isPending {
+                    Text("\(trainingDay.exercises.count) exercises")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(streak.tintColor)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(streak.tintColor.opacity(0.12), in: Capsule())
+                }
             }
             .padding(20)
 
             Divider()
                 .background(.white.opacity(0.08))
 
-            // Exercise list preview (first 3 + overflow)
-            VStack(spacing: 0) {
-                let preview = Array(trainingDay.exercises.prefix(3))
-                ForEach(Array(preview.enumerated()), id: \.offset) { index, exercise in
-                    ExerciseRowPreview(exercise: exercise, tintColor: streak.tintColor)
-                    if index < preview.count - 1 {
-                        Divider()
-                            .background(.white.opacity(0.06))
-                            .padding(.leading, 20)
-                    }
-                }
-                if trainingDay.exercises.count > 3 {
-                    Text("+ \(trainingDay.exercises.count - 3) more exercises")
+            if isPending {
+                // Not-yet-generated day: no exercises exist, so don't render a 0-count
+                // preview or a "~0 min" estimate — say so plainly.
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.35))
+                    Text("Session not generated yet")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.white.opacity(0.35))
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 14)
                 }
-            }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+            } else {
+                // Exercise list preview (first 3 + overflow)
+                VStack(spacing: 0) {
+                    let preview = Array(trainingDay.exercises.prefix(3))
+                    ForEach(Array(preview.enumerated()), id: \.offset) { index, exercise in
+                        ExerciseRowPreview(exercise: exercise, tintColor: streak.tintColor)
+                        if index < preview.count - 1 {
+                            Divider()
+                                .background(.white.opacity(0.06))
+                                .padding(.leading, 20)
+                        }
+                    }
+                    if trainingDay.exercises.count > 3 {
+                        Text("+ \(trainingDay.exercises.count - 3) more exercises")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.35))
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 14)
+                    }
+                }
 
-            // Duration estimate
-            Divider()
-                .background(.white.opacity(0.08))
-            HStack(spacing: 6) {
-                Image(systemName: "clock")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.35))
-                Text("~\(estimatedDurationMinutes) min estimated")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.35))
+                // Duration estimate
+                Divider()
+                    .background(.white.opacity(0.08))
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.white.opacity(0.35))
+                    Text("~\(estimatedDurationMinutes) min estimated")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
         }
         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
@@ -480,7 +508,102 @@ struct PreWorkoutView: View {
 
     // MARK: - Start Button
 
+    /// A not-yet-generated day shows a "Generate Session" CTA instead of "Start Workout":
+    /// the session has to be created before it can be started.
+    private var isPending: Bool { trainingDay.status == .pending }
+
+    @ViewBuilder
     private var startButton: some View {
+        if isPending {
+            pendingButtonGroup
+        } else {
+            startWorkoutButton
+        }
+    }
+
+    /// CTA group shown when the day's session has not been generated yet.
+    @ViewBuilder
+    private var pendingButtonGroup: some View {
+        VStack(spacing: 12) {
+            if onGenerateSession != nil {
+                generateSessionButton
+                // Inline failure: generateDaySession restores .loaded silently on error,
+                // leaving the day pending. Surface that honestly rather than failing mute.
+                if generationAttempted && !isGeneratingSession {
+                    Text("Couldn't generate the session. Check your connection and try again.")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.45))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                // No confirmed gym profile — generation can't run. Disabled CTA + hint,
+                // not a no-op route.
+                noGymProfileButton
+                Text("Set up your gym in Settings first")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.40))
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var generateSessionButton: some View {
+        Button {
+            generationAttempted = true
+            onGenerateSession?()
+        } label: {
+            HStack(spacing: 10) {
+                if isGeneratingSession {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                        .scaleEffect(0.85)
+                } else {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 18, weight: .semibold))
+                }
+                Text(isGeneratingSession ? "Generating\u{2026}" : "Generate Session")
+                    .font(.system(size: 18, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 60)
+            .background(
+                streak.tintColor.opacity(isGeneratingSession ? 0.40 : 0.85),
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(.white.opacity(0.20), lineWidth: 0.5)
+            )
+            .animation(.easeInOut(duration: 0.15), value: isGeneratingSession)
+        }
+        .disabled(isGeneratingSession)
+    }
+
+    private var noGymProfileButton: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 18, weight: .semibold))
+            Text("Generate Session")
+                .font(.system(size: 18, weight: .bold))
+        }
+        .foregroundStyle(.white.opacity(0.45))
+        .frame(maxWidth: .infinity)
+        .frame(height: 60)
+        .background(
+            Color.white.opacity(0.08),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 0.5)
+        )
+    }
+
+    private var startWorkoutButton: some View {
         Button {
             viewModel.startSession(trainingDay: trainingDay, programId: programId, userId: deps.resolvedUserId, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
         } label: {
