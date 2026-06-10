@@ -49,6 +49,12 @@ struct TraineeModel: Codable, Sendable, Hashable {
     /// Set true once they acknowledge the read-only projection screen, which
     /// suppresses the banner via `TraineeModelDigest.deriveCalibrationReviewSignal`.
     var calibrationReviewAcknowledged: Bool
+    /// #305 (ADR-0023): the highest re-calibration watermark
+    /// (`ProjectionState.lastRecalibratedAtSessionCount`) the athlete has
+    /// acknowledged. A watermark newer than this re-arms the calibration banner.
+    /// Event-keyed (not a boolean) so a session-apply re-arm and a goal-EF ack
+    /// advance disjoint values rather than clobbering one boolean.
+    var acknowledgedRecalibrationSessionCount: Int?
 
     init(
         activeProgramId: UUID? = nil,
@@ -69,7 +75,8 @@ struct TraineeModel: Codable, Sendable, Hashable {
         lastClassifiedNoteCreatedAt: Date? = nil,
         lastGlobalPhaseAdvanceFiredAtSessionCount: Int? = nil,
         acknowledgedTriggeringSessionCounts: Set<Int> = [],
-        calibrationReviewAcknowledged: Bool = false
+        calibrationReviewAcknowledged: Bool = false,
+        acknowledgedRecalibrationSessionCount: Int? = nil
     ) {
         self.activeProgramId = activeProgramId
         self.goal = goal
@@ -90,6 +97,7 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.lastGlobalPhaseAdvanceFiredAtSessionCount = lastGlobalPhaseAdvanceFiredAtSessionCount
         self.acknowledgedTriggeringSessionCounts = acknowledgedTriggeringSessionCounts
         self.calibrationReviewAcknowledged = calibrationReviewAcknowledged
+        self.acknowledgedRecalibrationSessionCount = acknowledgedRecalibrationSessionCount
     }
 
     // MARK: Custom Codable for JSONB shape parity (slice A12 / #83)
@@ -125,6 +133,10 @@ struct TraineeModel: Codable, Sendable, Hashable {
         case lastGlobalPhaseAdvanceFiredAtSessionCount
         case acknowledgedTriggeringSessionCounts
         case calibrationReviewAcknowledged = "calibration_review_acknowledged"
+        // camelCase (no override) so the goal-EF write and this decode agree —
+        // consistent with totalSessionCount / projections.* (see #305 report on
+        // the legacy calibration_review_acknowledged snake-case mismatch).
+        case acknowledgedRecalibrationSessionCount
     }
 
     init(from decoder: Decoder) throws {
@@ -212,6 +224,11 @@ struct TraineeModel: Codable, Sendable, Hashable {
         self.calibrationReviewAcknowledged = try c.decodeIfPresent(
             Bool.self, forKey: .calibrationReviewAcknowledged
         ) ?? false
+        // Tolerant decode (#305): absent on rows predating re-calibration → nil
+        // (no watermark acknowledged yet, so a re-calibration is eligible to fire).
+        self.acknowledgedRecalibrationSessionCount = try c.decodeIfPresent(
+            Int.self, forKey: .acknowledgedRecalibrationSessionCount
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -249,6 +266,7 @@ struct TraineeModel: Codable, Sendable, Hashable {
         // (cf. prescriptionAccuracy / recentlyAdvancedPatterns sorting). #258.
         try c.encode(acknowledgedTriggeringSessionCounts.sorted(), forKey: .acknowledgedTriggeringSessionCounts)
         try c.encode(calibrationReviewAcknowledged, forKey: .calibrationReviewAcknowledged)
+        try c.encodeIfPresent(acknowledgedRecalibrationSessionCount, forKey: .acknowledgedRecalibrationSessionCount)
     }
 
     // MARK: Major patterns (calibration / phase-advance gating)

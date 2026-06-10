@@ -298,7 +298,10 @@ struct WorkoutView: View {
                 calibrationReviewSignal = await deps.traineeModelService.digest()?.calibrationReviewSignal
             }
         }) {
-            CalibrationReviewView(projections: calibrationReviewSignal?.projections ?? [])
+            CalibrationReviewView(
+                projections: calibrationReviewSignal?.projections ?? [],
+                recalibratedPatterns: Set(calibrationReviewSignal?.recalibratedPatterns ?? [])
+            )
                 .presentationDetents([.large])
         }
         .alert("Session Mismatch", isPresented: $showMismatchRecoveryAlert) {

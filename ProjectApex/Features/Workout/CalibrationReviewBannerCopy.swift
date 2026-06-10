@@ -13,14 +13,29 @@ import Foundation
 
 enum CalibrationReviewBannerCopy {
 
-    /// Constant banner title — tone is fixed here (#269).
-    static let title = "Your starting targets are ready"
+    /// Banner title — first calibration vs a re-calibration (#269, #305). A
+    /// re-calibration celebrates the level-up; the first calibration introduces
+    /// the targets.
+    static func title(isRecalibration: Bool) -> String {
+        isRecalibration ? "You've leveled up" : "Your starting targets are ready"
+    }
 
-    /// Banner body for a calibration-review signal (#269). Names up to 3
-    /// patterns via `MovementPattern.displayName`, collapsing the remainder to
-    /// "and more" beyond 3. Returns a generic fallback when the projection list
-    /// is empty (defensive — the signal isn't produced when empty).
+    /// Banner body for a calibration-review signal. For a re-calibration (#305)
+    /// it names the patterns that outgrew their targets and frames it as
+    /// SUSTAINED progress (the trigger is the recent-window median, not a single
+    /// PR). For a first calibration (#269) it introduces the new targets. Both
+    /// name up to 3 patterns via `MovementPattern.displayName`, collapsing the
+    /// remainder to "and more" beyond 3.
     static func body(for signal: CalibrationReviewSignal) -> String {
+        if signal.isRecalibration {
+            let patterns = signal.recalibratedPatterns
+            let named = patterns.prefix(3).map(\.displayName)
+            let listed = patterns.count > 3
+                ? named.joined(separator: ", ") + ", and more"
+                : naturalJoin(named)
+            let target = patterns.count > 1 ? "targets" : "target"
+            return "You've consistently climbed past your \(listed) \(target) — here's a higher one."
+        }
         let patterns = signal.projections.map(\.pattern)
         guard !patterns.isEmpty else {
             return "We've set your starting targets — take a look."

@@ -113,6 +113,15 @@ actor TraineeModelService {
     func acknowledgeCalibrationReview() async throws {
         guard var model = await store.load() else { return }
         model.calibrationReviewAcknowledged = true
+        // #305: also advance the re-calibration ack watermark to the current
+        // watermark so the repeating re-calibration banner hides immediately
+        // (mirrors the server ack). max() keeps it monotonic. No-op when no
+        // re-calibration has fired (watermark nil).
+        if let recalAt = model.projections?.lastRecalibratedAtSessionCount {
+            model.acknowledgedRecalibrationSessionCount = max(
+                model.acknowledgedRecalibrationSessionCount ?? Int.min, recalAt
+            )
+        }
         try await store.save(model)
     }
 

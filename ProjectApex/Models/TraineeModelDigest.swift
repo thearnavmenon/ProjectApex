@@ -137,8 +137,21 @@ struct CalibrationReviewSignal: Codable, Sendable, Hashable {
     /// Per-pattern floor/stretch projections, sorted by `pattern.rawValue` for
     /// deterministic ordering.
     var projections: [PatternProjection]
+    /// #305 (ADR-0023): the patterns that just re-calibrated (capability outgrew
+    /// the band). Empty ⇒ this is the FIRST calibration display; non-empty ⇒ a
+    /// re-calibration — which flips the banner/screen to celebratory copy + a
+    /// "Levelled up" badge on these patterns' rows.
+    var recalibratedPatterns: [MovementPattern]
 
-    enum CodingKeys: String, CodingKey { case projections }
+    /// True iff this signal is a re-calibration (vs the first-ever calibration).
+    var isRecalibration: Bool { !recalibratedPatterns.isEmpty }
+
+    init(projections: [PatternProjection], recalibratedPatterns: [MovementPattern] = []) {
+        self.projections = projections
+        self.recalibratedPatterns = recalibratedPatterns
+    }
+
+    enum CodingKeys: String, CodingKey { case projections; case recalibratedPatterns }
 }
 
 // MARK: - HeavyReassessmentSignal
@@ -287,11 +300,30 @@ extension TraineeModelDigest {
     static func deriveCalibrationReviewSignal(
         from model: TraineeModel
     ) -> CalibrationReviewSignal? {
-        guard let proj = model.projections, proj.calibrationReviewFiredAt != nil else { return nil }
-        guard !model.calibrationReviewAcknowledged else { return nil }
+        guard let proj = model.projections else { return nil }
         let ps = proj.patternProjections.sorted { $0.pattern.rawValue < $1.pattern.rawValue }
         guard !ps.isEmpty else { return nil }
-        return CalibrationReviewSignal(projections: ps)
+
+        // Re-calibration (#305): a watermark strictly newer than the one the
+        // athlete has acknowledged. Event-keyed (watermark vs ack-watermark), so
+        // it survives a server sync and can't be reverted by an unrelated write.
+        let recalUnacked: Bool = {
+            guard let recalAt = proj.lastRecalibratedAtSessionCount else { return false }
+            guard let acked = model.acknowledgedRecalibrationSessionCount else { return true }
+            return recalAt > acked
+        }()
+
+        // First calibration (#269): fired and not yet acknowledged.
+        let firstUnacked = proj.calibrationReviewFiredAt != nil && !model.calibrationReviewAcknowledged
+
+        guard recalUnacked || firstUnacked else { return nil }
+
+        // A re-calibration display names the patterns that moved (celebratory
+        // copy + badge); a first calibration carries an empty list (neutral copy).
+        let recalibrated = recalUnacked
+            ? proj.lastRecalibratedPatterns.sorted { $0.rawValue < $1.rawValue }
+            : []
+        return CalibrationReviewSignal(projections: ps, recalibratedPatterns: recalibrated)
     }
 }
 
