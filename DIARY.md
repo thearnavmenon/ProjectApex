@@ -7,6 +7,32 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-10 — The new look has a rulebook, and new users get a proper welcome
+
+**What happened (in plain words):**
+We're rebuilding how the whole app looks and feels. Today the ground rules got
+written down for real: one signature color (a deep blue called ultramarine) on warm
+cream paper, bold clean lettering, and animation saved for the big moments so it
+stays special. Two expert reviewers (one for looks, one for experience) went over
+the plan and found real problems — the blue text was too hard to read on cream, the
+app had no plan for brand-new users, and a couple of spots where the app could
+quietly invent data about you. All of their must-fixes are now baked into the rules.
+
+**The biggest piece:**
+A design for the app's first three minutes. A new user answers a handful of quick
+questions (goal, experience, equipment, schedule, and roughly what they can lift —
+guessing is fine, skipping is fine), and then watches the app literally draw its
+starting picture of them. Honest guesses are marked as guesses, and the first
+workouts firm them up.
+
+**What this is and isn't:**
+These are design documents — the rulebook (DESIGN.md) and two specs in docs/design/.
+No app code changed yet. Building it comes next, screen by screen.
+
+**Status:** Merged into main.
+
+---
+
 ## 2026-06-10 — A whole chapter is finished: the coach that actually learns you
 
 **The big picture (in plain words):**
