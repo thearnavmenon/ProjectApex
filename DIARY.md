@@ -7,7 +7,7 @@ Started 2026-06-07.
 
 ---
 
-## 2026-06-11 — The Workout tab can finally start a brand-new day (PR #PENDING)
+## 2026-06-11 — The Workout tab can finally start a brand-new day (PR #335)
 
 **The problem (in plain words):**
 The app builds each day's workout only when you ask for it — until then the day
@@ -35,7 +35,7 @@ and no stray database record, the other proves resuming a truly empty day quietl
 stops instead of faking a finished workout. The full test suite — 261 tests —
 passed on an iPhone 17 Pro simulator.
 
-**Status:** Done and opened as a pull request for review (PR #PENDING). Part of
+**Status:** Done and opened as a pull request for review (PR #335). Part of
 the bigger eight-part fix-up (#318).
 
 ---
