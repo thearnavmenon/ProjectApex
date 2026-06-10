@@ -7,6 +7,36 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The Progress tab got designed: your strength as a staircase (PR #336)
+
+**What happened (in plain words):**
+The Progress tab — where you check if you're actually getting stronger — got
+its full design plan, reviewed by the same four experts. The main idea: other
+apps chart your raw gym numbers, so a planned light day looks like you got
+weaker. We chart what the coach *believes* about you instead — a band per
+lift — and your floor through time becomes a staircase that can only ever go
+up, because it only moves when you prove it.
+
+**The biggest catches:**
+The brand expert ruled that no line on the chart may ever slope — the coach's
+belief updates on training days and holds in between, so every line is made
+of flat steps and right angles. A slope would claim knowledge nobody has.
+The experience expert found the screen had no forward pull — it only looked
+backward — so every lift now shows how close the next floor-raise is ("2 of
+3 sessions above 102"). And the animation expert banned the two prettiest
+possible animations for honest reasons: re-scaling the chart would show the
+floor *moving*, and morphing the small band into the big chart would rotate
+an axis mid-flight.
+
+**How it was checked:**
+Four independent expert reviews against 17 reference screenshots from Tonal,
+Hevy, Bevel, Gymshark and Peloton; every accepted finding folded into the
+locked spec with the disagreements and who-won recorded.
+
+**Status:** merged as PR #336. One screen left in the queue: Train.
+
+---
+
 ## 2026-06-11 — The Workout tab can finally start a brand-new day (PR #335)
 
 **The problem (in plain words):**
