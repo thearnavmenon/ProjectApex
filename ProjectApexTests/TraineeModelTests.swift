@@ -294,6 +294,52 @@ struct TraineeModelCodableTests {
         let decoded = try JSONDecoder().decode(TraineeModel.self, from: stripped)
         #expect(decoded.acknowledgedTriggeringSessionCounts.isEmpty)
     }
+
+    // #309: the Edge Function writes `calibrationReviewAcknowledged` (camelCase),
+    // but the Swift CodingKey was snake_case (`calibration_review_acknowledged`)
+    // with no snake decoding strategy — so the SERVER ack never decoded on the
+    // client (it survived only via the local mirror). Fix: read camelCase
+    // (matching the EF), with a legacy snake fallback so a prior local-cache ack
+    // is not dropped, and encode camelCase going forward.
+
+    private func encodedDict(_ model: TraineeModel) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(model)
+        return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+
+    private func decode(_ dict: [String: Any]) throws -> TraineeModel {
+        try JSONDecoder().decode(
+            TraineeModel.self,
+            from: try JSONSerialization.data(withJSONObject: dict)
+        )
+    }
+
+    @Test("#309: the server's camelCase calibrationReviewAcknowledged decodes")
+    func decodesCamelCaseServerAck() throws {
+        var dict = try encodedDict(TraineeModel(goal: defaultGoal()))
+        dict.removeValue(forKey: "calibration_review_acknowledged")
+        dict.removeValue(forKey: "calibrationReviewAcknowledged")
+        dict["calibrationReviewAcknowledged"] = true // what the EF actually writes
+        #expect(try decode(dict).calibrationReviewAcknowledged == true)
+    }
+
+    @Test("#309: a legacy snake-cased ack still decodes (local-cache back-compat)")
+    func decodesLegacySnakeAck() throws {
+        var dict = try encodedDict(TraineeModel(goal: defaultGoal()))
+        dict.removeValue(forKey: "calibration_review_acknowledged")
+        dict.removeValue(forKey: "calibrationReviewAcknowledged")
+        dict["calibration_review_acknowledged"] = true // older local-cache shape
+        #expect(try decode(dict).calibrationReviewAcknowledged == true)
+    }
+
+    @Test("#309: calibrationReviewAcknowledged now encodes camelCase, matching the EF")
+    func encodesCamelCaseAck() throws {
+        var model = TraineeModel(goal: defaultGoal())
+        model.calibrationReviewAcknowledged = true
+        let dict = try encodedDict(model)
+        #expect(dict["calibrationReviewAcknowledged"] as? Bool == true)
+        #expect(dict["calibration_review_acknowledged"] == nil)
+    }
 }
 
 // MARK: - Helpers
