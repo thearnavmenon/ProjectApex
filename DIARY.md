@@ -7,6 +7,29 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-10 — Fixed a spelling mix-up so the app remembers what you've seen
+
+**The problem (in plain words):**
+When the app told the server "this person has seen their targets screen," the server
+saved that note under one spelling and the app looked for it under a slightly different
+one. So after a fresh sync the app couldn't find the note — and could pop up a one-time
+screen you'd already dismissed. A backup copy kept on the phone hid it most of the time,
+which is why nobody really noticed, but the server's own memory of it wasn't being read.
+
+**What I changed:**
+Matched the spelling so the app reads the server's note correctly. I also taught it to
+still understand the *old* spelling, so anyone who had already dismissed the screen
+doesn't suddenly get it back — the whole point of this note is that it should stick.
+
+**How I made sure it works:**
+Three small tests: it reads the new spelling, it still reads the old one, and it now
+writes the new one. The app builds clean and the related tests all pass.
+
+**Status:** Done. Bug #309, fixed in PR #311, merged. I'd spotted it while building the
+re-calibration feature (#305) and written it down rather than fixing it sideways.
+
+---
+
 ## 2026-06-10 — When you outgrow your goal, the app raises the bar and cheers
 
 **The problem (in plain words):**
