@@ -91,6 +91,14 @@ struct WorkoutView: View {
     var startingExerciseIndex: Int = 0
     /// Called when the user taps "Skip this session" on the pre-workout screen.
     var onSkipSession: (() -> Void)? = nil
+    /// True while a not-yet-generated day's session is being generated in place
+    /// (ProgramViewModel.viewState == .generatingSession). Drives the spinner on
+    /// the "Generate Session" CTA in PreWorkoutView.
+    var isGeneratingSession: Bool = false
+    /// Called when the user taps "Generate Session" on a pending day. Non-nil only
+    /// when the day is pending and a gym profile is confirmed; nil renders the CTA
+    /// disabled with a "set up your gym" hint instead.
+    var onGenerateSession: (() -> Void)? = nil
     /// Called when the user taps the back button or swipes on the pre-workout screen.
     var onBack: (() -> Void)? = nil
     /// Called when the user taps the × close button on the Tab 1 entry path (idle only).
@@ -220,9 +228,12 @@ struct WorkoutView: View {
                     )
                 }
             }
-            // Detect pause: session went idle while a PausedSessionState exists
+            // Detect pause: session went idle while a PausedSessionState exists FOR THIS DAY.
+            // Gating on trainingDayId prevents an .idle transition with someone else's live
+            // sentinel (e.g. an errored start, or a different paused day) from mis-marking the
+            // currently-rendered day as paused (amendment 2.1).
             if case .idle = newState {
-                if PausedSessionState.load() != nil {
+                if PausedSessionState.load()?.trainingDayId == trainingDay.id {
                     onSessionPaused?()
                 }
             }
@@ -351,7 +362,9 @@ struct WorkoutView: View {
                 },
                 onSkipSession: onSkipSession,
                 onBack: onBack,
-                onCloseToTab0: onCloseToTab0
+                onCloseToTab0: onCloseToTab0,
+                isGeneratingSession: isGeneratingSession,
+                onGenerateSession: onGenerateSession
             )
 
         case .active(let exercise, let setNumber):

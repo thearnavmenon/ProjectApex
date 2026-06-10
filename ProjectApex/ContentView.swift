@@ -291,12 +291,35 @@ struct ContentView: View {
 
     // MARK: - Workout Tab
 
+    /// Resolves the mesocycle to render on the Workout tab. Uses the loaded state's
+    /// mesocycle normally; while a day's session is generating in place, falls back to
+    /// `currentMesocycle` so the tab stays on the workout surface rather than collapsing
+    /// to "No Program Yet".
+    private func workoutTabMesocycle(for vm: ProgramViewModel) -> Mesocycle? {
+        switch vm.viewState {
+        case .loaded(let mesocycle):
+            return mesocycle
+        case .generatingSession:
+            return vm.currentMesocycle
+        default:
+            return nil
+        }
+    }
+
     /// The Workout tab. Routes to `WorkoutView` with the first non-completed day
     /// in the mesocycle. Shows a programme-complete state when all days are done,
     /// or a no-program state when no mesocycle is loaded.
     @ViewBuilder
     private var workoutTab: some View {
-        if let vm = programViewModel, case .loaded(let mesocycle) = vm.viewState {
+        // Render the workout surface for a loaded programme OR while a single day's
+        // session is generating in place — the latter keeps currentMesocycle populated,
+        // so the tab must not collapse to "No Program Yet" mid-generation.
+        if let vm = programViewModel,
+           let mesocycle = workoutTabMesocycle(for: vm) {
+            let isGeneratingSession: Bool = {
+                if case .generatingSession = vm.viewState { return true }
+                return false
+            }()
             if let (day, week) = vm.nextIncompleteDay(in: mesocycle) {
                 let allDays = mesocycle.weeks.flatMap { $0.trainingDays }
                 // Skipped sessions advance the programme pointer and count toward progress.
@@ -345,8 +368,41 @@ struct ContentView: View {
                         resumeState: crashResumeToPass,
                         onSkipSession: {
                             // Persistent skip — advances programme_day_index, records skippedAt.
-                            programViewModel?.markDaySkipped(dayId: day.id, weekId: week.id)
+                            // Resolve via crashResumeDay like the completed/paused siblings above
+                            // so a crash-resumed day skips THAT day, not nextIncompleteDay's.
+                            if let resumeDay = crashResumeDay,
+                               let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                                programViewModel?.markDaySkipped(dayId: found.day.id, weekId: found.week.id)
+                            } else {
+                                programViewModel?.markDaySkipped(dayId: day.id, weekId: week.id)
+                            }
                         },
+                        isGeneratingSession: isGeneratingSession,
+                        onGenerateSession: ((crashResumeDay ?? day).status == .pending && confirmedProfile != nil)
+                            ? {
+                                // Generate this not-yet-generated day's session in place.
+                                // Resolve day+week like the completed/paused/skip siblings:
+                                // crashResumeDay takes precedence (matching the render target),
+                                // falling back to nextIncompleteDay's (day, week) pair.
+                                let targetDay: TrainingDay
+                                let targetWeek: TrainingWeek
+                                if let resumeDay = crashResumeDay,
+                                   let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                                    targetDay = found.day
+                                    targetWeek = found.week
+                                } else {
+                                    targetDay = day
+                                    targetWeek = week
+                                }
+                                Task {
+                                    await programViewModel?.generateDaySession(
+                                        day: targetDay,
+                                        week: targetWeek,
+                                        gymProfile: confirmedProfile!
+                                    )
+                                }
+                            }
+                            : nil,
                         onCloseToTab0: { selectedTab = 0 },
                         onResumeStateConsumed: {
                             // One-shot — clear so subsequent tab swaps into Tab 1 don't re-apply

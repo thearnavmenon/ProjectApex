@@ -591,6 +591,101 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertEqual(snapshot?.programId, programId, "snapshot must reference the active program")
         XCTAssertEqual(snapshot?.userId, userId, "snapshot must reference the user")
     }
+
+    // MARK: #318 / J-F1 — empty-exercises start leaves ZERO durable traces
+
+    /// An attempt to start a session for a not-yet-generated day (no exercises) must
+    /// error WITHOUT mutating anything durable: no crash sentinel (PausedSessionState)
+    /// and no enqueued workout_sessions row. Pre-fix, the empty-exercises guard ran
+    /// AFTER the sentinel save and the session-row enqueue, so an errored start left a
+    /// phantom "Unfinished Workout" sentinel + an orphaned active session row.
+    func testStartSession_emptyExercises_errorsWithoutSentinelOrSessionRow() async throws {
+        WSMBodyCaptureURLProtocol.reset()
+        let manager = makeBodyCaptureManager()
+        // A day whose session was never generated: status .pending, exercises [].
+        let emptyDay = TrainingDay(
+            id: UUID(),
+            dayOfWeek: 1,
+            dayLabel: "Push_A",
+            exercises: [],
+            sessionNotes: nil,
+            status: .pending
+        )
+
+        await manager.startSession(trainingDay: emptyDay, programId: UUID())
+        // Allow any (incorrect) fire-and-forget enqueue/flush to surface as a request.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        // 1. State is .error — the start was rejected.
+        let state = await manager.sessionState
+        guard case .error = state else {
+            XCTFail("Expected .error for an empty-exercises start, got \(state)")
+            return
+        }
+
+        // 2. No crash sentinel was written.
+        XCTAssertNil(
+            PausedSessionState.load(),
+            "An errored start must not write a PausedSessionState crash sentinel (J-F1)"
+        )
+
+        // 3. No workout_sessions row was enqueued/POSTed (the orphaned 'active' row).
+        let sessionRowPosts = WSMBodyCaptureURLProtocol.captured.filter {
+            $0.path.contains("workout_sessions") && $0.method == "POST"
+        }
+        XCTAssertTrue(
+            sessionRowPosts.isEmpty,
+            "An errored start must not enqueue a workout_sessions row (J-F1); captured: \(sessionRowPosts.map(\.path))"
+        )
+    }
+
+    // MARK: #318 / J-F2 — resuming an empty/exhausted day aborts without completion
+
+    /// Regression pinning the CORRECTED J-F2 mechanism: resuming a day with no
+    /// remaining exercises ends in .idle with no summary and no fabricated completion.
+    /// finishSession's zero-set guard (completedSets.isEmpty → .idle + return) fires
+    /// before any completion/PATCH, so the day is never mis-marked complete.
+    func testResumeSession_emptyDay_abortsWithoutCompletion() async throws {
+        let manager = makeManager()
+        let emptyDay = TrainingDay(
+            id: UUID(),
+            dayOfWeek: 1,
+            dayLabel: "Push_A",
+            exercises: [],
+            sessionNotes: nil,
+            status: .pending
+        )
+        let paused = PausedSessionState(
+            sessionId: UUID(),
+            trainingDayId: emptyDay.id,
+            weekId: UUID(),
+            weekNumber: 1,
+            exerciseIndex: 0,
+            currentSetNumber: 1,
+            dayType: emptyDay.dayLabel,
+            programId: UUID(),
+            userId: UUID(),
+            pausedAt: Date()
+        )
+
+        await manager.resumeSession(
+            pausedState: paused,
+            trainingDay: emptyDay,
+            completedSetLogs: []
+        )
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // Ends idle — NOT .sessionComplete. No summary was fabricated.
+        let state = await manager.sessionState
+        if case .sessionComplete = state {
+            XCTFail("Resuming an empty day must NOT fabricate a completion; got \(state)")
+            return
+        }
+        XCTAssertEqual(
+            state, .idle,
+            "Resuming a day with no remaining sets must abort to .idle (corrected J-F2)"
+        )
+    }
 }
 
 // MARK: - Body-capturing URLProtocol (#171 — inspect the PATCH payload)

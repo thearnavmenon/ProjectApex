@@ -7,6 +7,39 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The Workout tab can finally start a brand-new day (PR #PENDING)
+
+**The problem (in plain words):**
+The app builds each day's workout only when you ask for it — until then the day
+is empty, a blank slate. But the big button on the Workout tab always said
+"Start Workout," even on a day that had nothing in it yet. Tapping it didn't
+build the workout; it just threw an error. Worse, by the time it hit that error
+it had already scribbled two notes to itself: a "you have an unfinished workout"
+flag and a half-started session record in the database. So the next time you
+opened the app it nagged you about a workout you never actually did, showed a
+warning dot on the tab, and could even mark a day you never trained as "paused."
+
+**What changed:**
+On a not-yet-built day, the button now reads "Generate Session" and actually
+builds the workout right there — no more dead-end error. If you haven't set up
+your gym yet, the button politely greys out and points you to Settings instead
+of pretending to work. And the empty-day check now runs *first*, before the app
+writes anything down — so a failed start leaves zero mess behind: no false
+"unfinished workout" flag, no orphaned record, no wrong-day "paused" mark. If
+building the session fails (say your connection drops), it now says so plainly
+instead of failing silently.
+
+**How it was checked:**
+Two new automated tests pin the fixes: one proves a failed start leaves no flag
+and no stray database record, the other proves resuming a truly empty day quietly
+stops instead of faking a finished workout. The full test suite — 261 tests —
+passed on an iPhone 17 Pro simulator.
+
+**Status:** Done and opened as a pull request for review (PR #PENDING). Part of
+the bigger eight-part fix-up (#318).
+
+---
+
 ## 2026-06-11 — The "what did today prove?" screen got designed (PR #333)
 
 **What happened (in plain words):**
