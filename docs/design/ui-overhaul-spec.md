@@ -149,5 +149,5 @@ let both fail loudly instead of silently.*
    (includes the wordmark/app-icon asset deliverable: the aperture-A).
 3. ~~Live-loop screen~~ — specced in `live-loop.md`.
 4. ~~Post-workout summary (bookend #3)~~ — specced in `post-workout.md`.
-5. Progress; Train.
+5. ~~Progress~~ — specced in `progress.md`. Train remains.
 6. Per-screen specs then get broken into issues/slices for implementation.

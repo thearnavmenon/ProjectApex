@@ -192,7 +192,10 @@ data-viz-dim:
 model reveal, the post-workout evidence strip, and Progress's pattern detail:
 same anatomy (band fill, edge ticks — floor 2px full ink, stretch 1px
 hairline — dot, dimension-bracket movement, caption slot), differing only in
-scale and caption. Full anatomy in `post-workout.md` §6.
+scale and caption. Full anatomy in `post-workout.md` §6. A sanctioned
+**list-scale reduction** (unlabeled drawing, 5pt dot, no bracket — numbers
+live in the row's annotation line) is specced in `progress.md` §3, where
+rows render band-relative so the floor ticks fuse into the ledger's spine.
 
 ## Tags
 
@@ -249,6 +252,8 @@ haptics:
   back-off:        "notification(.warning)"
   feel-pill:       "none — ignoring it must cost nothing (see spec §5)"
   routine-nav:     "none — motion carries it"
+  scrub-snap:      "selection — chart-scrub detents (Progress). Never impact:
+                    .medium is the plate-thud and .rigid is the pawl, both spoken for"
 ```
 
 ## Decision log
@@ -263,4 +268,5 @@ haptics:
 | 2026-06-11 | Second two-agent review (UI craft + UX/product) of the 16 Mobbin onboarding references — all proposals accepted into `docs/design/onboarding-calibration.md` (record in its §8). Headlines: the model reveal gets a full layout + honesty-rendering spec and is designed first; equipment gates capability seeding; single-selects auto-advance; progress honesty (full denominator, ~10% endowed start); honest-labor pacing for the drawing beat; pre-filled weights banned; protected zone before Today; adidas step-checklist + wheels rejected. |
 | 2026-06-11 | Splash + Today locked (`docs/design/splash-today.md`) after a **three-agent** review (UI craft + UX/product + visual/art-direction). **Wordmark: caps APEX with the custom aperture-A** — the A's counter drawn as the 6-blade iris (2–1 panel call; the iris integration is load-bearing). Cross-screen iris travel cut for v1 (in-place focus instead). Motion canon added ("the ink lives at the bottom of the world"). Today gains the drafting-rule hairline system, the evidence-number lockup (SG 600 tnum), the Lens unknown/calibrating state, and a full state machine (back-off day, session-not-generated + pre-generation policy, program complete, gap return). Inline emphasis = weight, never hue. |
 | 2026-06-11 | Post-workout summary locked (`docs/design/post-workout.md`) after the **four-agent** panel. Two-deck read — claim ≤45 chars `display` + proof ≤90 chars `body` (the draft's single 34pt hero failed its own type math; caught by all four). **The amended record replaces sealed-at-Finish**: facts (weight/reps) correctable from history with struck-not-erased provenance + AMENDED tag until next-session-or-48h; feel sealed forever; the stored read never rewrites. Bookend #3 = one ballistic arc (apex hang, finished-page law, tide line); the dot landing, conversion beat, and ratchet sequence locked (witness rule: never fired unseen, never replayed). Band strip respecced as a drawn instrument and promoted to **one component, three contexts**. Exit control named "Today" ("Done" was spent). Promotions landed here: work-is-ink/time-is-pencil (+ plan-is-pencil), the tag family, dim data-viz tokens. |
+| 2026-06-11 | Progress locked (`docs/design/progress.md`) after the four-agent panel. **The no-slope law** — every chart line is sample-and-hold (a diagonal claims continuous knowledge the model doesn't have); **the root spine** (band-relative rows, one fused 2px floor datum — the ledger's center of gravity); **the floor staircase** with extension-line riser dimensioning and the fossil-record grid (tread levels are the only y-references); observation-dot qualifying rule; distance-to-ratchet as a permanent instrument annotation (the forward hook — instrument, not voice); fixed canonical pattern order (program membership = treatment, never position); milestone quarantine (Progress renders fossils, never plays the ratchet); period re-domain = crossfade, geometry tweening banned; scrub inspector with `scrub-snap` selection detents (token added). Calibration-review redesign named as build debt. |
 | 2026-06-11 | Live loop locked (`docs/design/live-loop.md`) after a **four-agent** review (+ motion/animation, new). Headlines: **every logged set is editable until Finish** (the correction surface — undo, didn't-finish, symmetric over/under, pain flag); last-time anchor under the prescription; prescriptions pre-snap to gym-loadable; **Done is a full-bleed bottom ink slab** that relabels to Finish; **"work is ink, time is pencil"** (time digits always `ink-muted`); locked morph timelines, hard-swap timer digits, no idle animation, overshoot banned loop-wide; feel pill = ruled three-cell row (Easy/Solid/Grind), ignored = unknown; PR = inverted ink stamp, no celebration; warm-ups get compact rests and no pill. Candidates for app-wide promotion next round: work-ink/time-pencil, the tag family. |
