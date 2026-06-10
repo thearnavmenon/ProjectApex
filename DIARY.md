@@ -7,6 +7,49 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-10 — When you outgrow your goal, the app raises the bar and cheers
+
+**The problem (in plain words):**
+Each lift has two numbers: a floor (the level we keep you at) and a stretch (the next
+milestone). They're set once, early on, and then the floor was frozen forever. So an
+athlete who'd been lifting way above their floor for weeks still had a floor describing
+the weaker version of themselves. The number had quietly become a little bit of a lie.
+
+The day before, I'd asked a sharper question: should changing your *goal* move these
+numbers? After a lot of back-and-forth (I had two other helpers stress-test every
+decision), the honest answer was: no — changing your goal *words* doesn't make you
+stronger. What should move the numbers is **getting stronger**. And we already measure
+that, using your own lifts — no guessing, no comparing you to other people.
+
+**What I changed:**
+Now, when your typical strength on a lift has climbed clearly past your stretch target
+(not from one lucky day — it's measured over your last few sessions), the app **raises
+the whole target**: the floor steps up to what you're actually lifting, and a new
+stretch is set above it. Then it tells you — the targets screen pops back up with a
+"You've leveled up" message and a "Levelled up" badge on the lifts you outgrew, so
+beating your goal feels like a win, not the app quietly moving the goalposts. Three
+safety rules: the floor only ever goes **up**, never down; it never claims more than
+you've actually lifted; and it can't keep re-firing — once it raises the bar, it waits
+until you've genuinely grown again.
+
+One nice catch from the stress-testing: one helper worried the targets could get stuck
+re-raising forever for some athletes. I checked the math myself and proved that can't
+happen, then wrote a test to lock it in — rather than adding code to guard against a
+problem that doesn't exist.
+
+**How I made sure it works:**
+Test-first, in three small steps (mechanism → screen → words/badge). 10 + 105 + 7
+small tests, the app builds clean, and the database tests passed on the build server.
+I also found and reported an older unrelated bug (a mismatched data label, #309) but
+left it alone rather than fix it sideways.
+
+**Status:** Done. Issue #305 (re-scoped from "goal-aware" to "re-calibrate when you
+outgrow your targets"), shipped in PRs #307, #308, and this docs one; design recorded
+in ADR-0023. The "should your goal itself move the numbers" idea is parked until we
+have enough data to do it honestly.
+
+---
+
 ## 2026-06-09 — When you change your goal, your targets quietly catch up
 
 **The problem (in plain words):**

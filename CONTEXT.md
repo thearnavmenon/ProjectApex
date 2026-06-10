@@ -35,8 +35,12 @@ The persistent structured behavioural model per user — capability, recovery, g
 _Avoid_: user profile, user state, user data
 
 **Calibration review**:
-The one-time UI screen fired when ≥4 of 6 major patterns reach `.established` per-axis confidence; sets floor + stretch projections. See ADR-0005.
+The UI screen that surfaces floor + stretch projections. First fires once when ≥4 of 6 major patterns reach `.established` per-axis confidence; the **same banner/screen is re-armed** (event-keyed via a re-calibration watermark) on each later **re-calibration**. See ADR-0005, ADR-0023.
 _Avoid_: assessment, test block, week 1 test
+
+**Re-calibration**:
+A capability-driven event (per major pattern, in the session-apply pipeline): when a pattern's recent-window **median** capability climbs a full band-width past its stretch, its projection re-derives from current capability — floor steps **up** (monotonic), stretch + progress re-derive — and the calibration banner re-arms with celebratory "you've consistently climbed past your target" copy + a "Levelled up" badge. Idempotent; uses only the athlete's own lifts (no cohort constant). Distinct from goal renegotiation (a goal event, nearly inert) and global phase advance (a phase event). See ADR-0023.
+_Avoid_: re-test, re-assessment (overloaded with heavy reassessment), goal-aware re-derivation (deferred option B, #305)
 
 **Global phase advance event**:
 A recurring trigger that fires when ≥4 of 6 major patterns had a phase transition within the user's last 6 completed sessions. Surfaces a heavy-reassessment UI + goal renegotiation; re-derives stretch projections (floor untouched). Shares the 6-major-pattern enumeration with **calibration review** but is distinct: calibration review is one-time and confidence-triggered; global phase advance is recurring and transition-triggered. See ADR-0012.
@@ -47,8 +51,8 @@ A session-completion event whose `loggedAt` is earlier than the trainee model's 
 _Avoid_: out-of-order session (overloaded — ADR-0001's queue-position semantics are a different concept)
 
 **Floor projection**:
-The capability-based realistic target — immovable on goal renegotiation. See ADR-0005, ADR-0022.
-_Avoid_: target, conservative goal
+The capability-based realistic target — **monotonic non-decreasing**: never overstates (round-down median), never lowers, never client-supplied, but ratchets **up** at re-calibration when demonstrated capability outgrows it (#305). Unmoved by goal renegotiation. See ADR-0005, ADR-0022, ADR-0023.
+_Avoid_: target, conservative goal, immovable floor (retired — it now ratchets up)
 
 **Stretch projection**:
 The user-adjustable-upward target — re-derived silently (upward-only, floor untouched) on goal renegotiation; the re-derive is nearly inert by design (the formula reads only floor + trend), so it moves only when trend shifted. See ADR-0005, ADR-0021, ADR-0022.
