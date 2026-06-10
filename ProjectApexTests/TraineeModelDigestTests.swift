@@ -1864,6 +1864,61 @@ final class TraineeModelDigestTests: XCTestCase {
         XCTAssertEqual(signal?.projections.map(\.pattern),
                        [.hipHinge, .horizontalPush, .squat],
                        "Projections must be sorted by pattern.rawValue")
+        XCTAssertEqual(signal?.isRecalibration, false,
+            "A first calibration carries no re-calibrated patterns")
+    }
+
+    // MARK: ─── #305: re-calibration re-arm (watermark vs ack-watermark) ──────
+
+    func test_deriveCalibrationReviewSignal_reArmsWhenRecalibrationWatermarkUnacked() {
+        var model = makeBaselineModel()
+        // First calibration already acknowledged, but a re-calibration fired at
+        // session 8 and has NOT been acked → the banner re-arms.
+        model.projections = ProjectionState(
+            patternProjections: [makeProjection(.squat), makeProjection(.horizontalPush)],
+            calibrationReviewFiredAt: ref,
+            lastRecalibratedAtSessionCount: 8,
+            lastRecalibratedPatterns: [.squat]
+        )
+        model.calibrationReviewAcknowledged = true
+        model.acknowledgedRecalibrationSessionCount = nil
+
+        let signal = TraineeModelDigest.deriveCalibrationReviewSignal(from: model)
+        XCTAssertNotNil(signal, "An unacknowledged re-calibration must re-arm the banner")
+        XCTAssertEqual(signal?.isRecalibration, true)
+        XCTAssertEqual(signal?.recalibratedPatterns, [.squat],
+            "The signal names exactly the patterns that re-calibrated")
+    }
+
+    func test_deriveCalibrationReviewSignal_silencedWhenRecalibrationAcknowledged() {
+        var model = makeBaselineModel()
+        model.projections = ProjectionState(
+            patternProjections: [makeProjection(.squat)],
+            calibrationReviewFiredAt: ref,
+            lastRecalibratedAtSessionCount: 8,
+            lastRecalibratedPatterns: [.squat]
+        )
+        model.calibrationReviewAcknowledged = true
+        model.acknowledgedRecalibrationSessionCount = 8 // acked up to this watermark
+
+        XCTAssertNil(TraineeModelDigest.deriveCalibrationReviewSignal(from: model),
+            "A re-calibration acked at the current watermark must silence the banner")
+    }
+
+    func test_deriveCalibrationReviewSignal_reArmsWhenNewerWatermarkThanAck() {
+        var model = makeBaselineModel()
+        model.projections = ProjectionState(
+            patternProjections: [makeProjection(.squat)],
+            calibrationReviewFiredAt: ref,
+            lastRecalibratedAtSessionCount: 12, // a newer re-calibration
+            lastRecalibratedPatterns: [.squat]
+        )
+        model.calibrationReviewAcknowledged = true
+        model.acknowledgedRecalibrationSessionCount = 8 // only acked the older one
+
+        let signal = TraineeModelDigest.deriveCalibrationReviewSignal(from: model)
+        XCTAssertNotNil(signal, "A watermark newer than the ack must re-arm the banner")
+        XCTAssertEqual(signal?.isRecalibration, true)
     }
 
     func test_digest_calibrationReviewSignal_assignedFromDerive() {

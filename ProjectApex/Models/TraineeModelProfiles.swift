@@ -217,14 +217,38 @@ struct ProjectionState: Codable, Sendable, Hashable {
     var patternProjections: [PatternProjection]
     var calibrationReviewFiredAt: Date?
     var goalLastRenegotiatedAt: Date?
+    /// #305 (ADR-0023): the session-count at which a pattern most recently
+    /// re-calibrated (capability outgrew its band), and which patterns moved in
+    /// that apply. EF-written; drive the re-calibration banner re-arm + copy.
+    var lastRecalibratedAtSessionCount: Int?
+    var lastRecalibratedPatterns: [MovementPattern]
 
     init(
         patternProjections: [PatternProjection] = [],
         calibrationReviewFiredAt: Date? = nil,
-        goalLastRenegotiatedAt: Date? = nil
+        goalLastRenegotiatedAt: Date? = nil,
+        lastRecalibratedAtSessionCount: Int? = nil,
+        lastRecalibratedPatterns: [MovementPattern] = []
     ) {
         self.patternProjections = patternProjections
         self.calibrationReviewFiredAt = calibrationReviewFiredAt
         self.goalLastRenegotiatedAt = goalLastRenegotiatedAt
+        self.lastRecalibratedAtSessionCount = lastRecalibratedAtSessionCount
+        self.lastRecalibratedPatterns = lastRecalibratedPatterns
+    }
+
+    // Tolerant decode: rows written before #305 lack the re-calibration keys.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.patternProjections =
+            try c.decodeIfPresent([PatternProjection].self, forKey: .patternProjections) ?? []
+        self.calibrationReviewFiredAt =
+            try c.decodeIfPresent(Date.self, forKey: .calibrationReviewFiredAt)
+        self.goalLastRenegotiatedAt =
+            try c.decodeIfPresent(Date.self, forKey: .goalLastRenegotiatedAt)
+        self.lastRecalibratedAtSessionCount =
+            try c.decodeIfPresent(Int.self, forKey: .lastRecalibratedAtSessionCount)
+        self.lastRecalibratedPatterns =
+            try c.decodeIfPresent([MovementPattern].self, forKey: .lastRecalibratedPatterns) ?? []
     }
 }

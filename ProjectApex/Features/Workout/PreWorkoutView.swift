@@ -440,7 +440,7 @@ struct PreWorkoutView: View {
                 .foregroundStyle(accentColor)
             VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(CalibrationReviewBannerCopy.title)
+                    Text(CalibrationReviewBannerCopy.title(isRecalibration: signal.isRecalibration))
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(.white)
                     Text(CalibrationReviewBannerCopy.body(for: signal))

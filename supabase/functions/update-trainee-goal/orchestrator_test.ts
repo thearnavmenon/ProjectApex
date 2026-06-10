@@ -647,6 +647,58 @@ goalTest(
   },
 );
 
+// #305 (ADR-0023): acknowledge_calibration_review advances the re-calibration
+// ack watermark to the current projection watermark, so the repeating
+// re-calibration banner is acknowledged (not just the one-time first banner).
+
+goalTest(
+  "#305: acknowledge advances acknowledgedRecalibrationSessionCount to the re-calibration watermark",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({
+      goal: GOAL_A,
+      projections: {
+        patternProjections: [
+          { pattern: "squat", floor: 140, stretch: 150, progress: "on_track" },
+        ],
+        calibrationReviewFiredAt: "2026-05-12T10:00:00.000Z",
+        lastRecalibratedAtSessionCount: 8,
+        lastRecalibratedPatterns: ["squat"],
+      },
+    });
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_calibration_review: true },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const m = rows[0].model_json as Record<string, unknown>;
+    assertEquals(m.calibrationReviewAcknowledged, true);
+    assertEquals(m.acknowledgedRecalibrationSessionCount, 8);
+  },
+);
+
+goalTest(
+  "#305: acknowledge with no re-calibration watermark yet leaves the ack-watermark null",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ goal: GOAL_A });
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, acknowledge_calibration_review: true },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const m = rows[0].model_json as Record<string, unknown>;
+    assertEquals(m.calibrationReviewAcknowledged, true);
+    assertEquals(m.acknowledgedRecalibrationSessionCount ?? null, null);
+  },
+);
+
 // Sentinel "test" that runs last — closes the shared pool so the connection
 // lifecycle stays local to this file rather than relying on process-exit.
 Deno.test({

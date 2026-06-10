@@ -264,12 +264,24 @@ export async function upsertGoal(
   // the flag set leaves the value at `true`. The goal write above stays
   // byte-for-byte unchanged.
   if (req.acknowledge_calibration_review === true) {
+    // Acks BOTH calibration banners: the one-time first calibration
+    // (`calibrationReviewAcknowledged`) and the repeating re-calibration (#305,
+    // ADR-0023) by advancing `acknowledgedRecalibrationSessionCount` to the
+    // current re-calibration watermark (`projections.lastRecalibratedAtSessionCount`).
+    // The watermark only ever advances (EF-written, monotonic), so copying it is
+    // a monotonic ack — a later re-calibration bumps the watermark above this and
+    // re-arms the banner. Absent watermark (no re-calibration yet) → no-op copy.
     await sql`
       UPDATE public.trainee_models
       SET model_json = jsonb_set(
-        COALESCE(model_json, '{}'::jsonb),
-        '{calibrationReviewAcknowledged}',
-        'true'::jsonb,
+        jsonb_set(
+          COALESCE(model_json, '{}'::jsonb),
+          '{calibrationReviewAcknowledged}',
+          'true'::jsonb,
+          true
+        ),
+        '{acknowledgedRecalibrationSessionCount}',
+        COALESCE(model_json -> 'projections' -> 'lastRecalibratedAtSessionCount', 'null'::jsonb),
         true
       )
       WHERE user_id = ${req.user_id}

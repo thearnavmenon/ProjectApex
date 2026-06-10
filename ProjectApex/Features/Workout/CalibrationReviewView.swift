@@ -26,6 +26,10 @@ struct CalibrationReviewView: View {
     /// Per-pattern floor/stretch projections to display. Passed in from the
     /// calibration-review signal (already sorted by pattern.rawValue).
     let projections: [PatternProjection]
+    /// #305 (ADR-0023): patterns that just re-calibrated (capability outgrew
+    /// the band). Empty ⇒ first-ever calibration. Drives the celebratory intro
+    /// copy + the per-row "Levelled up" badge.
+    let recalibratedPatterns: Set<MovementPattern>
 
     @Environment(AppDependencies.self) private var deps
     @Environment(\.dismiss) private var dismiss
@@ -42,9 +46,13 @@ struct CalibrationReviewView: View {
     private static let accentPurple = Color(red: 0.58, green: 0.45, blue: 0.95)
     private static let darkChrome = Color(red: 0.04, green: 0.04, blue: 0.06)
 
-    init(projections: [PatternProjection]) {
+    init(projections: [PatternProjection], recalibratedPatterns: Set<MovementPattern> = []) {
         self.projections = projections
+        self.recalibratedPatterns = recalibratedPatterns
     }
+
+    /// True iff this presentation is a re-calibration (vs the first calibration).
+    private var isRecalibration: Bool { !recalibratedPatterns.isEmpty }
 
     // MARK: - Pure payload helper (the seam under TDD)
 
@@ -121,7 +129,9 @@ struct CalibrationReviewView: View {
     private var introCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionHeader("WHAT THIS MEANS")
-            Text("Your starting targets are ready. Floor is the level we'll keep you at; stretch is the next milestone to aim for — nudge it up if you want a bigger goal.")
+            Text(isRecalibration
+                ? "You've consistently climbed past some of your targets — so we've raised them. Floor is the level we'll keep you at; stretch is your next milestone. Nudge it up if you want a bigger goal."
+                : "Your starting targets are ready. Floor is the level we'll keep you at; stretch is the next milestone to aim for — nudge it up if you want a bigger goal.")
                 .font(.system(size: 13))
                 .foregroundStyle(.white.opacity(0.55))
         }
@@ -163,12 +173,24 @@ struct CalibrationReviewView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                 Spacer()
-                Text(Self.progressLabel(projection.progress))
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Self.accentPurple)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Self.accentPurple.opacity(0.14), in: Capsule())
+                // #305: a freshly re-calibrated pattern shows a "Levelled up"
+                // badge rather than its (just-reset) progress label, so hitting
+                // the old target reads as a win, not a demotion to "On track".
+                if recalibratedPatterns.contains(projection.pattern) {
+                    Text("Levelled up")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Self.accentPurple)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Self.accentPurple.opacity(0.14), in: Capsule())
+                } else {
+                    Text(Self.progressLabel(projection.progress))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Self.accentPurple)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Self.accentPurple.opacity(0.14), in: Capsule())
+                }
             }
             Text("Floor: \(Self.formatWeight(projection.floor)) kg")
                 .font(.system(size: 13).monospacedDigit())
