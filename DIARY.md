@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The workout screen itself got designed, with a motion expert at the table
+
+**What happened (in plain words):**
+The screen you actually lift with — one set at a time, a big Done button, a rest
+timer — got its full design plan. Four expert agents reviewed it this time: looks,
+experience, brand, and a new one who only judges animation and timing.
+
+**The biggest catch:**
+There was no way to fix a logged set. Tap Done by accident, or rack the bar a rep
+early, and the app would remember a lift that never happened — feeding the coach's
+picture of you with fiction. Now every logged set can be corrected until you finish
+the session: fewer reps, more reps, a different weight, or "that one hurt."
+
+**Other good catches:**
+The app now shows what you lifted last time right under today's target, so you can
+check the coach's homework. Weights snap to plates your gym actually has before
+they're ever shown. The animation expert timed every transition to the millisecond,
+ruled that nothing on screen may move while you rest (which also saves battery),
+and found two spots where animation quietly caused data bugs — like the final set
+of every session losing its "how did that feel?" question because the screen
+changed too early.
+
+**One look-and-feel decision worth noting:**
+The Done button is no longer a button — it's a solid band of blue ink across the
+bottom of the screen, all session long, that turns into "Finish" at the end. And
+work numbers are always dark ink while timer numbers are light pencil-grey, so your
+eye always knows what's a lift and what's a clock.
+
+**Status:** Merged into main in pull request #332; design documents only, no app code.
+
+---
+
 ## 2026-06-11 — The app's face got designed: the opening moment and the home screen
 
 **What happened (in plain words):**
