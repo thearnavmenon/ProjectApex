@@ -29,7 +29,7 @@ workouts firm them up.
 These are design documents — the rulebook (DESIGN.md) and two specs in docs/design/.
 No app code changed yet. Building it comes next, screen by screen.
 
-**Status:** Merged into main.
+**Status:** Merged into main in pull request #314.
 
 ---
 
