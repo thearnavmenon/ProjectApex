@@ -7,6 +7,28 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — Three expert reviewers walked through the whole app and wrote down everything wrong
+
+**What happened (in plain words):**
+Three reviewer agents each took a different pair of glasses and went through the
+app's real code, screen by screen: one looked at the overall journey (like a ride-app
+expert), one at what it's like to actually use mid-workout at the gym, and one at the
+very first minutes a new person spends in the app. They wrote three reports with
+about forty findings, each one pointing at the exact line of code.
+
+**The headline problems they agree on:**
+The Workout tab can't actually start a workout on most days (and can even invent a
+fake "unfinished workout" afterwards), several messages in the app say things that
+aren't true, the answers people give during signup get partly thrown away, a lazy
+set log quietly invents an effort score, and the streak counter is counting for the
+wrong user so it always shows zero.
+
+**What this is and isn't:**
+These are reports, not fixes. The fix campaign starts next: a plan, a critic to
+challenge the plan, then small focused pull requests.
+
+**Status:** Reports merged into main in pull request #316 (docs/design/reviews/).
+
 ## 2026-06-10 — The new look has a rulebook, and new users get a proper welcome
 
 **What happened (in plain words):**
