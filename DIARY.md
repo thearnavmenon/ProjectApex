@@ -7,6 +7,29 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-10 — A whole chapter is finished: the coach that actually learns you
+
+**The big picture (in plain words):**
+For a long stretch now, almost all the work has been one big project: making the app
+truly *learn* each person instead of starting from scratch every workout. Today that
+whole chapter is officially finished and closed.
+
+**What it means for someone using the app:**
+The app now keeps a living picture of you — how strong you're getting on each lift, how
+recovered you are, when you've genuinely stalled (versus just an off day), and when
+you've outgrown your own targets. The coaching is built on that picture instead of
+re-reading your raw history cold each time, so the advice stops feeling generic.
+
+**What's left for later — and none of it is blocking:**
+A handful of small tuning jobs that need real-world data before they're worth doing,
+one product idea parked on purpose, and a short "revisit next chapter" list. One honest
+caveat: the newest target screens work and are tested, but nobody has actually watched
+them run on a phone yet — worth a quick eyeball before showing them off.
+
+**Status:** Done. The big Phase 2 plan (issue #71) is closed.
+
+---
+
 ## 2026-06-10 — Fixed a spelling mix-up so the app remembers what you've seen
 
 **The problem (in plain words):**

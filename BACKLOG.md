@@ -388,3 +388,17 @@ The 2-agent verification earned its keep: it caught that a *silent* floor bump w
 - [x] S3: this entry + **ADR-0023** + CONTEXT (floor "monotonic non-decreasing"; "re-calibration" concept) + diary.
 
 Key calls: **median** trigger (consistent with every other projection number; a peakier signal would be jumpy + `e1rmPeak` is dead) → copy frames it as *sustained* progress; per-pattern (not a global ≥4/6 gate — that was one-time readiness); event-keyed watermark ack (survives a server sync, no boolean clobber); **no SQL migration**. Deferred (still): goal-aware margin / option B — needs cohort data. Found & reported (grep-and-report, not fixed): **#309** — legacy `calibrationReviewAcknowledged` camel/snake key mismatch (the #269 server ack doesn't survive a sync). Umbrella #305 closed on the slice-3 merge.
+
+### 2K — Phase 2 PRD (#71) milestone closure (2026-06-10)
+
+Phase 2 — "Trainee model in production: AI coaching intelligence" (#71) — is shipped, and the PRD umbrella is closed. The trainee model went from populated-but-inert (the Phase 1 rails) to the single source of truth the coach consumes: deterministic server-side rule logic runs after every completed session and produces the structured behavioural memory the AI reasons over (hybrid plateau verdict, two-dimensional recovery, plateau-aware phase advance, prescription accuracy, per-axis confidence lifecycle, calibration projections, capability-driven re-calibration).
+
+What shipped, by sub-milestone (all merged): **2A** rule modules + orchestrator; **2-wiring** integration-audit recovery; **2B** legacy→trainee cutover; **2C–2E** post-cutover stabilisation + the functional-defect bug sweep; **2F** heavy-reassessment surface (#258); **2G** per-axis confidence lifecycle (#166, all 3 axes); **2H** calibration-review projections (#269); **2I** goal-renegotiation stretch re-derivation (#304); **2J** capability-driven re-calibration (#305). Decision history: **ADRs 0008–0023**. Also merged in this window: #309 / PR #311 (calibration-ack camel/snake key fix) + diary #312.
+
+Carried forward into v2.x — **none of it blocks**; the feature is complete:
+- **Open follow-up tickets (data-gated tuning / hygiene):** #164, #165 (`MuscleProfile.volumeTolerance` cadence-scaling / EWMA-update), #279 (deterministic weight-snap), #292 (`recentSessionDates` unbounded in the EF write).
+- **Deferred-by-design:** #305 Option B (goal-aware stretch margin) — needs cohort data to calibrate the focus-bump honestly; held by ADR-0023, not a live issue.
+- **v2.x watch-items:** `docs/v2.x-watch-items.md` (12 Phase-2-design deferrals) remains the canonical revisit catalog — walk it when v2.x design starts.
+- **Unverified, not unbuilt:** the #269 / #305 iOS surfaces (calibration-review + re-calibration banners, review screen, "Levelled up" badge) are compile- and logic-verified but never visually QA'd on a simulator/device — worth an on-device once-over.
+
+Sweep (CLAUDE.md cadence, milestone boundary): re-read CONTEXT.md end-to-end — already current through #305 (floor "monotonic non-decreasing"; the "Re-calibration" concept; "immovable floor" explicitly marked retired), **nothing to prune**; `v2.x-watch-items.md` reconciled, no edit needed.
