@@ -7,6 +7,39 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The "what did today prove?" screen got designed (PR #333)
+
+**What happened (in plain words):**
+The screen you see right after finishing a workout got its full design plan.
+It's the moment the coach speaks: one short headline naming what the session
+proved about you, the proof drawn underneath as your strength band with
+today's result placed on it like a dot of ink, and the full session record
+below that. The same four experts reviewed it — looks, experience, brand, and
+animation.
+
+**The biggest catch:**
+My draft said that once you tap Finish, the record is locked forever. The
+experts voted that down 4 to 0. The scary example: you log the wrong weight by
+accident, and the app celebrates a strength milestone you never earned — and
+you can't fix it. Now real facts (weight and reps) can be corrected from the
+history page for up to two days, with the old number visibly crossed out, not
+erased. Feelings stay locked — you can't rewrite how a set felt after the fact.
+
+**Other good catches:**
+All four experts noticed my headline text literally couldn't fit on the screen
+(too many words at too big a size) — it's now a short claim plus a smaller
+proof line. The animation expert choreographed the screen's signature moment:
+today's dot settling onto your band like a pen touching paper, and the "floor
+moved up" click that only ever plays when you've actually seen it — never
+behind your back, never twice. And celebrations stay honest: a flat day gets
+respect and a quiet "one more session above 102 and the floor moves," not
+confetti.
+
+**What's next:**
+The Progress screen, then the Train screen — same four-expert panel.
+
+---
+
 ## 2026-06-11 — The workout screen itself got designed, with a motion expert at the table
 
 **What happened (in plain words):**
