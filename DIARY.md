@@ -40,6 +40,37 @@ The Progress screen, then the Train screen — same four-expert panel.
 
 ---
 
+## 2026-06-11 — Spring cleaning: three stray copies of workout screens got thrown out
+
+**What happened (in plain words):**
+A while back, three files for the workout screens ended up in the wrong place —
+sitting at the very top of the project folder instead of inside the app's real
+code folder. The app never used them; it always built from the proper copies.
+But two of the three strays were old and out of date: one was missing a crash
+fix, another was missing the "Continue with last weights" button. The danger
+wasn't a broken app — it was that anyone, a person or an AI helper, who opened
+the wrong copy could read outdated code and get confused, or even "fix" the
+file nobody actually runs.
+
+**What changed:**
+The three stray files are gone, along with their now-empty folders and the
+leftover bookkeeping lines in the project's index that still pointed at them.
+The real, up-to-date copies inside the app were not touched at all.
+
+**How it was checked:**
+Before deleting, we re-confirmed the app's build recipe never compiled these
+files — it didn't, so removing them couldn't break anything. After deleting,
+we searched the project's index for any leftover mention (none), confirmed the
+project still opens, and built and ran the full test suite on a simulated
+iPhone — all 261 of the everyday tests passed. One live-internet test failed,
+but it fails the exact same way on a clean copy of the project too, so it's an
+old flaky test, not something this change caused.
+
+**Status:** Up as pull request #334, awaiting review. First of eight cleanup
+jobs in campaign #318.
+
+---
+
 ## 2026-06-11 — The workout screen itself got designed, with a motion expert at the table
 
 **What happened (in plain words):**
