@@ -142,9 +142,10 @@ let both fail loudly instead of silently.*
 | P1 | Dim variant now; motion restraint; loop edge cases; plan-peek | **Accepted** — `DESIGN.md` + §4/§7 |
 | P2 | Gauge needs literal number; Train/Today boundary; quiet stat; missing tokens | **Accepted** — §6/§2/§5 + `DESIGN.md` |
 
-## 10. Next design targets (not started)
+## 10. Next design targets
 
 1. ~~Onboarding / first-run calibration~~ — specced in `onboarding-calibration.md`.
-2. Splash / brand moment + Today screen visual design (with Mobbin references).
+2. ~~Splash / brand moment + Today screen~~ — specced in `splash-today.md`
+   (includes the wordmark/app-icon asset deliverable: the aperture-A).
 3. Live-loop screen visual design; Progress; Train.
 4. Per-screen specs then get broken into issues/slices for implementation.
