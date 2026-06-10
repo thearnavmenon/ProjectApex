@@ -110,6 +110,11 @@ type-scale:
   label:    13     # metadata, axis labels (ink-muted)
 ```
 
+Inline emphasis within running text comes from **weight/value, never hue** —
+accent-colored words inside a sentence read as tappable (the accent means "act
+here"). Two-tone emphasis is sanctioned: key numbers in full ink/heavier weight,
+connective tissue in `ink-muted`.
+
 ### Dynamic Type & localization (review P2)
 
 - Body, labels, and UI text track Dynamic Type through the AX sizes.
@@ -194,6 +199,10 @@ motion:
 reduce-motion: "every expressive transition falls back to a 150ms crossfade; haptics kept"
 ```
 
+**Motion canon:** *the ink lives at the bottom of the world* — it drains downward
+at app open (splash) and floods upward from the Start button at workout start.
+One physics across the bookends; specifics in `docs/design/splash-today.md`.
+
 Feel: Apple-fluid springs, Opal-alive, a touch of Duolingo snap — never floaty.
 
 ## Haptics (review P2)
@@ -218,3 +227,4 @@ haptics:
 | 2026-06-10 | Two-agent review (UI expert + UX expert, Uber-calibre brief) — all four P0s and the P1s accepted: **P0-1** feel-pill ignore ≠ confirm (spec §5); **P0-2** deterministic local fallback for every coach line (spec §4/§6); **P0-3** onboarding/first-run calibration flow is a required design target (`onboarding-calibration.md`); **P0-4** contrast roles — text/icons in ink, `accent-ink #1322CC` as default interactive, bright accent for large fills only. P1: dim variant specced now; motion restraint; live-loop edge cases + plan-peek. P2: gauge always backed by literal number + label; data-viz/icon/haptic/Dynamic-Type tokens added. |
 | 2026-06-10 | Motion: drain-and-rise restricted to ≤4 bookend moments; 150ms workhorse nav; Reduce Motion fallback mandatory. |
 | 2026-06-11 | Second two-agent review (UI craft + UX/product) of the 16 Mobbin onboarding references — all proposals accepted into `docs/design/onboarding-calibration.md` (record in its §8). Headlines: the model reveal gets a full layout + honesty-rendering spec and is designed first; equipment gates capability seeding; single-selects auto-advance; progress honesty (full denominator, ~10% endowed start); honest-labor pacing for the drawing beat; pre-filled weights banned; protected zone before Today; adidas step-checklist + wheels rejected. |
+| 2026-06-11 | Splash + Today locked (`docs/design/splash-today.md`) after a **three-agent** review (UI craft + UX/product + visual/art-direction). **Wordmark: caps APEX with the custom aperture-A** — the A's counter drawn as the 6-blade iris (2–1 panel call; the iris integration is load-bearing). Cross-screen iris travel cut for v1 (in-place focus instead). Motion canon added ("the ink lives at the bottom of the world"). Today gains the drafting-rule hairline system, the evidence-number lockup (SG 600 tnum), the Lens unknown/calibrating state, and a full state machine (back-off day, session-not-generated + pre-generation policy, program complete, gap return). Inline emphasis = weight, never hue. |

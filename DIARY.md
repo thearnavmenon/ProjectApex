@@ -7,6 +7,37 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The app's face got designed: the opening moment and the home screen
+
+**What happened (in plain words):**
+Two more screens got their full design plans: the moment the app opens, and the
+home screen ("Today") that answers one question — what does my coach want from me
+right now? This round three expert agents reviewed the draft instead of two: the
+usual looks-and-experience pair, plus a new brand-design specialist.
+
+**The big design decision:**
+The brand specialist said the draft logo would look like anyone's app — plain
+lettering on a blue screen. The fix: the word APEX gets one custom-drawn letter.
+The hole inside the letter A becomes a tiny camera shutter — the same shutter that
+shows your daily readiness on the home screen. One drawing ties together the logo,
+the app icon, and the app's signature gauge. (Two agents preferred lowercase
+lettering; the brand specialist's capital-A argument won because the shutter needs
+the A's triangle shape.)
+
+**Other important catches:**
+The home screen was missing half its real-life situations — like the day the coach
+says "don't train hard today" (the screen now leads with that advice instead of a
+big blue Start button), or when your workout numbers aren't ready yet (they now get
+prepared in the background, so you never stand on the gym floor watching a spinner).
+Also, the readiness gauge must admit when it doesn't know yet — a new-user gauge
+shows a dash, not a made-up number. And one technical save: iPhone launch screens
+can't use custom fonts, so the logo ships as a pre-made image — caught on paper
+instead of in testing.
+
+**Status:** Merged into main in pull request #320; design documents only, no app code.
+
+---
+
 ## 2026-06-11 — The welcome-flow blueprint got a hard second look and grew much sharper
 
 **What happened (in plain words):**
