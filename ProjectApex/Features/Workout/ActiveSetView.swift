@@ -412,6 +412,17 @@ struct ActiveSetView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 4)
 
+            // "Last time" line (#318 U7 / G-F6) — last session's performance
+            // for this exercise, muted, directly under the hero numbers.
+            if let lastTime = viewModel.lastPerformanceSummary {
+                Text(lastTime)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 4)
+                    .accessibilityLabel("Last session: \(lastTime)")
+            }
+
             // "Adjusted" badge — shown after user overrides weight (FB-001)
             if prescription.userCorrectedWeight == true {
                 HStack(spacing: 5) {

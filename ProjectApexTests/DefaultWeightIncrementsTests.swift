@@ -141,4 +141,100 @@ final class DefaultWeightIncrementsTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(result.lower), 85.0, accuracy: 0.001)
         XCTAssertEqual(try XCTUnwrap(result.upper), 87.5, accuracy: 0.001)
     }
+
+    // MARK: ─── snap(_:for:excluding:) — PRD §7.1.1 (#318 U7 / G-F8) ──────────
+
+    /// 47.5 IS in the dumbbell table, so snapping it is only meaningful when
+    /// it has been excluded — the exclusion here comes from a real GymFactStore
+    /// correction in the setup, exactly like production. Without that setup
+    /// this test would be vacuous (snap would return nil).
+    func test_snap_dumbbells_47_5ExcludedViaGymFactStore_snapsDownTo45() async {
+        let defaults = UserDefaults(suiteName: "com.test.dwi.\(UUID().uuidString)")!
+        let store = GymFactStore(userDefaults: defaults)
+        await store.recordCorrection(
+            equipmentType: .dumbbellSet, unavailableWeight: 47.5, availableWeight: 45.0
+        )
+        let excluded = await store.facts
+            .filter { $0.equipmentType == .dumbbellSet }
+            .map(\.unavailableWeight)
+        XCTAssertTrue(
+            excluded.contains { abs($0 - 47.5) < 0.001 },
+            "Setup: 47.5 must be excluded via GymFactStore or this test is vacuous"
+        )
+        // lower=45, upper=50 → threshold 45 + 0.6×5 = 48; 47.5 < 48 → DOWN
+        let snapped = DefaultWeightIncrements.snap(47.5, for: .dumbbellSet, excluding: excluded)
+        XCTAssertEqual(snapped ?? -1, 45.0, accuracy: 0.001)
+    }
+
+    func test_snap_dumbbells_33_7_belowBiasThreshold_snapsDownTo32_5() {
+        // lower=32.5, upper=35 → threshold 32.5 + 0.6×2.5 = 34; 33.7 < 34 → DOWN
+        let snapped = DefaultWeightIncrements.snap(33.7, for: .dumbbellSet)
+        XCTAssertEqual(snapped ?? -1, 32.5, accuracy: 0.001)
+    }
+
+    func test_snap_dumbbells_34_1_aboveBiasThreshold_snapsUpTo35() {
+        // threshold 34; 34.1 ≥ 34 → UP (the 0.6 bias-down rule's other side)
+        let snapped = DefaultWeightIncrements.snap(34.1, for: .dumbbellSet)
+        XCTAssertEqual(snapped ?? -1, 35.0, accuracy: 0.001)
+    }
+
+    func test_snap_machineStack_5kgStep_biasRule() {
+        // legPress uses machineStack (5 kg steps in this range):
+        // 47 → lower 45, upper 50, threshold 48 → DOWN to 45.
+        XCTAssertEqual(
+            DefaultWeightIncrements.snap(47.0, for: .legPress) ?? -1, 45.0, accuracy: 0.001
+        )
+        // 48.5 ≥ 48 → UP to 50.
+        XCTAssertEqual(
+            DefaultWeightIncrements.snap(48.5, for: .legPress) ?? -1, 50.0, accuracy: 0.001
+        )
+    }
+
+    func test_snap_belowTableMinimum_snapsUp() {
+        // Below-min edge: no lower neighbour exists → snap UP to the minimum.
+        XCTAssertEqual(
+            DefaultWeightIncrements.snap(1.0, for: .dumbbellSet) ?? -1, 2.5, accuracy: 0.001
+        )
+    }
+
+    func test_snap_aboveTableMaximum_snapsDown() {
+        // Above-max edge: no upper neighbour exists → snap DOWN to the maximum.
+        XCTAssertEqual(
+            DefaultWeightIncrements.snap(250.0, for: .barbell) ?? -1, 200.0, accuracy: 0.001
+        )
+    }
+
+    func test_snap_alreadyAvailable_returnsNil_epsilonMembership() {
+        // Exact table value and a float-noise neighbour both count as
+        // available (epsilon membership — never exact `==`).
+        XCTAssertNil(DefaultWeightIncrements.snap(47.5, for: .dumbbellSet))
+        XCTAssertNil(DefaultWeightIncrements.snap(47.500001, for: .dumbbellSet))
+    }
+
+    func test_snap_noWeightTable_returnsNil() {
+        XCTAssertNil(DefaultWeightIncrements.snap(50.0, for: .adjustableBench))
+    }
+
+    // MARK: ─── snapDown(_:for:excluding:) (#318 U7 / G-F3) ───────────────────
+
+    func test_snapDown_returnsLargestAvailableAtOrBelow() {
+        // Barbell table runs in 2.5 steps: largest ≤ 92 is 90.
+        XCTAssertEqual(
+            DefaultWeightIncrements.snapDown(92.0, for: .barbell) ?? -1, 90.0, accuracy: 0.001
+        )
+        // An exact member stays put.
+        XCTAssertEqual(
+            DefaultWeightIncrements.snapDown(90.0, for: .barbell) ?? -1, 90.0, accuracy: 0.001
+        )
+    }
+
+    func test_snapDown_respectsExclusions() {
+        // 47.5 excluded → largest dumbbell ≤ 48 becomes 45.
+        let result = DefaultWeightIncrements.snapDown(48.0, for: .dumbbellSet, excluding: [47.5])
+        XCTAssertEqual(result ?? -1, 45.0, accuracy: 0.001)
+    }
+
+    func test_snapDown_noWeightTable_returnsNil() {
+        XCTAssertNil(DefaultWeightIncrements.snapDown(50.0, for: .adjustableBench))
+    }
 }

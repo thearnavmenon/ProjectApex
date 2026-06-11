@@ -85,4 +85,57 @@ nonisolated enum DefaultWeightIncrements {
         let upper = available.filter { $0 > prescribed }.first
         return (lower, upper)
     }
+
+    /// Snaps a prescribed weight to an available increment per PRD §7.1.1
+    /// (#318 U7 / G-F8): round DOWN to the lower neighbour unless the target
+    /// is ≥ lower + 0.6 × (upper − lower), in which case round UP. At the
+    /// table edges: below-min snaps UP, above-max snaps DOWN.
+    ///
+    /// Returns nil when no snap applies: the equipment has no weight table,
+    /// the weight is non-positive, the weight is already available (epsilon
+    /// membership — never exact `==`), or every table entry is excluded.
+    static func snap(
+        _ weight: Double,
+        for type: EquipmentType,
+        excluding unavailable: [Double] = []
+    ) -> Double? {
+        let epsilon = 0.05
+        let table = defaults(for: type)
+        guard !table.isEmpty, weight > 0 else { return nil }
+        // Exclusion matching uses the GymFactStore convention (abs < 0.1).
+        let available = table.filter { w in
+            !unavailable.contains { abs($0 - w) < 0.1 }
+        }
+        guard !available.isEmpty else { return nil }
+        // Already available — no snap needed.
+        guard !available.contains(where: { abs($0 - weight) < epsilon }) else { return nil }
+
+        let lower = available.last(where: { $0 < weight })
+        let upper = available.first(where: { $0 > weight })
+        switch (lower, upper) {
+        case (nil, nil):
+            return nil
+        case (nil, .some(let up)):           // below-min → snap UP
+            return up
+        case (.some(let low), nil):          // above-max → snap DOWN
+            return low
+        case (.some(let low), .some(let up)):
+            let threshold = low + 0.6 * (up - low)   // bias-down rule (PRD §7.1.1)
+            return weight >= threshold ? up : low
+        }
+    }
+
+    /// Largest available weight ≤ `weight` (#318 U7 / G-F3) — used to re-snap
+    /// a clamped cap so the stored weight is a real available weight. Returns
+    /// nil when the equipment has no weight table or nothing is ≤ `weight`.
+    static func snapDown(
+        _ weight: Double,
+        for type: EquipmentType,
+        excluding unavailable: [Double] = []
+    ) -> Double? {
+        let available = defaults(for: type).filter { w in
+            !unavailable.contains { abs($0 - w) < 0.1 }
+        }
+        return available.last(where: { $0 <= weight + 0.05 })
+    }
 }

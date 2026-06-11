@@ -73,8 +73,12 @@ struct InferenceRetrySheet: View {
                     }
                     .disabled(viewModel.isRetrying)
 
-                    // Continue with last weights — only during rest (not preflight)
-                    if viewModel.isResting {
+                    // Continue with last weights — only when a real seed exists
+                    // (#318 U7 / G-F1): an in-session set, last-session history,
+                    // or a genuinely bodyweight movement. Offered during rest
+                    // and (critic amendment 7.6) during preflight, so first-set
+                    // / post-swap / resume failures get a manual path too.
+                    if (viewModel.isResting || viewModel.isPreflight) && viewModel.canUseLastWeights {
                         Button(action: { viewModel.onUseLastWeights() }) {
                             HStack(spacing: 8) {
                                 Image(systemName: "clock.arrow.circlepath")

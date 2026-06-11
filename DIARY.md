@@ -7,6 +7,48 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The coach can no longer prescribe weights that don't exist, or jumps that don't make sense (PR #365)
+
+**What happened (in plain words):**
+Four related problems with the weights the AI coach hands you, all from the
+#318 audit. First, the coach could prescribe a weight your gym simply
+doesn't have — like 47.5 kg dumbbells when the rack jumps from 45 to 50.
+The app even had a little note ready to display ("adjusted to nearest
+available") but nothing ever produced it. Second, nothing stopped a runaway
+prescription: if the AI hallucinated 200 kg after you benched 80 last week,
+the app would show 200 kg with a straight face. Third, the workout card
+never told you what you actually did last time — useful context the app
+already stores but never showed. And fourth, when the AI was offline and
+you tapped "Continue with last weights" on your very first set, it had no
+"last weights" to use — so it showed 0 kg, rendered as "BW" (bodyweight),
+on a barbell exercise.
+
+**What changed:**
+Every weight the AI prescribes now goes through one shared checkpoint
+before you see it. It first snaps the weight to something your gym actually
+has (rounding down unless the target sits clearly closer to the next weight
+up — the safe default), honoring every "my gym doesn't have this" report
+you've made. Then, for your heavy working sets only, it caps the weight at
+15% above what you lifted last session — warm-ups and first-ever sessions
+stay free, and a low prescription is never pushed up. If anything changed,
+the card says so with the "adjusted" note. The card also gained a quiet
+"Last time: 80kg × 8/8/7" line so you can sanity-check the coach yourself.
+And "Continue with last weights" now seeds from your last session's history
+when this session has none, only shows up when it can offer something real,
+and works on the first set of a session too instead of only between sets.
+
+**How it was checked:**
+Twenty-five new tests: the snapping rule (including the gym-exclusion case,
+the 5 kg machine steps, and both ends of the rack), the cap (with history,
+without history, and per set type), the "adjusted" note surviving the round
+trip from the coach's text to the screen, the history seeding (including
+keeping honest 0 kg for genuinely bodyweight movements), and the new card
+line's wording. Full build passed and the whole suite ran green.
+
+**Status:** PR #365 opened — pending review and merge.
+
+---
+
 ## 2026-06-11 — Rest screen polish and the workout summary finally celebrates real records (PR #347)
 
 **What happened (in plain words):**
