@@ -487,7 +487,9 @@ actor SessionPlanService {
             let wrapper = try JSONDecoder().decode(SessionPlanWrapper.self, from: data)
             return wrapper.sessionPlan
         } catch let err {
+            #if DEBUG
             print("[SessionPlanService] Decode failure. Raw response:\n\(rawResponse)")
+            #endif
             throw SessionPlanError.decodingFailed(
                 "Session plan decode failed: \(err.localizedDescription). Raw: \(String(extracted.prefix(400)))"
             )
@@ -564,7 +566,9 @@ actor SessionPlanService {
                 .compactMap { $0.first }
                 .map { dateFormatter.string(from: $0.loggedAt) }
                 .sorted()
+            #if DEBUG
             print("[SessionPlanService] Exercise history for \(exerciseId): \(sessionDates.count) session(s) found, dates: \(sessionDates)")
+            #endif
         }
 
         // Group set logs by exerciseId

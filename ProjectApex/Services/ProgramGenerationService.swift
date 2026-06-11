@@ -420,7 +420,9 @@ actor ProgramGenerationService {
             return wrapper.mesocycleTemplate
         } catch let err {
             // Log the full raw response so decode failures are diagnosable.
+            #if DEBUG
             print("[ProgramGenerationService] Decode failure. Full raw response:\n\(rawResponse)")
+            #endif
             let preview = String(jsonString.prefix(600))
             throw ProgramGenerationError.decodingFailed(
                 "Template decode failed: \(err.localizedDescription). Raw: \(preview)"

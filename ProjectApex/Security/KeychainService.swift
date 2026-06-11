@@ -119,9 +119,14 @@ nonisolated struct KeychainService {
         // Attempt an add first; if duplicate, fall through to update.
         var addQuery = query
         addQuery[kSecValueData as String] = data
-        // Restrict to when-unlocked accessibility so the item is available
-        // during normal app use but protected when the device is locked.
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+        // ThisDeviceOnly prevents backup extraction: API keys and auth tokens
+        // must not migrate to another device via iCloud/iTunes/Finder backup.
+        // Note: this attribute is applied at store time. Items written before
+        // this change keep their old attribute until re-stored (e.g. fresh
+        // install or clearing via Developer Settings). No migration needed for
+        // alpha — the bundled-key seed re-stores on fresh install; existing dev
+        // keys can be cleared and re-entered via Developer Settings.
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
         let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
 
