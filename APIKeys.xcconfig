@@ -1,0 +1,17 @@
+// APIKeys.xcconfig — committed, NON-SECRET defaults for the bundled alpha key (#329).
+//
+// This file is TRACKED in git and contains ONLY the placeholder default below.
+// The REAL key never lives here — it goes in APIKeys.local.xcconfig (git-ignored),
+// which is optionally included on the next line. `#include?` (note the `?`) does
+// NOT error when the file is absent, so a clean checkout / CI without the secret
+// still builds: ANTHROPIC_API_KEY stays at the placeholder and the app resolves it
+// to nil at runtime → the honest "needs setup" gate. A missing key is never a
+// build break and never a compile error.
+//
+// To configure the real key (one step):
+//   cp APIKeys.xcconfig.example APIKeys.local.xcconfig
+//   then replace REPLACE_ME in APIKeys.local.xcconfig with the real sk-ant- key.
+
+ANTHROPIC_API_KEY = REPLACE_ME
+
+#include? "APIKeys.local.xcconfig"

@@ -7,6 +7,45 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — A brand-new install can now get past the front door (PR #368)
+
+**The problem (in plain words):**
+If someone installed the app fresh, they could never finish setting it up. The app
+needs a secret "key" to talk to the AI (for scanning your gym and building your
+program). But the only way to put that key in was a hidden developer screen buried
+*inside* setup — so on a clean phone there was no key, and setup would chug along
+for about ten minutes until the gym-scan step suddenly died with an ugly error.
+
+**What changed:**
+Two things. First, the app can now carry a key baked into the build itself, so a
+fresh install just works. The real key is never stored in the project's shared code
+— it lives in a private file on the builder's machine (or as a build secret), and
+only a fake "REPLACE_ME" placeholder is shared. The app looks for a key in this
+order: one you already saved → the baked-in build key (which it then tucks away so
+the rest of the app behaves exactly as before) → none.
+
+Second, if there genuinely is no key (someone built it without setting one up), the
+app no longer lets you wander into a doomed setup. Instead it shows a calm, honest
+"This build needs setup" screen right at launch, explaining the build is missing its
+configuration and to contact the developer. When a key *is* present, nothing changes
+at all — the normal app opens as usual.
+
+**How it was checked:**
+- Built the app with NO real key present — it builds cleanly (a missing key is never
+  a build error), and the baked-in value correctly reads as the placeholder, which
+  the app treats as "no key" and shows the setup screen.
+- Built again with a (fake) key in the private file — the value flows all the way
+  through to the app as expected.
+- Wrote 13 new automated tests covering the "which key wins" order and the
+  show/hide logic of the setup screen. Full test run: 525 passed, 10 skipped (the
+  usual live-internet tests), 0 failures.
+
+**Status:** Done, opened as PR #368 (closes #329). Note for later: the
+longer-term plan is to route AI keys through a server so nothing ships in the app at
+all — this build-time key is the alpha-stage stopgap.
+
+---
+
 ## 2026-06-11 — The new look's building blocks now exist in code (PR #367)
 
 **What happened (in plain words):**

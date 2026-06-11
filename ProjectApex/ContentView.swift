@@ -75,6 +75,19 @@ struct ContentView: View {
     @State private var navigateToPausedDayDetail: Bool = false
 
     var body: some View {
+        // Honest launch gate (#329 / O-F1): when no AI key is resolvable — neither
+        // in the Keychain nor bundled into the build — show the "needs setup" screen
+        // instead of letting onboarding start and die mid-gym-scan. No-op when a key
+        // is present: the normal onboarding/app path below is completely untouched.
+        if deps.hasResolvableAIKey {
+            mainContent
+        } else {
+            NeedsSetupView()
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         TabView(selection: $selectedTab) {
 
             // ── Tab 0: Program ─────────────────────────────────────────────

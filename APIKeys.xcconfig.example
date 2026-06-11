@@ -1,0 +1,23 @@
+// APIKeys.xcconfig.example — TEMPLATE for the LOCAL bundled alpha key (#329).
+//
+// HOW TO USE (one step):
+//   cp APIKeys.xcconfig.example APIKeys.local.xcconfig
+//   then replace REPLACE_ME with the real alpha Anthropic key (starts with "sk-ant-").
+//
+// APIKeys.local.xcconfig is .gitignored — the real key NEVER gets committed. This
+// template (with its placeholder) and the committed APIKeys.xcconfig (which only
+// sets the placeholder default and optionally includes the local file) are the
+// only copies in source control.
+//
+// Mechanism: the app target's build configs use APIKeys.xcconfig as their
+// baseConfigurationReference; APIKeys.xcconfig does `#include? "APIKeys.local.xcconfig"`,
+// so this file's value overrides the placeholder when present. The result is
+// surfaced into the generated Info.plist via INFOPLIST_KEY_APEXAnthropicAPIKey =
+// $(ANTHROPIC_API_KEY) and read at runtime by BundledAPIKey.anthropic. When this
+// file is absent (clean checkout, CI without the secret), the value stays at the
+// placeholder and the app resolves the key to nil — never a compile error.
+//
+// One key covers both failing onboarding steps: the gym scan (VisionAPIService)
+// and program generation both read the same .anthropicAPIKey Keychain entry.
+
+ANTHROPIC_API_KEY = REPLACE_ME

@@ -55,6 +55,7 @@
 		A1540154CAFE0154CAFE0021 /* CalibrationReviewStretchPayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1540154CAFE0154CAFE0022 /* CalibrationReviewStretchPayloadTests.swift */; };
 		22000000000000000000F011 /* PromptLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22000000000000000000F012 /* PromptLoaderTests.swift */; };
 		DE51900000000000DE519002 /* DesignSystemTokensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE51900000000000DE519001 /* DesignSystemTokensTests.swift */; };
+		A1C0F19329000000APIKEY04 /* BundledKeyResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */; };
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 		C0D12694855E73899CCFE137 /* TraineeModelDigestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */; };
@@ -132,6 +133,10 @@
 		EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelEnumsTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MovementPatternTests.swift; sourceTree = "<group>"; };
+		A1C0F19329000000APIKEY01 /* APIKeys.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = APIKeys.xcconfig; sourceTree = "<group>"; };
+		A1C0F19329000000APIKEY06 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A1C0F19329000000APIKEY02 /* APIKeys.xcconfig.example */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = APIKeys.xcconfig.example; sourceTree = "<group>"; };
+		A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledKeyResolutionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -172,6 +177,9 @@
 		47D91BB72F60266A007B3B34 = {
 			isa = PBXGroup;
 			children = (
+				A1C0F19329000000APIKEY01 /* APIKeys.xcconfig */,
+				A1C0F19329000000APIKEY02 /* APIKeys.xcconfig.example */,
+				A1C0F19329000000APIKEY06 /* Info.plist */,
 				47D91BC22F60266A007B3B34 /* ProjectApex */,
 				47D91BC12F60266A007B3B34 /* Products */,
 				46D6D0F8AAFB99EF747FA10E /* Frameworks */,
@@ -253,6 +261,7 @@
 				A1540154CAFE0154CAFE0022 /* CalibrationReviewStretchPayloadTests.swift */,
 				22000000000000000000F012 /* PromptLoaderTests.swift */,
 				DE51900000000000DE519001 /* DesignSystemTokensTests.swift */,
+				A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -409,6 +418,7 @@
 				A1540154CAFE0154CAFE0021 /* CalibrationReviewStretchPayloadTests.swift in Sources */,
 				22000000000000000000F011 /* PromptLoaderTests.swift in Sources */,
 				DE51900000000000DE519002 /* DesignSystemTokensTests.swift in Sources */,
+				A1C0F19329000000APIKEY04 /* BundledKeyResolutionTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -552,6 +562,7 @@
 		};
 		47D91BCC2F60266C007B3B34 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1C0F19329000000APIKEY01 /* APIKeys.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -560,13 +571,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3AF96AAKH6;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Project Apex uses the camera to scan gym equipment and build your gym profile.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -586,6 +592,7 @@
 		};
 		47D91BCD2F60266C007B3B34 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A1C0F19329000000APIKEY01 /* APIKeys.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -594,13 +601,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3AF96AAKH6;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Project Apex uses the camera to scan gym equipment and build your gym profile.";
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
