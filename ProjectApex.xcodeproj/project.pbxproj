@@ -54,6 +54,7 @@
 		A1540154CAFE0154CAFE0011 /* GoalReviewPayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1540154CAFE0154CAFE0012 /* GoalReviewPayloadTests.swift */; };
 		A1540154CAFE0154CAFE0021 /* CalibrationReviewStretchPayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1540154CAFE0154CAFE0022 /* CalibrationReviewStretchPayloadTests.swift */; };
 		22000000000000000000F011 /* PromptLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22000000000000000000F012 /* PromptLoaderTests.swift */; };
+		DE51900000000000DE519002 /* DesignSystemTokensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE51900000000000DE519001 /* DesignSystemTokensTests.swift */; };
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 		C0D12694855E73899CCFE137 /* TraineeModelDigestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */; };
@@ -118,6 +119,7 @@
 		A1540154CAFE0154CAFE0012 /* GoalReviewPayloadTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GoalReviewPayloadTests.swift; sourceTree = "<group>"; };
 		A1540154CAFE0154CAFE0022 /* CalibrationReviewStretchPayloadTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CalibrationReviewStretchPayloadTests.swift; sourceTree = "<group>"; };
 		22000000000000000000F012 /* PromptLoaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptLoaderTests.swift; sourceTree = "<group>"; };
+		DE51900000000000DE519001 /* DesignSystemTokensTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DesignSystemTokensTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
 		DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SetPrescriptionIntentValidationTests.swift; sourceTree = "<group>"; };
 		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
@@ -250,6 +252,7 @@
 				A1540154CAFE0154CAFE0012 /* GoalReviewPayloadTests.swift */,
 				A1540154CAFE0154CAFE0022 /* CalibrationReviewStretchPayloadTests.swift */,
 				22000000000000000000F012 /* PromptLoaderTests.swift */,
+				DE51900000000000DE519001 /* DesignSystemTokensTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -405,6 +408,7 @@
 				A1540154CAFE0154CAFE0011 /* GoalReviewPayloadTests.swift in Sources */,
 				A1540154CAFE0154CAFE0021 /* CalibrationReviewStretchPayloadTests.swift in Sources */,
 				22000000000000000000F011 /* PromptLoaderTests.swift in Sources */,
+				DE51900000000000DE519002 /* DesignSystemTokensTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
