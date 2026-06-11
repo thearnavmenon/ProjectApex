@@ -13,5 +13,6 @@
 //   then replace REPLACE_ME in APIKeys.local.xcconfig with the real sk-ant- key.
 
 ANTHROPIC_API_KEY = REPLACE_ME
+SUPABASE_ANON_KEY = REPLACE_ME
 
 #include? "APIKeys.local.xcconfig"

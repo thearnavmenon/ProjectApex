@@ -1,23 +1,26 @@
-// APIKeys.xcconfig.example — TEMPLATE for the LOCAL bundled alpha key (#329).
+// APIKeys.xcconfig.example — TEMPLATE for LOCAL bundled alpha keys (#329, #369).
 //
 // HOW TO USE (one step):
 //   cp APIKeys.xcconfig.example APIKeys.local.xcconfig
-//   then replace REPLACE_ME with the real alpha Anthropic key (starts with "sk-ant-").
+//   then replace the REPLACE_ME placeholders with the real keys.
 //
-// APIKeys.local.xcconfig is .gitignored — the real key NEVER gets committed. This
-// template (with its placeholder) and the committed APIKeys.xcconfig (which only
-// sets the placeholder default and optionally includes the local file) are the
+// APIKeys.local.xcconfig is .gitignored — real keys NEVER get committed. This
+// template (with its placeholders) and the committed APIKeys.xcconfig (which only
+// sets the placeholder defaults and optionally includes the local file) are the
 // only copies in source control.
 //
 // Mechanism: the app target's build configs use APIKeys.xcconfig as their
 // baseConfigurationReference; APIKeys.xcconfig does `#include? "APIKeys.local.xcconfig"`,
-// so this file's value overrides the placeholder when present. The result is
-// surfaced into the generated Info.plist via INFOPLIST_KEY_APEXAnthropicAPIKey =
-// $(ANTHROPIC_API_KEY) and read at runtime by BundledAPIKey.anthropic. When this
-// file is absent (clean checkout, CI without the secret), the value stays at the
-// placeholder and the app resolves the key to nil — never a compile error.
-//
-// One key covers both failing onboarding steps: the gym scan (VisionAPIService)
-// and program generation both read the same .anthropicAPIKey Keychain entry.
+// so this file's values override the placeholders when present. The results are
+// surfaced into Info.plist via ${VARIABLE} expansion and read at runtime by
+// BundledAPIKey. When this file is absent (clean checkout, CI without the keys),
+// the values stay at the placeholder and the app resolves them to nil — never a
+// compile error, always the honest needs-setup gate.
 
+// Anthropic API key (starts with "sk-ant-"). Used by VisionAPIService and program
+// generation. One key covers both failing onboarding steps.
 ANTHROPIC_API_KEY = REPLACE_ME
+
+// Supabase anon key (#369 slice 2). Public client credential — safe to ship in
+// the bundle. Required for a fresh install to reach Supabase at all.
+SUPABASE_ANON_KEY = REPLACE_ME

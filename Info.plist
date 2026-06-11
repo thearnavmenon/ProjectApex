@@ -26,6 +26,15 @@
 	<key>APEXAnthropicAPIKey</key>
 	<string>${ANTHROPIC_API_KEY}</string>
 
+	<!-- Bundled Supabase anon key (#369 slice 2). ${SUPABASE_ANON_KEY} is expanded from
+	     the build setting (APIKeys.xcconfig -> optional APIKeys.local.xcconfig) during
+	     Info.plist processing. The anon key is a public client credential but goes through
+	     the same placeholder mechanism for consistency. Read at runtime by
+	     BundledAPIKey.supabaseAnon. With no real key configured it stays "REPLACE_ME",
+	     treated as nil -> the needs-setup launch gate. -->
+	<key>APEXSupabaseAnonKey</key>
+	<string>${SUPABASE_ANON_KEY}</string>
+
 	<!-- Standard bundle identity. With GENERATE_INFOPLIST_FILE off these are not
 	     auto-injected, so they are declared here and expanded from the existing
 	     build settings (brace ${...} syntax). -->
