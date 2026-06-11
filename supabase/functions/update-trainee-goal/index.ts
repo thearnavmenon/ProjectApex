@@ -221,82 +221,91 @@ export async function upsertGoal(
   req: UpdateTraineeGoalRequest,
   sql: Sql,
 ): Promise<UpsertGoalResult> {
-  await applyGoalWrite(req, sql);
+  // #369 [23]: all four writes (goal + renegotiation re-derive, ack-append,
+  // stretch-edits, calibration-ack) run inside ONE transaction so a failure
+  // mid-sequence rolls back the whole set — no partial-write window. The
+  // `FOR UPDATE` reads in applyGoalWrite / applyStretchEdits live inside this
+  // same `tx`, so the per-write locking semantics are preserved end-to-end.
+  await sql.begin(async (tx: Sql) => {
+    await applyGoalWrite(req, tx);
 
-  // P5-D06 Slice B (#258): when the goal-review Save acknowledges a
-  // heavy-reassessment trigger, idempotently array-append the triggering
-  // session count to the Slice-A camelCase key. Separate statement, same
-  // connection — the goal write above stays byte-for-byte unchanged.
-  //
-  // The COALESCE(..., '[]') on BOTH the read and the @> containment guard is
-  // load-bearing: a bare `model_json->'key' @> x` is NULL (not false) when
-  // the key is absent, and `NOT NULL` is NULL — so without the COALESCE the
-  // first-ever ack would silently never append. The `NOT @>` guard makes
-  // re-acking an already-present count a no-op.
-  if (req.acknowledge_triggering_session_count !== undefined) {
-    const ack = req.acknowledge_triggering_session_count;
-    await sql`
-      UPDATE public.trainee_models
-      SET model_json = jsonb_set(
-        COALESCE(model_json, '{}'::jsonb),
-        '{acknowledgedTriggeringSessionCounts}',
-        COALESCE(model_json -> 'acknowledgedTriggeringSessionCounts', '[]'::jsonb)
-          || to_jsonb(${ack}::int),
-        true
-      )
-      WHERE user_id = ${req.user_id}
-        AND NOT (
-          COALESCE(model_json -> 'acknowledgedTriggeringSessionCounts', '[]'::jsonb)
-            @> to_jsonb(${ack}::int)
-        )
-    `;
-  }
-
-  // #296 (#269): apply athlete-raised stretch targets (upward-only clamp).
-  if (req.stretch_edits !== undefined && req.stretch_edits.length > 0) {
-    await applyStretchEdits(req.user_id, req.stretch_edits, sql);
-  }
-
-  // #269 S4: durably record that the athlete has seen the one-time
-  // calibration-review screen so the pre-workout banner does not reappear after
-  // a session sync rehydrates the local cache. Separate statement, same
-  // connection — like the ack-append block above. Idempotent: re-running with
-  // the flag set leaves the value at `true`. The goal write above stays
-  // byte-for-byte unchanged.
-  if (req.acknowledge_calibration_review === true) {
-    // Acks BOTH calibration banners: the one-time first calibration
-    // (`calibrationReviewAcknowledged`) and the repeating re-calibration (#305,
-    // ADR-0023) by advancing `acknowledgedRecalibrationSessionCount` to the
-    // current re-calibration watermark (`projections.lastRecalibratedAtSessionCount`).
-    // The watermark only ever advances (EF-written, monotonic), so copying it is
-    // a monotonic ack — a later re-calibration bumps the watermark above this and
-    // re-arms the banner. Absent watermark (no re-calibration yet) → no-op copy.
-    await sql`
-      UPDATE public.trainee_models
-      SET model_json = jsonb_set(
-        jsonb_set(
+    // P5-D06 Slice B (#258): when the goal-review Save acknowledges a
+    // heavy-reassessment trigger, idempotently array-append the triggering
+    // session count to the Slice-A camelCase key. The goal write above stays
+    // byte-for-byte unchanged.
+    //
+    // The COALESCE(..., '[]') on BOTH the read and the @> containment guard is
+    // load-bearing: a bare `model_json->'key' @> x` is NULL (not false) when
+    // the key is absent, and `NOT NULL` is NULL — so without the COALESCE the
+    // first-ever ack would silently never append. The `NOT @>` guard makes
+    // re-acking an already-present count a no-op.
+    if (req.acknowledge_triggering_session_count !== undefined) {
+      const ack = req.acknowledge_triggering_session_count;
+      await tx`
+        UPDATE public.trainee_models
+        SET model_json = jsonb_set(
           COALESCE(model_json, '{}'::jsonb),
-          '{calibrationReviewAcknowledged}',
-          'true'::jsonb,
+          '{acknowledgedTriggeringSessionCounts}',
+          COALESCE(model_json -> 'acknowledgedTriggeringSessionCounts', '[]'::jsonb)
+            || to_jsonb(${ack}::int),
           true
-        ),
-        '{acknowledgedRecalibrationSessionCount}',
-        COALESCE(model_json -> 'projections' -> 'lastRecalibratedAtSessionCount', 'null'::jsonb),
-        true
-      )
-      WHERE user_id = ${req.user_id}
-    `;
-  }
+        )
+        WHERE user_id = ${req.user_id}
+          AND NOT (
+            COALESCE(model_json -> 'acknowledgedTriggeringSessionCounts', '[]'::jsonb)
+              @> to_jsonb(${ack}::int)
+          )
+      `;
+    }
+
+    // #296 (#269): apply athlete-raised stretch targets (upward-only clamp).
+    if (req.stretch_edits !== undefined && req.stretch_edits.length > 0) {
+      await applyStretchEdits(req.user_id, req.stretch_edits, tx);
+    }
+
+    // #269 S4: durably record that the athlete has seen the one-time
+    // calibration-review screen so the pre-workout banner does not reappear after
+    // a session sync rehydrates the local cache. Idempotent: re-running with
+    // the flag set leaves the value at `true`. The goal write above stays
+    // byte-for-byte unchanged.
+    if (req.acknowledge_calibration_review === true) {
+      // Acks BOTH calibration banners: the one-time first calibration
+      // (`calibrationReviewAcknowledged`) and the repeating re-calibration (#305,
+      // ADR-0023) by advancing `acknowledgedRecalibrationSessionCount` to the
+      // current re-calibration watermark (`projections.lastRecalibratedAtSessionCount`).
+      // The watermark only ever advances (EF-written, monotonic), so copying it is
+      // a monotonic ack — a later re-calibration bumps the watermark above this and
+      // re-arms the banner. Absent watermark (no re-calibration yet) → no-op copy.
+      await tx`
+        UPDATE public.trainee_models
+        SET model_json = jsonb_set(
+          jsonb_set(
+            COALESCE(model_json, '{}'::jsonb),
+            '{calibrationReviewAcknowledged}',
+            'true'::jsonb,
+            true
+          ),
+          '{acknowledgedRecalibrationSessionCount}',
+          COALESCE(model_json -> 'projections' -> 'lastRecalibratedAtSessionCount', 'null'::jsonb),
+          true
+        )
+        WHERE user_id = ${req.user_id}
+      `;
+    }
+  });
 
   return { ok: true, goal: req.goal };
 }
 
 /**
  * Goal write + (when the goal genuinely changed) silent renegotiation stretch
- * re-derivation, in ONE `FOR UPDATE` transaction so the new goal, the
- * re-derived stretch, and `goalLastRenegotiatedAt` commit atomically (#304,
- * ADR-0022). The prior goal is read BEFORE the overwrite — this is the only
- * writer that sees old + new goal together, which is what makes
+ * re-derivation. The new goal, the re-derived stretch, and
+ * `goalLastRenegotiatedAt` commit atomically (#304, ADR-0022) — and, per #369
+ * [23], so do the caller's subsequent ack / stretch-edit / calibration-ack
+ * writes, because `tx` is the single `upsertGoal`-level transaction handle.
+ * The `FOR UPDATE` read below therefore holds its row lock for the whole
+ * `upsertGoal` sequence. The prior goal is read BEFORE the overwrite — this is
+ * the only writer that sees old + new goal together, which is what makes
  * "the goal actually changed" detectable (a later session-apply has already
  * lost the prior goal).
  *
@@ -310,73 +319,71 @@ export async function upsertGoal(
  */
 async function applyGoalWrite(
   req: UpdateTraineeGoalRequest,
-  sql: Sql,
+  tx: Sql,
 ): Promise<void> {
-  await sql.begin(async (tx: Sql) => {
-    const rows = await tx`
-      SELECT model_json FROM public.trainee_models
-      WHERE user_id = ${req.user_id}
-      FOR UPDATE
-    `;
-    const priorJson =
-      (rows[0]?.model_json ?? null) as Record<string, unknown> | null;
+  const rows = await tx`
+    SELECT model_json FROM public.trainee_models
+    WHERE user_id = ${req.user_id}
+    FOR UPDATE
+  `;
+  const priorJson =
+    (rows[0]?.model_json ?? null) as Record<string, unknown> | null;
 
-    // Goal write — same jsonb_set merge / COALESCE-NULL defense as before,
-    // now inside the transaction so it commits atomically with the re-derive.
-    await tx`
-      INSERT INTO public.trainee_models (user_id, model_json, updated_at)
-      VALUES (
-        ${req.user_id},
-        ${tx.json({ goal: req.goal })},
-        NOW()
-      )
-      ON CONFLICT (user_id) DO UPDATE SET
-        model_json = jsonb_set(
-          COALESCE(public.trainee_models.model_json, '{}'::jsonb),
-          '{goal}',
-          ${tx.json(req.goal)},
-          true
-        ),
-        updated_at = NOW()
-    `;
-
-    // Silent renegotiation re-derivation (computed from the LOCKED prior
-    // snapshot, so a concurrent session-apply cannot clobber it).
-    if (priorJson === null) return; // brand-new user → nothing to renegotiate
-    const priorGoal = priorJson.goal as RenegotiableGoal | undefined;
-    if (!isRenegotiation(priorGoal, req.goal)) return;
-
-    const projections = (priorJson.projections as {
-      patternProjections?: PatternProjection[];
-    } | undefined)?.patternProjections;
-    if (!Array.isArray(projections) || projections.length === 0) return;
-
-    const patterns =
-      (priorJson.patterns ?? {}) as Record<string, Record<string, unknown>>;
-    const trendByPattern: Record<string, string | undefined> = {};
-    for (const [pattern, profile] of Object.entries(patterns)) {
-      trendByPattern[pattern] = profile.trend as string | undefined;
-    }
-
-    const rederived = rederiveStretchOnRenegotiation(projections, trendByPattern);
-    const renegotiatedAt = new Date().toISOString();
-    await tx`
-      UPDATE public.trainee_models
-      SET model_json = jsonb_set(
-        jsonb_set(
-          model_json,
-          '{projections,patternProjections}',
-          ${tx.json(rederived)},
-          true
-        ),
-        '{projections,goalLastRenegotiatedAt}',
-        ${tx.json(renegotiatedAt)},
+  // Goal write — same jsonb_set merge / COALESCE-NULL defense as before,
+  // inside the transaction so it commits atomically with the re-derive.
+  await tx`
+    INSERT INTO public.trainee_models (user_id, model_json, updated_at)
+    VALUES (
+      ${req.user_id},
+      ${tx.json({ goal: req.goal })},
+      NOW()
+    )
+    ON CONFLICT (user_id) DO UPDATE SET
+      model_json = jsonb_set(
+        COALESCE(public.trainee_models.model_json, '{}'::jsonb),
+        '{goal}',
+        ${tx.json(req.goal)},
         true
       ),
       updated_at = NOW()
-      WHERE user_id = ${req.user_id}
-    `;
-  });
+  `;
+
+  // Silent renegotiation re-derivation (computed from the LOCKED prior
+  // snapshot, so a concurrent session-apply cannot clobber it).
+  if (priorJson === null) return; // brand-new user → nothing to renegotiate
+  const priorGoal = priorJson.goal as RenegotiableGoal | undefined;
+  if (!isRenegotiation(priorGoal, req.goal)) return;
+
+  const projections = (priorJson.projections as {
+    patternProjections?: PatternProjection[];
+  } | undefined)?.patternProjections;
+  if (!Array.isArray(projections) || projections.length === 0) return;
+
+  const patterns =
+    (priorJson.patterns ?? {}) as Record<string, Record<string, unknown>>;
+  const trendByPattern: Record<string, string | undefined> = {};
+  for (const [pattern, profile] of Object.entries(patterns)) {
+    trendByPattern[pattern] = profile.trend as string | undefined;
+  }
+
+  const rederived = rederiveStretchOnRenegotiation(projections, trendByPattern);
+  const renegotiatedAt = new Date().toISOString();
+  await tx`
+    UPDATE public.trainee_models
+    SET model_json = jsonb_set(
+      jsonb_set(
+        model_json,
+        '{projections,patternProjections}',
+        ${tx.json(rederived)},
+        true
+      ),
+      '{projections,goalLastRenegotiatedAt}',
+      ${tx.json(renegotiatedAt)},
+      true
+    ),
+    updated_at = NOW()
+    WHERE user_id = ${req.user_id}
+  `;
 }
 
 /**
@@ -384,9 +391,11 @@ async function applyGoalWrite(
  * patternProjections` (#296, #269). Upward-only: each edit is clamped to
  * `max(stored_stretch, edited)` — a lower (or below-floor) value is a no-op,
  * and the immovable `floor` is never touched (the client cannot lower a target
- * or misstate capability). Runs in a `FOR UPDATE` transaction so a concurrent
- * session-apply (which also writes `projections`) cannot clobber the edit, and
- * vice-versa. Writes only the `projections.patternProjections` leaf.
+ * or misstate capability). Runs inside the caller's transaction (`tx`) so a
+ * concurrent session-apply (which also writes `projections`) cannot clobber the
+ * edit via the `FOR UPDATE` read, and — per #369 [23] — so the edit commits or
+ * rolls back atomically with the rest of the `upsertGoal` sequence. Writes only
+ * the `projections.patternProjections` leaf.
  *
  * Progress is intentionally NOT recomputed here (it needs the live per-pattern
  * e1RM history the session-apply pipeline owns); the next session-apply's
@@ -396,50 +405,48 @@ async function applyGoalWrite(
 export async function applyStretchEdits(
   userId: string,
   edits: StretchEdit[],
-  sql: Sql,
+  tx: Sql,
 ): Promise<void> {
   if (edits.length === 0) return;
   const editMap = new Map(edits.map((e) => [e.pattern, e.stretch]));
-  await sql.begin(async (tx: Sql) => {
-    const rows = await tx`
-      SELECT model_json FROM public.trainee_models
-      WHERE user_id = ${userId}
-      FOR UPDATE
-    `;
-    if (rows.length === 0) return;
-    const modelJson = (rows[0].model_json ?? {}) as Record<string, unknown>;
-    const projections = modelJson.projections as {
-      patternProjections?: Array<Record<string, unknown>>;
-    } | undefined;
-    const list = projections?.patternProjections;
-    if (!Array.isArray(list) || list.length === 0) return;
+  const rows = await tx`
+    SELECT model_json FROM public.trainee_models
+    WHERE user_id = ${userId}
+    FOR UPDATE
+  `;
+  if (rows.length === 0) return;
+  const modelJson = (rows[0].model_json ?? {}) as Record<string, unknown>;
+  const projections = modelJson.projections as {
+    patternProjections?: Array<Record<string, unknown>>;
+  } | undefined;
+  const list = projections?.patternProjections;
+  if (!Array.isArray(list) || list.length === 0) return;
 
-    let changed = false;
-    const updated = list.map((p) => {
-      const edited = editMap.get(p.pattern as string);
-      if (edited === undefined) return p;
-      const stored = p.stretch as number;
-      const accepted = Math.max(stored, edited); // upward-only clamp
-      if (accepted !== stored) {
-        changed = true;
-        return { ...p, stretch: accepted };
-      }
-      return p;
-    });
-    if (!changed) return;
-
-    await tx`
-      UPDATE public.trainee_models
-      SET model_json = jsonb_set(
-        COALESCE(model_json, '{}'::jsonb),
-        '{projections,patternProjections}',
-        ${tx.json(updated)},
-        true
-      ),
-      updated_at = NOW()
-      WHERE user_id = ${userId}
-    `;
+  let changed = false;
+  const updated = list.map((p) => {
+    const edited = editMap.get(p.pattern as string);
+    if (edited === undefined) return p;
+    const stored = p.stretch as number;
+    const accepted = Math.max(stored, edited); // upward-only clamp
+    if (accepted !== stored) {
+      changed = true;
+      return { ...p, stretch: accepted };
+    }
+    return p;
   });
+  if (!changed) return;
+
+  await tx`
+    UPDATE public.trainee_models
+    SET model_json = jsonb_set(
+      COALESCE(model_json, '{}'::jsonb),
+      '{projections,patternProjections}',
+      ${tx.json(updated)},
+      true
+    ),
+    updated_at = NOW()
+    WHERE user_id = ${userId}
+  `;
 }
 
 let cachedSql: Sql | undefined;

@@ -18,8 +18,13 @@
 import {
   assertAlmostEquals,
   assertEquals,
+  assertExists,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { fitTransfer, type PairedObservation } from "./transfer-regression.ts";
+import {
+  fitTransfer,
+  type PairedObservation,
+  type TransferFit,
+} from "./transfer-regression.ts";
 import { TRANSFER_SPEARMAN_DIVERGENCE_THRESHOLD } from "./constants.ts";
 
 // Test fixture builder. `daysAgo` is just a sortable day offset; in log-log
@@ -35,10 +40,22 @@ const mk = (
   observedAt: new Date(2026, 0, 1 + daysAgo),
 });
 
+// Non-null narrowing wrapper for the non-degenerate fits these tests assert
+// on: `fitTransfer` returns `TransferFit | null` (null on degenerate zero-
+// variance inputs, per #369 [13]). Each call below uses non-degenerate data,
+// so `assertExists` both narrows the type and pins the non-null contract.
+// The dedicated degenerate-case tests call `fitTransfer` directly to assert
+// the null sentinel.
+const fit = (observations: PairedObservation[]): TransferFit => {
+  const fitted = fitTransfer(observations);
+  assertExists(fitted);
+  return fitted;
+};
+
 Deno.test(
   "Q10: empty observations → state='candidate', rSquared=0 (degenerate fit, gate fails on N=0)",
   () => {
-    const result = fitTransfer([]);
+    const result = fit([]);
     assertEquals(result.state, "candidate");
     assertEquals(result.rSquared, 0);
     assertEquals(result.pairedObservations, 0);
@@ -58,7 +75,7 @@ Deno.test(
       mk(120, Math.pow(120, 1.5), 2),
       mk(130, Math.pow(130, 1.5), 3),
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertEquals(result.state, "candidate");
     assertEquals(result.pairedObservations, 4);
   },
@@ -79,7 +96,7 @@ Deno.test(
       mk(130, Math.pow(130, 1.5), 3),
       mk(140, Math.pow(140, 1.5), 4),
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertEquals(result.state, "published");
     assertEquals(result.pairedObservations, 5);
     assertAlmostEquals(result.rSquared, 1.0, 1e-9);
@@ -116,7 +133,7 @@ Deno.test(
       mk(Math.exp(4), Math.exp(4), 3),
       mk(Math.exp(5), Math.exp(2), 4), // log-y deviated from 5 to 2 (e=-3)
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertAlmostEquals(result.rSquared, 4 / 13, 1e-9);
     assertEquals(result.state, "candidate");
   },
@@ -147,7 +164,7 @@ Deno.test(
       mk(Math.exp(4), Math.exp(4), 3),
       mk(Math.exp(5), Math.exp(5 + -2.75), 4), // e = -2.75 deviation
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertAlmostEquals(result.rSquared, 81 / 202, 1e-9);
     assertEquals(result.state, "published");
   },
@@ -167,7 +184,7 @@ Deno.test(
       mk(Math.exp(4), Math.exp(4), 3),
       mk(Math.exp(5), Math.exp(5 + -2.5), 4), // e = -2.5 deviation
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertAlmostEquals(result.rSquared, 0.5, 1e-9);
     assertEquals(result.state, "published");
   },
@@ -188,7 +205,7 @@ Deno.test(
       mk(Math.exp(4), Math.exp(6.0), 3),
       mk(Math.exp(5), Math.exp(7.5), 4),
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertAlmostEquals(result.coefficient, 1.5, 1e-9);
     assertAlmostEquals(result.intercept, 0, 1e-9);
     assertAlmostEquals(result.rSquared, 1.0, 1e-9);
@@ -211,7 +228,7 @@ Deno.test(
     const obs: PairedObservation[] = ys.map((y, i) =>
       mk(Math.exp(i + 1), Math.exp(y), i)
     );
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertEquals(result.spearmanFlagged, true);
     // Reference residualStddev computation (matches the impl's Q1-locked
     // n−2 denominator). Independent of the impl's helper functions; the
@@ -255,7 +272,7 @@ Deno.test(
     const obs: PairedObservation[] = ys.map((y, i) =>
       mk(Math.exp(i + 1), Math.exp(y), i)
     );
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertEquals(result.pairedObservations, 10);
     assertEquals(result.spearmanFlagged, true);
     assertEquals(result.seWidening > 0, true);
@@ -280,7 +297,7 @@ Deno.test(
     const obs: PairedObservation[] = ys.map((y, i) =>
       mk(Math.exp(i + 1), Math.exp(y), i)
     );
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertEquals(result.pairedObservations, 10);
     assertEquals(result.spearmanFlagged, false);
     assertEquals(result.seWidening, 0);
@@ -303,7 +320,7 @@ Deno.test(
     const obs: PairedObservation[] = yRaw.map((y, i) =>
       mk(Math.exp(i + 1), Math.exp(y), i)
     );
-    const result = fitTransfer(obs);
+    const result = fit(obs);
 
     // Expected Spearman ρ via average-rank convention.
     const xRanks = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
@@ -355,7 +372,7 @@ Deno.test(
     for (let i = 1; i <= 9; i++) {
       obs.push(mk(Math.exp(i), Math.exp(i * i), i - 1));
     }
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertEquals(result.pairedObservations, 9);
     assertEquals(result.spearmanFlagged, false);
     assertEquals(result.seWidening, 0);
@@ -384,7 +401,7 @@ Deno.test(
     for (let i = 1; i <= 5; i++) {
       obs.push(mk(Math.exp(i), Math.exp(-i), i - 1));
     }
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertAlmostEquals(result.coefficient, -1, 1e-9);
     assertAlmostEquals(result.rSquared, 1.0, 1e-9);
     assertEquals(result.state, "published");
@@ -402,12 +419,12 @@ Deno.test(
     for (let i = 1; i <= 10; i++) {
       baseObs.push(mk(Math.exp(i), Math.exp(i), i - 1));
     }
-    const fitBase = fitTransfer(baseObs);
+    const fitBase = fit(baseObs);
     assertEquals(fitBase.state, "published");
     assertEquals(fitBase.pairedObservations, 10);
 
     const droppedObs = [...baseObs, mk(Math.exp(11), Math.exp(0), 10)];
-    const fitDropped = fitTransfer(droppedObs);
+    const fitDropped = fit(droppedObs);
     assertEquals(fitDropped.pairedObservations, 11);
     assertEquals(fitDropped.rSquared < 0.4, true);
     assertEquals(fitDropped.state, "candidate");
@@ -428,7 +445,7 @@ Deno.test(
       obs.push(mk(Math.exp(i), Math.exp(i), i - 1));
     }
     obs.push(mk(Math.exp(11), Math.exp(0), 10)); // outlier — drops R²
-    const demoted = fitTransfer(obs);
+    const demoted = fit(obs);
     assertEquals(demoted.state, "candidate");
 
     // Recovery: keep adding on-line points until the fit climbs back.
@@ -440,7 +457,7 @@ Deno.test(
       mk(Math.exp(14), Math.exp(14), 13),
       mk(Math.exp(15), Math.exp(15), 14),
     ];
-    const recovered = fitTransfer(recoveryObs);
+    const recovered = fit(recoveryObs);
     assertEquals(recovered.rSquared >= 0.4, true);
     assertEquals(recovered.state, "published");
   },
@@ -460,7 +477,7 @@ Deno.test(
       mk(Math.exp(4), Math.exp(2), 3),
       mk(Math.exp(5), Math.exp(1), 4),
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertAlmostEquals(result.rSquared, 0, 1e-9);
     assertAlmostEquals(result.coefficient, 0, 1e-9);
     assertEquals(result.state, "candidate");
@@ -482,11 +499,70 @@ Deno.test(
       mk(Math.exp(4), Math.exp(6.0), 3),
       mk(Math.exp(5), Math.exp(7.5), 4),
     ];
-    const result = fitTransfer(obs);
+    const result = fit(obs);
     assertAlmostEquals(result.coefficient, 1.5, 1e-9);
     // R² strictly in (0, 1) — noise present (not perfect) and signal
     // present (not zero correlation).
     assertEquals(result.rSquared > 0, true);
     assertEquals(result.rSquared < 1, true);
+  },
+);
+
+// ─── #369 [13]: degenerate zero-variance guard ───────────────────────────────
+// When every fromE1RM (or every toE1RM) is identical, the variance in x (or y)
+// is zero, so the slope (sxy/sxx) and R² (1 − ssRes/ssTot) are 0/0 = NaN.
+// NaN serialises to null in JSONB (silent corruption). fitTransfer must return
+// the null sentinel so the caller skips recording an unlearnable transfer.
+
+Deno.test(
+  "#369 [13]: all fromE1RM identical (zero x-variance) → null sentinel (slope undefined, no transfer learnable; was NaN)",
+  () => {
+    // toE1RM varies but fromE1RM is constant → no relationship is recoverable.
+    const obs: PairedObservation[] = [
+      mk(100, 80, 0),
+      mk(100, 90, 1),
+      mk(100, 100, 2),
+    ];
+    assertEquals(fitTransfer(obs), null);
+  },
+);
+
+Deno.test(
+  "#369 [13]: all toE1RM identical (zero y-variance) → null sentinel (R² undefined, no transfer learnable; was NaN)",
+  () => {
+    // fromE1RM varies but toE1RM is constant → ssTot=0 → R² = 1 − 0/0 = NaN.
+    const obs: PairedObservation[] = [
+      mk(80, 100, 0),
+      mk(90, 100, 1),
+      mk(100, 100, 2),
+    ];
+    assertEquals(fitTransfer(obs), null);
+  },
+);
+
+Deno.test(
+  "#369 [13]: both fromE1RM and toE1RM identical (two equal observations) → null sentinel",
+  () => {
+    const obs: PairedObservation[] = [
+      mk(100, 120, 0),
+      mk(100, 120, 1),
+    ];
+    assertEquals(fitTransfer(obs), null);
+  },
+);
+
+Deno.test(
+  "#369 [13]: non-degenerate input still returns a real (non-null) fit — guard does not over-broaden",
+  () => {
+    // Both x and y vary → variance is non-zero → a genuine fit is returned.
+    const obs: PairedObservation[] = [
+      mk(100, 150, 0),
+      mk(110, 165, 1),
+      mk(120, 180, 2),
+    ];
+    const result = fitTransfer(obs);
+    assertExists(result);
+    assertEquals(Number.isNaN(result.coefficient), false);
+    assertEquals(Number.isNaN(result.rSquared), false);
   },
 );

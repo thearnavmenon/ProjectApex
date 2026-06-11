@@ -119,6 +119,7 @@ import {
   CLASSIFIER_BOOTSTRAP_MAX_NOTES,
   CLASSIFIER_BOOTSTRAP_MAX_SESSIONS,
   MAJOR_PATTERNS,
+  TOP_SET_RETENTION_COUNT,
 } from "../_shared/constants.ts";
 import {
   derivedTrainedJoints,
@@ -352,6 +353,20 @@ function sessionsCadenceDays(recentSessionDates: string[]): number | null {
  * by extending this loop.
  */
 /**
+ * ADR-0005 bounded retention for `ExerciseProfile.topSets`: keep only the most
+ * recent `TOP_SET_RETENTION_COUNT` entries. New sets are appended at the END of
+ * the list (their `loggedAt` is the incoming session's, which the watermark
+ * guarantees is the latest), so the newest N are the LAST N — slice from the
+ * tail. Without this cap the array grows unbounded (one+ append per session-
+ * apply). Pure; exported for unit testing.
+ */
+export function capTopSets<T>(topSets: T[]): T[] {
+  return topSets.length > TOP_SET_RETENTION_COUNT
+    ? topSets.slice(-TOP_SET_RETENTION_COUNT)
+    : topSets;
+}
+
+/**
  * Per-exercise rule pipeline per #116 (A17). Each ExerciseProfile carries
  * its own top-set history + EWMA estimate per ADR-0005's ExerciseProfile
  * shape. Production bootstrap (no separate path elsewhere): create a fresh
@@ -448,12 +463,17 @@ function applyPerExerciseRules(
         });
       }
 
-      newProfile.topSets = newTopSets;
+      // ADR-0005 bounded retention: cap topSets to the most recent
+      // TOP_SET_RETENTION_COUNT entries (newest are at the tail) so the array
+      // does not grow unbounded across session-applies.
+      const cappedTopSets = capTopSets(newTopSets);
 
-      // Compute EWMA over the full topSets list (ewma-engine windows the
+      newProfile.topSets = cappedTopSets;
+
+      // Compute EWMA over the retained topSets list (ewma-engine windows the
       // last 5 valid internally per ADR-0005). Standard branch — transition
       // mode wires when transition triggers ship.
-      const ewmaInput: EwmaTopSet[] = newTopSets.map((s) => ({
+      const ewmaInput: EwmaTopSet[] = cappedTopSets.map((s) => ({
         weight: s.weight as number,
         reps: s.reps as number,
         loggedAt: new Date(s.loggedAt as string),
@@ -1470,17 +1490,24 @@ function applyTransfers(
         ...cell.observations,
         { fromE1RM, toE1RM, observedAt: incomingLoggedAt },
       ];
-      const newFit: TransferFit = newObservations.length >= 2
-        ? fitTransfer(newObservations)
-        : {
-            coefficient: 0,
-            intercept: 0,
-            rSquared: 0,
-            pairedObservations: newObservations.length,
-            spearmanFlagged: false,
-            seWidening: 0,
-            state: "candidate",
-          };
+      // A non-candidate placeholder for the no-fit branches: n<2 (sxx=0 →
+      // NaN) and the degenerate-variance case (fitTransfer returns null when
+      // every fromE1RM or every toE1RM is identical). Both keep the
+      // observation history accumulating while persisting a clean,
+      // non-NaN candidate fit — no transfer is learnable yet.
+      const candidatePlaceholder: TransferFit = {
+        coefficient: 0,
+        intercept: 0,
+        rSquared: 0,
+        pairedObservations: newObservations.length,
+        spearmanFlagged: false,
+        seWidening: 0,
+        state: "candidate",
+      };
+      const newFit: TransferFit =
+        (newObservations.length >= 2
+          ? fitTransfer(newObservations)
+          : null) ?? candidatePlaceholder;
       fromMap[toEx] = { observations: newObservations, fit: newFit };
       next[fromEx] = fromMap;
       rulesFired.add("transfer-regression");
