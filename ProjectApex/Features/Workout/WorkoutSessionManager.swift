@@ -1463,6 +1463,97 @@ actor WorkoutSessionManager {
         )
     }
 
+    // MARK: - Personal Records (#318 U6 / G-F12)
+
+    /// Fetches the user's historical top-intent set logs for PR comparison.
+    /// Two-step query mirroring `fetchWeeklyFatigue` — set_logs has no
+    /// user_id column, so resolve the user's recent non-abandoned sessions
+    /// first, then fetch their set_logs filtered to `intent = top`. The
+    /// current session is excluded so the baseline never includes the sets
+    /// just logged (they may already be flushed via the WAQ).
+    /// Best-effort: any failure returns empty history, which suppresses all
+    /// PR claims (no baseline ⇒ no claim) — never blocks the summary.
+    private func fetchHistoricalTopSets(userId: UUID?, excludingSessionId: UUID?) async -> [SetLog] {
+        guard let userId else { return [] }
+        do {
+            struct SessionIdRow: Decodable { let id: UUID }
+            var sessionFilters = [
+                Filter(column: "user_id", op: .eq,  value: userId.uuidString),
+                Filter(column: "status",  op: .neq, value: "abandoned")
+            ]
+            if let excludingSessionId {
+                sessionFilters.append(Filter(column: "id", op: .neq, value: excludingSessionId.uuidString))
+            }
+            let sessionRows: [SessionIdRow] = try await supabase.fetch(
+                SessionIdRow.self,
+                table: "workout_sessions",
+                filters: sessionFilters,
+                order: "session_date.desc",
+                limit: 50,
+                select: "id"
+            )
+            guard !sessionRows.isEmpty else { return [] }
+            let sessionIds = sessionRows.map { $0.id.uuidString }.joined(separator: ",")
+            return try await supabase.fetch(
+                SetLog.self,
+                table: "set_logs",
+                filters: [
+                    Filter(column: "session_id", op: .in, value: "(\(sessionIds))"),
+                    Filter(column: "intent",     op: .eq, value: SetIntent.top.rawValue)
+                ]
+            )
+        } catch {
+            print("[WorkoutSessionManager] fetchHistoricalTopSets failed (\(error.localizedDescription)) — treating as empty history")
+            return []
+        }
+    }
+
+    /// Pure PR computation. Per exercise: the session-best e1RM over the
+    /// session's top sets with reps in 3...10, compared against the
+    /// historical-best e1RM under the same rule. e1RM uses the existing
+    /// Epley estimate (`weight × (1 + reps/30)`) shared with the in-session
+    /// PR memory event and ProgressViewModel.
+    ///
+    /// Suppression rule: an exercise with ZERO historical top sets produces
+    /// NO entry — `PersonalRecord.previousBest` is non-optional, and a
+    /// first-ever session must not fabricate a "PR" against a 0.0 baseline.
+    static func computePersonalRecords(
+        sessionSets: [SetLog],
+        historicalSets: [SetLog],
+        exercises: [PlannedExercise]
+    ) -> [PersonalRecord] {
+        func e1RM(_ log: SetLog) -> Double {
+            log.weightKg * (1.0 + Double(log.repsCompleted) / 30.0)
+        }
+        func isCandidate(_ log: SetLog) -> Bool {
+            log.intent == .top && (3...10).contains(log.repsCompleted)
+        }
+
+        let namesById = Dictionary(
+            exercises.map { ($0.exerciseId, $0.name) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let historicalCandidates = historicalSets.filter(isCandidate)
+
+        var records: [PersonalRecord] = []
+        for (exerciseId, sets) in Dictionary(grouping: sessionSets.filter(isCandidate), by: \.exerciseId) {
+            // No historical baseline ⇒ no claim ⇒ no entry (suppression rule).
+            guard let previousBest = historicalCandidates
+                .filter({ $0.exerciseId == exerciseId })
+                .map(e1RM).max()
+            else { continue }
+            guard let sessionBest = sets.map(e1RM).max(), sessionBest > previousBest else { continue }
+            records.append(PersonalRecord(
+                exerciseId: exerciseId,
+                exerciseName: namesById[exerciseId] ?? exerciseId,
+                previousBest: previousBest,
+                newBest: sessionBest,
+                metric: .estimatedOneRM
+            ))
+        }
+        return records.sorted { $0.exerciseName < $1.exerciseName }
+    }
+
     // MARK: - Session Termination
 
     private func finishSession(earlyExitReason: String?) async {
@@ -1473,6 +1564,14 @@ actor WorkoutSessionManager {
 
         restTimerTask?.cancel()
         restTimerTask = nil
+
+        // PR history fetch (#318 U6 / G-F12) runs CONCURRENTLY with the WAQ
+        // flush below so it adds no extra await to the summary gate. A failed
+        // fetch resolves to empty history → personalRecords: [].
+        async let historicalTopSets = fetchHistoricalTopSets(
+            userId: session?.userId,
+            excludingSessionId: session?.id
+        )
 
         // Flush WAQ before PATCH so all set_logs are in Supabase before the session row
         // is marked completed. Mirrors pauseSession() and abandonSession() exactly.
@@ -1502,11 +1601,19 @@ actor WorkoutSessionManager {
         } else {
             sessionDuration = 0
         }
+        // Real PR detection (#318 U6 / G-F12): session-best e1RM vs the
+        // historical best over top sets with 3–10 reps. The history fetch was
+        // started concurrently with the WAQ flush above.
+        let personalRecords = Self.computePersonalRecords(
+            sessionSets: completedSets,
+            historicalSets: await historicalTopSets,
+            exercises: trainingDay?.exercises ?? []
+        )
         let summary = SessionSummary(
             totalVolumeKg: totalVolume,
             setsCompleted: completedSets.count,
             setsPlanned: totalPlanned,
-            personalRecords: [],    // PR detection is a P4 deliverable
+            personalRecords: personalRecords,
             aiAdjustmentCount: completedSets.filter { $0.aiPrescribed != nil }.count,
             notableNotes: sessionNotes.map(\.rawTranscript),
             earlyExitReason: earlyExitReason,
