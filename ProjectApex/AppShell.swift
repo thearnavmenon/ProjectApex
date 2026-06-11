@@ -88,29 +88,27 @@ struct AppShell: View {
     @State private var showSettings = false
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            theme.paper.color.ignoresSafeArea()
-
-            // Active surface — code-as-switch routing (ADR-0026 (a)).
-            surface(for: selection)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            tabBar
-        }
-        // Settings leaves the tab bar for a corner gear (ADR-0026 (b)).
-        .overlay(alignment: .topTrailing) { settingsButton }
-        .sheet(isPresented: $showSettings) { settingsSheet }
-        // Preserve the frozen raw-Int `switchToTab` contract via the pure bridge,
-        // so the existing feature-view call sites need no edit (ADR-0026 (c)).
-        .environment(\.switchToTab) { legacyTab in
-            switch ShellRoute.from(legacyTab: legacyTab) {
-            case .select(let tab): selection = tab
-            // Interim: the live-loop host is lifted in a later, tested slice
-            // (machinery-last); route to Today, which owns Start, until then.
-            case .presentLiveLoop: selection = .today
-            case .presentSettings: showSettings = true
+        // Active surface — code-as-switch routing (ADR-0026 (a)).
+        surface(for: selection)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(theme.paper.color.ignoresSafeArea())
+            // The bar reserves its own space and propagates a bottom inset into
+            // child scroll views, so surface content never renders behind it.
+            .safeAreaInset(edge: .bottom, spacing: 0) { tabBar }
+            // Settings leaves the tab bar for a corner gear (ADR-0026 (b)).
+            .overlay(alignment: .topTrailing) { settingsButton }
+            .sheet(isPresented: $showSettings) { settingsSheet }
+            // Preserve the frozen raw-Int `switchToTab` contract via the pure bridge,
+            // so the existing feature-view call sites need no edit (ADR-0026 (c)).
+            .environment(\.switchToTab) { legacyTab in
+                switch ShellRoute.from(legacyTab: legacyTab) {
+                case .select(let tab): selection = tab
+                // Interim: the live-loop host is lifted in a later, tested slice
+                // (machinery-last); route to Today, which owns Start, until then.
+                case .presentLiveLoop: selection = .today
+                case .presentSettings: showSettings = true
+                }
             }
-        }
     }
 
     // MARK: Routing — code-as-switch
