@@ -9,7 +9,8 @@
 //   deno test supabase/functions/update-trainee-model/index_test.ts
 
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { derivedTrainedSets, validateRequest } from "./index.ts";
+import { capTopSets, derivedTrainedSets, validateRequest } from "./index.ts";
+import { TOP_SET_RETENTION_COUNT } from "../_shared/constants.ts";
 
 const VALID_USER_ID = "11111111-1111-4111-8111-111111111111";
 const VALID_SESSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -224,4 +225,43 @@ Deno.test("validateRequest_set_log_entry_null_returns_400", () => {
     throw new Error("expected error response");
   }
   assertEquals(result.error, "session_payload.set_logs[0] must be a JSON object");
+});
+
+// ─── #369 [12]: ExerciseProfile.topSets bounded retention (capTopSets) ───────
+// Without the cap, topSets grows by one+ append per session-apply and never
+// shrinks. capTopSets enforces ADR-0005's TOP_SET_RETENTION_COUNT, keeping the
+// most recent N (the tail, since new sets append at the end).
+
+Deno.test("capTopSets_under_count_returns_unchanged", () => {
+  // Fewer than the retention count → no truncation, same reference is fine.
+  const sets = Array.from({ length: TOP_SET_RETENTION_COUNT - 1 }, (_, i) => i);
+  assertEquals(capTopSets(sets), sets);
+});
+
+Deno.test("capTopSets_exactly_count_returns_unchanged", () => {
+  // Exactly the retention count is at the boundary, NOT over it → unchanged.
+  const sets = Array.from({ length: TOP_SET_RETENTION_COUNT }, (_, i) => i);
+  assertEquals(capTopSets(sets), sets);
+  assertEquals(capTopSets(sets).length, TOP_SET_RETENTION_COUNT);
+});
+
+Deno.test("capTopSets_over_count_keeps_newest_N_from_tail", () => {
+  // Append-order markers 0..N+4 (oldest..newest). After capping we must keep
+  // the NEWEST N — i.e. the last N markers — and drop the oldest 5.
+  const extra = 5;
+  const sets = Array.from(
+    { length: TOP_SET_RETENTION_COUNT + extra },
+    (_, i) => i,
+  );
+  const capped = capTopSets(sets);
+  assertEquals(capped.length, TOP_SET_RETENTION_COUNT);
+  // Newest N are markers [extra .. N+extra-1]; oldest `extra` are dropped.
+  const expected = Array.from(
+    { length: TOP_SET_RETENTION_COUNT },
+    (_, i) => i + extra,
+  );
+  assertEquals(capped, expected);
+  // Spot-check the ends: oldest dropped, newest retained.
+  assertEquals(capped[0], extra);
+  assertEquals(capped[capped.length - 1], TOP_SET_RETENTION_COUNT + extra - 1);
 });

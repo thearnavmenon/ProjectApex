@@ -105,7 +105,18 @@ function pearson(xs: number[], ys: number[]): number {
   return sxy / Math.sqrt(sxx * syy);
 }
 
-export function fitTransfer(observations: PairedObservation[]): TransferFit {
+/**
+ * Returns the fitted transfer, or `null` when the pair is degenerate and no
+ * linear transfer is learnable. Degenerate means zero variance in x or y —
+ * every `fromE1RM` (or every `toE1RM`) is identical — which leaves the slope
+ * (and hence R²) mathematically undefined: `coefficient = sxy/sxx` and
+ * `rSquared = 1 − ssRes/ssTot` both become `0/0 = NaN`, and NaN serialises to
+ * `null` in JSONB (silent corruption). The caller treats `null` as "skip this
+ * transfer" rather than persisting a degenerate fit.
+ */
+export function fitTransfer(
+  observations: PairedObservation[],
+): TransferFit | null {
   const n = observations.length;
   if (n === 0) {
     return {
@@ -138,6 +149,15 @@ export function fitTransfer(observations: PairedObservation[]): TransferFit {
     sxy += dx * dy;
     ssTot += dy * dy;
   }
+
+  // Degenerate guard: zero variance in x (all fromE1RM identical) leaves the
+  // slope undefined; zero variance in y (all toE1RM identical) leaves R²
+  // undefined. Either yields NaN coefficients that corrupt JSONB on write —
+  // return null so the caller skips recording this (unlearnable) transfer.
+  if (sxx === 0 || ssTot === 0) {
+    return null;
+  }
+
   const coefficient = sxy / sxx;
   const intercept = meanY - coefficient * meanX;
   let ssRes = 0;

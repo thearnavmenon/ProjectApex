@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — Three correctness fixes in the server-side learning functions (BUG-4, part of #369)
+
+Problem: the cross-dimension audit found three bugs in the Supabase Edge Functions — the server-side code that turns a finished workout into an updated training model. (1) Each exercise keeps a list of its best recent sets ("top sets"); that list grew forever, one entry per workout, with nothing trimming it — a constant for the cap existed but was never used. (2) The transfer-learning math (how much progress on one lift predicts another) divided by zero when every recorded number was identical, producing "not a number", which silently becomes `null` when written to the database — corrupting the stored value with no error. (3) The goal-update function did four separate database writes one after another with no shared transaction, so a crash halfway through could leave the user's record half-updated.
+
+Change: (1) After adding new top sets, trim the list to the most recent 10 (the existing constant) — newest are at the end, so keep the tail. Pulled the trim into a tiny pure helper so it could be unit-tested. (2) Detect the zero-variance case (all "from" values identical, or all "to" values identical) and return a "no transfer learnable" signal instead of the bad number; the caller then simply doesn't record a fit for that pair, while still keeping the observation so it can learn later once the numbers differ. The guard is narrow — it only triggers on genuinely flat data, not on legitimately weak correlations. (3) Wrapped all four goal-update writes in one transaction so they all succeed or all roll back together; the row-locking reads stay inside that same transaction, so the safety is real.
+
+How checked: Deno was available, so I ran the pure-logic tests. Added new unit tests for (1) the trim keeps the correct newest 10 and (2) the math returns the skip-signal for both flat-input cases but still returns a real fit for normal input. All passed. Could not run the database-integration tests for (3)'s atomicity — they need a live local Postgres, and Docker was not running in this environment — so (3) was verified by careful code inspection; CI runs those tests on merge. Confirmed the goal function still type-checks and its only remaining check-error is a pre-existing one on `main` in a test file I did not touch.
+
+Status: opened as PR #378 (not merged). Part of #369.
+
+---
+
 ## 2026-06-12 — Security hardening: Keychain backup protection and DEBUG-only PII logging (BUG-6, part of #369)
 
 Problem: two security gaps found in the cross-dimension audit. First, API keys and auth tokens in the Keychain used `kSecAttrAccessibleWhenUnlocked`, which lets iOS include them in unencrypted iTunes/Finder device backups — so a user's Anthropic API key could sit in a backup file on their laptop. Second, four service files wrote raw LLM responses and user training history (exercise IDs, session dates) to the device console unconditionally, even in release builds — visible to anyone with a Mac and a USB cable.
