@@ -135,6 +135,19 @@ final class WorkoutViewModel {
         }
     }
 
+    /// Called when the user taps "Skip Set" in the overflow menu (#318 / U5,
+    /// G-F7). Mirrors onSetComplete's task shape — reuses the isCompletingSet
+    /// flag so a skip and a complete can't race each other.
+    func onSkipSet() {
+        guard !isCompletingSet else { return }
+        isCompletingSet = true
+        Task {
+            await manager.skipCurrentSet()
+            await pullState()
+            isCompletingSet = false
+        }
+    }
+
     /// Submits a voice note transcript to the session.
     func onAddVoiceNote(transcript: String, exerciseId: String) {
         Task {

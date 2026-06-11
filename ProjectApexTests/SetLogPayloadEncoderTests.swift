@@ -115,6 +115,33 @@ final class SetLogPayloadEncoderTests: XCTestCase {
         assertSetLogRowShape(dict, expectedIntent: .backoff)
     }
 
+    /// Optional RPE (#318 / U5, G-F2): rpe_felt is nullable in the schema. A
+    /// set logged without an RPE pick must encode with the key ABSENT
+    /// (JSONEncoder omits nil optionals), which PostgREST stores as NULL —
+    /// not 0, not a fabricated default. Same for the derived rir_estimated.
+    func test_setLogPayload_nilRPE_omitsRpeFeltAndRirEstimated() throws {
+        let log = SetLog(
+            id: UUID(),
+            sessionId: UUID(),
+            exerciseId: "barbell_bench_press",
+            setNumber: 2,
+            weightKg: 100.0,
+            repsCompleted: 5,
+            rpeFelt: nil,
+            rirEstimated: nil,
+            aiPrescribed: nil,
+            loggedAt: Date(timeIntervalSince1970: 1_781_524_800),
+            primaryMuscle: "pectoralis_major",
+            intent: nil
+        )
+        let dict = try encodeToDict(SetLogPayload(from: log, intent: .top))
+        assertSetLogRowShape(dict, expectedIntent: .top)
+        XCTAssertNil(dict["rpe_felt"],
+                     "nil RPE must be omitted from the payload (→ NULL), never defaulted")
+        XCTAssertNil(dict["rir_estimated"],
+                     "nil RIR must be omitted from the payload (→ NULL)")
+    }
+
     // MARK: - ManualSetLogPayload (freestyle manual log)
 
     func test_manualSetLogPayload_topIntent_serialisesIntentAndLocalDate() throws {

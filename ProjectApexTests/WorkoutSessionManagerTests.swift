@@ -686,6 +686,100 @@ final class WorkoutSessionManagerTests: XCTestCase {
             "Resuming a day with no remaining sets must abort to .idle (corrected J-F2)"
         )
     }
+
+    // MARK: #318 / U5 — skip set (G-F7): advancement must be set-number-based
+
+    /// The bug-catcher (critic amendment): a SKIPPED set writes no SetLog, so
+    /// SetLog-count-based last-set determination lags reality. Skip set 1 of 2,
+    /// then complete set 2 → the manager must advance to the NEXT exercise,
+    /// not prescribe a phantom set 3 of the same exercise.
+    func testSkipSet_thenCompleteSet_advancesExerciseCorrectly() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 2)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // Skip set 1 of exercise 0 → straight to .active set 2 (no rest, no SetLog).
+        await manager.skipCurrentSet()
+        let afterSkip = await manager.sessionState
+        guard case .active(let skipEx, let skipN) = afterSkip else {
+            XCTFail("Expected .active after skip, got \(afterSkip)")
+            return
+        }
+        XCTAssertEqual(skipEx.exerciseId, day.exercises[0].exerciseId)
+        XCTAssertEqual(skipN, 2, "Skip must advance to set 2 of the same exercise")
+
+        // Let the post-skip inference land so completeSet has a prescription.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        // Complete set 2 — the exercise's LAST set (sets == 2; 1 skipped + 1 completed).
+        await manager.completeSet(actualReps: 8, rpeFelt: 7, intent: .top)
+
+        // The last-set branch flashes .exerciseComplete then rests for the NEXT
+        // exercise. Count-based logic sees only 1 SetLog (< 2 planned sets) and
+        // wrongly schedules a phantom set 3 of exercise 0 instead.
+        let after = await manager.sessionState
+        guard case .resting(let nextEx, let nextN) = after else {
+            XCTFail("Expected .resting after the exercise's last set, got \(after)")
+            return
+        }
+        XCTAssertEqual(
+            nextEx.exerciseId, day.exercises[1].exerciseId,
+            "After skip+complete (2 of 2 sets addressed) the manager must advance to exercise 1 — a phantom extra set means last-set determination is still SetLog-count-based"
+        )
+        XCTAssertEqual(nextN, 1, "Next exercise starts at set 1")
+
+        let logs = await manager.completedSets
+        XCTAssertEqual(logs.count, 1, "Only the completed set produces a SetLog")
+    }
+
+    /// Skip writes NO SetLog and advances within the exercise with NO rest.
+    func testSkipSet_advancesWithoutSetLogOrRest() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 3)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        await manager.skipCurrentSet()
+
+        let state = await manager.sessionState
+        guard case .active(let ex, let n) = state else {
+            XCTFail("Skip must go straight to .active (no rest period), got \(state)")
+            return
+        }
+        XCTAssertEqual(ex.exerciseId, day.exercises[0].exerciseId)
+        XCTAssertEqual(n, 2, "Skip advances to the next set number")
+
+        let logs = await manager.completedSets
+        XCTAssertTrue(logs.isEmpty, "A skipped set must not produce a SetLog")
+        let rest = await manager.restSecondsRemaining
+        XCTAssertEqual(rest, 0, "No rest period after a skip")
+    }
+
+    /// A session where EVERY set was skipped has zero SetLogs — finishSession's
+    /// zero-set guard must discard it (→ .idle), never persist a completion.
+    func testAllSetsSkipped_sessionIsDiscarded() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        await manager.skipCurrentSet()   // set 1 of 2
+        await manager.skipCurrentSet()   // set 2 of 2 — last set of last exercise → endSession
+
+        let state = await manager.sessionState
+        if case .sessionComplete = state {
+            XCTFail("An all-skipped session must not complete with a summary")
+            return
+        }
+        XCTAssertEqual(state, .idle, "Zero-set guard must discard the all-skipped session")
+
+        let logs = await manager.completedSets
+        XCTAssertTrue(logs.isEmpty, "No SetLogs for an all-skipped session")
+    }
 }
 
 // MARK: - Body-capturing URLProtocol (#171 — inspect the PATCH payload)
