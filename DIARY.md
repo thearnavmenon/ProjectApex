@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — Manually-logged workouts now count toward your records (PR #379, part of #369)
+
+**Problem.** When you logged a past workout by hand, that session row was saved with no "status" value. But the code that finds your previous bests (for personal records and the "last time" line) filters sessions where `status` is not `"abandoned"` — and in a database, comparing a missing value to `"abandoned"` is itself "unknown", not "true", so those hand-logged sessions were silently skipped. Your manual entries never counted toward a PR or showed up as your last-time anchor.
+
+**What changed.** The manual-log save now writes `status: "completed"` on the session row (it always set `completed: true`, but the queries filter on `status`, not that flag). A completed session passes the "not abandoned" filter, so manual workouts now contribute to PR baselines and last-time anchors like any normal session.
+
+**How checked.** Build passed (build-exit=0). The change is a single payload field on an additive struct, so it can't affect other logic; verified by the build plus the query semantics.
+
+**Status:** merged as PR #379.
+
+---
+
 ## 2026-06-12 — Three correctness fixes in the server-side learning functions (BUG-4, part of #369)
 
 Problem: the cross-dimension audit found three bugs in the Supabase Edge Functions — the server-side code that turns a finished workout into an updated training model. (1) Each exercise keeps a list of its best recent sets ("top sets"); that list grew forever, one entry per workout, with nothing trimming it — a constant for the cap existed but was never used. (2) The transfer-learning math (how much progress on one lift predicts another) divided by zero when every recorded number was identical, producing "not a number", which silently becomes `null` when written to the database — corrupting the stored value with no error. (3) The goal-update function did four separate database writes one after another with no shared transaction, so a crash halfway through could leave the user's record half-updated.
