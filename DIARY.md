@@ -42,7 +42,7 @@ genuine record, no record when you didn't beat your best, no record when
 there's no history, and reps outside 3–10 being ignored on both sides. Full
 build passed and the whole suite ran green — 757 tests, 0 failures.
 
-**Status:** waiting for review and merge as PR #347.
+**Status:** merged as PR #347.
 
 ---
 
