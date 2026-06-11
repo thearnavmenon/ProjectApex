@@ -51,6 +51,26 @@ The client reads a narrow `TraineeModelDigest` projection at prescription time, 
 
 **Idempotency at the DB layer** ([ADR-0006](docs/adr/0006-server-side-trainee-model-update-logic.md)). Same `(user_id, session_id)` posted twice returns the cached snapshot. Writes whose `loggedAt < watermark` are refused.
 
+## Configure the bundled API key
+
+A fresh install needs an Anthropic key before onboarding (the gym scan and program
+generation both call the Anthropic API). The key is supplied at build time, not
+checked into git. One step to set it up:
+
+```sh
+cp APIKeys.xcconfig.example APIKeys.local.xcconfig   # then replace REPLACE_ME with the real sk-ant- key
+```
+
+`APIKeys.local.xcconfig` is git-ignored — only the placeholder template and the
+committed `APIKeys.xcconfig` (which sets the placeholder default and optionally
+includes the local file) are in source control. The build surfaces the value into
+the generated Info.plist; at launch the app resolves the key with precedence
+**Keychain → bundled Info.plist (seeded into Keychain) → nil**.
+With no key configured (clean checkout, CI without the secret), the build still
+succeeds and the app shows an honest "this build needs setup" screen instead of
+failing mid-gym-scan. In a debug build you can also enter a key under
+Settings → Developer. (Server-proxied keys remain the long-term direction.)
+
 ## Where to read more
 
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — the deep dive
