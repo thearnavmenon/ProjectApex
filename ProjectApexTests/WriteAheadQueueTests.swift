@@ -345,4 +345,64 @@ final class WriteAheadQueueTests: XCTestCase {
         XCTAssertEqual(pending, 0, "exhausted item must leave the pending queue")
         XCTAssertEqual(dead.count, 1, "exhausted item must be dead-lettered, not silently dropped")
     }
+
+    // MARK: Test 9 (#369 perf-27): batch flush emits correct end-state + all items sent
+
+    /// Verifies that flushing N items in a batch results in an empty queue and that
+    /// all N items were sent. This is the core correctness invariant for the O(N)
+    /// persist optimisation — the end-state after a flush must be identical to what
+    /// the per-item approach produced (empty queue, all items flushed).
+    func testFlush_batchFlush_sendsAllItemsAndLeavesEmptyQueue() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        var sentCount = 0
+
+        WAQMockURLProtocol.requestHandler = { request in
+            sentCount += 1
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 201,
+                httpVersion: nil, headerFields: nil
+            )!
+            return (response, Data("[]".utf8))
+        }
+
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults)
+
+        // Enqueue 10 items to exercise the batch-flush path
+        for i in 1...10 {
+            try await queue.enqueue(TestSetLogPayload.mock(setNumber: i), table: "set_logs")
+        }
+
+        // Wait for flush to complete (all 10 items, 201 on every request)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+
+        let pending = await queue.pendingCount
+        XCTAssertEqual(pending, 0, "all items must be flushed from the queue")
+        XCTAssertEqual(sentCount, 10, "every item in the batch must have been sent exactly once")
+
+        // Verify the persisted queue is also empty (end-state persistence)
+        let reloaded = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults)
+        let reloadedCount = await reloaded.pendingCount
+        XCTAssertEqual(reloadedCount, 0, "persisted queue must be empty after a complete flush")
+    }
+
+    // MARK: Test 10 (#369 perf-27): permanent-failure items are dead-lettered, queue cleared
+
+    /// Verifies that permanently-failed items land in the dead-letter store and the
+    /// main queue is empty after flush — consistent with pre-optimisation behaviour.
+    func testFlush_permanentFailure_deadLetteredAndQueueEmpty() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults)
+
+        await queue.registerFlushHandler(forTable: "set_logs") { _ in
+            .permanentFailure("test permanent failure")
+        }
+
+        try await queue.enqueue(TestSetLogPayload.mock(), table: "set_logs")
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let pending = await queue.pendingCount
+        let dead = await queue.failedWrites()
+        XCTAssertEqual(pending, 0, "permanently-failed item must leave the pending queue")
+        XCTAssertEqual(dead.count, 1, "permanently-failed item must be dead-lettered")
+    }
 }

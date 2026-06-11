@@ -170,18 +170,13 @@ struct WorkoutView: View {
                 }
             }
 
-            // Heavy-reassessment signal for the pre-workout level-up banner (#258).
-            // Read the cached trainee-model digest (minimal existing path — no new
-            // service plumbing). Nil model / out-of-window / acknowledged → nil → no banner.
-            heavyReassessmentSignal = await deps.traineeModelService.digest()?.heavyReassessmentSignal
-
-            // Calibration-review signal for the pre-workout one-time targets banner (#269).
-            // Same cached-digest path. Nil model / not-fired / acknowledged → nil → no banner.
-            calibrationReviewSignal = await deps.traineeModelService.digest()?.calibrationReviewSignal
-
-            // Watermark pair backing the calibration banner's durable dismissal
-            // fingerprint (J-F7). Same cached-digest path.
-            let watermark = await deps.traineeModelService.digest()?.projections
+            // Decode the trainee-model digest exactly once; read all three fields from the
+            // same local snapshot. Previously called digest() three times back-to-back,
+            // each triggering a full model decode. [#369 perf-14]
+            let digest = await deps.traineeModelService.digest()
+            heavyReassessmentSignal = digest?.heavyReassessmentSignal
+            calibrationReviewSignal = digest?.calibrationReviewSignal
+            let watermark = digest?.projections
             calibrationWatermarkFiredAt = watermark?.calibrationReviewFiredAt
             calibrationWatermarkRecalibratedAtSessionCount = watermark?.lastRecalibratedAtSessionCount
 
@@ -310,7 +305,9 @@ struct WorkoutView: View {
             // the trigger (Slice F1), so deriveHeavyReassessmentSignal now returns
             // nil and the banner disappears. A mere cancel leaves it unchanged.
             Task {
-                heavyReassessmentSignal = await deps.traineeModelService.digest()?.heavyReassessmentSignal
+                // Single decode — consistent with .task site pattern. [#369 perf-14]
+                let d = await deps.traineeModelService.digest()
+                heavyReassessmentSignal = d?.heavyReassessmentSignal
             }
         }) {
             GoalReviewView(triggeringSessionCount: heavyReassessmentSignal?.triggeringSessionCount)
@@ -322,7 +319,9 @@ struct WorkoutView: View {
             // (#269), so deriveCalibrationReviewSignal now returns nil and the
             // banner disappears. A mere swipe-dismiss leaves it unchanged.
             Task {
-                calibrationReviewSignal = await deps.traineeModelService.digest()?.calibrationReviewSignal
+                // Single decode — consistent with .task site pattern. [#369 perf-14]
+                let d = await deps.traineeModelService.digest()
+                calibrationReviewSignal = d?.calibrationReviewSignal
             }
         }) {
             CalibrationReviewView(

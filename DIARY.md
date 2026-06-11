@@ -7,6 +7,26 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — Five performance fixes: less CPU, less memory, fewer wasteful reads (BUG-5, PR TBD)
+
+Problem: a cross-dimension audit (issue #369) found five efficiency problems that were silently burning CPU and memory on every session.
+
+1. WorkoutView called `traineeModelService.digest()` three times back-to-back to read three different fields, decoding the full model each time. Fix: one `let digest = await ...` at the top, then read all three fields from the local copy. Same pattern applied to the two onDismiss closures.
+
+2. LiveSessionWatcher polled the session actor every 500 ms for the full lifetime of the app — even when no workout was running. That is 2 actor hops per second, all day. Fix: keep polling at 500 ms while a session is active or paused; slow to 5 s when idle. The observable properties stay the same; views see no difference.
+
+3. ProgressViewModel re-fetched 90 days of sessions and all set_logs every time the Progress tab appeared, with no caching. Fix: cache the result for 5 minutes. After that window, or when `invalidateCache()` is called (which callers should do after a session completes), the next appearance re-fetches. A completed workout shows up as soon as the cache is invalidated.
+
+4. ProgressSessionRow.date allocated up to three DateFormatter/ISO8601DateFormatter objects on every call to `.date`, and `.date` was called twice per row. Fix: hoist all three formatters to `static let` so they are created once per process lifetime. DateFormatter is thread-safe for read-only use after setup.
+
+5. WriteAheadQueue called `persistQueue()` after every single item during a batch flush — encoding and writing the entire queue array to UserDefaults N times for N items, making flushing O(N²). Fix: remove all per-item persists inside the loop. The `defer` at the end of `flush()` writes the queue once after the whole batch. Dead-letter items are still persisted immediately (separate store, crash-safety). On a crash mid-flush, successfully-sent items may be re-sent on the next launch, but set_log inserts are idempotent by UUID primary key, so no data is lost or duplicated in a user-visible way.
+
+How checked: built clean (build-exit=0). Ran the full test suite — all existing WriteAheadQueue tests passed. Two new WAQ tests verify the batch-flush end-state (empty queue, all items sent, persisted state also empty) and the permanent-failure dead-letter path. One pre-existing live-API flake unrelated to these changes.
+
+Status: PR open, not yet merged. Part of #369.
+
+---
+
 ## 2026-06-12 — A fresh install can now reach Supabase (auth slice 2, PR TBD)
 
 Problem: a clean install had no Supabase anon key, so the SupabaseClient was created with an empty string and any network call to Supabase would fail. The Anthropic key already had a bundled-key mechanism (PR #368), but the Supabase anon key did not.

@@ -196,12 +196,30 @@ actor WriteAheadQueue {
     ///
     /// Safe to call multiple times concurrently — the isFlushing guard
     /// ensures only one flush runs at a time.
+    ///
+    /// Persistence strategy [#369 perf-27]:
+    ///   The queue is persisted **once** via the `defer` at the end of the flush
+    ///   rather than after every individual item. This turns O(N²) UserDefaults
+    ///   re-encodes into O(N).
+    ///
+    ///   Crash-safety reasoning:
+    ///   • Items enter UserDefaults on `enqueue()` — before any flush attempt.
+    ///   • On crash mid-flush, UserDefaults still holds the last `enqueue()`-time
+    ///     snapshot. Items successfully sent in the current flush that haven't yet
+    ///     been persisted will be re-sent on next launch. Set_log inserts are
+    ///     idempotent by primary key (UUID), so duplicate sends are harmless.
+    ///   • Un-sent items are never lost: they are only removed from the in-memory
+    ///     queue after a confirmed `.success` or `.permanentFailure`, and the full
+    ///     queue is written at flush completion.
+    ///   • Dead-letter items are persisted immediately via `recordFailedWrite()`
+    ///     so they survive a crash between queue removal and the final persist.
     func flush() async {
         guard !isFlushing else { return }
         isFlushing = true
         clearRequested = false
         defer {
             isFlushing = false
+            // Single persist covering all mutations in this flush. [#369 perf-27]
             persistQueue()
         }
 
@@ -218,12 +236,12 @@ actor WriteAheadQueue {
             switch outcome {
             case .success:
                 queue.removeFirst()
-                persistQueue()
+                // No per-item persistQueue() — deferred to end of flush. [#369 perf-27]
 
             case .permanentFailure(let reason):
                 queue.removeFirst()
-                recordFailedWrite(item)
-                persistQueue()
+                recordFailedWrite(item)   // persists dead-letter immediately for crash-safety
+                // No per-item persistQueue() — deferred to end of flush. [#369 perf-27]
                 Self.logger.error("[WriteAheadQueue] permanent failure (dead-lettered), item \(item.id, privacy: .public), table: \(item.table, privacy: .public) — \(reason, privacy: .public)")
 
             case .transientFailure:
@@ -233,15 +251,16 @@ actor WriteAheadQueue {
                     // Exhausted retries — move to the dead-letter store instead
                     // of silently dropping, so the write can be recovered (#184).
                     queue.removeFirst()
-                    recordFailedWrite(item)
-                    persistQueue()
+                    recordFailedWrite(item)   // persists dead-letter immediately for crash-safety
+                    // No per-item persistQueue() — deferred to end of flush. [#369 perf-27]
                     Self.logger.error("[WriteAheadQueue] dead-lettered item \(item.id, privacy: .public) after \(Self.maxRetries) retries — table: \(item.table, privacy: .public)")
                     continue
                 }
 
-                // Update the item in the queue with incremented retry count
+                // Update the item in the queue with incremented retry count.
+                // No per-item persistQueue() — retry-count resets on crash are
+                // acceptable; the item will simply restart from retryCount=0. [#369 perf-27]
                 queue[0] = item
-                persistQueue()
 
                 // Exponential backoff: 1s, 2s, 4s, 8s, 16s
                 let delay = baseRetryDelay * pow(2.0, Double(item.retryCount - 1))

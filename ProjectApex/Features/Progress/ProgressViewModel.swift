@@ -99,21 +99,35 @@ private struct ProgressSessionRow: Decodable {
     /// session_date is a Postgres DATE column — Supabase returns it as "yyyy-MM-dd".
     /// Falls back through ISO8601 variants for any future migration to TIMESTAMPTZ.
     var date: Date {
-        // Primary: bare DATE format "2026-03-20"
+        // Formatters are hoisted to static let so they are allocated once and
+        // reused across all rows. DateFormatter/ISO8601DateFormatter are thread-safe
+        // for read-only formatting after configuration. [#369 perf-26]
+        if let d = Self.dateFormatterYMD.date(from: sessionDate) { return d }
+        if let d = Self.iso8601WithFractional.date(from: sessionDate) { return d }
+        if let d = Self.iso8601Plain.date(from: sessionDate) { return d }
+        return Date.distantPast
+    }
+
+    // MARK: - Static formatters (allocated once, reused per row) [#369 perf-26]
+
+    /// Primary: bare DATE format "2026-03-20"
+    private static let dateFormatterYMD: DateFormatter = {
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
         df.timeZone = TimeZone(identifier: "UTC")
         df.locale = Locale(identifier: "en_US_POSIX")
-        if let d = df.date(from: sessionDate) { return d }
-        // Fallback: full ISO8601 with fractional seconds
-        let f1 = ISO8601DateFormatter()
-        f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = f1.date(from: sessionDate) { return d }
-        // Fallback: plain ISO8601
-        let f2 = ISO8601DateFormatter()
-        if let d = f2.date(from: sessionDate) { return d }
-        return Date.distantPast
-    }
+        return df
+    }()
+
+    /// Fallback: full ISO8601 with fractional seconds
+    private static let iso8601WithFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    /// Fallback: plain ISO8601
+    private static let iso8601Plain = ISO8601DateFormatter()
 }
 
 // MARK: - ProgressViewModel
@@ -136,6 +150,27 @@ final class ProgressViewModel {
     var patternTrends: [PatternSummary] = []
     var isLoading = true
     var errorMessage: String?
+
+    // MARK: - Cache [#369 perf-25]
+    //
+    // Invalidation rule: cache is fresh for `cacheTTL` seconds after the last
+    // successful load, OR until `invalidateCache()` is called explicitly.
+    // Callers should call `invalidateCache()` after a session completes so the
+    // newly-logged sets appear immediately on the next Progress tab visit.
+    // This keeps the common re-appearance case (switching tabs mid-session) free
+    // of redundant 90-day fetches while guaranteeing post-workout freshness.
+
+    private static let cacheTTL: TimeInterval = 5 * 60  // 5 minutes
+    private var lastLoadedAt: Date? = nil
+    private var cacheIsValid: Bool {
+        guard let t = lastLoadedAt else { return false }
+        return Date().timeIntervalSince(t) < Self.cacheTTL
+    }
+
+    /// Call after a session completes to force the next `loadAll()` to re-fetch.
+    func invalidateCache() {
+        lastLoadedAt = nil
+    }
 
     // MARK: - Dependencies
 
@@ -164,6 +199,14 @@ final class ProgressViewModel {
     // MARK: - Load
 
     func loadAll() async {
+        // Skip the full fetch when cached data is still fresh. [#369 perf-25]
+        // `invalidateCache()` must be called after a session completes so the
+        // new sets are visible on the next visit.
+        guard !cacheIsValid else {
+            isLoading = false
+            return
+        }
+
         isLoading = true
         errorMessage = nil
 
@@ -236,6 +279,9 @@ final class ProgressViewModel {
                     .max { $0.value.count < $1.value.count }?.key
                     ?? trendData.keys.sorted().first
             }
+
+            // Mark cache valid — stamp after all state mutations complete. [#369 perf-25]
+            lastLoadedAt = Date()
 
         } catch {
             errorMessage = error.localizedDescription

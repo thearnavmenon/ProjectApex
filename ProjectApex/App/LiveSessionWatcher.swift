@@ -11,6 +11,10 @@
 // access, so any view that reads `isLive`, `currentTrainingDayId`,
 // `liveSetSummary`, or `pausedSessionExists` re-renders automatically when
 // the watcher updates them.
+//
+// Polling rate [#369 perf-24]: 500 ms while a session is active or paused;
+// 5 s when idle. This avoids hitting the session actor every 500 ms for the
+// entire process lifetime when no workout is in progress.
 
 import SwiftUI
 
@@ -30,6 +34,10 @@ final class LiveSessionWatcher {
     private let manager: WorkoutSessionManager
     private var task: Task<Void, Never>? = nil
 
+    /// Poll every 500 ms while a session is active/paused; 5 s when idle.
+    private static let activeIntervalNs:  UInt64 = 500_000_000
+    private static let idleIntervalNs:    UInt64 = 5_000_000_000
+
     init(manager: WorkoutSessionManager) {
         self.manager = manager
         start()
@@ -40,7 +48,10 @@ final class LiveSessionWatcher {
         task = Task { [weak self] in
             while let self, !Task.isCancelled {
                 await self.poll()
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                // Use the fast interval while a session is active; slow down when idle
+                // so we are not hammering the actor 2× per second all day. [#369 perf-24]
+                let interval = self.isLive ? Self.activeIntervalNs : Self.idleIntervalNs
+                try? await Task.sleep(nanoseconds: interval)
             }
         }
     }
