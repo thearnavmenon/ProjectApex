@@ -7,7 +7,7 @@ Started 2026-06-07.
 
 ---
 
-## 2026-06-12 — Five performance fixes: less CPU, less memory, fewer wasteful reads (BUG-5, PR TBD)
+## 2026-06-12 — Five performance fixes: less CPU, less memory, fewer wasteful reads (PR #374, part of #369)
 
 Problem: a cross-dimension audit (issue #369) found five efficiency problems that were silently burning CPU and memory on every session.
 
@@ -15,7 +15,7 @@ Problem: a cross-dimension audit (issue #369) found five efficiency problems tha
 
 2. LiveSessionWatcher polled the session actor every 500 ms for the full lifetime of the app — even when no workout was running. That is 2 actor hops per second, all day. Fix: keep polling at 500 ms while a session is active or paused; slow to 5 s when idle. The observable properties stay the same; views see no difference.
 
-3. ProgressViewModel re-fetched 90 days of sessions and all set_logs every time the Progress tab appeared, with no caching. Fix: cache the result for 5 minutes. After that window, or when `invalidateCache()` is called (which callers should do after a session completes), the next appearance re-fetches. A completed workout shows up as soon as the cache is invalidated.
+3. ProgressViewModel re-fetched 90 days of sessions and all set_logs every time the Progress tab appeared, with no caching. Fix: cache the result, but reuse it only when it's both within a 5-minute window AND no session has been logged since the last load — the cache compares the session counter that every finished or manually-logged workout already bumps. So a just-finished workout always appears on the next Progress visit (no stale window), while flipping tabs mid-session skips the redundant 90-day fetch.
 
 4. ProgressSessionRow.date allocated up to three DateFormatter/ISO8601DateFormatter objects on every call to `.date`, and `.date` was called twice per row. Fix: hoist all three formatters to `static let` so they are created once per process lifetime. DateFormatter is thread-safe for read-only use after setup.
 

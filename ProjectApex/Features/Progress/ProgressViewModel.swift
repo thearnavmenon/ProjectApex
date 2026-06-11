@@ -153,23 +153,35 @@ final class ProgressViewModel {
 
     // MARK: - Cache [#369 perf-25]
     //
-    // Invalidation rule: cache is fresh for `cacheTTL` seconds after the last
-    // successful load, OR until `invalidateCache()` is called explicitly.
-    // Callers should call `invalidateCache()` after a session completes so the
-    // newly-logged sets appear immediately on the next Progress tab visit.
-    // This keeps the common re-appearance case (switching tabs mid-session) free
-    // of redundant 90-day fetches while guaranteeing post-workout freshness.
+    // Invalidation rule: the cache is reused only when BOTH (a) it is within
+    // `cacheTTL` of the last successful load AND (b) no session has been logged
+    // since that load. Every finished or manually-logged session bumps
+    // `UserProfileConstants.sessionCountKey` (WorkoutSessionManager.finishSession
+    // and ManualSessionLogView both increment it), so comparing that counter makes
+    // a just-completed workout appear on the very next Progress visit — no stale
+    // window — while still skipping the redundant 90-day fetch when nothing changed
+    // (e.g. flipping tabs mid-session). The TTL is a defensive backstop.
 
     private static let cacheTTL: TimeInterval = 5 * 60  // 5 minutes
     private var lastLoadedAt: Date? = nil
-    private var cacheIsValid: Bool {
-        guard let t = lastLoadedAt else { return false }
-        return Date().timeIntervalSince(t) < Self.cacheTTL
+    /// Session count observed at the last successful load; a change means new
+    /// Progress-visible data exists → re-fetch.
+    private var lastLoadedSessionCount: Int? = nil
+
+    private var sessionCount: Int {
+        UserDefaults.standard.integer(forKey: UserProfileConstants.sessionCountKey)
     }
 
-    /// Call after a session completes to force the next `loadAll()` to re-fetch.
+    private var cacheIsValid: Bool {
+        guard let t = lastLoadedAt, let n = lastLoadedSessionCount else { return false }
+        guard Date().timeIntervalSince(t) < Self.cacheTTL else { return false }
+        return n == sessionCount
+    }
+
+    /// Forces the next `loadAll()` to re-fetch (e.g. explicit pull-to-refresh).
     func invalidateCache() {
         lastLoadedAt = nil
+        lastLoadedSessionCount = nil
     }
 
     // MARK: - Dependencies
@@ -199,9 +211,9 @@ final class ProgressViewModel {
     // MARK: - Load
 
     func loadAll() async {
-        // Skip the full fetch when cached data is still fresh. [#369 perf-25]
-        // `invalidateCache()` must be called after a session completes so the
-        // new sets are visible on the next visit.
+        // Skip the full fetch when cached data is still fresh AND no session has
+        // been logged since the last load (cacheIsValid checks the session
+        // counter, so a finished/manually-logged workout always re-fetches). [#369 perf-25]
         guard !cacheIsValid else {
             isLoading = false
             return
@@ -280,8 +292,10 @@ final class ProgressViewModel {
                     ?? trendData.keys.sorted().first
             }
 
-            // Mark cache valid — stamp after all state mutations complete. [#369 perf-25]
+            // Mark cache valid — stamp time + the session count we loaded against,
+            // after all state mutations complete. [#369 perf-25]
             lastLoadedAt = Date()
+            lastLoadedSessionCount = sessionCount
 
         } catch {
             errorMessage = error.localizedDescription
