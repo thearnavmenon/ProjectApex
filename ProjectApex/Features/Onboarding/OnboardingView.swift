@@ -247,7 +247,12 @@ struct OnboardingView: View {
                                 .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.70))
                             HStack(spacing: 10) {
-                                ForEach([3, 4, 5, 6], id: \.self) { n in
+                                // #369 / O-F11: include 2 — the engine supports 2-day weeks
+                                // (phase-advance handles daysPerWeek≥1; the macro-plan prompt
+                                // takes any integer) and the onboarding spec lists 2/3/4/5+,
+                                // but the picker previously started at 3, so 2-day-per-week
+                                // users could not onboard honestly.
+                                ForEach([2, 3, 4, 5, 6], id: \.self) { n in
                                     Button {
                                         withAnimation(.spring(response: 0.28, dampingFraction: 0.80)) {
                                             profile.daysPerWeek = n

@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — Two-day-a-week lifters can now onboard honestly (PR #380, part of #369)
+
+**Problem.** The onboarding "days per week" picker only offered 3, 4, 5 and 6. Someone who trains twice a week had no honest option and was forced to claim 3 — even though the program engine fully supports 2-day weeks (the phase-advance math handles down to 1 day; the macro-plan prompt builds exactly as many days as you pick) and the redesign spec explicitly lists 2 / 3 / 4 / 5+.
+
+**What changed.** Added 2 to the picker (now 2/3/4/5/6). One-line, no option removed, so nothing regresses. This is the one onboarding item from the audit that's both cheap and not throwaway — the rest of the onboarding cluster is either already handled (the answer-wiring shipped earlier in #339) or belongs to the full onboarding rebuild (#362), and one finding turned out stale (height/age are now used by the coach, so they must NOT be removed).
+
+**How checked.** Build passed (build-exit=0). Pure picker-option change — can't affect other logic.
+
+**Status:** merged as PR #380.
+
+---
+
 ## 2026-06-12 — Manually-logged workouts now count toward your records (PR #379, part of #369)
 
 **Problem.** When you logged a past workout by hand, that session row was saved with no "status" value. But the code that finds your previous bests (for personal records and the "last time" line) filters sessions where `status` is not `"abandoned"` — and in a database, comparing a missing value to `"abandoned"` is itself "unknown", not "true", so those hand-logged sessions were silently skipped. Your manual entries never counted toward a PR or showed up as your last-time anchor.
