@@ -11,11 +11,11 @@ Started 2026-06-07.
 
 Problem: two security gaps found in the cross-dimension audit. First, API keys and auth tokens in the Keychain used `kSecAttrAccessibleWhenUnlocked`, which lets iOS include them in unencrypted iTunes/Finder device backups — so a user's Anthropic API key could sit in a backup file on their laptop. Second, four service files wrote raw LLM responses and user training history (exercise IDs, session dates) to the device console unconditionally, even in release builds — visible to anyone with a Mac and a USB cable.
 
-Change: switched the Keychain accessibility to `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` so items are excluded from backups. Wrapped the four sensitive `print` calls in `#if DEBUG … #endif` so they compile out of release builds. The Keychain change only applies to items stored after the update — existing items in a dev's Keychain keep the old attribute until they re-store the key (fresh install, or clear + re-enter via Developer Settings). That is acceptable for alpha. Two new Keychain tests confirm the round-trip still works and that the correct attribute is set.
+Change: switched the Keychain accessibility to `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` so items are excluded from backups. Wrapped seven sensitive `print` calls in `#if DEBUG … #endif` so they compile out of release builds — the four raw-LLM-response / training-history logs the audit cited, plus three more found by a follow-up grep (two non-canonical-exercise-id warnings and the macro-skeleton log that includes the user's historical day labels). `InferenceSpike` also logs prescription details unconditionally, but it is dead code (`run()` has no production caller), so its prints never execute in a real build — left in place and flagged, not gated. The Keychain change only applies to items stored after the update — existing items in a dev's Keychain keep the old attribute until they re-store the key (fresh install, or clear + re-enter via Developer Settings). That is acceptable for alpha. Two new Keychain tests confirm the round-trip still works and that the correct attribute is set.
 
 How checked: build passed (exit 0). Full test suite ran — all Keychain round-trip tests pass, including the two new ones. Logging changes are not unit-testable (no observable side effect to assert), so they were verified by code inspection.
 
-Status: PR #376 open, not merged. Part of #369.
+Status: merged as PR #377. Part of #369.
 
 ---
 

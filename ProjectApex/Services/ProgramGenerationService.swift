@@ -498,7 +498,9 @@ actor ProgramGenerationService {
         // Validate exercise IDs against canonical library — log warnings for non-canonical IDs.
         for ex in template.exercises {
             if ExerciseLibrary.lookup(ex.exerciseId) == nil {
+                #if DEBUG
                 print("[ProgramGenerationService] ⚠️ Non-canonical exercise_id: '\(ex.exerciseId)' — not in ExerciseLibrary.")
+                #endif
             }
         }
 

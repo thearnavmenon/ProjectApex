@@ -509,7 +509,9 @@ actor SessionPlanService {
         // The session is not rejected; primaryMuscle will fall back to the LLM's own value.
         for ex in payload.exercises {
             if ExerciseLibrary.lookup(ex.exerciseId) == nil {
+                #if DEBUG
                 print("[SessionPlanService] ⚠️ Non-canonical exercise_id: '\(ex.exerciseId)' — not in ExerciseLibrary. primary_muscle will use LLM-provided value.")
+                #endif
             }
         }
 

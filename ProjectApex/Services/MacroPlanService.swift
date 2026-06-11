@@ -189,7 +189,9 @@ actor MacroPlanService {
 
         let systemPrompt = try Self.loadSystemPrompt()
 
+        #if DEBUG
         print("[MacroPlanService] Generating macro skeleton — training_days_per_week: \(trainingDaysPerWeek), historical_day_labels: \(historicalDayLabels)")
+        #endif
 
         let request = MacroPlanRequest(
             userProfile: MacroPlanUserProfile(
