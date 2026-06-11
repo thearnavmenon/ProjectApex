@@ -7,6 +7,45 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — Rest screen polish and the workout summary finally celebrates real records (PR #347)
+
+**What happened (in plain words):**
+Four small lies and rough edges in the live workout loop, all found by the
+big #318 audit. The gym streak was always computed for a fake placeholder
+user, so once real sign-ins existed, your streak could be someone else's —
+or nobody's. The rest screen promised a "rest is over" alert even when you
+had turned notifications off, and said nothing about it. Its skip button was
+so faint and small it was easy to miss and easy to fumble. The countdown
+showed raw seconds ("150") instead of the "2:30" a human expects. And the
+end-of-workout summary had a personal-records section that the screen knew
+how to draw — but the data side always sent an empty list, so it never,
+ever appeared.
+
+**What changed:**
+The streak now uses the real signed-in user. The rest screen quietly tells
+you when rest alerts can't fire because notifications are off (one muted
+line, no nagging, no buttons). The skip button is brighter and has a proper
+finger-sized tap area, and the countdown now reads minutes:seconds. And the
+summary now computes real personal records: for each exercise it compares
+your best estimated one-rep max from today's top sets (3–10 reps only)
+against your history under the same rule, using the same formula the rest
+of the app already uses. One honest detail: if you've never done an
+exercise before, there's no baseline — so no record is claimed. First time
+doing something is not a "new record", it's just a first time. The history
+lookup runs alongside the existing end-of-workout save, so finishing a
+workout is not a second slower; and if the lookup fails, the summary simply
+shows no records rather than blocking.
+
+**How it was checked:**
+The record-computing piece is a pure function, so four tests pin it down: a
+genuine record, no record when you didn't beat your best, no record when
+there's no history, and reps outside 3–10 being ignored on both sides. Full
+build passed and the whole suite ran green — 757 tests, 0 failures.
+
+**Status:** waiting for review and merge as PR #347.
+
+---
+
 ## 2026-06-11 — Logging a set got honest: no forced effort rating, zero reps allowed, and you can skip (PR #340)
 
 **What happened (in plain words):**

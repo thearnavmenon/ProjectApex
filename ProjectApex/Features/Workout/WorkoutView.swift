@@ -133,8 +133,7 @@ struct WorkoutView: View {
                 viewModel = WorkoutViewModel(manager: deps.workoutSessionManager)
             }
             // Fetch streak from GymStreakService (non-blocking — neutral fallback on error).
-            // userId is a placeholder for MVP; auth is wired in a future phase.
-            streak = await deps.gymStreakService.computeStreak(userId: AppDependencies.placeholderUserId)
+            streak = await deps.gymStreakService.computeStreak(userId: deps.resolvedUserId)
 
             // Fetch days-since-last-session for the welcome-back banner in PreWorkoutView.
             // One-row query: most recent completed session ordered desc. Nil = first-ever session.
@@ -224,7 +223,7 @@ struct WorkoutView: View {
                 // and the next PreWorkoutView both show the updated value.
                 Task {
                     streak = await deps.gymStreakService.computeStreak(
-                        userId: AppDependencies.placeholderUserId
+                        userId: deps.resolvedUserId
                     )
                 }
             }

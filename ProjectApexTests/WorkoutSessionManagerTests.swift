@@ -916,3 +916,105 @@ private func makeDelayManager() -> WorkoutSessionManager {
         writeAheadQueue: waq
     )
 }
+
+// MARK: - ComputePersonalRecordsTests (#318 U6 / G-F12)
+
+/// Tests for the pure `WorkoutSessionManager.computePersonalRecords`.
+/// Rule under test: per exercise, session-best e1RM (Epley, weight × (1 + reps/30))
+/// over top sets with reps in 3...10, vs the historical best under the same rule.
+/// No historical baseline ⇒ no entry (PersonalRecord.previousBest is non-optional).
+final class ComputePersonalRecordsTests: XCTestCase {
+
+    private func makeSet(
+        exerciseId: String = "exercise_0",
+        weightKg: Double,
+        reps: Int,
+        intent: SetIntent? = .top
+    ) -> SetLog {
+        SetLog(
+            id: UUID(),
+            sessionId: UUID(),
+            exerciseId: exerciseId,
+            setNumber: 1,
+            weightKg: weightKg,
+            repsCompleted: reps,
+            rpeFelt: 8,
+            rirEstimated: 2,
+            aiPrescribed: nil,
+            loggedAt: Date(),
+            primaryMuscle: nil,
+            intent: intent,
+            completionFlags: []
+        )
+    }
+
+    func test_genuinePR_producesRecordWithCorrectValues() {
+        // Historical best: 100 kg × 5 → e1RM 116.667. Session best: 105 kg × 5 → 122.5.
+        let records = WorkoutSessionManager.computePersonalRecords(
+            sessionSets: [makeSet(weightKg: 105, reps: 5)],
+            historicalSets: [makeSet(weightKg: 100, reps: 5)],
+            exercises: makeTrainingDay().exercises
+        )
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].exerciseId, "exercise_0")
+        XCTAssertEqual(records[0].exerciseName, "Exercise 0")
+        XCTAssertEqual(records[0].previousBest, 100.0 * (1.0 + 5.0 / 30.0), accuracy: 0.0001)
+        XCTAssertEqual(records[0].newBest, 105.0 * (1.0 + 5.0 / 30.0), accuracy: 0.0001)
+        XCTAssertEqual(records[0].metric, .estimatedOneRM)
+    }
+
+    func test_noPR_whenSessionBestDoesNotExceedHistoricalBest() {
+        // Equal e1RM (strict > required) and lower e1RM both produce no record.
+        let equalRecords = WorkoutSessionManager.computePersonalRecords(
+            sessionSets: [makeSet(weightKg: 100, reps: 5)],
+            historicalSets: [makeSet(weightKg: 100, reps: 5)],
+            exercises: makeTrainingDay().exercises
+        )
+        XCTAssertTrue(equalRecords.isEmpty)
+
+        let lowerRecords = WorkoutSessionManager.computePersonalRecords(
+            sessionSets: [makeSet(weightKg: 95, reps: 5)],
+            historicalSets: [makeSet(weightKg: 100, reps: 5)],
+            exercises: makeTrainingDay().exercises
+        )
+        XCTAssertTrue(lowerRecords.isEmpty)
+    }
+
+    func test_suppressed_whenExerciseHasZeroHistoricalTopSets() {
+        // exercise_1 has NO history — a huge session best must NOT fabricate a
+        // PR against a 0.0 baseline. exercise_0 has a baseline and a real PR.
+        let records = WorkoutSessionManager.computePersonalRecords(
+            sessionSets: [
+                makeSet(exerciseId: "exercise_0", weightKg: 105, reps: 5),
+                makeSet(exerciseId: "exercise_1", weightKg: 200, reps: 5)
+            ],
+            historicalSets: [makeSet(exerciseId: "exercise_0", weightKg: 100, reps: 5)],
+            exercises: makeTrainingDay().exercises
+        )
+        XCTAssertEqual(records.count, 1)
+        XCTAssertFalse(records.contains { $0.exerciseId == "exercise_1" })
+        XCTAssertEqual(records[0].exerciseId, "exercise_0")
+    }
+
+    func test_repsOutside3to10_excludedFromBothSessionAndHistoricalBests() {
+        // Session: 200 kg × 2 (excluded, below range) + 100 kg × 5 (valid → 116.667).
+        // History: 180 kg × 12 (excluded, above range) + 90 kg × 5 (valid → 105).
+        // If exclusion failed on either side, the result would differ:
+        // history 180×12 → e1RM 252 would swallow the PR; session 200×2 → 213.3
+        // would inflate newBest.
+        let records = WorkoutSessionManager.computePersonalRecords(
+            sessionSets: [
+                makeSet(weightKg: 200, reps: 2),
+                makeSet(weightKg: 100, reps: 5)
+            ],
+            historicalSets: [
+                makeSet(weightKg: 180, reps: 12),
+                makeSet(weightKg: 90, reps: 5)
+            ],
+            exercises: makeTrainingDay().exercises
+        )
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].previousBest, 90.0 * (1.0 + 5.0 / 30.0), accuracy: 0.0001)
+        XCTAssertEqual(records[0].newBest, 100.0 * (1.0 + 5.0 / 30.0), accuracy: 0.0001)
+    }
+}

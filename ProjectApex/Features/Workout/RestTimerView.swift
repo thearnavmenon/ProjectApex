@@ -53,6 +53,10 @@ struct RestTimerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
+    /// True when notification permission is denied — the background
+    /// "rest complete" alert cannot fire, so we surface a quiet notice (G-F5).
+    @State private var notificationsDenied: Bool = false
+
     // MARK: - Body
 
     var body: some View {
@@ -123,6 +127,15 @@ struct RestTimerView: View {
 
                 Spacer()
 
+                // Rest-alert disabled notice (G-F5) — display-only, shown when
+                // notification permission is denied.
+                if notificationsDenied {
+                    Text("Rest alerts are off — enable notifications in iOS Settings.")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.38))
+                        .padding(.bottom, 12)
+                }
+
                 // Skip rest button
                 skipButton
                     .padding(.bottom, 48)
@@ -165,6 +178,11 @@ struct RestTimerView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your progress so far will be saved. You can review your partial session summary.")
+        }
+        .task {
+            // Check notification authorization once per appearance (G-F5).
+            let settings = await UNUserNotificationCenter.current().notificationSettings()
+            notificationsDenied = settings.authorizationStatus == .denied
         }
         .onAppear {
             // Seed total duration from plan default or AI prescription if already present
@@ -215,18 +233,12 @@ struct RestTimerView: View {
                 .rotationEffect(.degrees(-90))
                 .animation(.linear(duration: 1.0), value: ringProgress)
 
-            // Countdown number
-            VStack(spacing: 4) {
-                Text(countdownDisplay)
-                    .font(.system(size: 80, weight: .ultraLight, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .contentTransition(.numericText())
-                    .animation(.linear(duration: 0.3), value: viewModel.restSecondsRemaining)
-
-                Text("seconds")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.35))
-            }
+            // Countdown number (m:ss — the "seconds" caption no longer applies)
+            Text(countdownDisplay)
+                .font(.system(size: 80, weight: .ultraLight, design: .rounded).monospacedDigit())
+                .foregroundStyle(.white)
+                .contentTransition(.numericText())
+                .animation(.linear(duration: 0.3), value: viewModel.restSecondsRemaining)
         }
         .scaleEffect(prescriptionJustArrived ? 1.03 : 1.0)
         .animation(.spring(response: 0.45, dampingFraction: 0.70), value: prescriptionJustArrived)
@@ -343,10 +355,12 @@ struct RestTimerView: View {
                     .font(.system(size: 13, weight: .bold))
                     .tracking(1.0)
             }
-            .foregroundStyle(.white.opacity(0.28))
+            .foregroundStyle(.white.opacity(0.55))
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
             .background(.white.opacity(0.04), in: Capsule())
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
     }
 
@@ -375,7 +389,7 @@ struct RestTimerView: View {
     }
 
     private var countdownDisplay: String {
-        "\(viewModel.restSecondsRemaining)"
+        viewModel.formattedRestTime
     }
 
     private func weightString(_ kg: Double) -> String {
