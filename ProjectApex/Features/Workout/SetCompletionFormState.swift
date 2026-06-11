@@ -39,7 +39,10 @@ struct SetCompletionFormState: Equatable {
 
     /// 0 = too easy, 1 = on target, 2 = too hard. Mapped to RPE 5/7/9 at
     /// commit time (matches the existing ActiveSetView mapping).
-    var rpeFelt: Int
+    /// Optional with NO preselected value (#318 / U5, G-F2): nil means the
+    /// user chose not to report — rpe_felt persists as NULL, never a
+    /// fabricated default.
+    var rpeFelt: Int?
 
     // MARK: - Intent (Slice 6 redesign)
 
@@ -94,7 +97,7 @@ struct SetCompletionFormState: Equatable {
     ///     on whether the picker is the only path (freestyle: yes;
     ///     AI-prescribed: hidden behind the "Did something different?"
     ///     affordance).
-    init(actualReps: Int, rpeFelt: Int = 1, prescribedIntent: SetIntent?) {
+    init(actualReps: Int, rpeFelt: Int? = nil, prescribedIntent: SetIntent?) {
         self.actualReps = actualReps
         self.rpeFelt = rpeFelt
         self.prescribedIntent = prescribedIntent

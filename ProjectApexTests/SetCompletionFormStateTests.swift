@@ -177,6 +177,30 @@ final class SetCompletionFormStateTests: XCTestCase {
                        "Freestyle never has isDeviation=true regardless of selection.")
     }
 
+    // MARK: - Optional RPE (#318 / U5, G-F2)
+
+    /// RPE is truly optional: no preselected value. The prior shape defaulted
+    /// to 1 ("On Target"), silently fabricating an RPE for users who never
+    /// touched the picker.
+    func test_rpeFelt_defaultsToNil_noPreselectedValue() {
+        let state = SetCompletionFormState(actualReps: 8, prescribedIntent: .top)
+        XCTAssertNil(state.rpeFelt,
+                     "RPE must have NO preselected value (G-F2).")
+        XCTAssertTrue(state.canSubmit,
+                      "A nil RPE must not block submission — the gate is intent-only.")
+    }
+
+    func test_rpeFelt_nil_freestyleGateStillIntentOnly() {
+        var state = SetCompletionFormState(actualReps: 8, prescribedIntent: nil)
+        XCTAssertNil(state.rpeFelt)
+        XCTAssertFalse(state.canSubmit,
+                       "Freestyle stays blocked on intent, regardless of RPE.")
+        state.selectIntent(.warmup)
+        XCTAssertTrue(state.canSubmit,
+                      "Picking an intent opens the gate with RPE still nil.")
+        XCTAssertNil(state.rpeFelt, "Picking an intent must not fabricate an RPE.")
+    }
+
     // MARK: - Completion flags
 
     func test_completionFlags_emptyByDefault() {

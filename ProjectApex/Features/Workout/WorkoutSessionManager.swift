@@ -351,47 +351,12 @@ actor WorkoutSessionManager {
         try? await writeAheadQueue.enqueue(setPayload, table: "set_logs")
         print("[WAQ] Enqueued set_log — session_id: \(session.id), set: \(setNumber), exercise: \(exercise.name), weight: \(currentPrescription?.weightKg ?? 0)kg, reps: \(actualReps)")
 
-        // Determine whether this was the last set for this exercise
-        let setsForExercise = completedSets.filter { $0.exerciseId == exercise.exerciseId }.count
-        let isLastSetForExercise = setsForExercise >= exercise.sets
-
-        if isLastSetForExercise {
-            // Archive this exercise's sets into session history
-            sessionHistoryToday.append(buildExerciseHistoryItem(for: exercise))
-            exerciseIndex += 1
-            currentSetNumber = 1
-        } else {
-            currentSetNumber = setNumber + 1
-        }
-
-        // Update crash sentinel so crash recovery reflects the latest set/exercise position.
-        if let day = trainingDay {
-            PausedSessionState(
-                sessionId: session.id,
-                trainingDayId: day.id,
-                weekId: weekId,
-                weekNumber: session.weekNumber,
-                exerciseIndex: exerciseIndex,
-                currentSetNumber: currentSetNumber,
-                dayType: session.dayType,
-                programId: session.programId,
-                userId: session.userId,
-                pausedAt: Date()
-            ).save()
-        }
-
-        // Determine next exercise and set number
-        let exercises = trainingDay?.exercises ?? []
-        let nextExercise: PlannedExercise?
-        let nextSetNumber: Int
-
-        if isLastSetForExercise {
-            nextExercise = exercises.indices.contains(exerciseIndex) ? exercises[exerciseIndex] : nil
-            nextSetNumber = 1
-        } else {
-            nextExercise = exercise
-            nextSetNumber = currentSetNumber
-        }
+        // Determine whether this was the last set for this exercise and
+        // advance position. SET-NUMBER-based, shared with skipCurrentSet()
+        // (#318 / U5): counting SetLogs lags reality after a skip (a skipped
+        // set writes no SetLog) and would prescribe a phantom extra set.
+        let (isLastSetForExercise, nextExercise, nextSetNumber) =
+            advancePosition(after: exercise, setNumber: setNumber)
 
         // 2. Transition to resting (or end session immediately if this was the last set)
         let planRestSeconds = currentPrescription?.restSeconds ?? exercise.restSeconds
@@ -467,6 +432,97 @@ actor WorkoutSessionManager {
             } else {
                 inflightRequestCount -= 1
             }
+        }
+    }
+
+    /// Skips the current set without logging it (#318 / U5, G-F7).
+    ///
+    /// Advances exactly like completeSet() but writes NO SetLog, NO WAQ entry,
+    /// NO memory event, and takes NO rest period: state moves straight to
+    /// .active for the next set (ActiveSetView renders the thinking indicator
+    /// while currentPrescription is nil) and inference fires immediately.
+    /// Skipping the last set of the last exercise ends the session; a session
+    /// where EVERY set was skipped is then discarded by finishSession's
+    /// zero-set guard (completedSets.isEmpty → .idle, nothing persisted).
+    func skipCurrentSet() async {
+        guard case .active(let exercise, let setNumber) = sessionState,
+              session != nil else { return }
+
+        // Invalidate any in-flight inference aimed at the skipped set —
+        // same reentrancy discipline as completeSet().
+        inferenceGeneration += 1
+
+        let (isLastSetForExercise, nextExercise, nextSetNumber) =
+            advancePosition(after: exercise, setNumber: setNumber)
+
+        currentPrescription = nil   // ActiveSetView shows the thinking indicator
+
+        guard let next = nextExercise else {
+            // Skipped the last set of the last exercise — end the session.
+            await endSession()
+            return
+        }
+
+        if isLastSetForExercise {
+            // Moving to a new exercise — refresh RAG memory (mirrors
+            // completeSet's last-set branch; the sessionHistoryToday archive
+            // already happened inside advancePosition).
+            cachedRAGMemory = await fetchRAGMemory(for: next)
+        }
+
+        // No rest after a skip — go straight to the next set and fire inference.
+        sessionState = .active(exercise: next, setNumber: nextSetNumber)
+        await triggerInference(for: next, setNumber: nextSetNumber)
+    }
+
+    /// Shared advancement tail for completeSet()/skipCurrentSet() (#318 / U5).
+    ///
+    /// Last-set determination is SET-NUMBER-based (`setNumber >= exercise.sets`),
+    /// NOT SetLog-count-based: a skipped set writes no SetLog, so counting logs
+    /// lags reality after a skip and would prescribe a phantom extra set.
+    ///
+    /// Advances exerciseIndex/currentSetNumber, archives the finished exercise
+    /// into sessionHistoryToday on the last set, and refreshes the crash
+    /// sentinel. Returns the position to move to next — a nil nextExercise
+    /// (only possible when isLastSetForExercise) means the session is over.
+    private func advancePosition(
+        after exercise: PlannedExercise,
+        setNumber: Int
+    ) -> (isLastSetForExercise: Bool, nextExercise: PlannedExercise?, nextSetNumber: Int) {
+        let isLastSetForExercise = setNumber >= exercise.sets
+
+        if isLastSetForExercise {
+            // Archive this exercise's sets into session history
+            sessionHistoryToday.append(buildExerciseHistoryItem(for: exercise))
+            exerciseIndex += 1
+            currentSetNumber = 1
+        } else {
+            currentSetNumber = setNumber + 1
+        }
+
+        // Update crash sentinel so crash recovery reflects the latest set/exercise position.
+        if let session, let day = trainingDay {
+            PausedSessionState(
+                sessionId: session.id,
+                trainingDayId: day.id,
+                weekId: weekId,
+                weekNumber: session.weekNumber,
+                exerciseIndex: exerciseIndex,
+                currentSetNumber: currentSetNumber,
+                dayType: session.dayType,
+                programId: session.programId,
+                userId: session.userId,
+                pausedAt: Date()
+            ).save()
+        }
+
+        // Determine next exercise and set number
+        let exercises = trainingDay?.exercises ?? []
+        if isLastSetForExercise {
+            let next = exercises.indices.contains(exerciseIndex) ? exercises[exerciseIndex] : nil
+            return (true, next, 1)
+        } else {
+            return (false, exercise, currentSetNumber)
         }
     }
 
@@ -1187,6 +1243,14 @@ actor WorkoutSessionManager {
                 }
                 // If rest still running, do nothing — onRestTimerExpired() handles it.
             }
+        case .active:
+            // Post-skip path (#318 / U5): skipCurrentSet() moves straight to
+            // .active with a nil prescription. On success the prescription was
+            // applied above and the card appears; on failure surface the retry
+            // sheet now — there is no rest timer on this path to defer to.
+            if currentPrescription == nil && currentFallbackReason != nil {
+                inferenceRetryNeeded = true
+            }
         default:
             break
         }
@@ -1598,6 +1662,9 @@ actor WorkoutSessionManager {
     /// (Cross-session PR detection is a P4 deliverable; this covers within-session PRs.)
     private func emitPRMemoryEventIfNeeded(for log: SetLog, exercise: PlannedExercise) {
         guard let sess = session else { return }
+        // A 0-rep set (failed attempt) must never emit a PR event (#318 / U5):
+        // weight × (1 + 0/30) still exceeds a 0.0 priorBest on the first set.
+        guard log.repsCompleted > 0 else { return }
         let currentEstimated1RM = log.weightKg * (1.0 + Double(log.repsCompleted) / 30.0)
         let priorBest = completedSets
             .filter { $0.exerciseId == exercise.exerciseId && $0.id != log.id }

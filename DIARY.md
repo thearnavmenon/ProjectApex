@@ -7,6 +7,44 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — Logging a set got honest: no forced effort rating, zero reps allowed, and you can skip (PR #340)
+
+**What happened (in plain words):**
+The set-logging sheet quietly made things up. The "how hard was it?" picker
+came pre-set to "On Target", so if you never touched it the app recorded an
+effort rating you never gave. The rep counter refused to go below 1, so a
+failed lift — zero reps, real and useful information — could not be recorded
+truthfully. And there was no way to skip a set at all: if you weren't going
+to do it, your only options were lying about it or ending the workout.
+
+**What changed:**
+Three things. The effort picker now starts empty and is clearly marked
+optional — pick one if you want, skip it if you don't, and nothing gets
+invented either way. The rep counter now goes down to zero, and a zero-rep
+set can no longer be celebrated as a personal record. And the menu on the
+active set screen has a new "Skip Set" item: it moves you straight to the
+next set (no rest timer, nothing written down for the skipped one), and if
+you skip everything, the session is thrown away instead of being saved empty.
+
+Fixing skip surfaced a sneaky bug: the app decided "was that the last set?"
+by counting the sets it had written down. A skipped set writes nothing down,
+so after a skip the count lagged and the coach would prescribe a phantom
+extra set. Both the skip path and the normal path now ask "what set number
+are we on?" instead of counting receipts.
+
+**How it was checked:**
+The phantom-set test was written first and watched to fail against the old
+counting logic, then the fix turned it green. Full build passed and the whole
+suite ran green — 743 tests, 0 failures. Seven new tests: the empty-by-default
+effort picker, the database row leaving the effort field properly blank,
+skip advancing without writing anything or resting, skip-then-complete
+advancing to the next exercise with no phantom set, and an all-skipped
+session being discarded.
+
+**Status:** waiting for review and merge as PR #340.
+
+---
+
 ## 2026-06-11 — Your onboarding answers finally reach the coach (PR #339)
 
 **What happened (in plain words):**

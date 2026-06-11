@@ -230,6 +230,11 @@ struct ActiveSetView: View {
                 .accessibilityHint("Shows the planned exercises and what you've logged so far")
                 Menu {
                     Button {
+                        viewModel.onSkipSet()
+                    } label: {
+                        Label("Skip Set", systemImage: "forward.end")
+                    }
+                    Button {
                         viewModel.requestExerciseSwap()
                     } label: {
                         Label("Swap Exercise", systemImage: "arrow.triangle.2.circlepath")
@@ -955,8 +960,11 @@ struct ActiveSetView: View {
     private func commitSetComplete(_ state: SetCompletionFormState) {
         guard state.canSubmit, let chosenIntent = state.resolvedIntent else { return }
         showRepConfirmation = false
-        // Map 0/1/2 picker to a rough RPE value: too easy = 5, on target = 7, too hard = 9
-        let rpeValue: Int = [5, 7, 9][state.rpeFelt]
+        // Map 0/1/2 picker to a rough RPE value: too easy = 5, on target = 7, too hard = 9.
+        // RPE is optional (#318 / U5, G-F2): nil when the user didn't pick —
+        // the downstream chain to the SetLog encode is Int?-tolerant and
+        // persists rpe_felt as NULL.
+        let rpeValue = state.rpeFelt.map { [5, 7, 9][$0] }
         viewModel.onSetComplete(
             actualReps: state.actualReps,
             rpeFelt: rpeValue,
@@ -1032,7 +1040,8 @@ struct RepRPEIntentConfirmationSheet: View {
                     HStack(spacing: 24) {
                         Button {
                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            if formState.actualReps > 1 { formState.actualReps -= 1 }
+                            // Floor is 0 (#318 / U5): a failed/zero rep is honest data.
+                            if formState.actualReps > 0 { formState.actualReps -= 1 }
                         } label: {
                             Image(systemName: "minus.circle.fill")
                                 .font(.system(size: 36))
@@ -1058,17 +1067,25 @@ struct RepRPEIntentConfirmationSheet: View {
                     }
                 }
 
-                // RPE/RIR felt — 3-option segmented picker
+                // RPE/RIR felt — 3-option segmented picker.
+                // Optional with NO preselected value (#318 / U5, G-F2): the
+                // selection is Int? starting nil, so no segment is highlighted
+                // until the user actively picks one.
                 VStack(spacing: 10) {
-                    Text("How hard was it?")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
-                        .tracking(0.5)
+                    HStack(spacing: 6) {
+                        Text("How hard was it?")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.50))
+                            .tracking(0.5)
+                        Text("· Optional")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.30))
+                    }
 
-                    Picker("RPE felt", selection: $formState.rpeFelt) {
-                        Text("Too Easy").tag(0)
-                        Text("On Target").tag(1)
-                        Text("Too Hard").tag(2)
+                    Picker("RPE felt (optional)", selection: $formState.rpeFelt) {
+                        Text("Too Easy").tag(Int?.some(0))
+                        Text("On Target").tag(Int?.some(1))
+                        Text("Too Hard").tag(Int?.some(2))
                     }
                     .pickerStyle(.segmented)
                 }
