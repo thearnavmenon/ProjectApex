@@ -347,7 +347,8 @@ struct ManualSessionLogView: View {
                 weekNumber: week.weekNumber,
                 dayType: day.dayLabel,
                 completed: true,
-                manuallyLogged: true
+                manuallyLogged: true,
+                status: "completed"   // #369 [10] — count toward PR baselines / last-time anchors
             )
             do {
                 try await deps.supabaseClient.insert(sessionPayload, table: "workout_sessions")
@@ -760,6 +761,12 @@ private struct ManualSessionPayload: Encodable {
     let dayType: String
     let completed: Bool
     let manuallyLogged: Bool
+    /// #369 [10]: a manually-logged session is a completed session. Without an
+    /// explicit status the row is inserted with status = NULL, and the PR-baseline
+    /// / last-performance queries filter `status != "abandoned"` — under which NULL
+    /// evaluates to NULL (not true), silently excluding manual sessions from PR
+    /// baselines and last-time anchors. Setting "completed" makes them count.
+    let status: String
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -770,6 +777,7 @@ private struct ManualSessionPayload: Encodable {
         case dayType        = "day_type"
         case completed
         case manuallyLogged = "manually_logged"
+        case status
     }
 }
 
