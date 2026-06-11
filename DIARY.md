@@ -7,6 +7,43 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — Dismissed banners now stay dismissed — and come back only when there's genuinely something new (PR #366)
+
+**What happened (in plain words):**
+The last item from the #318 flow audit. The pre-workout screen shows little
+notice cards — "welcome back after your break", "you've leveled up", "your
+targets are ready". Each has an × to dismiss it. But the app only remembered
+that × in short-term memory: leave the screen and come back, and the same
+card you just closed was back again. Worse, the app didn't remember *which*
+news you dismissed — so it couldn't tell "same old card again" apart from
+"actually, something new happened". Separately, on app launch two pop-ups
+(crash recovery and a one-time programme notice) could try to appear at the
+same moment; the system quietly drops one, and the dropped notice was marked
+as "already shown" — so you'd never see it at all.
+
+**What changed:**
+Dismissing a card now writes down exactly which event you dismissed — keyed
+to solid facts like "the session date that caused the break" or "the
+session count when you leveled up", never to wobbly numbers. The card stays
+gone across screens and app restarts, and only returns when the underlying
+event genuinely changes (a new break, a new level-up, a re-calibration).
+The × is still just a local "not now" — saving from the review screens
+remains the real acknowledgement. And at launch, crash recovery now goes
+first: the programme notice politely waits for the next launch instead of
+being silently swallowed. The bigger banner-queue redesign stays parked as
+issue #327.
+
+**How it was checked:**
+Six new unit tests cover the dismissal memory directly — shows when nothing
+is dismissed, stays hidden for the same event, re-arms for a new one, each
+banner independent — all against a throwaway settings store so real
+settings are never touched. Full build passed and the whole test suite ran
+green — zero failures (the live-API test stays gated off).
+
+**Status:** merged as PR #366 — the #318 audit campaign closes with this one.
+
+---
+
 ## 2026-06-11 — The coach can no longer prescribe weights that don't exist, or jumps that don't make sense (PR #365)
 
 **What happened (in plain words):**

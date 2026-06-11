@@ -170,22 +170,19 @@ struct ContentView: View {
                 )
             }
 
-            // One-time migration notice: show once when an existing user first launches
-            // the build that introduced training-time programme progression.
-            let migrationKey = "training_time_migration_v1_shown"
-            if !showOnboarding && !UserDefaults.standard.bool(forKey: migrationKey) {
-                UserDefaults.standard.set(true, forKey: migrationKey)
-                showTrainingTimeMigrationNotice = true
-            }
-
             // Crash recovery check — detect sessions that were interrupted by a kill.
             // PausedSessionState is written at session start and updated every set, so
             // if it's present here the session was never properly ended or explicitly paused.
             // Skip during onboarding (no session has ever run).
+            // Evaluated FIRST (J-F7 / #318): two alerts arming in the same .task pass
+            // collide — SwiftUI silently drops one — so the migration notice below only
+            // arms when no crash-recovery alert won this launch.
+            var crashAlertArmed = false
             if !showOnboarding {
                 if let saved = PausedSessionState.load() {
                     crashRecoveryState = saved
                     showCrashRecoveryAlert = true
+                    crashAlertArmed = true
                 } else if PausedSessionState.repairPending {
                     // UserDefaults data was present but corrupt (key migration failure or
                     // incompatible struct change). Query Supabase for a paused row so the
@@ -197,8 +194,20 @@ struct ContentView: View {
                     if let repaired = PausedSessionState.load() {
                         crashRecoveryState = repaired
                         showCrashRecoveryAlert = true
+                        crashAlertArmed = true
                     }
                 }
+            }
+
+            // One-time migration notice: show once when an existing user first launches
+            // the build that introduced training-time programme progression. Suppressed
+            // when the crash-recovery alert won — and the shown-flag is set ONLY when
+            // the notice actually presents, so a suppressed notice isn't silently
+            // consumed and still shows on the next launch (J-F7 / #318).
+            let migrationKey = "training_time_migration_v1_shown"
+            if !showOnboarding && !crashAlertArmed && !UserDefaults.standard.bool(forKey: migrationKey) {
+                UserDefaults.standard.set(true, forKey: migrationKey)
+                showTrainingTimeMigrationNotice = true
             }
         }
         .alert("Unfinished Workout", isPresented: $showCrashRecoveryAlert) {

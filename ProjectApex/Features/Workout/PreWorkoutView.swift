@@ -45,6 +45,9 @@ struct PreWorkoutView: View {
     /// Days since the user's last completed session — nil means first-ever session.
     /// Drives the welcome-back banner when the gap is ≥ 14 days (2.4A).
     var daysSinceLastSession: Int? = nil
+    /// Raw `session_date` string ("yyyy-MM-dd") of that last completed session —
+    /// the stable key for the welcome-back banner's dismissal fingerprint (J-F7).
+    var lastSessionDateKey: String? = nil
     /// Heavy-reassessment signal (#258). When present (and not locally dismissed),
     /// shows the level-up banner naming recently-advanced patterns. Nil → no banner.
     var heavyReassessmentSignal: HeavyReassessmentSignal? = nil
@@ -58,6 +61,12 @@ struct PreWorkoutView: View {
     /// Called when the user taps "Review targets" on the calibration banner (#269).
     /// Wired to the read-only calibration screen. Default no-op.
     var onReviewCalibration: () -> Void = {}
+    /// Watermark pair backing the calibration banner's dismissal fingerprint
+    /// (J-F7): `ProjectionState.calibrationReviewFiredAt` and
+    /// `ProjectionState.lastRecalibratedAtSessionCount`. Re-calibration moves
+    /// the watermark, which re-arms a dismissed banner (#305 semantics).
+    var calibrationWatermarkFiredAt: Date? = nil
+    var calibrationWatermarkRecalibratedAtSessionCount: Int? = nil
     /// Called when the user taps "Skip this session". Defers this day without recording
     /// any session data — the next pending non-skipped day becomes the active session.
     var onSkipSession: (() -> Void)? = nil
@@ -75,9 +84,15 @@ struct PreWorkoutView: View {
 
     // MARK: - Private state
     @State private var showSkipConfirmation: Bool = false
-    @State private var welcomeBackBannerDismissed: Bool = false
-    @State private var heavyReassessmentBannerDismissed: Bool = false
-    @State private var calibrationBannerDismissed: Bool = false
+    /// Durable, event-fingerprinted dismissal store for the three dismissable
+    /// banners (J-F7 / #318). Replaces the transient per-banner Bool flags —
+    /// a dismissal now survives view rebuilds and is keyed to the event it
+    /// dismissed, re-arming only when the underlying event genuinely changes.
+    private let bannerDismissals = BannerDismissals()
+    /// Banners dismissed during this view's lifetime. The durable store is the
+    /// source of truth across rebuilds; this set exists only so an X-tap
+    /// triggers an immediate SwiftUI re-render.
+    @State private var locallyDismissedBanners: Set<BannerDismissals.Banner> = []
     /// Set true once the user taps "Generate Session". Combined with the day still being
     /// pending and generation no longer in progress, this surfaces the inline failure
     /// line — generateDaySession restores .loaded silently on error (amendment 2.2).
@@ -102,12 +117,15 @@ struct PreWorkoutView: View {
                         // Precedence (#269): the calibration banner takes priority; the
                         // heavy-reassessment banner shows only when the calibration banner
                         // is not currently shown.
-                        if let calibration = calibrationReviewSignal, !calibrationBannerDismissed {
+                        if let calibration = calibrationReviewSignal,
+                           showsBanner(.calibrationReview, fingerprint: calibrationFingerprint) {
                             calibrationReviewBanner(calibration)
-                        } else if let signal = heavyReassessmentSignal, !heavyReassessmentBannerDismissed {
+                        } else if let signal = heavyReassessmentSignal,
+                                  showsBanner(.heavyReassessment, fingerprint: heavyReassessmentFingerprint(signal)) {
                             heavyReassessmentBanner(signal)
                         }
-                        if let days = daysSinceLastSession, days >= 14, !welcomeBackBannerDismissed {
+                        if let days = daysSinceLastSession, days >= 14,
+                           showsBanner(.welcomeBack, fingerprint: welcomeBackFingerprint) {
                             welcomeBackBanner(days: days)
                         }
                         sessionInfoCard
@@ -368,6 +386,39 @@ struct PreWorkoutView: View {
         )
     }
 
+    // MARK: - Banner dismissal semantics (J-F7 / #318)
+
+    /// True when the banner should render: not dismissed during this view's
+    /// lifetime (the set drives the immediate re-render on X-tap) and the
+    /// current event fingerprint differs from the durably dismissed one (the
+    /// store drives persistence across view rebuilds).
+    private func showsBanner(_ banner: BannerDismissals.Banner, fingerprint: String) -> Bool {
+        !locallyDismissedBanners.contains(banner)
+            && bannerDismissals.shouldShow(banner, fingerprint: fingerprint)
+    }
+
+    /// Writes the current event fingerprint durably. No server-side ack —
+    /// sheet-save remains the only durable-ack path.
+    private func dismissBanner(_ banner: BannerDismissals.Banner, fingerprint: String) {
+        bannerDismissals.dismiss(banner, fingerprint: fingerprint)
+        locallyDismissedBanners.insert(banner)
+    }
+
+    private var welcomeBackFingerprint: String {
+        BannerDismissals.welcomeBackFingerprint(lastSessionDateKey: lastSessionDateKey ?? "")
+    }
+
+    private func heavyReassessmentFingerprint(_ signal: HeavyReassessmentSignal) -> String {
+        BannerDismissals.heavyReassessmentFingerprint(triggeringSessionCount: signal.triggeringSessionCount)
+    }
+
+    private var calibrationFingerprint: String {
+        BannerDismissals.calibrationFingerprint(
+            calibrationReviewFiredAt: calibrationWatermarkFiredAt,
+            lastRecalibratedAtSessionCount: calibrationWatermarkRecalibratedAtSessionCount
+        )
+    }
+
     // MARK: - Welcome Back Banner (2.4A)
 
     /// Pure message-selection for the welcome-back banner, extracted for unit testing.
@@ -399,7 +450,7 @@ struct PreWorkoutView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             Button {
-                welcomeBackBannerDismissed = true
+                dismissBanner(.welcomeBack, fingerprint: welcomeBackFingerprint)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
@@ -449,7 +500,7 @@ struct PreWorkoutView: View {
             }
             Spacer(minLength: 0)
             Button {
-                heavyReassessmentBannerDismissed = true
+                dismissBanner(.heavyReassessment, fingerprint: heavyReassessmentFingerprint(signal))
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
@@ -499,7 +550,7 @@ struct PreWorkoutView: View {
             }
             Spacer(minLength: 0)
             Button {
-                calibrationBannerDismissed = true
+                dismissBanner(.calibrationReview, fingerprint: calibrationFingerprint)
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))

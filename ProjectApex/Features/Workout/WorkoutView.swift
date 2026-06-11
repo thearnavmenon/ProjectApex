@@ -39,6 +39,9 @@ struct WorkoutView: View {
     /// Days since the user's last completed session — nil on first-ever session.
     /// Used by PreWorkoutView to show the welcome-back banner after a long gap.
     @State private var daysSinceLastSession: Int? = nil
+    /// Raw `session_date` string ("yyyy-MM-dd") of that last completed session —
+    /// the stable key for the welcome-back banner's dismissal fingerprint (J-F7).
+    @State private var lastSessionDateKey: String? = nil
     /// Heavy-reassessment signal derived from the cached trainee model (#258).
     /// Drives the level-up banner in PreWorkoutView. Nil when no model / out of
     /// the cooldown window / acknowledged.
@@ -51,6 +54,11 @@ struct WorkoutView: View {
     /// Drives the one-time targets banner in PreWorkoutView. Nil when no model /
     /// review not fired / already acknowledged.
     @State private var calibrationReviewSignal: CalibrationReviewSignal? = nil
+    /// Watermark pair backing the calibration banner's durable dismissal
+    /// fingerprint (J-F7): re-calibration moves the watermark, re-arming a
+    /// dismissed banner (#305 semantics).
+    @State private var calibrationWatermarkFiredAt: Date? = nil
+    @State private var calibrationWatermarkRecalibratedAtSessionCount: Int? = nil
     /// True while the read-only calibration-review screen is presented from the
     /// banner CTA (#269). On dismiss the signal is re-derived; acknowledging the
     /// screen sets calibrationReviewAcknowledged, so the banner then disappears.
@@ -156,6 +164,9 @@ struct WorkoutView: View {
                 formatter.locale = Locale(identifier: "en_US_POSIX")
                 if let date = formatter.date(from: row.sessionDate) {
                     daysSinceLastSession = Calendar.current.dateComponents([.day], from: date, to: Date()).day
+                    // Stable dismissal key for the welcome-back banner (J-F7) —
+                    // the raw date string, never the day count (which changes daily).
+                    lastSessionDateKey = row.sessionDate
                 }
             }
 
@@ -167,6 +178,12 @@ struct WorkoutView: View {
             // Calibration-review signal for the pre-workout one-time targets banner (#269).
             // Same cached-digest path. Nil model / not-fired / acknowledged → nil → no banner.
             calibrationReviewSignal = await deps.traineeModelService.digest()?.calibrationReviewSignal
+
+            // Watermark pair backing the calibration banner's durable dismissal
+            // fingerprint (J-F7). Same cached-digest path.
+            let watermark = await deps.traineeModelService.digest()?.projections
+            calibrationWatermarkFiredAt = watermark?.calibrationReviewFiredAt
+            calibrationWatermarkRecalibratedAtSessionCount = watermark?.lastRecalibratedAtSessionCount
 
             guard let vm = viewModel else { return }
 
@@ -351,6 +368,7 @@ struct WorkoutView: View {
                 completedDayCount: completedDayCount,
                 totalDayCount: totalDayCount,
                 daysSinceLastSession: daysSinceLastSession,
+                lastSessionDateKey: lastSessionDateKey,
                 heavyReassessmentSignal: heavyReassessmentSignal,
                 onReviewGoals: {
                     showGoalReview = true
@@ -359,6 +377,8 @@ struct WorkoutView: View {
                 onReviewCalibration: {
                     showCalibrationReview = true
                 },
+                calibrationWatermarkFiredAt: calibrationWatermarkFiredAt,
+                calibrationWatermarkRecalibratedAtSessionCount: calibrationWatermarkRecalibratedAtSessionCount,
                 onSkipSession: onSkipSession,
                 onBack: onBack,
                 onCloseToTab0: onCloseToTab0,
