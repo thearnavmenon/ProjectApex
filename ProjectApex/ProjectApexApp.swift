@@ -13,10 +13,17 @@ struct ProjectApexApp: App {
     @State private var deps = AppDependencies()
     @Environment(\.scenePhase) private var scenePhase
 
+    init() {
+        // Register the embedded design-system fonts at launch (ADR-0024 — runtime
+        // Core Text registration, not the Info.plist UIAppFonts build-setting key).
+        _ = AppFont.register
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(deps)
+                .apexThemeRoot()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {

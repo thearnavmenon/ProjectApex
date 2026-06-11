@@ -7,6 +7,39 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The new look's building blocks now exist in code (PR #367)
+
+**What happened (in plain words):**
+The redesign has been fully drawn on paper for a while. This is the first piece of
+actually building it. I put the design's basic ingredients into the app's code: the
+exact colours (cream "paper", the deep ultramarine ink-blue, and a handful of
+others), the two fonts (Space Grotesk for big headline numbers, Inter for normal
+text), plus the spacing, corner-rounding, motion, and buzz-feedback rules. None of
+the real screens use these yet — this is the shared paint-set and toolbox every new
+screen will reach for next.
+
+A few things worth calling out simply:
+- There are two looks: the normal cream "light" look and a "dim" dark look for
+  late-night or dark home gyms. Same recipe, swapped values. There's now a setting
+  (System / Light / Dim) to choose.
+- The bright blue is special — it's only allowed for big filled shapes, never for
+  text, so it can't accidentally make small writing hard to read. The code is built
+  so that mistake won't even compile.
+- Weight numbers are set up so the digits don't jiggle as they change, and the big
+  numbers won't balloon too large or get cut off on phones set to large text.
+- I added a hidden "gallery" screen (developers only) that shows every colour and
+  font side by side in both looks, so we can eyeball them.
+
+I also wrote automatic checks that prove the colours match the design exactly, the
+dark look really differs, the blue text stays readable, and the fonts actually load.
+All twelve pass.
+
+Nothing an everyday user sees has changed — the old screens are all still in place
+and untouched. This just lays the foundation the next steps build on (the new
+3-tab shell is next).
+
+---
+
 ## 2026-06-11 — Dismissed banners now stay dismissed — and come back only when there's genuinely something new (PR #366)
 
 **What happened (in plain words):**
