@@ -46,6 +46,24 @@ on; until then the app correctly runs on the old shared-key path.
 
 ---
 
+## 2026-06-12 — Three broken data paths in the trainee-model learning pipeline fixed (PR #371, part of #369)
+
+**Problem.** The trainee model learns from your workout data, but three bugs meant it was learning almost nothing in production.
+
+First, every set you complete gets sent to an Edge Function that updates your model. That payload was missing the AI's original prescription — without it, the Edge Function's accuracy-learning loop hit a guard and bailed out immediately. The learning loop has never run since it was written.
+
+Second, because the prescription was never sent, the weekly fatigue signals (deload triggers, rep-rate alarms) could never fire either. They depend on comparing what the AI prescribed to what you actually did. With no prescription in the data, every set looked like a no-prescription set and the signals stayed at zero.
+
+Third, the muscle-volume breakdown (`setsPerPrimaryMuscle`) was being sent to the AI digest as a flat alternating array like `["chest", 4, "quads", 6]` instead of a proper JSON object `{"chest": 4, "quads": 6}`. The AI can't reason about a flat array the way it can a named object.
+
+**What changed.** Added `ai_prescribed` to the set-log payload that goes to the Edge Function — it's the same nested prescription object the EF already knows how to read (`intent`, `reps`, `user_corrected_weight`). Added a custom `encode(to:)` and `init(from:)` to `WeekFatigueSignals` so the muscle-volume map serialises as an object (using the same `encodeEnumKeyedDict` helper already used in `TraineeModel`). Also added an explicit memberwise init since the custom Codable init suppresses the synthesised one.
+
+**How checked.** Added 6 new tests: two prove the `ai_prescribed` field is present (or correctly absent) in the encoded WAQ payload; two prove the deload signals fire when a prescription is present and stay silent when it isn't; two prove the muscle-volume field round-trips as a JSON object. All 276 tests pass (build-exit=0).
+
+**Status.** merged as PR #371.
+
+---
+
 ## 2026-06-12 — A brand-new install can now get past the front door (PR #368)
 
 **The problem (in plain words):**

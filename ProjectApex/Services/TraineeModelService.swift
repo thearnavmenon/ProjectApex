@@ -224,6 +224,11 @@ nonisolated struct TraineeModelSetLogPayload: Codable, Sendable {
     let repsCompleted: Int
     let rpeFelt: Int?
     let intent: String
+    /// The AI prescription shown when this set was initiated.
+    /// The Edge Function's `applyPrescriptionAccuracy` reads `ai_prescribed.intent`,
+    /// `ai_prescribed.reps`, and `ai_prescribed.user_corrected_weight` to gate the
+    /// accuracy-learning loop. Omitted when nil (sets without a prescription).
+    let aiPrescribed: SetPrescription?
 
     enum CodingKeys: String, CodingKey {
         case exerciseId    = "exercise_id"
@@ -232,6 +237,7 @@ nonisolated struct TraineeModelSetLogPayload: Codable, Sendable {
         case repsCompleted = "reps_completed"
         case rpeFelt       = "rpe_felt"
         case intent
+        case aiPrescribed  = "ai_prescribed"
     }
 
     init?(from setLog: SetLog) {
@@ -242,5 +248,6 @@ nonisolated struct TraineeModelSetLogPayload: Codable, Sendable {
         self.repsCompleted = setLog.repsCompleted
         self.rpeFelt       = setLog.rpeFelt
         self.intent        = intent.rawValue
+        self.aiPrescribed  = setLog.aiPrescribed
     }
 }
