@@ -197,7 +197,8 @@ final class TraineeModelServiceTests: XCTestCase {
         weightKg: Double = 100,
         reps: Int = 5,
         rpe: Int? = 8,
-        intent: SetIntent? = .top
+        intent: SetIntent? = .top,
+        aiPrescribed: SetPrescription? = nil
     ) -> SetLog {
         SetLog(
             id: UUID(),
@@ -208,11 +209,30 @@ final class TraineeModelServiceTests: XCTestCase {
             repsCompleted: reps,
             rpeFelt: rpe,
             rirEstimated: nil,
-            aiPrescribed: nil,
+            aiPrescribed: aiPrescribed,
             loggedAt: ref,
             primaryMuscle: nil,
             intent: intent,
             completionFlags: []
+        )
+    }
+
+    private func makeSetPrescription(
+        reps: Int = 5,
+        intent: SetIntent = .top,
+        userCorrectedWeight: Bool? = nil
+    ) -> SetPrescription {
+        SetPrescription(
+            weightKg: 100,
+            reps: reps,
+            tempo: "3-1-1-0",
+            rirTarget: 2,
+            restSeconds: 180,
+            coachingCue: "Drive through heels",
+            reasoning: "Top set for strength",
+            safetyFlags: [],
+            userCorrectedWeight: userCorrectedWeight,
+            intent: intent
         )
     }
 
@@ -422,5 +442,130 @@ final class TraineeModelServiceTests: XCTestCase {
 
         XCTAssertEqual(logs.count, 2, "intent=nil sets must be filtered out")
         XCTAssertEqual(logs.map { $0["intent"] as? String }, ["top", "backoff"])
+    }
+
+    // MARK: ─── (A) ai_prescribed payload — #369 ──────────────────────────────
+    //
+    // The Edge Function's applyPrescriptionAccuracy reads set.ai_prescribed as a
+    // nested object with `intent`, `reps`, and `user_corrected_weight` fields. The
+    // payload struct must carry `ai_prescribed` for the accuracy-learning loop to
+    // run. These tests verify the field is present in the encoded JSON when the
+    // source SetLog has aiPrescribed, and absent when it does not.
+
+    func test_enqueueUpdate_setLog_withAiPrescribed_encodesObjectInPayload() async throws {
+        let session = makeSession()
+        let prescription = makeSetPrescription(reps: 5, intent: .top, userCorrectedWeight: false)
+        let sets: [SetLog] = [
+            makeSetLog(setNumber: 1, intent: .top, aiPrescribed: prescription),
+        ]
+
+        try await service.enqueueUpdate(forSession: session, setLogs: sets)
+
+        let pending = await waq.queue
+        let item = try XCTUnwrap(pending.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: item.payload) as? [String: Any])
+        let payload = try XCTUnwrap(body["session_payload"] as? [String: Any])
+        let logs = try XCTUnwrap(payload["set_logs"] as? [[String: Any]])
+        let first = try XCTUnwrap(logs.first)
+
+        // Edge Function reads set.ai_prescribed as an object — must not be nil.
+        let aiPrescribed = try XCTUnwrap(
+            first["ai_prescribed"] as? [String: Any],
+            "ai_prescribed must be a JSON object — EF gating in applyPrescriptionAccuracy"
+        )
+        XCTAssertEqual(aiPrescribed["reps"] as? Int, 5,
+                       "ai_prescribed.reps must match the prescription's reps (EF reads this to gate accuracy loop)")
+        XCTAssertEqual(aiPrescribed["intent"] as? String, "top",
+                       "ai_prescribed.intent must be the snake_case raw value")
+        // user_corrected_weight is Bool — false is present in the object.
+        XCTAssertEqual(aiPrescribed["user_corrected_weight"] as? Bool, false)
+    }
+
+    func test_enqueueUpdate_setLog_withoutAiPrescribed_omitsFieldFromPayload() async throws {
+        let session = makeSession()
+        let sets: [SetLog] = [
+            makeSetLog(setNumber: 1, intent: .top, aiPrescribed: nil),
+        ]
+
+        try await service.enqueueUpdate(forSession: session, setLogs: sets)
+
+        let pending = await waq.queue
+        let item = try XCTUnwrap(pending.first)
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: item.payload) as? [String: Any])
+        let payload = try XCTUnwrap(body["session_payload"] as? [String: Any])
+        let logs = try XCTUnwrap(payload["set_logs"] as? [[String: Any]])
+        let first = try XCTUnwrap(logs.first)
+
+        // Sets with no prescription must omit the key (EF tolerates absence and
+        // skips those sets — the `continue` on line 1226 of index.ts).
+        XCTAssertNil(first["ai_prescribed"], "No prescription → field must be absent")
+    }
+
+    // MARK: ─── (B) Deload signals fire when ai_prescribed is present — #369 ──
+
+    func test_weekFatigueSignals_deloadSignals_fireWhenAiPrescribedPresent() {
+        // 3 sets: each prescribed for 5 reps but only 2 completed (rate = 40% < 60%).
+        // This produces 3 significant misses (≥3) AND a rep rate < 75%.
+        // Two deload triggers → deloadTriggered must be true.
+        // Without aiPrescribed these signals would be absent (repCompletionRate = nil,
+        // significantMissCount = 0), and deloadTriggered would be false.
+        let prescription = makeSetPrescription(reps: 5, intent: .top)
+        let logs = (1...3).map { i in
+            SetLog(
+                id: UUID(),
+                sessionId: sessionId,
+                exerciseId: "barbell_back_squat",
+                setNumber: i,
+                weightKg: 100,
+                repsCompleted: 2,       // << well below prescribed 5 reps
+                rpeFelt: nil,
+                rirEstimated: nil,
+                aiPrescribed: prescription,
+                loggedAt: ref,
+                primaryMuscle: nil,
+                intent: .top
+            )
+        }
+
+        let signals = WeekFatigueSignals.compute(from: logs, sessionCount: 1)
+
+        XCTAssertNotNil(signals.repCompletionRate,
+                        "repCompletionRate must be non-nil when ai_prescribed is present")
+        XCTAssertEqual(signals.significantMissCount, 3,
+                       "All 3 sets complete <60% reps → 3 significant misses")
+        let rate = try! XCTUnwrap(signals.repCompletionRate)
+        XCTAssertLessThan(rate, 0.75,
+                          "Rep rate (2/5 = 40%) must be below deload threshold of 75%")
+        XCTAssertTrue(signals.deloadTriggered,
+                      "≥2 deload signals (rep_rate < 75% + 3 misses) → deloadTriggered must be true")
+    }
+
+    func test_weekFatigueSignals_deloadSignals_absentWhenNoAiPrescribed() {
+        // Same actual reps, but no prescription → can't compute rep rate or misses.
+        let logs = (1...3).map { i in
+            SetLog(
+                id: UUID(),
+                sessionId: sessionId,
+                exerciseId: "barbell_back_squat",
+                setNumber: i,
+                weightKg: 100,
+                repsCompleted: 2,
+                rpeFelt: nil,
+                rirEstimated: nil,
+                aiPrescribed: nil,      // << no prescription
+                loggedAt: ref,
+                primaryMuscle: nil,
+                intent: .top
+            )
+        }
+
+        let signals = WeekFatigueSignals.compute(from: logs, sessionCount: 1)
+
+        XCTAssertNil(signals.repCompletionRate,
+                     "No prescription → repCompletionRate must be nil")
+        XCTAssertEqual(signals.significantMissCount, 0,
+                       "No prescription → significantMissCount must be 0")
+        XCTAssertFalse(signals.deloadTriggered,
+                       "Without rep-rate / miss signals, deloadTriggered must be false")
     }
 }

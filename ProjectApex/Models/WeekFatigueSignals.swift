@@ -45,6 +45,53 @@ nonisolated struct WeekFatigueSignals: Codable, Sendable, Hashable {
         case deloadTriggered           = "deload_triggered"
     }
 
+    // Explicit memberwise init — required because custom Codable inits below
+    // suppress the synthesized one. Called by compute() and unit tests.
+    init(
+        sessionsCompletedThisWeek: Int,
+        weeklyAvgRPE: Double?,
+        repCompletionRate: Double?,
+        significantMissCount: Int,
+        setsPerPrimaryMuscle: [PrimaryMuscle: Int],
+        fatigueManagementFlagged: Bool,
+        deloadTriggered: Bool
+    ) {
+        self.sessionsCompletedThisWeek = sessionsCompletedThisWeek
+        self.weeklyAvgRPE              = weeklyAvgRPE
+        self.repCompletionRate         = repCompletionRate
+        self.significantMissCount      = significantMissCount
+        self.setsPerPrimaryMuscle      = setsPerPrimaryMuscle
+        self.fatigueManagementFlagged  = fatigueManagementFlagged
+        self.deloadTriggered           = deloadTriggered
+    }
+
+    // Custom Codable so `setsPerPrimaryMuscle` encodes as a JSON object
+    // (`{ "chest": 4, "back": 6 }`) rather than Swift's default flat
+    // alternating-array shape for non-String-keyed dictionaries. The LLM
+    // digest consumer and Postgres Studio both require the object form.
+    // Uses JSONBCodable.swift helpers, same pattern as TraineeModel.patterns.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sessionsCompletedThisWeek = try c.decode(Int.self,     forKey: .sessionsCompletedThisWeek)
+        weeklyAvgRPE              = try c.decodeIfPresent(Double.self, forKey: .weeklyAvgRPE)
+        repCompletionRate         = try c.decodeIfPresent(Double.self, forKey: .repCompletionRate)
+        significantMissCount      = try c.decode(Int.self,     forKey: .significantMissCount)
+        setsPerPrimaryMuscle      = try c.decodeEnumKeyedDictIfPresent(Int.self, forKey: .setsPerPrimaryMuscle)
+        fatigueManagementFlagged  = try c.decode(Bool.self,    forKey: .fatigueManagementFlagged)
+        deloadTriggered           = try c.decode(Bool.self,    forKey: .deloadTriggered)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(sessionsCompletedThisWeek, forKey: .sessionsCompletedThisWeek)
+        try c.encodeIfPresent(weeklyAvgRPE,     forKey: .weeklyAvgRPE)
+        try c.encodeIfPresent(repCompletionRate, forKey: .repCompletionRate)
+        try c.encode(significantMissCount,      forKey: .significantMissCount)
+        try c.encodeEnumKeyedDict(setsPerPrimaryMuscle, forKey: .setsPerPrimaryMuscle)
+        try c.encode(fatigueManagementFlagged,  forKey: .fatigueManagementFlagged)
+        try c.encode(deloadTriggered,           forKey: .deloadTriggered)
+    }
+
     /// Computes fatigue signals from a list of completed set logs this week.
     static func compute(from setLogs: [SetLog], sessionCount: Int) -> WeekFatigueSignals {
         guard !setLogs.isEmpty else {
