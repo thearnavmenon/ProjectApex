@@ -7,6 +7,13 @@ xcuserdata/
 build/
 DerivedData/
 
+# Bundled alpha API key (#329). The real key lives in APIKeys.local.xcconfig,
+# which is NEVER committed. The committed APIKeys.xcconfig holds only the
+# placeholder default and optionally includes the local file; APIKeys.xcconfig.example
+# is the template. See README "Configure the bundled API key". A missing local
+# file resolves to nil at runtime (→ needs-setup gate), never a build break.
+APIKeys.local.xcconfig
+
 # Supabase Edge Function local dev — never commit secrets.
 # See docs/agents/edge-functions.md §Decisions §1 for the storage policy
 # (production secrets live in Supabase-managed env vars, not on disk).

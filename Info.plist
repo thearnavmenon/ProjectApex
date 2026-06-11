@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Explicit Info.plist for the ProjectApex app target.
+
+	  Why a physical file (not GENERATE_INFOPLIST_FILE): the bundled alpha key
+	  (#329 / O-F1) needs a CUSTOM Info.plist key, and in this Xcode the auto-
+	  generator only emits its known INFOPLIST_KEY_* allowlist — it drops custom
+	  keys. So generation is off (GENERATE_INFOPLIST_FILE = NO) and the keys that
+	  used to come from INFOPLIST_KEY_* live here instead. The CFBundle*/DT*
+	  identity keys are still injected automatically from build settings, so they
+	  are NOT duplicated here.
+
+	  This file lives at the repo root (NOT inside the folder-synced ProjectApex/
+	  group) so it is the target's INFOPLIST_FILE and is never copied as a resource.
+	-->
+
+	<!-- Bundled alpha Anthropic key. ${ANTHROPIC_API_KEY} is expanded from the build
+	     setting (APIKeys.xcconfig -> optional APIKeys.local.xcconfig) during Info.plist
+	     processing (INFOPLIST_EXPAND_BUILD_SETTINGS = YES). NOTE: brace ${...} syntax is
+	     required here — paren $(...) is not expanded in Info.plist. Read at runtime by
+	     BundledAPIKey.anthropic. With no real key configured it stays the placeholder
+	     "REPLACE_ME", which the resolver treats as nil -> the needs-setup launch gate. -->
+	<key>APEXAnthropicAPIKey</key>
+	<string>${ANTHROPIC_API_KEY}</string>
+
+	<!-- Standard bundle identity. With GENERATE_INFOPLIST_FILE off these are not
+	     auto-injected, so they are declared here and expanded from the existing
+	     build settings (brace ${...} syntax). -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>${EXECUTABLE_NAME}</string>
+	<key>CFBundleIdentifier</key>
+	<string>${PRODUCT_BUNDLE_IDENTIFIER}</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>${PRODUCT_NAME}</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${MARKETING_VERSION}</string>
+	<key>CFBundleVersion</key>
+	<string>${CURRENT_PROJECT_VERSION}</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+
+	<key>NSCameraUsageDescription</key>
+	<string>Project Apex uses the camera to scan gym equipment and build your gym profile.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<true/>
+		<key>UISceneConfigurations</key>
+		<dict/>
+	</dict>
+	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>

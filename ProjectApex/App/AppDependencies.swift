@@ -75,6 +75,12 @@ final class AppDependencies {
 
     private let anthropicKey: String
 
+    /// True when an Anthropic key was resolvable at launch (Keychain or bundled
+    /// build-time key). False on a fresh install with no key baked in — drives the
+    /// honest "this build needs setup" launch gate (#329 / O-F1) instead of letting
+    /// onboarding start and die mid-gym-scan with a raw HTTP error.
+    let hasResolvableAIKey: Bool
+
     // MARK: Init
 
     init() {
@@ -103,7 +109,16 @@ final class AppDependencies {
         // 4. Memory — needs Supabase + OpenAI embedding key + Anthropic key for Haiku tag classification
         let openAIKey = (try? keychain.retrieve(.openAIAPIKey)) ?? ""
         // Read Anthropic key early so MemoryService can use Haiku for tag classification.
-        let anthropicKey = (try? keychain.retrieve(.anthropicAPIKey)) ?? ""
+        // Precedence (#329): existing Keychain value → bundled build-time key (seeded
+        // into the Keychain) → nil. Resolving here, before any service is built, means
+        // a fresh install with a bundled key behaves exactly like a dev install.
+        let resolvedAnthropicKey = AnthropicKeyResolver.resolve(
+            retrieve: { try? keychain.retrieve(.anthropicAPIKey) },
+            store: { try? keychain.store($0, for: .anthropicAPIKey) },
+            bundled: { BundledAPIKey.anthropic() }
+        )
+        self.hasResolvableAIKey = resolvedAnthropicKey != nil
+        let anthropicKey = resolvedAnthropicKey ?? ""
         self.memoryService = MemoryService(
             supabase: supabaseClient,
             embeddingAPIKey: openAIKey,
