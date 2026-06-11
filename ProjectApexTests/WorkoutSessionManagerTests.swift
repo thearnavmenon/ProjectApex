@@ -1018,3 +1018,350 @@ final class ComputePersonalRecordsTests: XCTestCase {
         XCTAssertEqual(records[0].newBest, 100.0 * (1.0 + 5.0 / 30.0), accuracy: 0.0001)
     }
 }
+
+// MARK: - History-serving URLProtocol (#318 U7 — last-session anchor fixtures)
+
+/// Serves a fixed prior session and configurable set_logs so the
+/// cachedLastPerformance fetch at session start finds real history.
+/// GET workout_sessions → one session row (the "last session").
+/// GET set_logs → `Self.setLogRowsJSON`. Everything else → empty array.
+private final class WSMHistoryURLProtocol: URLProtocol, @unchecked Sendable {
+    static let lastSessionId = "00000000-0000-4000-8000-00000000000A"
+    nonisolated(unsafe) static var setLogRowsJSON: String = "[]"
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let path = request.url?.path ?? ""
+        let isGet = (request.httpMethod ?? "GET") == "GET"
+        let body: String
+        if isGet && path.contains("workout_sessions") {
+            body = "[{\"id\":\"\(Self.lastSessionId)\"}]"
+        } else if isGet && path.contains("set_logs") {
+            body = Self.setLogRowsJSON
+        } else {
+            body = "[]"
+        }
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// Builds set_logs rows for the history fixture, all belonging to the fixed
+/// "last session" id so the two-step fetch groups them correctly.
+private func historySetLogRowsJSON(exerciseId: String, weightKg: Double, reps: [Int]) -> String {
+    let rows = reps.enumerated().map { idx, r in
+        """
+        {"id":"\(UUID().uuidString)","session_id":"\(WSMHistoryURLProtocol.lastSessionId)",\
+        "exercise_id":"\(exerciseId)","set_number":\(idx + 1),"weight_kg":\(weightKg),\
+        "reps_completed":\(r),"rpe_felt":8,"logged_at":"2026-06-01T10:00:00Z","intent":"top"}
+        """
+    }
+    return "[" + rows.joined(separator: ",") + "]"
+}
+
+private func makeHistoryManager(provider: any LLMProvider) -> WorkoutSessionManager {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [WSMHistoryURLProtocol.self]
+    let supabase = SupabaseClient(
+        supabaseURL: URL(string: "https://test.supabase.co")!,
+        anonKey: "test-key",
+        urlSession: URLSession(configuration: config)
+    )
+    let inferenceService = AIInferenceService(provider: provider, gymProfile: nil, maxRetries: 0)
+    let memoryService = MemoryService(supabase: supabase, embeddingAPIKey: "")
+    let testDefaults = UserDefaults(suiteName: "com.test.wsm.hist.\(UUID().uuidString)")!
+    let gymFactStore = GymFactStore(userDefaults: testDefaults)
+    let waq = WriteAheadQueue(supabase: supabase, userDefaults: testDefaults)
+    return WorkoutSessionManager(
+        aiInference: inferenceService,
+        healthKit: HealthKitService(),
+        memoryService: memoryService,
+        supabase: supabase,
+        gymFactStore: gymFactStore,
+        writeAheadQueue: waq
+    )
+}
+
+// MARK: - PrescriptionGuardrailTests (#318 U7 / G-F8, G-F3, G-F6, G-F1)
+
+/// Tests for the prescription guardrail spine: the pure snap → clamp core
+/// (`WorkoutSessionManager.adjustedWeight`), the canonical marker contract,
+/// the live wiring through handleInferenceResult, the last-session anchor
+/// clamp, the "Last time" line, and the manual-fallback weight seeding.
+final class PrescriptionGuardrailTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        PausedSessionState.clear()
+        WSMHistoryURLProtocol.setLogRowsJSON = "[]"
+    }
+
+    override func tearDown() {
+        PausedSessionState.clear()
+        WSMHistoryURLProtocol.setLogRowsJSON = "[]"
+        super.tearDown()
+    }
+
+    private func historySetLog(setNumber: Int, weightKg: Double, reps: Int) -> SetLog {
+        SetLog(
+            id: UUID(),
+            sessionId: UUID(),
+            exerciseId: "exercise_0",
+            setNumber: setNumber,
+            weightKg: weightKg,
+            repsCompleted: reps,
+            rpeFelt: 8,
+            rirEstimated: 2,
+            aiPrescribed: nil,
+            loggedAt: Date(),
+            primaryMuscle: nil,
+            intent: .top,
+            completionFlags: []
+        )
+    }
+
+    private func basePrescription(reasoning: String) -> SetPrescription {
+        SetPrescription(
+            weightKg: 45.0,
+            reps: 8,
+            tempo: "3-1-1-0",
+            rirTarget: 2,
+            restSeconds: 120,
+            coachingCue: "Cue",
+            reasoning: reasoning,
+            safetyFlags: [],
+            intent: .top,
+            setFraming: "Frame."
+        )
+    }
+
+    // MARK: snap → clamp pure core (G-F3)
+
+    func test_adjustedWeight_anchorPresent_topIntent_capsAtSnappedDownCap() {
+        // raw 100 (a real barbell load → snap is a no-op), anchor 80 →
+        // cap 92 → snapDown 90.
+        let result = WorkoutSessionManager.adjustedWeight(
+            rawWeight: 100, intent: .top, equipment: .barbell,
+            excludedWeights: [], anchorWeight: 80
+        )
+        XCTAssertEqual(result?.clamped ?? -1, 90.0, accuracy: 0.001)
+        XCTAssertEqual(result?.snapped ?? -1, 100.0, accuracy: 0.001,
+            "snap must be a no-op for an already-available weight")
+    }
+
+    func test_adjustedWeight_noAnchor_skipsClamp() {
+        // No anchor (first session / no history / fetch failure) → no clamp,
+        // and 100 is a real barbell load → no snap → no adjustment at all.
+        XCTAssertNil(WorkoutSessionManager.adjustedWeight(
+            rawWeight: 100, intent: .top, equipment: .barbell,
+            excludedWeights: [], anchorWeight: nil
+        ))
+    }
+
+    func test_adjustedWeight_intentGating_onlyTopAndBackoffClamp() {
+        for intent in [SetIntent.warmup, .technique, .amrap] {
+            XCTAssertNil(WorkoutSessionManager.adjustedWeight(
+                rawWeight: 100, intent: intent, equipment: .barbell,
+                excludedWeights: [], anchorWeight: 80
+            ), "\(intent) must not clamp")
+        }
+        XCTAssertNil(WorkoutSessionManager.adjustedWeight(
+            rawWeight: 100, intent: nil, equipment: .barbell,
+            excludedWeights: [], anchorWeight: 80
+        ), "nil intent must not clamp")
+        XCTAssertEqual(WorkoutSessionManager.adjustedWeight(
+            rawWeight: 100, intent: .backoff, equipment: .barbell,
+            excludedWeights: [], anchorWeight: 80
+        )?.clamped ?? -1, 90.0, accuracy: 0.001, ".backoff clamps like .top")
+    }
+
+    func test_adjustedWeight_upwardCapOnly_neverRaisesLowPrescription() {
+        // raw 60 with anchor 80 (cap 92): under the cap → untouched.
+        XCTAssertNil(WorkoutSessionManager.adjustedWeight(
+            rawWeight: 60, intent: .top, equipment: .barbell,
+            excludedWeights: [], anchorWeight: 80
+        ))
+    }
+
+    func test_adjustedWeight_snapThenClamp_combined() {
+        // raw 101.3 → snap DOWN to 100 (threshold 101.5); anchor 80 → cap 92
+        // → snapDown 90. The final stored weight is a real barbell load.
+        let result = WorkoutSessionManager.adjustedWeight(
+            rawWeight: 101.3, intent: .top, equipment: .barbell,
+            excludedWeights: [], anchorWeight: 80
+        )
+        XCTAssertEqual(result?.snapped ?? -1, 100.0, accuracy: 0.001)
+        XCTAssertEqual(result?.clamped ?? -1, 90.0, accuracy: 0.001)
+    }
+
+    // MARK: marker round-trip (G-F8) — pins the string contract
+
+    @MainActor
+    func test_weightAdjustmentMarker_roundTripsThroughWeightAdjustmentNote() {
+        for adjusted in [45.0, 32.5, 100.0] {
+            let marker = WorkoutSessionManager.weightAdjustmentMarker(for: adjusted)
+            let vm = WorkoutViewModel(manager: makeManager())
+            vm.currentPrescription = basePrescription(reasoning: "Base reasoning." + marker)
+
+            let note = vm.weightAdjustmentNote
+            XCTAssertNotNil(note, "weightAdjustmentNote must detect the canonical marker")
+            // Parse the weight back out of the rendered note:
+            // "(adjusted to nearest available: 45kg)" → 45.0
+            let parsed = note
+                .flatMap { $0.split(separator: ":").last }
+                .map {
+                    $0.replacingOccurrences(of: "kg)", with: "")
+                      .trimmingCharacters(in: .whitespaces)
+                }
+                .flatMap(Double.init)
+            XCTAssertEqual(parsed ?? -1, adjusted, accuracy: 0.001,
+                "Marker must round-trip: \(marker) → \(String(describing: note))")
+        }
+    }
+
+    // MARK: spine — handleInferenceResult routes through the post-processor
+
+    func test_inferenceResult_snapsWeight_andAppendsCanonicalMarker() async throws {
+        // 101.3 kg is not a real barbell load → snaps DOWN to 100 (PRD §7.1.1)
+        // on the handleInferenceResult success path. No history → no clamp.
+        let manager = makeManager(
+            provider: MockLLMProvider(response: prescriptionJSON(weightKg: 101.3))
+        )
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let rx = await manager.currentPrescription
+        XCTAssertEqual(rx?.weightKg ?? -1, 100.0, accuracy: 0.001,
+            "101.3 must snap down to the 100 kg barbell load")
+        XCTAssertTrue(
+            rx?.reasoning.contains("(adjusted to nearest available: 100kg)") ?? false,
+            "Canonical marker must be appended to reasoning; got: \(rx?.reasoning ?? "nil")"
+        )
+    }
+
+    func test_startSession_clampsRunawayPrescription_againstLastSessionAnchor() async throws {
+        // Last session: 80 kg top sets → anchor 80 → cap 92 → snapDown 90.
+        // The LLM prescribes a runaway 200 kg top set → stored prescription 90.
+        WSMHistoryURLProtocol.setLogRowsJSON = historySetLogRowsJSON(
+            exerciseId: "exercise_0", weightKg: 80.0, reps: [8, 8, 7]
+        )
+        let manager = makeHistoryManager(
+            provider: MockLLMProvider(response: prescriptionJSON(weightKg: 200.0))
+        )
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let rx = await manager.currentPrescription
+        XCTAssertEqual(rx?.weightKg ?? -1, 90.0, accuracy: 0.001,
+            "200 kg must clamp to snapDown(80 × 1.15) = 90")
+        XCTAssertTrue(
+            rx?.reasoning.contains("(adjusted to nearest available: 90kg)") ?? false,
+            "Clamp must apply the same canonical marker; got: \(rx?.reasoning ?? "nil")"
+        )
+    }
+
+    // MARK: manual fallback seeding (G-F1)
+
+    func test_manualFallback_seedsFromHistoryAnchor_whenNoInSessionSet() async throws {
+        WSMHistoryURLProtocol.setLogRowsJSON = historySetLogRowsJSON(
+            exerciseId: "exercise_0", weightKg: 80.0, reps: [8, 8, 7]
+        )
+        let manager = makeHistoryManager(provider: FailingLLMProvider())
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        // Preflight inference failed; no in-session lastSet exists.
+        let retryNeeded = await manager.inferenceRetryNeeded
+        XCTAssertTrue(retryNeeded, "Setup: preflight inference must have failed")
+
+        await manager.applyManualFallbackPrescription(for: day.exercises[0])
+        let rx = await manager.currentPrescription
+        XCTAssertEqual(rx?.weightKg ?? -1, 80.0, accuracy: 0.001,
+            "Fallback must seed from the history anchor, not 0.0 (G-F1)")
+        XCTAssertEqual(rx?.isManualFallback, true)
+
+        // Critic amendment 7.6: the preflight failure path transitions
+        // straight to .active — no rest timer exists to complete it later.
+        let state = await manager.sessionState
+        guard case .active(let exercise, let setNumber) = state else {
+            XCTFail("Manual fallback during preflight must transition to .active, got \(state)")
+            return
+        }
+        XCTAssertEqual(exercise.exerciseId, day.exercises[0].exerciseId)
+        XCTAssertEqual(setNumber, 1)
+    }
+
+    func test_manualFallback_keepsZero_forGenuineBodyweightHistory() async throws {
+        // Genuine bodyweight history (all 0 kg) → the 0.0 seed survives.
+        WSMHistoryURLProtocol.setLogRowsJSON = historySetLogRowsJSON(
+            exerciseId: "exercise_0", weightKg: 0.0, reps: [12, 10]
+        )
+        let manager = makeHistoryManager(provider: FailingLLMProvider())
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        await manager.applyManualFallbackPrescription(for: day.exercises[0])
+        let rx = await manager.currentPrescription
+        XCTAssertEqual(rx?.weightKg ?? -1, 0.0, accuracy: 0.001,
+            "Genuine bodyweight history keeps the 0.0 seed (BW is honest here)")
+    }
+
+    // MARK: "Last time" line (G-F6)
+
+    @MainActor
+    func test_lastPerformanceSummary_formatsHeaviestWeightAndPerSetReps() {
+        let vm = WorkoutViewModel(manager: makeManager())
+        vm.lastPerformanceSets = [
+            historySetLog(setNumber: 1, weightKg: 80, reps: 8),
+            historySetLog(setNumber: 2, weightKg: 80, reps: 8),
+            historySetLog(setNumber: 3, weightKg: 80, reps: 7)
+        ]
+        XCTAssertEqual(vm.lastPerformanceSummary, "Last time: 80kg × 8/8/7")
+    }
+
+    @MainActor
+    func test_lastPerformanceSummary_bodyweightHistory_showsBW() {
+        let vm = WorkoutViewModel(manager: makeManager())
+        vm.lastPerformanceSets = [
+            historySetLog(setNumber: 1, weightKg: 0, reps: 12),
+            historySetLog(setNumber: 2, weightKg: 0, reps: 10)
+        ]
+        XCTAssertEqual(vm.lastPerformanceSummary, "Last time: BW × 12/10")
+    }
+
+    @MainActor
+    func test_lastPerformanceSummary_nilWhenNoHistory() {
+        let vm = WorkoutViewModel(manager: makeManager())
+        vm.lastPerformanceSets = nil
+        XCTAssertNil(vm.lastPerformanceSummary)
+        vm.lastPerformanceSets = []
+        XCTAssertNil(vm.lastPerformanceSummary)
+    }
+
+    // MARK: retry-sheet gating (G-F1)
+
+    @MainActor
+    func test_canUseLastWeights_gatesLoadedMovementWithoutSeed() {
+        let vm = WorkoutViewModel(manager: makeManager())
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+        vm.sessionState = .resting(nextExercise: day.exercises[0], setNumber: 2)
+        vm.completedSets = []
+        vm.lastPerformanceSets = nil
+        XCTAssertFalse(vm.canUseLastWeights,
+            "Barbell movement with no in-session set and no history must hide 'Continue with last weights'")
+
+        vm.lastPerformanceSets = [historySetLog(setNumber: 1, weightKg: 80, reps: 8)]
+        XCTAssertTrue(vm.canUseLastWeights,
+            "A last-session history seed makes the manual fallback honest again")
+    }
+}

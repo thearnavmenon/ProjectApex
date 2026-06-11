@@ -47,6 +47,15 @@ final class WorkoutViewModel {
     /// All sets logged so far in this session.
     var completedSets: [SetLog] = []
 
+    /// Last-session set logs for the live exercise (#318 U7 / G-F6). Pulled
+    /// from the manager's cachedLastPerformance; nil when no history exists.
+    var lastPerformanceSets: [SetLog]? = nil
+
+    /// The exercise awaiting a prescription retry (#318 U7 / 7.6). Non-nil
+    /// while the retry sheet is up; used to gate and target the manual
+    /// fallback during .preflight, where currentExercise is nil.
+    var retryExercise: PlannedExercise? = nil
+
     /// True when inference failed and the user must choose Retry or Pause.
     var showInferenceRetrySheet: Bool = false
 
@@ -235,6 +244,24 @@ final class WorkoutViewModel {
         let sets = await manager.completedSets
         let retryNeeded = await manager.inferenceRetryNeeded
         let retryReason = await manager.inferenceRetryReason
+        let pendingExercise = await manager.pendingRetryExercise
+
+        // Last-session history for the live exercise (#318 U7 / G-F6 + G-F1):
+        // powers the "Last time" line and the manual-fallback gating. During
+        // .preflight the retry exercise (if any) is the live one.
+        let liveExercise: PlannedExercise?
+        switch state {
+        case .active(let exercise, _), .resting(let exercise, _):
+            liveExercise = exercise
+        default:
+            liveExercise = pendingExercise
+        }
+        let lastPerformance: [SetLog]?
+        if let liveExercise {
+            lastPerformance = await manager.lastPerformance(for: liveExercise.exerciseId)
+        } else {
+            lastPerformance = nil
+        }
 
         sessionState = state
         currentPrescription = prescription
@@ -246,6 +273,8 @@ final class WorkoutViewModel {
         developerFallbackDescription = fallbackReason.map { Self.developerFallbackDescription(for: $0) }
         showInferenceRetrySheet = retryNeeded
         retryFailureDescription = retryReason.map { Self.retryDescription(for: $0) }
+        retryExercise = pendingExercise
+        lastPerformanceSets = lastPerformance
     }
 
     /// Token for the currently-running polling task, so a second caller (e.g.
@@ -297,9 +326,11 @@ final class WorkoutViewModel {
     }
 
     /// Called when the user taps "Continue with last weights" on InferenceRetrySheet.
-    /// Only valid during .resting state where currentExercise is the pending next set's exercise.
+    /// Valid during .resting (currentExercise is the pending next set's exercise)
+    /// and during .preflight (#318 U7 / 7.6 — retryExercise carries the target,
+    /// since currentExercise is nil before the first prescription lands).
     func onUseLastWeights() {
-        guard let exercise = currentExercise else { return }
+        guard let exercise = currentExercise ?? retryExercise else { return }
         Task {
             await manager.applyManualFallbackPrescription(for: exercise)
             await pullState()
@@ -553,7 +584,9 @@ final class WorkoutViewModel {
     /// by looking for the canonical "(adjusted to nearest available:" prefix.
     var weightAdjustmentNote: String? {
         guard let reasoning = currentPrescription?.reasoning else { return nil }
-        // The AIInferenceService appends a note in this exact format when it snaps weight
+        // WorkoutSessionManager's prescription post-processor appends a note in
+        // this exact format when it snaps/clamps weight (#318 U7) — see
+        // WorkoutSessionManager.weightAdjustmentMarker(for:).
         let marker = "(adjusted to nearest available:"
         guard let range = reasoning.range(of: marker, options: .caseInsensitive) else { return nil }
         // Extract the parenthetical note to its closing ")"
@@ -562,6 +595,38 @@ final class WorkoutViewModel {
             return String(suffix[suffix.startIndex...endRange])
         }
         return nil
+    }
+
+    /// Muted "Last time" one-liner under the hero numbers (#318 U7 / G-F6),
+    /// e.g. "Last time: 80kg × 8/8/7". Weight shown is the heaviest set of the
+    /// last session; reps are listed per set in set order. Nil when no
+    /// last-session history is cached for this exercise.
+    var lastPerformanceSummary: String? {
+        guard let sets = lastPerformanceSets, !sets.isEmpty else { return nil }
+        let topWeight = sets.map(\.weightKg).max() ?? 0
+        let weightString: String
+        if topWeight <= 0 {
+            weightString = "BW"
+        } else if topWeight.truncatingRemainder(dividingBy: 1) == 0 {
+            weightString = String(format: "%.0fkg", topWeight)
+        } else {
+            weightString = String(format: "%.1fkg", topWeight)
+        }
+        let reps = sets.map { "\($0.repsCompleted)" }.joined(separator: "/")
+        return "Last time: \(weightString) × \(reps)"
+    }
+
+    /// True when "Continue with last weights" can produce an honest
+    /// prescription (#318 U7 / G-F1): an in-session set for the exercise, a
+    /// last-session history seed, or a genuinely bodyweight movement. Gates
+    /// the manual-fallback affordance so a 0 kg "BW" card can never appear
+    /// for a loaded movement.
+    var canUseLastWeights: Bool {
+        guard let exercise = currentExercise ?? retryExercise else { return false }
+        let hasInSessionSet = completedSets.contains { $0.exerciseId == exercise.exerciseId }
+        let hasHistorySeed = !(lastPerformanceSets ?? []).isEmpty
+        let isBodyweight = exercise.equipmentRequired.isNaturallyBodyweightOnly
+        return hasInSessionSet || hasHistorySeed || isBodyweight
     }
 
     /// Skips the current rest period and advances immediately to the next active set.

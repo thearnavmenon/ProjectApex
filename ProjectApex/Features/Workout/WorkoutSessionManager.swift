@@ -87,7 +87,9 @@ actor WorkoutSessionManager {
     /// The reason that triggered the retry sheet (for display in the UI subtitle).
     private(set) var inferenceRetryReason: FallbackReason?
     /// The exercise that needs a prescription retry — restored after sheet is shown.
-    private var pendingRetryExercise: PlannedExercise?
+    /// Readable (#318 U7 / 7.6) so WorkoutViewModel can gate and target the
+    /// manual-fallback path during .preflight, where currentExercise is nil.
+    private(set) var pendingRetryExercise: PlannedExercise?
     private var pendingRetrySetNumber: Int = 0
 
     // MARK: - Private session state
@@ -148,6 +150,11 @@ actor WorkoutSessionManager {
     /// Completed session count fetched from Supabase at session start (FB-005 fix).
     /// Replaces the local UserDefaults counter as the source of truth.
     private var cachedTotalSessionCount: Int = 0
+    /// Last-session set logs per exerciseId (#318 U7). Populated at session
+    /// start and at every exercise transition (next exercise, skip into a new
+    /// exercise, swap, resume). Powers the runaway-clamp anchor (G-F3), the
+    /// "Last time" line (G-F6), and the manual-fallback weight seed (G-F1).
+    private var cachedLastPerformance: [String: [SetLog]] = [:]
     /// Records of any mid-session exercise swaps (P3-T10).
     private var swapRecords: [SwapRecord] = []
 
@@ -221,6 +228,7 @@ actor WorkoutSessionManager {
         self.cachedRAGMemory = []
         self.cachedWeeklyFatigue = nil
         self.cachedGymProfile = nil
+        self.cachedLastPerformance = [:]
         self.swapRecords = []
         self.inflightRequestCount = 0
         self.inferenceGeneration = 0
@@ -275,10 +283,16 @@ actor WorkoutSessionManager {
         async let ragFetch           = fetchRAGMemory(for: firstExercise)
         async let fatigueFetch       = fetchWeeklyFatigue(userId: newSession.userId)
         async let sessionCountFetch  = fetchCompletedSessionCount(userId: newSession.userId)
+        async let lastPerfFetch      = fetchLastPerformance(
+            for: firstExercise, userId: newSession.userId, excludingSessionId: newSession.id
+        )
         cachedStreakResult           = await streakFetch
         cachedRAGMemory             = await ragFetch
         cachedWeeklyFatigue  = await fatigueFetch
         cachedTotalSessionCount      = await sessionCountFetch
+        if let lastPerf = await lastPerfFetch {
+            cachedLastPerformance[firstExercise.exerciseId] = lastPerf
+        }
 
         // Trigger first prescription; state → .active when result arrives
         await triggerInference(for: firstExercise, setNumber: 1)
@@ -389,6 +403,10 @@ actor WorkoutSessionManager {
                 ragSignposter.endInterval("RAGFetch", signpostState)
                 ragLogger.info("RAG fetch latency: \(ragElapsed, privacy: .public) exercise=\(next.name, privacy: .public)")
 
+                // #318 U7: refresh last-session history for the next exercise —
+                // clamp anchor (G-F3), "Last time" line (G-F6), fallback seed (G-F1).
+                await refreshLastPerformance(for: next)
+
                 let context = await assembleWorkoutContext(exercise: next, setNumber: nextSetNumber)
                 Task { [weak self] in
                     guard let self else { return }
@@ -468,6 +486,8 @@ actor WorkoutSessionManager {
             // completeSet's last-set branch; the sessionHistoryToday archive
             // already happened inside advancePosition).
             cachedRAGMemory = await fetchRAGMemory(for: next)
+            // #318 U7: same exercise-transition refresh as completeSet.
+            await refreshLastPerformance(for: next)
         }
 
         // No rest after a skip — go straight to the next set and fire inference.
@@ -641,6 +661,9 @@ actor WorkoutSessionManager {
 
         switch result {
         case .success(var rx):
+            // #318 U7: snap → clamp → marker — same shared post-processor as
+            // handleInferenceResult (the only other live LLM path).
+            rx = await postProcessPrescription(rx, for: exercise)
             if rx.safetyFlags.contains(.painReported) { rx.restSeconds = max(rx.restSeconds, 180) }
             currentPrescription = rx
             currentFallbackReason = nil
@@ -780,8 +803,17 @@ actor WorkoutSessionManager {
         // *suggestion* for the picker to prefill. Stays `nil` when there's no
         // prior set in the session — the picker then has no prefill and the
         // user must pick explicitly per Slice 6's no-silent-default rule.
+
+        // #318 U7 / G-F1: with no in-session set, seed the weight from the
+        // last-session history (cachedLastPerformance top set) instead of
+        // 0.0 — no more "BW" shown on a loaded movement. 0.0 survives ONLY
+        // for genuine bodyweight history (all sets 0 kg) or no history at all.
+        let seedWeight = lastSet?.weightKg
+            ?? historySeedWeight(for: exercise.exerciseId)
+            ?? 0.0
+
         let prescription = SetPrescription(
-            weightKg:          lastSet?.weightKg ?? 0.0,
+            weightKg:          seedWeight,
             reps:              lastSet?.repsCompleted ?? exercise.repRange.min,
             tempo:             exercise.tempo,
             rirTarget:         exercise.rirTarget,
@@ -802,6 +834,16 @@ actor WorkoutSessionManager {
         currentPrescription = prescription
         inferenceRetryNeeded = false
         inferenceRetryReason = nil
+
+        // Critic amendment 7.6 (#318 U7): give the preflight failure path a
+        // manual way forward too. When inference failed before any rest period
+        // existed (first set of a session, post-swap set 1, resume), applying
+        // the manual fallback transitions straight to .active — there is no
+        // rest timer on this path to complete the transition later.
+        if case .preflight = sessionState {
+            sessionState = .active(exercise: exercise, setNumber: max(1, pendingRetrySetNumber))
+        }
+
         pendingRetryExercise = nil
     }
 
@@ -828,6 +870,7 @@ actor WorkoutSessionManager {
         self.cachedStreakResult = nil
         self.cachedRAGMemory = []
         self.cachedWeeklyFatigue = nil
+        self.cachedLastPerformance = [:]
         self.inflightRequestCount = 0
         self.inferenceGeneration = 0
         self.inferenceRetryNeeded = false
@@ -887,10 +930,16 @@ actor WorkoutSessionManager {
         async let ragFetch          = fetchRAGMemory(for: currentExercise)
         async let fatigueFetch      = fetchWeeklyFatigue(userId: pausedState.userId)
         async let sessionCountFetch = fetchCompletedSessionCount(userId: pausedState.userId)
+        async let lastPerfFetch     = fetchLastPerformance(
+            for: currentExercise, userId: pausedState.userId, excludingSessionId: pausedState.sessionId
+        )
         cachedStreakResult          = await streakFetch
         cachedRAGMemory            = await ragFetch
         cachedWeeklyFatigue = await fatigueFetch
         cachedTotalSessionCount    = await sessionCountFetch
+        if let lastPerf = await lastPerfFetch {
+            cachedLastPerformance[currentExercise.exerciseId] = lastPerf
+        }
 
         print("[WorkoutSessionManager] resumeSession ✓ — sessionId: \(pausedState.sessionId), exerciseIndex: \(exerciseIndex), setNumber: \(currentSetNumber)")
 
@@ -932,6 +981,7 @@ actor WorkoutSessionManager {
         cachedUserProfile = nil
         cachedWeeklyFatigue = nil
         cachedGymProfile = nil
+        cachedLastPerformance = [:]
         swapRecords = []
         inflightRequestCount = 0
         inferenceGeneration = 0
@@ -1037,6 +1087,9 @@ actor WorkoutSessionManager {
         // Prefetch RAG memory for the new exercise and fire inference for set 1
         sessionState = .preflight
         cachedRAGMemory = await fetchRAGMemory(for: newExercise)
+        // #318 U7: a swap is an exercise transition too — refresh last-session
+        // history so the clamp anchor and "Last time" line cover the new exercise.
+        await refreshLastPerformance(for: newExercise)
         await triggerInference(for: newExercise, setNumber: 1)
     }
 
@@ -1186,14 +1239,21 @@ actor WorkoutSessionManager {
         generation: Int,
         targetExercise: PlannedExercise,
         targetSetNumber: Int
-    ) {
+    ) async {
         guard generation == inferenceGeneration else {
             // Stale result — a newer completeSet() has already advanced the generation.
             return
         }
 
         switch result {
-        case .success(var prescription):
+        case .success(let rawPrescription):
+            // #318 U7: snap → clamp → marker (G-F8 + G-F3) — the single shared
+            // post-processor for LLM prescriptions (also used by retryInference).
+            var prescription = await postProcessPrescription(rawPrescription, for: targetExercise)
+            // Re-check the reentrancy guard after the await: postProcessPrescription
+            // suspends on GymFactStore, and a newer completeSet() may have advanced
+            // the generation during that hop.
+            guard generation == inferenceGeneration else { return }
             // Safety gate (TDD §7.2 acceptance criteria):
             // if safetyFlags contains .painReported → rest ≥ 180 s
             if prescription.safetyFlags.contains(.painReported) {
@@ -1461,6 +1521,176 @@ actor WorkoutSessionManager {
             userId: sess.userId.uuidString,
             threshold: 0.60
         )
+    }
+
+    // MARK: - Prescription Guardrails (#318 U7 / G-F8, G-F3, G-F6, G-F1)
+
+    /// Last-session set logs for `exerciseId`, if cached. Read by
+    /// WorkoutViewModel to render the "Last time" line (G-F6) and to gate
+    /// the manual-fallback affordance (G-F1).
+    func lastPerformance(for exerciseId: String) -> [SetLog]? {
+        cachedLastPerformance[exerciseId]
+    }
+
+    /// Refreshes `cachedLastPerformance` for `exercise`. Called at session
+    /// start and at EVERY exercise transition: next exercise in completeSet,
+    /// skip into a new exercise, swapExercise, and resume.
+    private func refreshLastPerformance(for exercise: PlannedExercise) async {
+        guard let sess = session else { return }
+        if let sets = await fetchLastPerformance(
+            for: exercise, userId: sess.userId, excludingSessionId: sess.id
+        ) {
+            cachedLastPerformance[exercise.exerciseId] = sets
+        }
+    }
+
+    /// Fetches the most recent prior session's set logs for `exercise`.
+    /// Two-step query mirroring `fetchHistoricalTopSets` — set_logs has no
+    /// user_id column: resolve the user's recent non-abandoned sessions
+    /// (excluding the current one), then fetch set_logs for those ids
+    /// filtered to this exercise, keeping only the newest session that has
+    /// any. Best-effort: failure returns nil — no anchor, the clamp is
+    /// skipped, the "Last time" line stays hidden; never blocks the session.
+    private func fetchLastPerformance(
+        for exercise: PlannedExercise,
+        userId: UUID,
+        excludingSessionId: UUID
+    ) async -> [SetLog]? {
+        do {
+            struct SessionIdRow: Decodable { let id: UUID }
+            let sessionRows: [SessionIdRow] = try await supabase.fetch(
+                SessionIdRow.self,
+                table: "workout_sessions",
+                filters: [
+                    Filter(column: "user_id", op: .eq,  value: userId.uuidString),
+                    Filter(column: "status",  op: .neq, value: "abandoned"),
+                    Filter(column: "id",      op: .neq, value: excludingSessionId.uuidString)
+                ],
+                order: "session_date.desc",
+                limit: 20,
+                select: "id"
+            )
+            guard !sessionRows.isEmpty else { return nil }
+            let orderedIds = sessionRows.map(\.id)
+            let idList = orderedIds.map(\.uuidString).joined(separator: ",")
+            let logs: [SetLog] = try await supabase.fetch(
+                SetLog.self,
+                table: "set_logs",
+                filters: [
+                    Filter(column: "session_id",  op: .in, value: "(\(idList))"),
+                    Filter(column: "exercise_id", op: .eq, value: exercise.exerciseId)
+                ]
+            )
+            let bySession = Dictionary(grouping: logs, by: \.sessionId)
+            guard let lastSessionId = orderedIds.first(where: { bySession[$0] != nil }),
+                  let lastSets = bySession[lastSessionId]
+            else { return nil }
+            return lastSets.sorted { $0.setNumber < $1.setNumber }
+        } catch {
+            print("[WorkoutSessionManager] fetchLastPerformance failed (\(error.localizedDescription)) — no last-session history for \(exercise.exerciseId)")
+            return nil
+        }
+    }
+
+    /// G-F3 clamp anchor: the last session's top-set weight — heaviest cached
+    /// last-session set with reps in 3...10. Nil when there is no usable
+    /// history (first session, fetch failure, bodyweight-only history) — the
+    /// clamp is then skipped entirely so calibration stays free.
+    private func clampAnchorWeight(for exerciseId: String) -> Double? {
+        cachedLastPerformance[exerciseId]?
+            .filter { (3...10).contains($0.repsCompleted) && $0.weightKg > 0 }
+            .map(\.weightKg)
+            .max()
+    }
+
+    /// G-F1 fallback seed: heaviest last-session set regardless of reps.
+    /// Nil for genuine bodyweight history (all 0 kg) or no history — the
+    /// manual fallback then keeps its 0.0 default.
+    private func historySeedWeight(for exerciseId: String) -> Double? {
+        cachedLastPerformance[exerciseId]?
+            .map(\.weightKg)
+            .filter { $0 > 0 }
+            .max()
+    }
+
+    /// #318 U7 spine: the ONE snap → clamp → marker post-processor that every
+    /// LLM-produced prescription routes through. handleInferenceResult success
+    /// and retryInference success are the only two live paths that set
+    /// currentPrescription from an LLM result — both call this. The marker is
+    /// appended AFTER validate() ran inside AIInferenceService; nothing
+    /// re-validates on decode, so the ≤200-char reasoning rule is unaffected.
+    private func postProcessPrescription(
+        _ rx: SetPrescription,
+        for exercise: PlannedExercise
+    ) async -> SetPrescription {
+        let equipment = exercise.equipmentRequired
+        let excluded = await gymFactStore.facts
+            .filter { $0.equipmentType == equipment }
+            .map(\.unavailableWeight)
+        let anchor = clampAnchorWeight(for: exercise.exerciseId)
+        guard let adjustment = Self.adjustedWeight(
+            rawWeight: rx.weightKg,
+            intent: rx.intent,
+            equipment: equipment,
+            excludedWeights: excluded,
+            anchorWeight: anchor
+        ) else { return rx }
+
+        // Raw→adjusted telemetry (#318 U7) — print only, no new schema field.
+        print("[WorkoutSessionManager] Prescription weight adjusted — raw: \(rx.weightKg)kg, snapped: \(adjustment.snapped)kg, clamped: \(adjustment.clamped)kg (\(exercise.name), anchor: \(anchor.map { "\($0)kg" } ?? "none"))")
+
+        var adjusted = rx
+        adjusted.weightKg = adjustment.clamped
+        adjusted.reasoning += Self.weightAdjustmentMarker(for: adjustment.clamped)
+        return adjusted
+    }
+
+    /// Pure snap → clamp core (#318 U7). Returns nil when the weight needs no
+    /// adjustment; otherwise both intermediate values for telemetry.
+    ///
+    /// Snap (G-F8): PRD §7.1.1 via DefaultWeightIncrements.snap — applies only
+    /// when the equipment has a weight table, weight > 0, and the weight is
+    /// not already available (epsilon membership; GymFactStore exclusions
+    /// honoured).
+    /// Clamp (G-F3): upward cap ONLY, intents .top/.backoff ONLY —
+    /// final ≤ snapDown(anchor × 1.15), re-snapped so the stored weight is a
+    /// real available weight. No anchor (first session, no history) ⇒ no
+    /// clamp. A low prescription is never raised.
+    nonisolated static func adjustedWeight(
+        rawWeight: Double,
+        intent: SetIntent?,
+        equipment: EquipmentType,
+        excludedWeights: [Double],
+        anchorWeight: Double?
+    ) -> (snapped: Double, clamped: Double)? {
+        let snapped = DefaultWeightIncrements.snap(
+            rawWeight, for: equipment, excluding: excludedWeights
+        ) ?? rawWeight
+
+        var clamped = snapped
+        if intent == .top || intent == .backoff,
+           let anchor = anchorWeight, anchor > 0 {
+            let cap = anchor * 1.15   // +15% per-session ceiling — accepted call
+            if clamped > cap + 0.001 {
+                // Re-snap the cap DOWN so the stored weight is still a real
+                // available weight (raw cap only when the equipment has no
+                // weight table at all).
+                clamped = DefaultWeightIncrements.snapDown(
+                    cap, for: equipment, excluding: excludedWeights
+                ) ?? cap
+            }
+        }
+        return abs(clamped - rawWeight) > 0.001 ? (snapped, clamped) : nil
+    }
+
+    /// Canonical adjusted-weight marker (#318 U7 / G-F8). Parsed verbatim by
+    /// WorkoutViewModel.weightAdjustmentNote and rendered on ActiveSetView —
+    /// the format must round-trip.
+    nonisolated static func weightAdjustmentMarker(for kg: Double) -> String {
+        let formatted = kg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", kg)
+            : String(format: "%.1f", kg)
+        return " (adjusted to nearest available: \(formatted)kg)"
     }
 
     // MARK: - Personal Records (#318 U6 / G-F12)
