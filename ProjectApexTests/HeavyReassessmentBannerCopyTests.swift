@@ -92,3 +92,123 @@ struct WelcomeBackBannerCopyTests {
         #expect(!message.contains("adjusted"))
     }
 }
+
+// MARK: - Banner dismissal semantics (#318 U8 / J-F7)
+
+/// Verifies BannerDismissals — the durable, event-fingerprinted dismissal
+/// store behind the pre-workout banners' X buttons. Every case runs against
+/// an ephemeral injected UserDefaults suite; `.standard` is never touched.
+@Suite("BannerDismissals")
+struct BannerDismissalsTests {
+
+    /// Runs `body` against a uniquely-named UserDefaults suite, then wipes it.
+    private func withEphemeralDefaults(_ body: (UserDefaults) -> Void) {
+        let suiteName = "BannerDismissalsTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        body(defaults)
+    }
+
+    // MARK: Welcome-back (keyed on the last-session date that produced the gap)
+
+    @Test("welcome-back: shows with no stored dismissal, hides after dismissing the same last-session date")
+    func welcomeBackDismissalSticks() {
+        withEphemeralDefaults { defaults in
+            let store = BannerDismissals(defaults: defaults)
+            let fp = BannerDismissals.welcomeBackFingerprint(lastSessionDateKey: "2026-05-20")
+            #expect(store.shouldShow(.welcomeBack, fingerprint: fp))
+            store.dismiss(.welcomeBack, fingerprint: fp)
+            #expect(!store.shouldShow(.welcomeBack, fingerprint: fp))
+        }
+    }
+
+    @Test("welcome-back: re-arms when a NEW last-session date produces the gap")
+    func welcomeBackReArmsOnNewLastSessionDate() {
+        withEphemeralDefaults { defaults in
+            let store = BannerDismissals(defaults: defaults)
+            store.dismiss(
+                .welcomeBack,
+                fingerprint: BannerDismissals.welcomeBackFingerprint(lastSessionDateKey: "2026-05-20")
+            )
+            let newGap = BannerDismissals.welcomeBackFingerprint(lastSessionDateKey: "2026-06-10")
+            #expect(store.shouldShow(.welcomeBack, fingerprint: newGap))
+        }
+    }
+
+    // MARK: Heavy reassessment (keyed on triggeringSessionCount)
+
+    @Test("heavy-reassessment: hides after dismissal, re-arms on a NEW triggeringSessionCount")
+    func heavyReassessmentReArmsOnNewTrigger() {
+        withEphemeralDefaults { defaults in
+            let store = BannerDismissals(defaults: defaults)
+            let fired18 = BannerDismissals.heavyReassessmentFingerprint(triggeringSessionCount: 18)
+            #expect(store.shouldShow(.heavyReassessment, fingerprint: fired18))
+            store.dismiss(.heavyReassessment, fingerprint: fired18)
+            #expect(!store.shouldShow(.heavyReassessment, fingerprint: fired18))
+            // A later GPA fire carries a new triggering count → banner re-arms.
+            let fired24 = BannerDismissals.heavyReassessmentFingerprint(triggeringSessionCount: 24)
+            #expect(store.shouldShow(.heavyReassessment, fingerprint: fired24))
+        }
+    }
+
+    // MARK: Calibration (keyed on the watermark pair, #305 semantics)
+
+    @Test("calibration: hides after dismissal, re-arms when the watermark pair moves (re-calibration)")
+    func calibrationReArmsOnWatermarkMove() {
+        withEphemeralDefaults { defaults in
+            let store = BannerDismissals(defaults: defaults)
+            let firedAt = Date(timeIntervalSince1970: 1_780_000_000)
+            let firstCalibration = BannerDismissals.calibrationFingerprint(
+                calibrationReviewFiredAt: firedAt,
+                lastRecalibratedAtSessionCount: nil
+            )
+            #expect(store.shouldShow(.calibrationReview, fingerprint: firstCalibration))
+            store.dismiss(.calibrationReview, fingerprint: firstCalibration)
+            #expect(!store.shouldShow(.calibrationReview, fingerprint: firstCalibration))
+            // Re-calibration moves the watermark (same firedAt, new recal count) → re-arms.
+            let recalibrated = BannerDismissals.calibrationFingerprint(
+                calibrationReviewFiredAt: firedAt,
+                lastRecalibratedAtSessionCount: 24
+            )
+            #expect(store.shouldShow(.calibrationReview, fingerprint: recalibrated))
+        }
+    }
+
+    @Test("calibration fingerprint is a stable function of the watermark pair — nil components stay distinct")
+    func calibrationFingerprintIsStable() {
+        let firedAt = Date(timeIntervalSince1970: 1_780_000_000)
+        // Same inputs → same fingerprint (deterministic key, no unstable formatting).
+        #expect(
+            BannerDismissals.calibrationFingerprint(calibrationReviewFiredAt: firedAt, lastRecalibratedAtSessionCount: 12)
+                == BannerDismissals.calibrationFingerprint(calibrationReviewFiredAt: firedAt, lastRecalibratedAtSessionCount: 12)
+        )
+        // Each component of the pair moving changes the fingerprint.
+        let base = BannerDismissals.calibrationFingerprint(calibrationReviewFiredAt: firedAt, lastRecalibratedAtSessionCount: nil)
+        #expect(base != BannerDismissals.calibrationFingerprint(calibrationReviewFiredAt: nil, lastRecalibratedAtSessionCount: nil))
+        #expect(base != BannerDismissals.calibrationFingerprint(calibrationReviewFiredAt: firedAt, lastRecalibratedAtSessionCount: 12))
+    }
+
+    // MARK: Independence
+
+    @Test("dismissing one banner never hides another")
+    func bannersDismissIndependently() {
+        withEphemeralDefaults { defaults in
+            let store = BannerDismissals(defaults: defaults)
+            store.dismiss(
+                .welcomeBack,
+                fingerprint: BannerDismissals.welcomeBackFingerprint(lastSessionDateKey: "2026-05-20")
+            )
+            #expect(store.shouldShow(
+                .heavyReassessment,
+                fingerprint: BannerDismissals.heavyReassessmentFingerprint(triggeringSessionCount: 18)
+            ))
+            #expect(store.shouldShow(
+                .calibrationReview,
+                fingerprint: BannerDismissals.calibrationFingerprint(
+                    calibrationReviewFiredAt: Date(timeIntervalSince1970: 1_780_000_000),
+                    lastRecalibratedAtSessionCount: nil
+                )
+            ))
+        }
+    }
+}
