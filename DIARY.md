@@ -45,7 +45,46 @@ trip from the coach's text to the screen, the history seeding (including
 keeping honest 0 kg for genuinely bodyweight movements), and the new card
 line's wording. Full build passed and the whole suite ran green.
 
-**Status:** PR #365 opened — pending review and merge.
+**Status:** merged as PR #365.
+
+---
+
+## 2026-06-11 — The whole new look got turned into a build plan, and a panel of AIs made the big calls (PR #364)
+
+**What happened (in plain words):**
+All five redesigned screens are done on paper. This step turned that pile of
+design documents into an actual to-do list a developer can pick up — about 22
+small, self-contained build tickets, ordered so each one can be finished and
+checked on its own. They're all written down as issues on the tracker now, so
+the plan can't get lost when a session ends.
+
+Three of those tickets needed real engineering judgment calls before anyone can
+start: how to build the colour-and-font system in code, how to take automatic
+"did the drawing change?" screenshots in tests, and how to swap the new screens
+in one at a time without breaking the old app while another developer is editing
+the same files. Instead of just deciding these myself, I had several AI
+"advisors" each argue their own recommendation, then a separate AI reviewer
+weigh the arguments and make the call, then a final reviewer check that the
+three decisions fit together. Each decision is now written up as a permanent
+record (an "ADR").
+
+**The biggest catches:**
+- The AIs actually read the real code first, so the advice was grounded — they
+  found 236 places where colours are hard-coded, that no custom fonts are
+  installed yet, and an old chart drawn the dishonest "smooth curve" way the new
+  design bans.
+- The final cross-check caught a gap: the colour-system ticket hadn't promised
+  to include the special chart colours and line-thicknesses the screenshot tests
+  need — so the screenshot work would've had nothing to check against. Fixed.
+- The safe way to roll out the new screens: build them as brand-new files and
+  leave the big, fragile old screen completely untouched until the very end, so
+  the two efforts don't collide.
+- A few things genuinely need a human answer before coding starts — mainly
+  whether we have the rights to the two fonts — so I deliberately stopped before
+  writing app code and wrote those questions down.
+
+**Status:** merged as PR #364. The full plan and all decisions are on the
+tracker and in the project's decision records.
 
 ---
 
