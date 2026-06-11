@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — A fresh install can now reach Supabase (auth slice 2, PR TBD)
+
+Problem: a clean install had no Supabase anon key, so the SupabaseClient was created with an empty string and any network call to Supabase would fail. The Anthropic key already had a bundled-key mechanism (PR #368), but the Supabase anon key did not.
+
+Change: mirrored the existing Anthropic bundling pattern for the Supabase anon key. Added `APEXSupabaseAnonKey` to Info.plist expanded from a new `SUPABASE_ANON_KEY` build variable in the xcconfig files. Added `BundledAPIKey.supabaseAnon()` and `SupabaseAnonKeyResolver` (same Keychain-first precedence as the Anthropic resolver). AppDependencies now resolves the anon key through the resolver instead of a bare Keychain lookup, seeding it into the Keychain on first run. The launch gate in ContentView was extended from "AI key required" to "both keys required" — either missing triggers NeedsSetupView.
+
+How checked: built with no real key in place (build-exit=0). Ran the full test suite — all 23 tests in BundledKeyResolutionTests passed (9 new tests for the Supabase path). One pre-existing timing flake in AIInferenceServiceTests unrelated to this change.
+
+Status: PR open, not yet merged. Closes #329 (both keys now bundleable so a fresh install can complete onboarding end-to-end).
+
+---
+
 ## 2026-06-12 — The app now quietly signs in behind the scenes (PR #372)
 
 **The problem (in plain words):**

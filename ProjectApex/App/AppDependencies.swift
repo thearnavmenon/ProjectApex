@@ -84,6 +84,10 @@ final class AppDependencies {
     /// onboarding start and die mid-gym-scan with a raw HTTP error.
     let hasResolvableAIKey: Bool
 
+    /// True when a Supabase anon key was resolvable at launch (Keychain or bundled
+    /// build-time key). False on a fresh install with no key baked in (#369 slice 2).
+    let hasResolvableSupabaseKey: Bool
+
     // MARK: Init
 
     init() {
@@ -101,8 +105,17 @@ final class AppDependencies {
         let keychain = KeychainService.shared
         self.keychainService = keychain
 
-        // 2. Supabase — needs its anon key from Keychain; URL comes from Config
-        let supabaseAnonKey = (try? keychain.retrieve(.supabaseAnonKey)) ?? ""
+        // 2. Supabase — needs its anon key; URL comes from Config.
+        // Precedence (#369 slice 2): existing Keychain value → bundled build-time key
+        // (seeded into the Keychain) → nil. A fresh install with a bundled key behaves
+        // exactly like a dev install that entered the key via Developer Settings.
+        let resolvedSupabaseAnonKey = SupabaseAnonKeyResolver.resolve(
+            retrieve: { try? keychain.retrieve(.supabaseAnonKey) },
+            store: { try? keychain.store($0, for: .supabaseAnonKey) },
+            bundled: { BundledAPIKey.supabaseAnon() }
+        )
+        self.hasResolvableSupabaseKey = resolvedSupabaseAnonKey != nil
+        let supabaseAnonKey = resolvedSupabaseAnonKey ?? ""
         let client = SupabaseClient(supabaseURL: Config.supabaseURL, anonKey: supabaseAnonKey)
         self.supabaseClient = client
 
