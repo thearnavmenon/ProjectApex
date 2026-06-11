@@ -409,4 +409,118 @@ struct SkipFeatureTests {
         #expect(decoded.daysSinceLastTrainedByPattern["horizontal_push"] == 4)
         #expect(decoded.daysSinceLastTrainedByPattern["squat"] == 7)
     }
+
+    // MARK: 9. resetDayToPending — regenerate-session eligibility (#318 U4)
+
+    /// Minimal planned exercise so tests can assert exercises are cleared.
+    private func makeExercise() -> PlannedExercise {
+        PlannedExercise(
+            id: UUID(),
+            exerciseId: "barbell_bench_press",
+            name: "Barbell Bench Press",
+            primaryMuscle: "pectoralis_major",
+            synergists: [],
+            equipmentRequired: EquipmentType(typeKey: "barbell"),
+            sets: 3,
+            repRange: RepRange(min: 6, max: 10),
+            tempo: "3-1-1-0",
+            restSeconds: 120,
+            rirTarget: 2,
+            coachingCues: []
+        )
+    }
+
+    @MainActor
+    @Test("resetDayToPending resets a .generated day to .pending, clears exercises, preserves the day id")
+    func resetDayToPendingResetsGeneratedDay() {
+        var meso = makeMesocycle()
+        meso.weeks[0].trainingDays[0].exercises = [makeExercise()]
+        let vm = makeViewModel()
+        vm.currentMesocycle = meso
+        vm.viewState = .loaded(meso)
+        defer { Mesocycle.clearUserDefaults() }
+
+        let targetDayId = meso.weeks[0].trainingDays[0].id
+        vm.resetDayToPending(dayId: targetDayId, weekId: meso.weeks[0].id)
+
+        let updated = vm.currentMesocycle?.weeks[0].trainingDays[0]
+        #expect(updated?.status == .pending)
+        #expect(updated?.exercises.isEmpty == true)
+        #expect(updated?.id == targetDayId, "day id must be PRESERVED so sentinel matching still holds")
+
+        // Persisted via the same UserDefaults path other mutations use.
+        let persisted = Mesocycle.loadFromUserDefaults()?.weeks[0].trainingDays[0]
+        #expect(persisted?.status == .pending)
+        #expect(persisted?.exercises.isEmpty == true)
+    }
+
+    @MainActor
+    @Test("resetDayToPending refuses a .completed day (no-op)")
+    func resetDayToPendingRefusesCompletedDay() {
+        var meso = makeMesocycle(week1Statuses: [.completed, .generated, .generated])
+        meso.weeks[0].trainingDays[0].exercises = [makeExercise()]
+        let vm = makeViewModel()
+        vm.currentMesocycle = meso
+        vm.viewState = .loaded(meso)
+        defer { Mesocycle.clearUserDefaults() }
+
+        vm.resetDayToPending(dayId: meso.weeks[0].trainingDays[0].id, weekId: meso.weeks[0].id)
+
+        let day = vm.currentMesocycle?.weeks[0].trainingDays[0]
+        #expect(day?.status == .completed, "completed days are historical records — must refuse")
+        #expect(day?.exercises.count == 1, "exercises must be untouched on refusal")
+    }
+
+    @MainActor
+    @Test("resetDayToPending refuses a .paused day (no-op)")
+    func resetDayToPendingRefusesPausedDay() {
+        var meso = makeMesocycle(week1Statuses: [.paused, .generated, .generated])
+        meso.weeks[0].trainingDays[0].exercises = [makeExercise()]
+        let vm = makeViewModel()
+        vm.currentMesocycle = meso
+        vm.viewState = .loaded(meso)
+        defer { Mesocycle.clearUserDefaults() }
+
+        vm.resetDayToPending(dayId: meso.weeks[0].trainingDays[0].id, weekId: meso.weeks[0].id)
+
+        let day = vm.currentMesocycle?.weeks[0].trainingDays[0]
+        #expect(day?.status == .paused, "paused days have a live session underneath — must refuse")
+        #expect(day?.exercises.count == 1, "exercises must be untouched on refusal")
+    }
+
+    @MainActor
+    @Test("resetDayToPending refuses a .generated day whose session sentinel matches (no-op)")
+    func resetDayToPendingRefusesSentinelMatchingDay() {
+        var meso = makeMesocycle()
+        meso.weeks[0].trainingDays[0].exercises = [makeExercise()]
+        let vm = makeViewModel()
+        vm.currentMesocycle = meso
+        vm.viewState = .loaded(meso)
+        defer {
+            Mesocycle.clearUserDefaults()
+            PausedSessionState.clear()
+        }
+
+        let targetDay = meso.weeks[0].trainingDays[0]
+        // Sentinel written at session start and updated every set — a match
+        // means a live/paused session with logged work exists for this day.
+        PausedSessionState(
+            sessionId: UUID(),
+            trainingDayId: targetDay.id,
+            weekId: meso.weeks[0].id,
+            weekNumber: 1,
+            exerciseIndex: 0,
+            currentSetNumber: 1,
+            dayType: targetDay.dayLabel,
+            programId: meso.id,
+            userId: meso.userId,
+            pausedAt: Date()
+        ).save()
+
+        vm.resetDayToPending(dayId: targetDay.id, weekId: meso.weeks[0].id)
+
+        let day = vm.currentMesocycle?.weeks[0].trainingDays[0]
+        #expect(day?.status == .generated, "a sentinel-matching day must refuse the reset")
+        #expect(day?.exercises.count == 1, "exercises must be untouched on refusal")
+    }
 }

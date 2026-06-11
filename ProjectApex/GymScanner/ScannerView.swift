@@ -121,6 +121,12 @@ struct ScannerView: View {
             .tint(.white)
             .foregroundStyle(.black)
             .padding(.horizontal, 24)
+
+            // #318 U4: manual path on device too — not just simulator/denied.
+            Button("Enter Equipment Manually") {
+                viewModel.skipToManualEntry()
+            }
+            .foregroundStyle(.white.opacity(0.7))
             .padding(.bottom, 48)
         }
     }
@@ -512,7 +518,9 @@ struct ScannerView: View {
             .foregroundStyle(.black)
 
             Button("Enter Equipment Manually") {
-                viewModel.reset()
+                // #318 U4: was reset() — which looped back to the camera idle
+                // screen, a dead end for users who denied camera access.
+                viewModel.skipToManualEntry()
             }
             .foregroundStyle(.white.opacity(0.7))
         }

@@ -209,3 +209,125 @@ final class OnboardingGoalPayloadTests: XCTestCase {
         )
     }
 }
+
+// MARK: - GenerationUserProfile assembly (#318 U4)
+
+/// Locks the profile-assembly rules shared by all three generation paths
+/// (`ProgramViewModel.generateProgram` / `generateMacroSkeleton` /
+/// `generateDaySession`):
+///   • biometrics come from the REAL `UserProfileConstants` keys onboarding
+///     writes (the bug being fixed: generateDaySession read dead keys);
+///   • experienceLevel derives from the persisted training age, falling back
+///     to "intermediate" only when absent;
+///   • the goal is hybrid — digest goal statement first (ADR-0022 staleness
+///     guard), then the persisted onboarding answer, then "hypertrophy".
+final class GenerationUserProfileAssemblyTests: XCTestCase {
+
+    private static let suiteName = "GenerationUserProfileAssemblyTests"
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: Self.suiteName)
+        defaults.removePersistentDomain(forName: Self.suiteName)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: Self.suiteName)
+        defaults = nil
+        super.tearDown()
+    }
+
+    // MARK: Real UserProfileConstants keys are read
+
+    func test_assemble_readsBiometricsFromUserProfileConstantsKeys() {
+        defaults.set(82.5, forKey: UserProfileConstants.bodyweightKgKey)
+        defaults.set(31, forKey: UserProfileConstants.ageKey)
+        defaults.set("Advanced (3+ yrs)", forKey: UserProfileConstants.trainingAgeKey)
+
+        let profile = GenerationUserProfile.assemble(
+            defaults: defaults, digestGoalStatement: nil
+        )
+
+        XCTAssertEqual(profile.bodyweightKg, 82.5,
+            "bodyweight must come from UserProfileConstants.bodyweightKgKey")
+        XCTAssertEqual(profile.ageYears, 31,
+            "age must come from UserProfileConstants.ageKey")
+        XCTAssertEqual(profile.trainingAge, "Advanced (3+ yrs)",
+            "training age must come from UserProfileConstants.trainingAgeKey")
+    }
+
+    func test_assemble_absentBiometrics_areNil() {
+        let profile = GenerationUserProfile.assemble(
+            defaults: defaults, digestGoalStatement: nil
+        )
+        XCTAssertNil(profile.bodyweightKg)
+        XCTAssertNil(profile.ageYears)
+        XCTAssertNil(profile.trainingAge)
+    }
+
+    // MARK: experienceLevel derives from training age
+
+    func test_experienceLevel_usesTrainingAgeWhenPresent() {
+        defaults.set("Beginner (< 1 yr)", forKey: UserProfileConstants.trainingAgeKey)
+        let profile = GenerationUserProfile.assemble(
+            defaults: defaults, digestGoalStatement: nil
+        )
+        XCTAssertEqual(profile.experienceLevel, "Beginner (< 1 yr)",
+            "experienceLevel must derive from the persisted training age — not a hardcoded value")
+    }
+
+    func test_experienceLevel_fallsBackToIntermediateWhenAbsent() {
+        let profile = GenerationUserProfile.assemble(
+            defaults: defaults, digestGoalStatement: nil
+        )
+        XCTAssertEqual(profile.experienceLevel, "intermediate",
+            "\"intermediate\" is the fallback ONLY when no training age was persisted")
+    }
+
+    // MARK: Hybrid goal source — branch 1: digest goal wins
+
+    func test_goal_digestStatementWins_whenPresentAndValid() {
+        defaults.set("Strength (max weight)", forKey: UserProfileConstants.primaryGoalKey)
+        let profile = GenerationUserProfile.assemble(
+            defaults: defaults,
+            digestGoalStatement: "Squat 180kg by December"
+        )
+        XCTAssertEqual(profile.goals, ["Squat 180kg by December"],
+            "a hydrated digest goal must win over the stored onboarding answer (ADR-0022)")
+    }
+
+    // MARK: Hybrid goal source — branch 2: stored onboarding answer
+
+    func test_goal_fallsBackToStoredPrimaryGoal_whenDigestAbsent() {
+        defaults.set("Strength (max weight)", forKey: UserProfileConstants.primaryGoalKey)
+        let profile = GenerationUserProfile.assemble(
+            defaults: defaults, digestGoalStatement: nil
+        )
+        XCTAssertEqual(profile.goals, ["Strength (max weight)"],
+            "with no digest goal, the persisted onboarding primaryGoal is the source")
+    }
+
+    func test_goal_placeholderDigest_emptyOrWhitespace_isTreatedAsAbsent() {
+        // GoalState.placeholder carries statement == "" (#146); whitespace-only
+        // is equally un-hydrated.
+        defaults.set("Muscular endurance", forKey: UserProfileConstants.primaryGoalKey)
+        for placeholder in ["", "   ", "\n"] {
+            let profile = GenerationUserProfile.assemble(
+                defaults: defaults, digestGoalStatement: placeholder
+            )
+            XCTAssertEqual(profile.goals, ["Muscular endurance"],
+                "digest statement '\(placeholder)' must be treated as absent")
+        }
+    }
+
+    // MARK: Hybrid goal source — branch 3: legacy default
+
+    func test_goal_fallsBackToHypertrophy_whenBothSourcesAbsent() {
+        let profile = GenerationUserProfile.assemble(
+            defaults: defaults, digestGoalStatement: nil
+        )
+        XCTAssertEqual(profile.goals, ["hypertrophy"],
+            "\"hypertrophy\" is the last-resort default ONLY when no goal source exists")
+    }
+}

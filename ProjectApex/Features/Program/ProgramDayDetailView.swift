@@ -94,6 +94,8 @@ struct ProgramDayDetailView: View {
     @State private var showSkipDayConfirmation: Bool = false
     /// Controls the confirmation alert for restarting an incomplete completed session.
     @State private var showRestartConfirmation: Bool = false
+    /// Controls the confirmation alert for regenerating a generated-but-unlogged session (#318 U4).
+    @State private var showRegenerateConfirmation: Bool = false
     /// 0-based exercise index passed to WorkoutView when starting/continuing a session.
     @State private var workoutStartingExerciseIndex: Int = 0
 
@@ -826,6 +828,36 @@ struct ProgramDayDetailView: View {
                     Button("Cancel", role: .cancel) { }
                 } message: {
                     Text("This session won't be logged and the programme will advance to the next session.")
+                }
+            }
+
+            // Tertiary: Regenerate — only for a .generated, unlogged day with no
+            // live/paused session sentinel (#318 U4 / J-F10). The sentinel is
+            // written at session start and updated every set, so a match means
+            // logged work exists for this day.
+            if currentDay.status == .generated,
+               PausedSessionState.load()?.trainingDayId != currentDay.id {
+                Button(action: { showRegenerateConfirmation = true }) {
+                    Text("Regenerate this session")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+                .alert("Regenerate this session?", isPresented: $showRegenerateConfirmation) {
+                    Button("Regenerate", role: .destructive) {
+                        guard let vm = viewModel else { return }
+                        vm.resetDayToPending(dayId: currentDay.id, weekId: week.id)
+                        // Only proceed when the reset actually took — the view
+                        // model refuses ineligible days (completed/paused/sentinel).
+                        if let meso = vm.currentMesocycle,
+                           let found = vm.findTrainingDay(byId: currentDay.id, in: meso),
+                           found.day.status == .pending {
+                            currentDay = found.day
+                            Task { await generateSessionOnDemand() }
+                        }
+                    }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("This discards the planned exercises for this day and generates a fresh session from your latest training data.")
                 }
             }
         }
