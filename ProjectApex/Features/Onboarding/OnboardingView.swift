@@ -438,12 +438,11 @@ struct OnboardingView: View {
                 stepHeader(
                     icon: "bell.badge.fill",
                     title: "Stay On Track",
-                    subtitle: "Allow notifications so the AI coach can alert you when your rest timer expires and remind you of upcoming sessions."
+                    subtitle: "Allow notifications so the AI coach can alert you when your rest timer expires."
                 )
 
                 VStack(spacing: 14) {
                     notifFeatureRow(icon: "timer", label: "Rest timer alerts — never lose track of your rest")
-                    notifFeatureRow(icon: "calendar.badge.clock", label: "Session reminders — train on schedule")
                 }
                 .padding(20)
                 .background(
@@ -632,7 +631,7 @@ struct OnboardingView: View {
                         .multilineTextAlignment(.center)
 
                     if isGenerating {
-                        Text("The AI coach is designing your 12-week periodized program.\nThis usually takes under a minute.")
+                        Text("The AI coach is designing your 12-week periodized program.\nThis can take up to a couple of minutes.")
                             .font(.system(size: 15, weight: .regular))
                             .foregroundStyle(.white.opacity(0.50))
                             .multilineTextAlignment(.center)
@@ -694,7 +693,16 @@ struct OnboardingView: View {
                             .multilineTextAlignment(.center)
 
                         let name = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        Text("Welcome, \(name.isEmpty ? "Athlete" : name). Your 12-week program is loaded. Head to the Program tab to review it, then start your first session.")
+                        let readyMessage: String = {
+                            if generationError != nil {
+                                return "Program generation didn't finish. You can generate it from the Program tab — your answers are saved."
+                            } else if scanSkipped {
+                                return "Almost there — add your gym equipment to unlock your program."
+                            } else {
+                                return "Welcome, \(name.isEmpty ? "Athlete" : name). Your 12-week program is loaded. Head to the Program tab to review it, then start your first session."
+                            }
+                        }()
+                        Text(readyMessage)
                             .font(.system(size: 16, weight: .regular))
                             .foregroundStyle(.white.opacity(0.55))
                             .multilineTextAlignment(.center)

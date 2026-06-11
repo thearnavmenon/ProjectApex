@@ -21,6 +21,7 @@ import SwiftUI
 struct ProgramOverviewView: View {
 
     @Environment(AppDependencies.self) private var deps
+    @Environment(\.switchToTab) private var switchToTab
 
     @Bindable var viewModel: ProgramViewModel
     /// The confirmed gym profile passed in from ContentView.
@@ -172,11 +173,13 @@ struct ProgramOverviewView: View {
                 .tint(Color(red: 0.23, green: 0.56, blue: 1.00))
                 .padding(.horizontal, 32)
             } else {
-                Text("Scan your gym in the Scanner tab to get started.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.40))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 40)
+                Button(action: { switchToTab(3) }) {
+                    Text("Set up your gym in Settings")
+                        .font(.footnote)
+                        .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
             }
 
             Spacer()
@@ -239,7 +242,13 @@ struct ProgramOverviewView: View {
             }
 
             Button("Try Again") {
-                Task { await viewModel.loadProgram() }
+                Task {
+                    if let profile = gymProfile {
+                        await viewModel.generateMacroSkeleton(gymProfile: profile)
+                    } else {
+                        await viewModel.loadProgram()
+                    }
+                }
             }
             .buttonStyle(.borderedProminent)
             .tint(Color(red: 0.23, green: 0.56, blue: 1.00))

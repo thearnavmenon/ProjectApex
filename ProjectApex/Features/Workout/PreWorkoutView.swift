@@ -370,12 +370,25 @@ struct PreWorkoutView: View {
 
     // MARK: - Welcome Back Banner (2.4A)
 
+    /// Pure message-selection for the welcome-back banner, extracted for unit testing.
+    /// A pending day's session hasn't been generated yet, so it genuinely will account
+    /// for the break; an already-generated session was planned before the break, so the
+    /// copy must not claim any break-aware adjustment.
+    static func welcomeBackMessage(days: Int, status: TrainingDayStatus) -> String {
+        switch status {
+        case .pending:
+            return days >= 28
+                ? "Welcome back — it's been \(days) days. Today is a recovery session with reduced volume to get you back on track."
+                : "Welcome back — it's been \(days) days. Today's session will account for the break."
+        default:
+            return "Welcome back — it's been \(days) days. This session was planned before your break — take it easy out there."
+        }
+    }
+
     private func welcomeBackBanner(days: Int) -> some View {
         let isReturnSession = days >= 28
         let amberColor = Color(red: 1.0, green: 0.65, blue: 0.0)
-        let message = isReturnSession
-            ? "Welcome back — it's been \(days) days. Today is a recovery session with reduced volume to get you back on track."
-            : "Welcome back — it's been \(days) days. We've adjusted today's session to ease back in."
+        let message = Self.welcomeBackMessage(days: days, status: trainingDay.status)
         return HStack(spacing: 12) {
             Image(systemName: isReturnSession ? "arrow.counterclockwise.circle.fill" : "hand.wave.fill")
                 .font(.system(size: 18, weight: .semibold))

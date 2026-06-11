@@ -461,14 +461,15 @@ struct SettingsView: View {
         .presentationDragIndicator(.hidden)
     }
 
+    @ViewBuilder
     private var developerSection: some View {
+        #if DEBUG
         Section("Developer") {
-            #if DEBUG
             NavigationLink(destination: DeveloperSettingsView(onResetAll: onResetAll, programViewModel: programViewModel)) {
                 Label("Developer Settings", systemImage: "key.fill")
             }
-            #endif
         }
+        #endif
     }
 
     private var aboutSection: some View {

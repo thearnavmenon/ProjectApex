@@ -7,6 +7,36 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — The app stops making promises it can't keep (PR #337)
+
+**What happened (in plain words):**
+A flow audit found a bunch of places where the app's words didn't match
+reality. The onboarding screen promised "session reminders" that don't exist.
+The final onboarding screen said "your program is loaded" even when generation
+had failed or the gym scan was skipped. An error message blamed your "API key"
+— something a normal user has never heard of. One screen pointed you to a
+"Scanner tab" that isn't a tab. And when you finished all 12 weeks, the app
+just told you to wander over to Settings instead of offering a button.
+
+**What changed:**
+Ten small fixes. The copy now tells the truth: the final onboarding screen has
+three honest versions depending on what actually happened; the fake reminder
+promise is gone; the wait estimate matches the real timeout ("up to a couple
+of minutes"). Dead ends became buttons: the Scanner-tab text is now a button
+that takes you to Settings, and the programme-complete screen got a real
+"Start Your Next Programme" button with a confirmation step (disabled with an
+explanation if your gym isn't set up). The welcome-back-from-a-break banner
+now only claims the session "accounts for the break" when that's true — if the
+session was planned before your break, it says so instead.
+
+**How it was checked:**
+Full build passed, the whole test suite ran, and the welcome-back banner logic
+got three new unit tests (short break, long break, pre-planned session).
+
+**Status:** waiting for review and merge as PR #337.
+
+---
+
 ## 2026-06-11 — The Progress tab got designed: your strength as a staircase (PR #336)
 
 **What happened (in plain words):**

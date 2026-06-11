@@ -61,3 +61,34 @@ struct HeavyReassessmentBannerCopyTests {
         #expect(HeavyReassessmentBannerCopy.title == "Your training has leveled up")
     }
 }
+
+// MARK: - Welcome-back banner copy (#318 U3)
+
+/// Verifies PreWorkoutView.welcomeBackMessage — the pure copy helper for the
+/// welcome-back banner. Pending days may claim break-aware adjustment (the
+/// session hasn't been generated yet); already-generated days must not.
+@Suite("WelcomeBackBannerCopy")
+struct WelcomeBackBannerCopyTests {
+
+    @Test("pending day under 28 days claims the session will account for the break")
+    func pendingUnder28Days() {
+        let message = PreWorkoutView.welcomeBackMessage(days: 15, status: .pending)
+        #expect(message.contains("Today's session will account for the break."))
+        #expect(message.contains("15 days"))
+    }
+
+    @Test("pending day at 28+ days keeps the stronger recovery-session variant")
+    func pendingAtLeast28Days() {
+        let message = PreWorkoutView.welcomeBackMessage(days: 30, status: .pending)
+        #expect(message.contains("Today is a recovery session with reduced volume"))
+    }
+
+    @Test("generated day claims no break-aware adjustment — session predates the break")
+    func generatedClaimsNoAdjustment() {
+        let message = PreWorkoutView.welcomeBackMessage(days: 30, status: .generated)
+        #expect(message.contains("This session was planned before your break — take it easy out there."))
+        #expect(!message.contains("account for the break"))
+        #expect(!message.contains("recovery session"))
+        #expect(!message.contains("adjusted"))
+    }
+}
