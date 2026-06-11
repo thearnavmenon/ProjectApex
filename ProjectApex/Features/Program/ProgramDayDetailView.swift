@@ -1222,7 +1222,7 @@ struct ProgramDayDetailView: View {
         ) {
             currentDay = generated
         } else {
-            sessionGenerationError = "Could not generate session. Check your API key and try again."
+            sessionGenerationError = "Couldn't generate the session. Check your connection and try again."
         }
     }
 }

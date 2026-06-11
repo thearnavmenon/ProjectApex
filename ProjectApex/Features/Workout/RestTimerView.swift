@@ -253,7 +253,7 @@ struct RestTimerView: View {
                 Image(systemName: "brain.head.profile.slash")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
-                Text(viewModel.fallbackDescription ?? "Coach offline — using plan defaults")
+                Text(viewModel.fallbackDescription ?? "Coach offline — using program defaults")
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.55))
             } else {

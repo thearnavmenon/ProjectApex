@@ -47,6 +47,10 @@ struct ContentView: View {
     /// Shown once to users who already have a mesocycle loaded when updating to this build.
     @State private var showTrainingTimeMigrationNotice: Bool = false
 
+    /// Confirms "Start Your Next Programme" on the programme-complete screen
+    /// before triggering regeneration.
+    @State private var showNextProgrammeConfirmation: Bool = false
+
     // MARK: - Crash recovery
 
     /// Non-nil when a crash-sentinel is found in UserDefaults on launch, indicating an
@@ -504,8 +508,32 @@ struct ContentView: View {
                     Text("Programme Complete")
                         .font(.title2.bold())
                         .foregroundStyle(.white)
-                    Text("You've finished every session. Head to Settings to regenerate a new programme.")
+                    Text("You've finished every session.")
                         .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.45))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 40)
+                }
+                Button {
+                    showNextProgrammeConfirmation = true
+                } label: {
+                    Text("Start Your Next Programme")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white.opacity(confirmedProfile != nil ? 1.0 : 0.4))
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 12)
+                        .background(
+                            confirmedProfile != nil
+                                ? Color(red: 0.23, green: 0.56, blue: 1.00)
+                                : Color.white.opacity(0.08),
+                            in: Capsule()
+                        )
+                }
+                .disabled(confirmedProfile == nil)
+                .padding(.top, 8)
+                if confirmedProfile == nil {
+                    Text("Set up your gym in Settings to start a new programme")
+                        .font(.footnote)
                         .foregroundStyle(.white.opacity(0.45))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
@@ -520,7 +548,6 @@ struct ContentView: View {
                         .padding(.vertical, 12)
                         .background(.white.opacity(0.12), in: Capsule())
                 }
-                .padding(.top, 8)
                 Spacer()
             }
             .background(Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea())
@@ -528,6 +555,15 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .alert("Start Your Next Programme?", isPresented: $showNextProgrammeConfirmation) {
+                Button("Cancel", role: .cancel) { }
+                Button("Start") {
+                    guard let profile = confirmedProfile else { return }
+                    Task { await regenerateProgram(gymProfile: profile) }
+                }
+            } message: {
+                Text("Generates a fresh 12-week programme. Your history is preserved.")
+            }
         }
     }
 
