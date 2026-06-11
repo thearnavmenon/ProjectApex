@@ -149,5 +149,7 @@ let both fail loudly instead of silently.*
    (includes the wordmark/app-icon asset deliverable: the aperture-A).
 3. ~~Live-loop screen~~ — specced in `live-loop.md`.
 4. ~~Post-workout summary (bookend #3)~~ — specced in `post-workout.md`.
-5. ~~Progress~~ — specced in `progress.md`. Train remains.
-6. Per-screen specs then get broken into issues/slices for implementation.
+5. ~~Progress~~ — specced in `progress.md`.
+6. ~~Train~~ — specced in `train.md` (the program + the exercise library;
+   four-agent panel). **All five per-screen specs now locked.**
+7. Per-screen specs then get broken into issues/slices for implementation.

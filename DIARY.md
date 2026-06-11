@@ -42,6 +42,48 @@ in-progress days while correctly resetting an eligible one.
 
 ---
 
+## 2026-06-11 — The Train tab got designed: the plan ahead, and the move dictionary (PR #338)
+
+**What happened (in plain words):**
+The Train tab got its full design plan — the last of the five screens. Train is
+two things in one: the *plan* (your weeks ahead, what's coming) and the
+*dictionary* of every exercise (how to do it, and your own history with it).
+The same four experts reviewed it.
+
+The big idea the experts pushed hardest on: the app should never pretend it
+knows more about the future than it does. The coach builds your program a little
+at a time — it plans next week's exact weights close to the day, not a month
+out. So the calendar draws a line: days it has really planned show in full ink
+with real numbers; days it hasn't yet show in faint pencil, as just a shape
+("lower body, squat focus") with no fake numbers. The further out you look, the
+fainter it gets — because that's honestly how much the coach knows.
+
+**The biggest catches:**
+- The first draft let the app pretend on the future, so the experts made the
+  "how much do we actually know" line into a real drawn thing on the page, not
+  just a colour change.
+- The calendar must NOT become a guilt machine. No streak flames, no "you missed
+  3 days" — a done day is just a quiet fact, a missed day is just a day the plan
+  moved past.
+- The biggest gap: you couldn't change your own plan. But during a workout the
+  app already lets you swap an exercise — so it was weird that you could change
+  things mid-lift but not when calmly planning. Now you can move a day, say "I
+  can't train today," or swap an exercise for a cousin of it, and the coach rolls
+  with it.
+- An exercise page used to risk copying a competitor's dishonest "is it going
+  up?" chart (the kind that makes a planned light day look like you got weaker).
+  We cut the chart entirely — the exercise page just points up to your real
+  strength band instead.
+- There was a half-built feature (re-checking your strength) that had no home in
+  the app — every other screen pointed at it but nobody owned it. Train adopted
+  it, because re-checking your strength changes your plan, and the plan is
+  Train's job.
+
+All five screens are now fully designed. The next step (not started — waiting for
+the go-ahead) is breaking these designs into actual build tickets.
+
+---
+
 ## 2026-06-11 — The app stops making promises it can't keep (PR #337)
 
 **What happened (in plain words):**
