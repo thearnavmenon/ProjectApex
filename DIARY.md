@@ -7,6 +7,45 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — The app now quietly signs in behind the scenes (PR #372)
+
+**The problem (in plain words):**
+Right now the app talks to our database using one shared "house key" (the anon key)
+— there's no notion of *this particular person* being signed in. Before we can lock
+data down so each person only sees their own, the app first needs to get its own
+private sign-in token. This is the first small step of that bigger job: get the
+token, but change nothing anyone can see yet.
+
+**What changed:**
+On launch the app now asks our auth service for an anonymous sign-in — like getting
+a wristband at the door without giving your name. It tucks the resulting token away
+safely (in the iPhone's secure Keychain) and uses it on its database calls. Next
+time you open the app it reuses the same wristband instead of grabbing a new one, so
+you stay the same "person" across launches. The token also quietly refreshes itself
+when it's about to expire.
+
+Crucially, this is built to fail softly. If the sign-in can't happen — for example
+because we haven't flipped the "allow anonymous sign-ins" switch on the dashboard
+yet, or the network is slow — the app shrugs and carries on exactly as it does today
+with the shared house key. It never blocks the app waiting. So nothing about how the
+app behaves changes in this step: it still reads and writes the same data the same
+way. We did NOT switch over which user-id the app uses, and we did NOT turn on the
+per-person data locks — those are deliberately later steps.
+
+**How it was checked:**
+Wrote tests that fake the auth server (no real network): a successful sign-in saves
+the token and sets it; a relaunch with a saved token reuses it without signing in
+again; a rejected sign-in leaves things on the old shared-key behavior without
+crashing or hanging; and the token-refresh / retry-after-expiry path works. Full app
+test suite still green (532 ran, 0 failures, 10 skipped — the usual live-API ones
+that need real credentials). The build is clean.
+
+**Status:** Done on branch `feat/369-auth-slice1-anon-session`, PR #372. Not
+merged. Live end-to-end sign-in still needs the dashboard's Anonymous provider turned
+on; until then the app correctly runs on the old shared-key path.
+
+---
+
 ## 2026-06-12 — A brand-new install can now get past the front door (PR #368)
 
 **The problem (in plain words):**

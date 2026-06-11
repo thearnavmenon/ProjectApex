@@ -107,6 +107,30 @@ actor SupabaseClient {
     /// request instead of (not in addition to) the anon key.
     var authToken: String?
 
+    /// Sets the auth token from outside the actor (e.g. AppDependencies once a
+    /// GoTrue session resolves). Slice 1 (#369).
+    func setAuthToken(_ token: String?) {
+        self.authToken = token
+    }
+
+    // MARK: - Auth refresh hooks (#369, slice 1)
+
+    /// Returns a valid (non-near-expiry) access token, refreshing first if
+    /// needed. Wired to `SupabaseAuth` by AppDependencies; `nil` when no session
+    /// (→ anon-key behavior). Both hooks update `authToken` via their return.
+    private var refreshIfNeeded: (@Sendable () async -> String?)?
+    /// Forces a token refresh after a 401; returns the fresh token or `nil`.
+    private var forceRefresh: (@Sendable () async -> String?)?
+
+    /// Installs the GoTrue refresh hooks. Called once after a session resolves.
+    func setRefreshHooks(
+        refreshIfNeeded: @escaping @Sendable () async -> String?,
+        forceRefresh: @escaping @Sendable () async -> String?
+    ) {
+        self.refreshIfNeeded = refreshIfNeeded
+        self.forceRefresh = forceRefresh
+    }
+
     // MARK: - Private helpers
 
     private let session: URLSession
@@ -500,16 +524,55 @@ actor SupabaseClient {
 
     /// Performs a request and returns the response body on success.
     /// Throws `SupabaseError.httpError` on non-2xx responses.
+    ///
+    /// Auth (#369, slice 1): when a GoTrue session is wired, the access token is
+    /// refreshed *before* the request if it is near expiry, and on a 401 the
+    /// token is refreshed once and the request retried. With no session wired
+    /// these hooks are nil and behavior is unchanged (anon-key path).
     private func performReturningData(_ request: URLRequest) async throws -> Data {
+        var request = request
+
+        // Pre-flight refresh if the access token is near expiry.
+        if let refreshIfNeeded, let fresh = await refreshIfNeeded() {
+            authToken = fresh
+            stampAuthorization(on: &request)
+        }
+
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw SupabaseError.httpError(statusCode: 0, body: "Non-HTTP response")
         }
+
+        // On 401, refresh once and retry the request a single time.
+        if http.statusCode == 401, let forceRefresh, let fresh = await forceRefresh() {
+            authToken = fresh
+            stampAuthorization(on: &request)
+            let (retryData, retryResponse) = try await session.data(for: request)
+            guard let retryHTTP = retryResponse as? HTTPURLResponse else {
+                throw SupabaseError.httpError(statusCode: 0, body: "Non-HTTP response")
+            }
+            guard (200...299).contains(retryHTTP.statusCode) else {
+                let body = String(data: retryData, encoding: .utf8) ?? "<non-UTF8 body>"
+                throw SupabaseError.httpError(statusCode: retryHTTP.statusCode, body: body)
+            }
+            return retryData
+        }
+
         guard (200...299).contains(http.statusCode) else {
             let body = String(data: data, encoding: .utf8) ?? "<non-UTF8 body>"
             throw SupabaseError.httpError(statusCode: http.statusCode, body: body)
         }
         return data
+    }
+
+    /// Re-stamps the `Authorization` header on an already-built request after a
+    /// token change. Mirrors the Bearer priority in `baseRequest`.
+    private func stampAuthorization(on request: inout URLRequest) {
+        if let token = authToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        } else {
+            request.setValue("Bearer \(anonKey)", forHTTPHeaderField: "Authorization")
+        }
     }
 
     /// Performs a PATCH request that already carries `Prefer: return=representation`
