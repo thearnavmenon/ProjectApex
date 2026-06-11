@@ -38,6 +38,15 @@ enum KeychainKey: String, CaseIterable {
     case supabaseAnonKey  = "com.projectapex.keychain.supabaseAnonKey"
     /// Stable user identifier (UUID string) persisted between app reinstalls.
     case userId           = "com.projectapex.keychain.userId"
+    /// Supabase Auth (GoTrue) access token (JWT) for the current session.
+    case supabaseAccessToken  = "com.projectapex.keychain.supabaseAccessToken"
+    /// Supabase Auth refresh token used to mint a fresh access token.
+    case supabaseRefreshToken = "com.projectapex.keychain.supabaseRefreshToken"
+    /// Access-token expiry as a Unix-epoch seconds string (e.g. "1718200000").
+    case supabaseSessionExpiry = "com.projectapex.keychain.supabaseSessionExpiry"
+    /// The GoTrue `user.id` (UUID string) of the authenticated session. This is
+    /// the auth subject; it is NOT yet wired to `resolvedUserId` (later slice).
+    case supabaseAuthUserId   = "com.projectapex.keychain.supabaseAuthUserId"
 }
 
 // MARK: - KeychainError

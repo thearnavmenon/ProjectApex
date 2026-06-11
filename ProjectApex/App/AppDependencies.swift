@@ -22,6 +22,9 @@ final class AppDependencies {
 
     let keychainService: KeychainService
     let supabaseClient: SupabaseClient
+    /// GoTrue anonymous-auth session owner (#369 slice 1). Additive: sets the
+    /// client's JWT; does not repoint resolvedUserId or enable RLS this slice.
+    let supabaseAuth: SupabaseAuth
     let healthKitService: HealthKitService
     let memoryService: MemoryService
     let speechService: SpeechService
@@ -102,6 +105,26 @@ final class AppDependencies {
         let supabaseAnonKey = (try? keychain.retrieve(.supabaseAnonKey)) ?? ""
         let client = SupabaseClient(supabaseURL: Config.supabaseURL, anonKey: supabaseAnonKey)
         self.supabaseClient = client
+
+        // 2b. Supabase Auth (GoTrue) — #369 slice 1. Additive only: establishes
+        // an anonymous session and sets the client's JWT. resolvedUserId is NOT
+        // repointed and RLS is still off, so behavior is unchanged this slice.
+        // A stored session restores instantly; a fresh launch signs in anonymously
+        // in the background and falls back to the anon key on failure/timeout.
+        let auth = SupabaseAuth(supabaseURL: Config.supabaseURL, anonKey: supabaseAnonKey)
+        self.supabaseAuth = auth
+        // Wire the refresh/401-retry hooks so authed requests stay valid.
+        Task {
+            await client.setRefreshHooks(
+                refreshIfNeeded: { await auth.validAccessToken() },
+                forceRefresh: { await auth.forceRefreshAccessToken() }
+            )
+            // Resolve the first session (restore-or-sign-in), then set the JWT.
+            // Bounded internally so this can never hang. nil → stays on anon key.
+            if let session = await auth.awaitFirstResolution() {
+                await client.setAuthToken(session.accessToken)
+            }
+        }
 
         // 3. HealthKit — no dependencies
         self.healthKitService = HealthKitService()
