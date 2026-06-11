@@ -422,7 +422,15 @@ A full UI rebuild from scratch, design language **"a single ink (ultramarine) on
 - **0026 (#343):** frozen-`ContentView` **strangler** — new `AppShell.swift`, one-line compile-time swap in `ProjectApexApp.swift`, code-as-switch `@ViewBuilder` routing (no flag can dangle), keep the raw-`Int` `switchToTab` contract with a translation bridge, **machinery-last** (resume/crash/onboarding stays in frozen ContentView), no runtime feature flag; close-out is #363.
 - **Capstone: GO.** Sequencing: **#341 (incl. data-viz tokens) → #343 (chrome) → #342 (references) → screens.** The one true blocker before #342 records any reference: #341 must commit the data-viz tokens (folded into ADR-0024).
 
-**Open HITL questions surfaced (not yet answered):** font licensing/availability (Space Grotesk + Inter — blocks #341 typography), dim-override timing, first-SPM-dependency approval, snapshot-reference recording toolchain/owner (CI 26.3 vs local 26.5), Today's interim content, and the brand-asset case ratification (#344). Implementation of #341 Swift code intentionally **not started** pending the font/asset answers (CLAUDE.md non-autonomy).
+**HITL questions answered (2026-06-11):** Space Grotesk + Inter are **SIL OFL** (embeddable) and ship `tnum`; dim override **shipped in #341** (System/Light/Dim Settings toggle); first-SPM-dependency (swift-snapshot-testing) approved for #342; snapshot-reference recording = a CI record-mode job on pinned Xcode 26.3; Today's interim content reuses the existing next-workout surface. Still open: brand-asset case ratification (#344).
+
+**Slice #341 — SHIPPED (2026-06-11, PR #367).** Pure-Swift `ProjectApex/DesignSystem/` per ADR-0024, foundation-only (0 of 236 legacy `Color(red:)` sites migrated; `ContentView` frozen):
+- **Colour** — `TokenColor` (sRGB components → headless-testable; DESIGN.md hex are executable fixtures) + `Theme` (light + dim remap on the same role names) via `\.apexTheme`. **P0-4 enforced by API shape:** bright accent is a fill-only `FillToken` with no `.color` text path; `accent-ink` is the text-safe stroke/dot value. Data-viz tokens are *computed* from base roles (no drift) + dim remap + shared geometry (floor 2px / stretch 1px / list-dot 5pt / dash 4-2) — the #342 capstone prerequisite.
+- **Typography** — Space Grotesk + Inter under `Resources/Fonts/` (OFL licenses included), registered at launch via `CTFontManagerRegisterFontsForURL` (no `UIAppFonts` pbxproj key). Scale per DESIGN.md; body/ui track Dynamic Type, hero/display cap at 1.3×, hero-num tabular.
+- **Spacing/shape/elevation/motion/haptics** static enums; **work-is-ink/time-is-pencil** (+plan-is-pencil) helper; **Settings System/Light/Dim** override (drives `\.apexTheme` only — legacy `colorScheme` untouched); **DEBUG token gallery** (light+dim) in Developer Settings.
+- **Tests** — one Swift Testing file, 12 green (hex fixtures, dim distinctness, AA contrast, P0-4, data-viz, typography scale/tabular/1.3×-cap, font registration). `APEX_INTEGRATION_TESTS` contradiction left for #342 to own.
+- **Assumption flagged:** `title` (22pt) → Inter Medium ("ui"); DESIGN.md fixes its size but not its family.
+- **Unblocks** #343 (chrome) → #342 (snapshot references).
 
 ## Flow-audit fix campaign (#318) (2026-06-11)
 
