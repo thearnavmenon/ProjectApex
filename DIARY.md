@@ -103,6 +103,42 @@ all — this build-time key is the alpha-stage stopgap.
 
 ---
 
+## 2026-06-12 — Built the new 3-tab layout, but kept it switched off (PR #370)
+
+**What happened (in plain words):**
+The redesign moves the app from four bottom tabs (Program, Workout, Progress,
+Settings) to three — **Today, Train, Progress** — with Settings tucked into a corner
+button instead of a tab. I built that new three-tab layout in code, drawn in the
+redesign's own colours and fonts (yesterday's building blocks), with a little corner
+gear for settings.
+
+The important part: it's **switched off by default**. The app still runs the old
+four-tab screen exactly as before. There's a single on/off switch in the code, set
+to "off". That's on purpose — turning it on means moving some delicate plumbing (the
+first-time setup screen, crash recovery, and "resume a paused workout"), and that
+deserves its own careful, separately-tested step later. So this slice lays the new
+layout down next to the old one without disturbing any of that plumbing.
+
+A few things worth calling out simply:
+- The new bottom bar follows the design rule: each tab's icon is quiet ink normally
+  and turns ink-blue + filled-in only for the tab you're on.
+- One tab (Progress) already shows its real screen; Today and Train show a simple
+  honest placeholder for now — and nobody sees these yet, because the whole thing is
+  switched off.
+- There's a small translator so the app's existing "jump to that tab" buttons keep
+  working unchanged once the new layout is eventually switched on.
+
+**How I made sure it works:**
+I wrote five small tests for the translator first, and they all pass. The whole app
+still builds cleanly with no warnings, and I confirmed I didn't touch the old main
+screen at all.
+
+**Status:** Opened pull request #370 (part of issue #343). Switched off, so nothing
+changes for the user yet — waiting on your review before it merges. Turning it on
+(and moving the delicate plumbing) is a later step.
+
+---
+
 ## 2026-06-11 — The new look's building blocks now exist in code (PR #367)
 
 **What happened (in plain words):**
