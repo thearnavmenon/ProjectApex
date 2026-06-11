@@ -34,6 +34,59 @@ private struct SessionMetaRow: Decodable {
     }
 }
 
+// MARK: - GenerationUserProfile (#318 U4)
+
+/// Profile payload assembled from the user's persisted onboarding answers for
+/// program/session generation. Extracted as a pure value + static assembler so
+/// the assembly rules are unit-testable and shared by all three generation
+/// paths (generateProgram, generateMacroSkeleton, generateDaySession).
+struct GenerationUserProfile: Equatable {
+    let bodyweightKg: Double?
+    let ageYears: Int?
+    let trainingAge: String?
+    let experienceLevel: String
+    let goals: [String]
+
+    /// Assembles the profile from the persisted onboarding answers.
+    ///
+    /// Goal source is hybrid (#318 U4): the live trainee-model digest goal
+    /// statement wins when hydrated (so a renegotiated goal, ADR-0022, is not
+    /// shadowed by a stale onboarding answer), then the onboarding answer
+    /// persisted under `UserProfileConstants.primaryGoalKey`, then the legacy
+    /// "hypertrophy" default. `GoalState.placeholder` has an empty statement
+    /// (#146), so empty/whitespace detection covers the un-hydrated case.
+    static func assemble(
+        defaults: UserDefaults = .standard,
+        digestGoalStatement: String?
+    ) -> GenerationUserProfile {
+        let bwKg: Double? = defaults.double(forKey: UserProfileConstants.bodyweightKgKey) > 0
+            ? defaults.double(forKey: UserProfileConstants.bodyweightKgKey) : nil
+        let ageYears: Int? = defaults.integer(forKey: UserProfileConstants.ageKey) > 0
+            ? defaults.integer(forKey: UserProfileConstants.ageKey) : nil
+        let trainingAge: String? = defaults.string(forKey: UserProfileConstants.trainingAgeKey)
+
+        let goal: String
+        let digestGoal = (digestGoalStatement ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedGoal = (defaults.string(forKey: UserProfileConstants.primaryGoalKey) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !digestGoal.isEmpty {
+            goal = digestGoal
+        } else if !storedGoal.isEmpty {
+            goal = storedGoal
+        } else {
+            goal = "hypertrophy"
+        }
+
+        return GenerationUserProfile(
+            bodyweightKg: bwKg,
+            ageYears: ageYears,
+            trainingAge: trainingAge,
+            experienceLevel: trainingAge ?? "intermediate",
+            goals: [goal]
+        )
+    }
+}
+
 // MARK: - ProgramViewState
 
 enum ProgramViewState: Equatable {
@@ -271,12 +324,10 @@ final class ProgramViewModel {
         guard await !programGenerationService.isGenerating else { return }
         viewState = .generating
 
-        // Read user profile from UserDefaults for consistent generation across paths.
-        let bwKg: Double? = UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) > 0
-            ? UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) : nil
-        let ageYears: Int? = UserDefaults.standard.integer(forKey: UserProfileConstants.ageKey) > 0
-            ? UserDefaults.standard.integer(forKey: UserProfileConstants.ageKey) : nil
-        let trainingAge: String? = UserDefaults.standard.string(forKey: UserProfileConstants.trainingAgeKey)
+        // Read user profile from UserDefaults for consistent generation across paths (#318 U4).
+        let profile = GenerationUserProfile.assemble(
+            digestGoalStatement: await traineeModelService?.digest()?.goal.statement
+        )
         let daysPerWeek: Int = {
             let v = UserDefaults.standard.integer(forKey: UserProfileConstants.daysPerWeekKey)
             return v > 0 ? v : 4
@@ -286,10 +337,10 @@ final class ProgramViewModel {
 
         let userProfile = UserProfile(
             userId: userId.uuidString,
-            experienceLevel: trainingAge ?? "intermediate",
-            goals: ["hypertrophy"],
-            bodyweightKg: bwKg,
-            ageYears: ageYears
+            experienceLevel: profile.experienceLevel,
+            goals: profile.goals,
+            bodyweightKg: profile.bodyweightKg,
+            ageYears: profile.ageYears
         )
 
         do {
@@ -324,12 +375,10 @@ final class ProgramViewModel {
         guard await !macroPlanService.isGenerating else { return }
         viewState = .generating
 
-        // Read onboarding profile from UserDefaults if available.
-        let bwKg: Double? = UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) > 0
-            ? UserDefaults.standard.double(forKey: UserProfileConstants.bodyweightKgKey) : nil
-        let ageYears: Int? = UserDefaults.standard.integer(forKey: UserProfileConstants.ageKey) > 0
-            ? UserDefaults.standard.integer(forKey: UserProfileConstants.ageKey) : nil
-        let trainingAge: String? = UserDefaults.standard.string(forKey: UserProfileConstants.trainingAgeKey)
+        // Read onboarding profile from UserDefaults if available (#318 U4).
+        let profile = GenerationUserProfile.assemble(
+            digestGoalStatement: await traineeModelService?.digest()?.goal.statement
+        )
         let daysPerWeek: Int = {
             let v = UserDefaults.standard.integer(forKey: UserProfileConstants.daysPerWeekKey)
             return v > 0 ? v : 4
@@ -346,11 +395,11 @@ final class ProgramViewModel {
             let skeleton = try await macroPlanService.generateSkeleton(
                 userId: userId,
                 gymProfile: gymProfile,
-                experienceLevel: trainingAge ?? "intermediate",
-                goals: ["hypertrophy"],
-                bodyweightKg: bwKg,
-                ageYears: ageYears,
-                trainingAge: trainingAge,
+                experienceLevel: profile.experienceLevel,
+                goals: profile.goals,
+                bodyweightKg: profile.bodyweightKg,
+                ageYears: profile.ageYears,
+                trainingAge: profile.trainingAge,
                 trainingDaysPerWeek: daysPerWeek,
                 historicalDayLabels: historicalDayLabels
             )
@@ -420,20 +469,20 @@ final class ProgramViewModel {
 
         viewState = .generatingSession(dayId: day.id)
 
-        // Read user profile
-        let bwKg: Double? = UserDefaults.standard.double(forKey: "bodyweight_kg") > 0
-            ? UserDefaults.standard.double(forKey: "bodyweight_kg") : nil
-        let ageYears: Int? = UserDefaults.standard.integer(forKey: "user_age") > 0
-            ? UserDefaults.standard.integer(forKey: "user_age") : nil
-        let trainingAge: String? = UserDefaults.standard.string(forKey: "training_age")
+        // Read user profile (#318 U4: was reading dead keys nothing writes —
+        // "bodyweight_kg"/"user_age"/"training_age" — and hardcoding
+        // experienceLevel + goals; now shares the real onboarding answers).
+        let profile = GenerationUserProfile.assemble(
+            digestGoalStatement: await traineeModelService?.digest()?.goal.statement
+        )
 
         let userProfile = MacroPlanUserProfile(
             userId: userId.uuidString,
-            experienceLevel: "intermediate",
-            goals: ["hypertrophy"],
-            bodyweightKg: bwKg,
-            ageYears: ageYears,
-            trainingAge: trainingAge
+            experienceLevel: profile.experienceLevel,
+            goals: profile.goals,
+            bodyweightKg: profile.bodyweightKg,
+            ageYears: profile.ageYears,
+            trainingAge: profile.trainingAge
         )
 
         // ── Step 1: Fetch recent session metadata (last 7 days) for fatigue signals ──
@@ -689,6 +738,39 @@ final class ProgramViewModel {
         currentMesocycle = mesocycle
         viewState = .loaded(mesocycle)
         print("[ProgramViewModel] markDaySkipped ✓ — dayId: \(dayId), week \(mesocycle.weeks[wIdx].weekNumber)")
+    }
+
+    // MARK: - Regenerate session (#318 U4 / J-F10)
+
+    /// Resets a `.generated` day back to `.pending` so its session can be
+    /// regenerated via the normal on-demand path. The day id is PRESERVED so
+    /// sentinel matching and history queries still hold.
+    ///
+    /// Refuses (no-op) unless the day is eligible:
+    ///   • status must be `.generated` — completed/paused/skipped/pending days
+    ///     are historical, live, or already pending;
+    ///   • no matching paused-session sentinel — `PausedSessionState` is written
+    ///     at session start and updated every set, so a matching sentinel means
+    ///     a live or paused session (with logged sets) exists for this day.
+    func resetDayToPending(dayId: UUID, weekId: UUID) {
+        guard var mesocycle = currentMesocycle else { return }
+        guard let wIdx = mesocycle.weeks.firstIndex(where: { $0.id == weekId }),
+              let dIdx = mesocycle.weeks[wIdx].trainingDays.firstIndex(where: { $0.id == dayId })
+        else { return }
+        guard mesocycle.weeks[wIdx].trainingDays[dIdx].status == .generated else {
+            print("[ProgramViewModel] resetDayToPending — refused, status is \(mesocycle.weeks[wIdx].trainingDays[dIdx].status), dayId: \(dayId)")
+            return
+        }
+        if PausedSessionState.load()?.trainingDayId == dayId {
+            print("[ProgramViewModel] resetDayToPending — refused, session sentinel matches dayId: \(dayId)")
+            return
+        }
+        mesocycle.weeks[wIdx].trainingDays[dIdx].status = .pending
+        mesocycle.weeks[wIdx].trainingDays[dIdx].exercises = []
+        mesocycle.saveToUserDefaults()
+        currentMesocycle = mesocycle
+        viewState = .loaded(mesocycle)
+        print("[ProgramViewModel] resetDayToPending ✓ — dayId: \(dayId), week \(mesocycle.weeks[wIdx].weekNumber)")
     }
 
     // MARK: - Computed helpers

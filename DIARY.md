@@ -7,6 +7,41 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-11 — Your onboarding answers finally reach the coach (PR #339)
+
+**What happened (in plain words):**
+During onboarding the app asks about your experience, your goal, your
+bodyweight and your age — and then, embarrassingly, the part that builds each
+workout never read those answers. It looked in storage spots nothing ever
+wrote to, shrugged, and planned every session for a made-up "intermediate
+lifter chasing muscle size". Three smaller things too: if you denied camera
+access, the "enter equipment manually" button just looped you back to the
+camera; if the app got killed mid-onboarding, your finished gym scan was
+forgotten and a paid AI call could quietly run twice; and there was no way to
+ask for a fresh version of a session you hadn't started yet.
+
+**What changed:**
+All three program-building paths now read your real saved answers from one
+shared, tested place. Your goal is picked smartly: the coach's current
+understanding of your goal wins when it exists, then your onboarding answer,
+then the old default as a last resort. The manual-equipment button now
+actually opens manual entry (and phone users get that option up front, not
+just simulator users). Onboarding now remembers a finished scan after an app
+kill and won't pay for a second program generation it already has. And any
+planned-but-untouched session gets a "Regenerate this session" button with a
+confirmation — days that are completed, paused, or mid-workout are protected
+and can't be reset.
+
+**How it was checked:**
+Full build passed and the whole test suite ran green. Twelve new tests: eight
+lock down exactly how the profile and goal get assembled (every fallback
+branch covered), and four prove regenerate refuses completed, paused, and
+in-progress days while correctly resetting an eligible one.
+
+**Status:** waiting for review and merge as PR #339.
+
+---
+
 ## 2026-06-11 — The Train tab got designed: the plan ahead, and the move dictionary (PR #338)
 
 **What happened (in plain words):**

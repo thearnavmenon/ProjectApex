@@ -65,7 +65,9 @@ struct OnboardingView: View {
 
     @State private var step: Int = 1
     @State private var profile = OnboardingProfile()
-    @State private var gymProfile: GymProfile? = nil
+    /// Seeded from the UserDefaults cache (#318 U4) so a scan that completed
+    /// before an app kill rehydrates instead of forcing a re-scan.
+    @State private var gymProfile: GymProfile? = GymProfile.loadFromUserDefaults()
     @State private var scanSkipped: Bool = false
     @State private var notifGranted: Bool = false
     @State private var isGenerating: Bool = false
@@ -869,6 +871,16 @@ struct OnboardingView: View {
         // written regardless of whether the user skipped the gym scan.
         UserDefaults.standard.set(profile.daysPerWeek, forKey: UserProfileConstants.daysPerWeekKey)
 
+        // Re-entry guard (#318 U4): if a program was already generated for this
+        // user (e.g. the app was killed between generation and onboarding
+        // completion), reuse the cached mesocycle instead of paying for a
+        // second skeleton LLM call.
+        if let cached = Mesocycle.loadFromUserDefaults(), cached.userId == deps.resolvedUserId {
+            isGenerating = false
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.80)) { step = 6 }
+            return
+        }
+
         guard let gymProf = gymProfile else {
             // No gym profile — can't generate a valid program. Advance directly to ready.
             isGenerating = false
@@ -927,6 +939,7 @@ struct OnboardingView: View {
         UserDefaults.standard.set(profile.heightCm, forKey: UserProfileConstants.heightCmKey)
         UserDefaults.standard.set(profile.age, forKey: UserProfileConstants.ageKey)
         UserDefaults.standard.set(profile.trainingAge.rawValue, forKey: UserProfileConstants.trainingAgeKey)
+        UserDefaults.standard.set(profile.primaryGoal.rawValue, forKey: UserProfileConstants.primaryGoalKey)
 
         // Best-effort upsert into users table — failure is non-fatal for onboarding.
         let nameStr = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -990,6 +1003,10 @@ enum UserProfileConstants {
     static let heightCmKey      = "com.projectapex.user.heightCm"
     static let ageKey           = "com.projectapex.user.age"
     static let trainingAgeKey   = "com.projectapex.user.trainingAge"
+    /// Primary training goal selected during onboarding (TrainingGoal.rawValue).
+    /// Read by GenerationUserProfile.assemble as the fallback goal source when
+    /// the trainee-model digest goal is not hydrated (#318 U4).
+    static let primaryGoalKey   = "com.projectapex.user.primaryGoal"
     /// Number of training days per week selected during onboarding. Default 4 if absent.
     static let daysPerWeekKey   = "com.projectapex.user.daysPerWeek"
     /// Incremented after each completed workout session. 0 = no sessions ever completed.
