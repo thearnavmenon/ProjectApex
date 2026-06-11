@@ -54,6 +54,70 @@ private struct DelayedLLMProvider: LLMProvider {
     }
 }
 
+/// Gated provider for deterministic generation-guard tests (#369 [19]). The first
+/// `complete()` call (startSession) throws so the manager lands in the pending-retry
+/// state with no flaky timing. The SECOND call (retryInference) parks on a
+/// continuation that the test resumes manually — letting the test advance the
+/// generation (via a reentrant actor call) WHILE the retry is suspended mid-await,
+/// then release it to verify the stale result is dropped by the guard.
+private final class GatedRetryProvider: LLMProvider, @unchecked Sendable {
+    let response: String
+    private let lock = NSLock()
+    private var callCount = 0
+    private var gateContinuation: CheckedContinuation<Void, Never>?
+    private var gateContinuationReadyContinuation: CheckedContinuation<Void, Never>?
+
+    init(response: String) { self.response = response }
+
+    /// Suspends until the retry call has actually parked on its gate.
+    func waitUntilRetryParked() async {
+        await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if gateContinuation != nil {
+                lock.unlock(); k.resume()
+            } else {
+                gateContinuationReadyContinuation = k; lock.unlock()
+            }
+        }
+    }
+
+    /// Releases the parked retry call so it can finish and return its response.
+    func releaseRetry() {
+        lock.lock()
+        let k = gateContinuation
+        gateContinuation = nil
+        lock.unlock()
+        k?.resume()
+    }
+
+    func complete(systemPrompt: String, userPayload: String) async throws -> String {
+        lock.lock()
+        callCount += 1
+        let n = callCount
+        lock.unlock()
+
+        if n == 1 {
+            // startSession inference — fail fast so we land in pending-retry.
+            throw LLMProviderError.httpError(statusCode: 401, body: "Invalid API key")
+        }
+
+        // ONLY the retry call (#2) is gated — park until the test releases it. Every
+        // later call (e.g. the swap's own inference, #3) returns immediately, so the
+        // gate is never overwritten and releaseRetry() is unambiguous.
+        guard n == 2 else { return response }
+
+        await withCheckedContinuation { (k: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            gateContinuation = k
+            let ready = gateContinuationReadyContinuation
+            gateContinuationReadyContinuation = nil
+            lock.unlock()
+            ready?.resume()
+        }
+        return response
+    }
+}
+
 // MARK: - Mock URLProtocol (always returns HTTP 201 — prevents real network calls and WAQ retry loops)
 
 private final class WSMAlwaysSucceedURLProtocol: URLProtocol, @unchecked Sendable {
@@ -779,6 +843,171 @@ final class WorkoutSessionManagerTests: XCTestCase {
 
         let logs = await manager.completedSets
         XCTAssertTrue(logs.isEmpty, "No SetLogs for an all-skipped session")
+    }
+
+    // MARK: #369 [8] — finishSession idempotency
+
+    /// Two end paths reaching finishSession for the same session (here endSession()
+    /// followed by endSessionEarly(), the rest-timer-Task-vs-UI race) must run the
+    /// side effects ONCE: the persistent session count increments by exactly 1.
+    /// Pre-fix, the second call re-ran the whole body, double-incrementing the count
+    /// (and double-enqueueing the trainee-model update).
+    func testFinishSession_isIdempotent_sessionCountIncrementsOnce() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        // finishSession writes UserProfileConstants.sessionCountKey on UserDefaults.standard.
+        // Snapshot the delta rather than the absolute value so the test is independent of
+        // any pre-existing count.
+        let key = UserProfileConstants.sessionCountKey
+        let before = UserDefaults.standard.integer(forKey: key)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        await manager.completeSet(actualReps: 5, rpeFelt: 7, intent: .top)
+
+        // First end path (the natural completion). Then a second, duplicate end path.
+        await manager.endSession()
+        await manager.endSessionEarly()
+
+        let after = UserDefaults.standard.integer(forKey: key)
+        XCTAssertEqual(
+            after - before, 1,
+            "finishSession must increment the session count exactly once across two end paths (#369 [8])"
+        )
+
+        // State is the single completed session — the second call did not corrupt it.
+        let state = await manager.sessionState
+        guard case .sessionComplete = state else {
+            XCTFail("Expected .sessionComplete after the (idempotent) double end, got \(state)")
+            return
+        }
+    }
+
+    /// A fresh session after a completed one must be able to finish again — the
+    /// idempotency latch is cleared on startSession, so it does not permanently
+    /// disable finishSession for the next session.
+    func testFinishSession_latchResetsForNextSession() async throws {
+        let manager = makeManager()
+        let key = UserProfileConstants.sessionCountKey
+        let before = UserDefaults.standard.integer(forKey: key)
+
+        // Session 1.
+        let day1 = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+        await manager.startSession(trainingDay: day1, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        await manager.completeSet(actualReps: 5, rpeFelt: 7, intent: .top)
+        await manager.endSession()
+        await manager.resetToIdle()
+
+        // Session 2 — latch must have been cleared so this one also counts.
+        let day2 = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+        await manager.startSession(trainingDay: day2, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        await manager.completeSet(actualReps: 5, rpeFelt: 7, intent: .top)
+        await manager.endSession()
+
+        let after = UserDefaults.standard.integer(forKey: key)
+        XCTAssertEqual(after - before, 2, "Two distinct sessions must each count once (latch resets per session)")
+    }
+
+    // MARK: #369 [19] — retryInference participates in the generation guard
+
+    /// A retry result that resolves AFTER the session has advanced (generation bumped
+    /// by a concurrent swap) must be DROPPED, not applied. The GatedRetryProvider parks
+    /// the retry mid-await; the test bumps the generation via swapExercise (a reentrant
+    /// actor call while the retry is suspended), then releases the retry. Pre-fix,
+    /// retryInference had no post-await generation re-check, so the stale prescription
+    /// clobbered the swapped-in state.
+    func testRetryInference_staleResultDroppedAfterGenerationBump() async throws {
+        let provider = GatedRetryProvider(response: prescriptionJSON(weightKg: 60.0))
+        let manager = makeManager(provider: provider)
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+
+        // startSession's inference fails (gated call #1) → pending-retry on exercise 0.
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let retryNeeded = await manager.inferenceRetryNeeded
+        XCTAssertTrue(retryNeeded, "Failed startSession inference should arm the retry")
+
+        // Launch the retry — it parks on the gate inside prescribe() (gated call #2).
+        let retryTask = Task { await manager.retryInference() }
+        await provider.waitUntilRetryParked()
+
+        // While the retry is suspended, advance the generation via a swap (reentrant
+        // actor call). The swap bumps inferenceGeneration, so the parked retry's
+        // captured generation is now stale.
+        let suggestion = ExerciseSwapService.ExerciseSuggestion(
+            exerciseId: "swapped_in",
+            name: "Swapped In",
+            equipmentRequired: "barbell",
+            suggestedWeightKg: 60.0,
+            suggestedReps: 8,
+            reasoning: "test"
+        )
+        await manager.swapExercise(suggestion: suggestion, reason: "test swap")
+
+        // Release the retry; its result is for the OLD generation and must be dropped.
+        provider.releaseRetry()
+        let applied = await retryTask.value
+        XCTAssertFalse(applied, "A stale retry result (generation bumped by swap) must report not-applied")
+
+        // The stale retry targeted exercise_0; if the guard failed it would have set
+        // sessionState = .active(exercise_0, ...). The swap moved the active context to
+        // "swapped_in", so the live exercise must NEVER be exercise_0. (The swap's own
+        // valid inference legitimately sets currentPrescription for "swapped_in".)
+        let state = await manager.sessionState
+        let liveExerciseId: String?
+        switch state {
+        case .active(let ex, _), .resting(let ex, _):
+            liveExerciseId = ex.exerciseId
+        default:
+            liveExerciseId = nil
+        }
+        if let liveExerciseId {
+            XCTAssertNotEqual(
+                liveExerciseId, day.exercises[0].exerciseId,
+                "Stale retry must not transition the session back to the pre-swap exercise (#369 [19])"
+            )
+        }
+    }
+
+    // MARK: #369 [20] — uiSnapshot returns a consistent set of fields
+
+    /// uiSnapshot() must return the same field values as the individual actor-isolated
+    /// properties at a quiescent moment (no torn read). This pins the snapshot's
+    /// field-mapping contract that pullState() now relies on.
+    func testUISnapshot_matchesIndividualFields() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let snapshot = await manager.uiSnapshot()
+        let state = await manager.sessionState
+        let prescription = await manager.currentPrescription
+        let fallback = await manager.currentFallbackReason
+        let restRemaining = await manager.restSecondsRemaining
+        let expiresAt = await manager.restExpiresAt
+        let sets = await manager.completedSets
+        let retryNeeded = await manager.inferenceRetryNeeded
+        let pendingExercise = await manager.pendingRetryExercise
+
+        XCTAssertEqual(snapshot.sessionState, state)
+        XCTAssertEqual(snapshot.currentPrescription?.weightKg, prescription?.weightKg)
+        XCTAssertEqual(snapshot.restSecondsRemaining, restRemaining)
+        XCTAssertEqual(snapshot.restExpiresAt, expiresAt)
+        XCTAssertEqual(snapshot.completedSets.count, sets.count)
+        XCTAssertEqual(snapshot.inferenceRetryNeeded, retryNeeded)
+        XCTAssertEqual(snapshot.pendingRetryExercise?.exerciseId, pendingExercise?.exerciseId)
+        // currentFallbackReason is an enum without Equatable in scope here — compare nil-ness.
+        XCTAssertEqual(snapshot.currentFallbackReason == nil, fallback == nil)
+
+        // During .active the snapshot's lastPerformanceSets reflects the live exercise's
+        // cached history (nil here — no prior sessions in the test DB), proving the
+        // derivation runs inside the same atomic hop.
+        XCTAssertNil(snapshot.lastPerformanceSets, "No prior-session history in test → nil")
     }
 }
 

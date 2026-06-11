@@ -59,6 +59,29 @@ nonisolated enum SessionState: Sendable, Equatable {
     }
 }
 
+// MARK: - WorkoutUISnapshot
+
+/// Atomic snapshot of every actor-isolated field `WorkoutViewModel.pullState()`
+/// needs to render the live session UI (#369 [20]). Returning all of these in ONE
+/// actor hop avoids the torn read that `pullState` previously produced by awaiting
+/// ~9 separate isolated properties — between hops the actor could advance, so the
+/// published `sessionState` and `currentPrescription` (etc.) could be from different
+/// instants. `lastPerformance` is the cached last-session set logs for the *live*
+/// exercise, resolved inside the actor so the liveExercise derivation is part of the
+/// same consistent snapshot.
+nonisolated struct WorkoutUISnapshot: Sendable {
+    let sessionState: SessionState
+    let currentPrescription: SetPrescription?
+    let currentFallbackReason: FallbackReason?
+    let restSecondsRemaining: Int
+    let restExpiresAt: Date?
+    let completedSets: [SetLog]
+    let inferenceRetryNeeded: Bool
+    let inferenceRetryReason: FallbackReason?
+    let pendingRetryExercise: PlannedExercise?
+    let lastPerformanceSets: [SetLog]?
+}
+
 // MARK: - WorkoutSessionManager
 
 /// Actor-isolated orchestrator for the full workout session lifecycle.
@@ -116,6 +139,13 @@ actor WorkoutSessionManager {
     /// Monotonically increasing generation counter. Incremented each completeSet().
     /// Inference results whose captured generation < inferenceGeneration are discarded.
     private var inferenceGeneration: Int = 0
+    /// Idempotency latch for finishSession (#369 [8]). Set the instant finishSession
+    /// begins so concurrent/duplicate end paths (endSession from the rest-timer Task
+    /// racing endSessionEarly from the UI) run the side effects — session-count
+    /// increment, trainee-model enqueue, completion PATCH — at most once.
+    /// Reset wherever a fresh session lifecycle begins (startSession / resumeSession /
+    /// resetToIdle).
+    private var isFinishingSession: Bool = false
     /// Running rest-timer Task reference so we can cancel it on early exit.
     private var restTimerTask: Task<Void, Never>?
 
@@ -232,6 +262,7 @@ actor WorkoutSessionManager {
         self.swapRecords = []
         self.inflightRequestCount = 0
         self.inferenceGeneration = 0
+        self.isFinishingSession = false   // #369 [8] — fresh session, latch cleared
 
         // FB-003: Read user biometrics from UserDefaults for WorkoutContext assembly.
         self.cachedUserProfile = Self.loadUserProfileFromDefaults()
@@ -652,6 +683,13 @@ actor WorkoutSessionManager {
         guard let exercise = pendingRetryExercise else { return false }
         let setNumber = pendingRetrySetNumber
 
+        // #369 [19] — capture the generation BEFORE the network/post-processing awaits.
+        // retryInference previously applied its result with no generation re-check, so a
+        // result that resolved AFTER a concurrent completeSet()/skip/swap advanced the
+        // session could clobber the newer state. Participate in the same guard discipline
+        // as handleInferenceResult: drop the result if the generation moved on.
+        let generation = inferenceGeneration
+
         // Clear failed state before retrying so UI shows "thinking" state
         currentFallbackReason = nil
         inferenceRetryNeeded = false
@@ -664,6 +702,10 @@ actor WorkoutSessionManager {
             // #318 U7: snap → clamp → marker — same shared post-processor as
             // handleInferenceResult (the only other live LLM path).
             rx = await postProcessPrescription(rx, for: exercise)
+            // #369 [19] — re-check the generation after the awaits (assembleWorkoutContext,
+            // prescribe, postProcessPrescription all suspend). If the session advanced in
+            // the meantime, this prescription is stale: drop it without mutating state.
+            guard generation == inferenceGeneration else { return false }
             if rx.safetyFlags.contains(.painReported) { rx.restSeconds = max(rx.restSeconds, 180) }
             currentPrescription = rx
             currentFallbackReason = nil
@@ -675,6 +717,9 @@ actor WorkoutSessionManager {
             sessionState = .active(exercise: exercise, setNumber: setNumber)
             return true
         case .fallback(let reason):
+            // #369 [19] — a stale fallback must not re-arm the retry sheet for a set the
+            // session has already moved past.
+            guard generation == inferenceGeneration else { return false }
             currentFallbackReason = reason
             inferenceRetryReason = reason
             inferenceRetryNeeded = true
@@ -872,7 +917,18 @@ actor WorkoutSessionManager {
         self.cachedWeeklyFatigue = nil
         self.cachedLastPerformance = [:]
         self.inflightRequestCount = 0
-        self.inferenceGeneration = 0
+        // #369 [21] — bump (not reset to 0) so any inference Task still in flight from
+        // BEFORE the pause is rejected by the generation guard when it returns. The actor
+        // is always idle here (resume guards on .idle, and the prior pause/end ran
+        // resetToIdle which left the counter at 0), so this advances 0 → 1. A pre-pause
+        // straggler that captured generation 0 (the common case: paused before/just as
+        // the first prescription landed) therefore no longer matches the resumed
+        // generation. NOTE: a straggler that captured a generation ≥ 1 deeper into the
+        // pre-pause session could still coincide with the resumed counter once it climbs
+        // there; fully closing that requires a lifetime-monotonic counter (never zeroed in
+        // resetToIdle) — deferred as a wider change. Documented in PR / report.
+        self.inferenceGeneration += 1
+        self.isFinishingSession = false   // #369 [8] — resumed session can end again
         self.inferenceRetryNeeded = false
         self.inferenceRetryReason = nil
         self.pendingRetryExercise = nil
@@ -985,6 +1041,7 @@ actor WorkoutSessionManager {
         swapRecords = []
         inflightRequestCount = 0
         inferenceGeneration = 0
+        isFinishingSession = false   // #369 [8] — clean slate for the next session
         currentPrescription = nil
         currentFallbackReason = nil
         inferenceRetryNeeded = false
@@ -1070,6 +1127,14 @@ actor WorkoutSessionManager {
         currentSetNumber = 1
         currentPrescription = nil
         inferenceRetryNeeded = false
+
+        // #369 [21] — bump the generation BEFORE firing inference for the swapped-in
+        // exercise. A swap changes "what we're inferring for" mid-session: an inference
+        // Task for the OLD exercise may still be in flight, having captured the prior
+        // generation. Bumping here means that stale result is rejected by the guard in
+        // handleInferenceResult when it returns, instead of clobbering the new
+        // exercise's prescription. Mirrors completeSet()/skipCurrentSet().
+        inferenceGeneration += 1
 
         // Embed a memory event so the AI learns about the swap
         let userId = sess.userId.uuidString
@@ -1532,6 +1597,36 @@ actor WorkoutSessionManager {
         cachedLastPerformance[exerciseId]
     }
 
+    /// #369 [20] — returns every field `WorkoutViewModel.pullState()` needs in ONE
+    /// actor hop, so the published UI state is internally consistent. The liveExercise
+    /// derivation (and its `lastPerformance` lookup) mirror the prior pullState logic
+    /// exactly — during .active/.resting the live exercise is the one in the state;
+    /// otherwise it is the pending-retry exercise (relevant during .preflight, where
+    /// the manual-fallback path targets pendingRetryExercise).
+    func uiSnapshot() -> WorkoutUISnapshot {
+        let liveExercise: PlannedExercise?
+        switch sessionState {
+        case .active(let exercise, _), .resting(let exercise, _):
+            liveExercise = exercise
+        default:
+            liveExercise = pendingRetryExercise
+        }
+        let lastPerformanceSets: [SetLog]? = liveExercise.flatMap { cachedLastPerformance[$0.exerciseId] }
+
+        return WorkoutUISnapshot(
+            sessionState: sessionState,
+            currentPrescription: currentPrescription,
+            currentFallbackReason: currentFallbackReason,
+            restSecondsRemaining: restSecondsRemaining,
+            restExpiresAt: restExpiresAt,
+            completedSets: completedSets,
+            inferenceRetryNeeded: inferenceRetryNeeded,
+            inferenceRetryReason: inferenceRetryReason,
+            pendingRetryExercise: pendingRetryExercise,
+            lastPerformanceSets: lastPerformanceSets
+        )
+    }
+
     /// Refreshes `cachedLastPerformance` for `exercise`. Called at session
     /// start and at EVERY exercise transition: next exercise in completeSet,
     /// skip into a new exercise, swapExercise, and resume.
@@ -1787,6 +1882,19 @@ actor WorkoutSessionManager {
     // MARK: - Session Termination
 
     private func finishSession(earlyExitReason: String?) async {
+        // #369 [8] — idempotency guard. endSession() (rest-timer Task, completeSet
+        // last-set, skip last-set, resume edge case) and endSessionEarly() can both
+        // reach here for the same session; the actor serialises them but each would
+        // otherwise run the full body, double-incrementing the session count and
+        // double-enqueueing the trainee-model update. Check-and-set on entry so the
+        // side effects run exactly once. The latch is cleared when a fresh session
+        // begins (startSession / resumeSession / resetToIdle).
+        guard !isFinishingSession else {
+            print("[WorkoutSessionManager] finishSession ignored — already finishing/finished")
+            return
+        }
+        isFinishingSession = true
+
         // Clear crash sentinel — session ending normally or via early exit.
         // pauseSession() overwrites this instead of clearing it.
         PausedSessionState.clear()
