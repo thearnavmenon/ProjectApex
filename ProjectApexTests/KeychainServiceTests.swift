@@ -205,4 +205,47 @@ final class KeychainServiceTests: XCTestCase {
         let fromB = try serviceB.retrieve(.anthropicAPIKey)
         XCTAssertNil(fromB, "serviceB must not see items stored by serviceA.")
     }
+
+    // MARK: - ThisDeviceOnly accessibility attribute (BUG-6 / #369)
+
+    /// Confirms that the store→retrieve round-trip still works after the
+    /// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` change (BUG-6 / #369).
+    func test_storeAndRetrieve_thisDeviceOnly_roundTrips() throws {
+        let service = makeService()
+        defer { deleteAll(from: service) }
+
+        try service.store("sk-ant-api03-TESTKEY", for: .anthropicAPIKey)
+        let retrieved = try service.retrieve(.anthropicAPIKey)
+
+        XCTAssertEqual(retrieved, "sk-ant-api03-TESTKEY",
+                       "Round-trip must succeed under kSecAttrAccessibleWhenUnlockedThisDeviceOnly.")
+    }
+
+    /// Confirms that the `kSecAttrAccessible` attribute on stored items is
+    /// `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` (not the old WhenUnlocked
+    /// value that permitted backup extraction).
+    func test_storedItem_hasThisDeviceOnlyAccessibility() throws {
+        let service = makeService()
+        defer { deleteAll(from: service) }
+
+        try service.store("canary-value", for: .anthropicAPIKey)
+
+        // Query back the item's attributes to inspect kSecAttrAccessible.
+        var query: [String: Any] = [
+            kSecClass as String:            kSecClassGenericPassword,
+            kSecAttrService as String:      service.serviceName,
+            kSecAttrAccount as String:      KeychainKey.anthropicAPIKey.rawValue,
+            kSecMatchLimit as String:       kSecMatchLimitOne,
+            kSecReturnAttributes as String: true
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        XCTAssertEqual(status, errSecSuccess, "Attribute query must succeed.")
+        let attrs = result as? [String: Any]
+        let accessible = attrs?[kSecAttrAccessible as String] as? String
+        XCTAssertEqual(accessible, kSecAttrAccessibleWhenUnlockedThisDeviceOnly as String,
+                       "Stored item must use kSecAttrAccessibleWhenUnlockedThisDeviceOnly to prevent backup extraction.")
+        _ = query  // silence unused-variable warning
+    }
 }

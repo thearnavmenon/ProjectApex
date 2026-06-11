@@ -487,7 +487,9 @@ actor SessionPlanService {
             let wrapper = try JSONDecoder().decode(SessionPlanWrapper.self, from: data)
             return wrapper.sessionPlan
         } catch let err {
+            #if DEBUG
             print("[SessionPlanService] Decode failure. Raw response:\n\(rawResponse)")
+            #endif
             throw SessionPlanError.decodingFailed(
                 "Session plan decode failed: \(err.localizedDescription). Raw: \(String(extracted.prefix(400)))"
             )
@@ -507,7 +509,9 @@ actor SessionPlanService {
         // The session is not rejected; primaryMuscle will fall back to the LLM's own value.
         for ex in payload.exercises {
             if ExerciseLibrary.lookup(ex.exerciseId) == nil {
+                #if DEBUG
                 print("[SessionPlanService] ⚠️ Non-canonical exercise_id: '\(ex.exerciseId)' — not in ExerciseLibrary. primary_muscle will use LLM-provided value.")
+                #endif
             }
         }
 
@@ -564,7 +568,9 @@ actor SessionPlanService {
                 .compactMap { $0.first }
                 .map { dateFormatter.string(from: $0.loggedAt) }
                 .sorted()
+            #if DEBUG
             print("[SessionPlanService] Exercise history for \(exerciseId): \(sessionDates.count) session(s) found, dates: \(sessionDates)")
+            #endif
         }
 
         // Group set logs by exerciseId

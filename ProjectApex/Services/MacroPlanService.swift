@@ -189,7 +189,9 @@ actor MacroPlanService {
 
         let systemPrompt = try Self.loadSystemPrompt()
 
+        #if DEBUG
         print("[MacroPlanService] Generating macro skeleton — training_days_per_week: \(trainingDaysPerWeek), historical_day_labels: \(historicalDayLabels)")
+        #endif
 
         let request = MacroPlanRequest(
             userProfile: MacroPlanUserProfile(
@@ -255,7 +257,9 @@ actor MacroPlanService {
             let wrapper = try JSONDecoder().decode(MacroPlanSkeletonWrapper.self, from: data)
             return wrapper.macroPlan
         } catch let err {
+            #if DEBUG
             print("[MacroPlanService] Decode failure. Raw response:\n\(rawResponse)")
+            #endif
             throw MacroPlanError.decodingFailed(
                 "Skeleton decode failed: \(err.localizedDescription). Raw: \(String(extracted.prefix(400)))"
             )

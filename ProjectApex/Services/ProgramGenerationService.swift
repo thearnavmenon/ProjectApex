@@ -420,7 +420,9 @@ actor ProgramGenerationService {
             return wrapper.mesocycleTemplate
         } catch let err {
             // Log the full raw response so decode failures are diagnosable.
+            #if DEBUG
             print("[ProgramGenerationService] Decode failure. Full raw response:\n\(rawResponse)")
+            #endif
             let preview = String(jsonString.prefix(600))
             throw ProgramGenerationError.decodingFailed(
                 "Template decode failed: \(err.localizedDescription). Raw: \(preview)"
@@ -496,7 +498,9 @@ actor ProgramGenerationService {
         // Validate exercise IDs against canonical library — log warnings for non-canonical IDs.
         for ex in template.exercises {
             if ExerciseLibrary.lookup(ex.exerciseId) == nil {
+                #if DEBUG
                 print("[ProgramGenerationService] ⚠️ Non-canonical exercise_id: '\(ex.exerciseId)' — not in ExerciseLibrary.")
+                #endif
             }
         }
 
