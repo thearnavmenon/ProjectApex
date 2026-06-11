@@ -7,6 +7,24 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — Four concurrency fixes in the live workout loop: no double-counting, no stale results, no torn reads (part of #369)
+
+Problem: the same cross-dimension audit (issue #369) found four subtle threading problems in the actor that runs a live workout and in the screen that reads from it. None of them showed up every time — they only bite when two things happen close together.
+
+1. Ending a session could run its wrap-up twice. The rest timer can fire "the session is over" at almost the same moment the user taps "end early". Both reached the same finish routine, and each one bumped the saved session count and queued a learning-update for the AI. So one workout could count as two. Fix: a one-way latch flipped the instant the finish routine starts — the second caller just returns. The latch is cleared whenever a brand-new session begins, so the next workout still counts.
+
+2. The "Retry" button could apply a stale answer. When the AI fails and the user taps Retry, the app asks again — but if the user moved on (finished a set, skipped, or swapped the exercise) while that retry was still in flight, the late answer used to overwrite the newer state. Fix: the retry now remembers which "generation" of the session it belongs to and throws its own answer away if the session has moved on, exactly like the normal inference path already did.
+
+3. Swapping an exercise (or resuming a paused session) didn't cancel the old in-flight answer. The app already had a "generation" counter that invalidates stale answers, but swap and resume never advanced it — so an answer meant for the old exercise could land on the new one. Fix: bump the counter at both points. (Judgment call on resume, documented in code + PR: bumping rather than resetting to zero catches the most common straggler — paused right as the first answer was coming back; a fully bulletproof version needs a wider change and is noted as deferred.)
+
+4. The live screen read the actor one field at a time — about nine separate hops. Between hops the actor could change, so the screen could show, say, a prescription from one moment next to a state from another. Fix: one method on the actor returns all the fields at once, so the screen always paints a single consistent moment.
+
+How checked: built clean (build-exit=0). Full suite green — 553 XCTest cases (543 passed, 0 failed, 10 skipped live-API/integration tests) plus 293 Swift Testing tests (0 failed). Four new tests: end-session runs its side effects once, the retry guard drops a stale result after a swap bumps the generation, the latch resets for the next session, and the one-hop snapshot matches the individual fields. The hard-to-reproduce timing races are pinned with deterministic latch/guard tests rather than flaky sleeps.
+
+Status: PR open, not yet merged. Part of #369.
+
+---
+
 ## 2026-06-12 — Five performance fixes: less CPU, less memory, fewer wasteful reads (PR #374, part of #369)
 
 Problem: a cross-dimension audit (issue #369) found five efficiency problems that were silently burning CPU and memory on every session.

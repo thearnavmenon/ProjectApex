@@ -236,45 +236,27 @@ final class WorkoutViewModel {
     /// Pulls the latest actor state onto @MainActor properties.
     /// Safe to call from any context — awaits on the actor then updates self.
     func pullState() async {
-        let state = await manager.sessionState
-        let prescription = await manager.currentPrescription
-        let fallbackReason = await manager.currentFallbackReason
-        let restRemaining = await manager.restSecondsRemaining
-        let expiresAt = await manager.restExpiresAt
-        let sets = await manager.completedSets
-        let retryNeeded = await manager.inferenceRetryNeeded
-        let retryReason = await manager.inferenceRetryReason
-        let pendingExercise = await manager.pendingRetryExercise
+        // #369 [20] — single atomic actor hop. Previously this awaited ~9 separate
+        // isolated properties, so the actor could advance between hops and publish a
+        // torn snapshot (e.g. sessionState from one instant, currentPrescription from
+        // another). uiSnapshot() returns all of them — including the live exercise's
+        // last-session history — captured at one consistent instant. Behaviour is
+        // identical; only the read is now atomic.
+        let snapshot = await manager.uiSnapshot()
 
-        // Last-session history for the live exercise (#318 U7 / G-F6 + G-F1):
-        // powers the "Last time" line and the manual-fallback gating. During
-        // .preflight the retry exercise (if any) is the live one.
-        let liveExercise: PlannedExercise?
-        switch state {
-        case .active(let exercise, _), .resting(let exercise, _):
-            liveExercise = exercise
-        default:
-            liveExercise = pendingExercise
-        }
-        let lastPerformance: [SetLog]?
-        if let liveExercise {
-            lastPerformance = await manager.lastPerformance(for: liveExercise.exerciseId)
-        } else {
-            lastPerformance = nil
-        }
-
-        sessionState = state
-        currentPrescription = prescription
-        restSecondsRemaining = restRemaining
-        restExpiresAt = expiresAt
-        completedSets = sets
+        let fallbackReason = snapshot.currentFallbackReason
+        sessionState = snapshot.sessionState
+        currentPrescription = snapshot.currentPrescription
+        restSecondsRemaining = snapshot.restSecondsRemaining
+        restExpiresAt = snapshot.restExpiresAt
+        completedSets = snapshot.completedSets
         isAIOffline = fallbackReason != nil
         fallbackDescription = fallbackReason.map { Self.fallbackDescription(for: $0) }
         developerFallbackDescription = fallbackReason.map { Self.developerFallbackDescription(for: $0) }
-        showInferenceRetrySheet = retryNeeded
-        retryFailureDescription = retryReason.map { Self.retryDescription(for: $0) }
-        retryExercise = pendingExercise
-        lastPerformanceSets = lastPerformance
+        showInferenceRetrySheet = snapshot.inferenceRetryNeeded
+        retryFailureDescription = snapshot.inferenceRetryReason.map { Self.retryDescription(for: $0) }
+        retryExercise = snapshot.pendingRetryExercise
+        lastPerformanceSets = snapshot.lastPerformanceSets
     }
 
     /// Token for the currently-running polling task, so a second caller (e.g.
