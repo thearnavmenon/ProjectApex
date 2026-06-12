@@ -17,7 +17,7 @@ Started 2026-06-07.
 
 **How I checked.** The whole app builds, and all 7 sign-in tests pass (the change doesn't affect the failure/timeout cases). The user spotted that this was a timing problem, not a wifi problem — they were right.
 
-**Status:** fix on branch, building green, tests green, PR to follow.
+**Status:** merged as PR #392 — sign-in now retries with a longer, bounded wait; build + 7/7 sign-in tests green.
 
 ---
 
