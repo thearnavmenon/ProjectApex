@@ -360,3 +360,112 @@ final class HangingURLProtocol: URLProtocol {
     override func startLoading() { /* intentionally never finishes */ }
     override func stopLoading() {}
 }
+
+// MARK: - UserIdentityResolver (#369 slice 3: repoint resolvedUserId to auth.uid())
+
+/// Locks the identity-resolution precedence that `AppDependencies.resolvedUserId`
+/// and onboarding's user-insert both delegate to. Uses a per-test scoped
+/// `KeychainService` so the Keychain state is injected deterministically.
+final class UserIdentityResolverTests: XCTestCase {
+
+    private let placeholder = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+
+    private func makeScopedKeychain() -> KeychainService {
+        KeychainService(serviceName: "com.projectapex.tests.identity.\(UUID().uuidString)")
+    }
+
+    private func clearIdentityKeys(_ keychain: KeychainService) {
+        try? keychain.delete(.supabaseAuthUserId)
+        try? keychain.delete(.userId)
+    }
+
+    // MARK: resolve — auth uid is the primary source
+
+    func test_resolve_returnsAuthUid_whenSessionExists() throws {
+        let keychain = makeScopedKeychain()
+        clearIdentityKeys(keychain)
+        let authUid = UUID()
+        try keychain.store(authUid.uuidString, for: .supabaseAuthUserId)
+
+        let resolved = UserIdentityResolver.resolve(keychain: keychain, placeholder: placeholder)
+
+        XCTAssertEqual(resolved, authUid,
+            "resolvedUserId must be the persisted auth.uid() when a session exists")
+        clearIdentityKeys(keychain)
+    }
+
+    func test_resolve_authUid_winsOverUserIdMirror() throws {
+        let keychain = makeScopedKeychain()
+        clearIdentityKeys(keychain)
+        let authUid = UUID()
+        let mirrored = UUID()
+        try keychain.store(authUid.uuidString, for: .supabaseAuthUserId)
+        try keychain.store(mirrored.uuidString, for: .userId)
+
+        let resolved = UserIdentityResolver.resolve(keychain: keychain, placeholder: placeholder)
+
+        XCTAssertEqual(resolved, authUid,
+            "the auth uid takes precedence over the .userId mirror")
+        clearIdentityKeys(keychain)
+    }
+
+    // MARK: resolve — first-launch fallback
+
+    func test_resolve_fallsBackToPlaceholder_whenNoSessionAndNoMirror() {
+        let keychain = makeScopedKeychain()
+        clearIdentityKeys(keychain)
+
+        let resolved = UserIdentityResolver.resolve(keychain: keychain, placeholder: placeholder)
+
+        XCTAssertEqual(resolved, placeholder,
+            "with no auth uid and no .userId, the transitional placeholder is the fallback")
+        clearIdentityKeys(keychain)
+    }
+
+    func test_resolve_fallsBackToUserIdMirror_whenNoAuthUidYet() throws {
+        // A pre-slice-1 install (or mid-launch before the session restores) that
+        // already minted a .userId keeps reading it rather than the placeholder.
+        let keychain = makeScopedKeychain()
+        clearIdentityKeys(keychain)
+        let mirrored = UUID()
+        try keychain.store(mirrored.uuidString, for: .userId)
+
+        let resolved = UserIdentityResolver.resolve(keychain: keychain, placeholder: placeholder)
+
+        XCTAssertEqual(resolved, mirrored,
+            "with no auth uid but an existing .userId, the mirror is the fallback (not placeholder)")
+        clearIdentityKeys(keychain)
+    }
+
+    // MARK: onboardingUserId — never the placeholder
+
+    func test_onboardingUserId_isAuthUid_whenSessionExists() throws {
+        let keychain = makeScopedKeychain()
+        clearIdentityKeys(keychain)
+        let authUid = UUID()
+        try keychain.store(authUid.uuidString, for: .supabaseAuthUserId)
+
+        let onboardingId = UserIdentityResolver.onboardingUserId(
+            keychain: keychain, placeholder: placeholder
+        )
+
+        XCTAssertEqual(onboardingId, authUid,
+            "onboarding writes users.id = auth.uid() so slice 5's RLS policy matches")
+        clearIdentityKeys(keychain)
+    }
+
+    func test_onboardingUserId_isNil_whenNoSessionYet() {
+        // The guard that prevents writing a placeholder-keyed users row: with no
+        // resolved identity, onboarding must skip the insert (returns nil).
+        let keychain = makeScopedKeychain()
+        clearIdentityKeys(keychain)
+
+        let onboardingId = UserIdentityResolver.onboardingUserId(
+            keychain: keychain, placeholder: placeholder
+        )
+
+        XCTAssertNil(onboardingId,
+            "no auth session yet → onboarding must NOT write a placeholder-keyed users row")
+        clearIdentityKeys(keychain)
+    }
+}

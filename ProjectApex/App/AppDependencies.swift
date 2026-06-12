@@ -62,16 +62,18 @@ final class AppDependencies {
     /// Matches the hardcoded UUID used in WorkoutSessionManager for session creation.
     static let placeholderUserId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
-    /// Returns the user UUID stored in Keychain if available, falling back to
-    /// the MVP placeholder. Use this for all Supabase writes and AI calls so
-    /// that real user IDs flow through automatically once onboarding has run.
+    /// The app's user identity for all Supabase writes and AI calls. As of #369
+    /// slice 3 this is the anonymous-auth `auth.uid()` slice 1 persists to
+    /// `.supabaseAuthUserId`, read synchronously so this stays a sync property.
+    ///
+    /// First-launch race: on a fresh install the async anon sign-in may not have
+    /// completed the first time this is read, so the resolver falls back to the
+    /// `.userId` onboarding mirror and finally the placeholder. That fallback is
+    /// safe THIS slice only because RLS is still off (placeholder-keyed reads
+    /// work); it goes vestigial once RLS lands (slice 5) + slice 1's readiness
+    /// gate guarantees a session before any RLS-gated read. See `UserIdentityResolver`.
     var resolvedUserId: UUID {
-        if let stored = try? keychainService.retrieve(.userId),
-           !stored.isEmpty,
-           let uuid = UUID(uuidString: stored) {
-            return uuid
-        }
-        return Self.placeholderUserId
+        UserIdentityResolver.resolve(keychain: keychainService, placeholder: Self.placeholderUserId)
     }
 
     // MARK: Private: Stored Anthropic key for re-init
