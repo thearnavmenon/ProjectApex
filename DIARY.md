@@ -7,6 +7,20 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — Writing down what the auth work decided, so we don't forget (auth slice 6, docs — part of #369)
+
+**What this is.** Slices 1–5 of the auth/RLS workstream all shipped and the database lock is now live. This last slice is just paperwork: it writes down the decisions in a permanent record (ADR-0027) so future contributors understand why we went the way we did, and it fixes two older records that had an assumption that turned out to be wrong.
+
+**What ADR-0027 records.** The audit found that row-level security was switched off on the five core tables — workouts, programs, trainee models, users, and set logs — so the per-user rules that existed for programs and set logs were doing nothing. The gym-profiles table had its lock on but a rule that said "everyone can see everything." The server functions trusted the user ID in the request body with no check on who was actually sending the request (an IDOR: anyone who found the URL could act as any user). The decision: give every fresh install a real Supabase login via anonymous sign-in (no account creation UI needed), turn on the database lock on all six tables with proper "you can only see your own rows" rules, and make the server functions verify the login token before touching the database. We also accepted that old data written before this change — tagged with a locally-generated device ID, not a real login ID — becomes invisible; that's the price of the fix at alpha scale.
+
+**The two records that needed a correction.** ADR-0016 (written when we removed the service-role key from the app) said "all client database access is subject to RLS." ADR-0018 (the atomic program-save RPC) said the programs owner rule governs its writes. Both were saying what *should* be true; neither was true at the time because the lock was off. Both ADRs now have a short note at the top explaining that their "RLS is enforcing" assumption held only after ADR-0027 turned the lock on. Their core decisions (no service-role key on the client; atomic save via RPC) are unaffected.
+
+**CONTEXT updated.** Added a new "Auth, identity, and access control" section so the terms — anonymous identity, resolvedUserId, RLS, the Edge Function ownership check — are part of the domain glossary.
+
+**Status:** docs only. No code, no prod impact. PR to be reviewed and merged.
+
+---
+
 ## 2026-06-12 — The database now hides everyone else's data from you (auth slice 5 — the gate-flip, part of #369)
 
 **Problem.** This is the keystone of the auth work. Up to now the database had *no* lock on the core tables — workouts, programs, your trainee model, your user row, and your set logs were all readable and writable by any logged-in client, because "row-level security" (the database's own per-user filter) was switched off on them. The two tables that *did* have it on were either fine (the memory embeddings) or wide open anyway (gym profiles had an "anon full access" rule that let everyone see everything). Slices 1–4 set up real per-user identities and made the server functions check them; this slice finally turns the database lock itself.

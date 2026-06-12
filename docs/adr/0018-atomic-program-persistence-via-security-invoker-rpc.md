@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-06-04
 
+> **Partial supersession note (2026-06-12):** This ADR stated that the `SECURITY INVOKER` RPC means "the existing 'programs: owner access' policy … governs both the UPDATE and the INSERT/UPSERT." That claim assumed RLS was enabled on `programs` — it was not. [ADR-0027](0027-supabase-anon-auth-and-enforced-rls.md) (accepted 2026-06-12) enabled RLS on `programs` (and the other core tables), so the statement is now true. The atomicity rationale, idempotency design, and `SECURITY INVOKER` choice documented here are unaffected.
+
 ## Context
 
 Persisting a (re)generated program to Supabase was a two-step, non-transactional
@@ -105,4 +107,4 @@ UPDATE's effect — correct and retry-safe.
 ## Supersedes / supersedes-by
 
 Supersedes the pre-#189 non-transactional client-side `deactivatePrograms()`-then-
-`insert()` program-persist sequence. Not yet superseded.
+`insert()` program-persist sequence. Partially superseded by [ADR-0027](0027-supabase-anon-auth-and-enforced-rls.md): the "programs owner policy governs both operations" claim is now correct (RLS enabled on `programs`); the atomicity and idempotency design stands.

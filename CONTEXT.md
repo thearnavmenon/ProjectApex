@@ -126,6 +126,24 @@ _Avoid_: AI accuracy, calibration
 Capability follows the user across gyms; per-session generation is gym-aware. See ADR-0002, ADR-0005.
 _Avoid_: gym switch, multi-gym sync, cross-exercise transfer (different concept)
 
+### Auth, identity, and access control
+
+**Anonymous identity** (`auth.uid()`):
+Every install signs in via `auth.signInAnonymously()` at launch — Supabase issues a real JWT and a stable `sub` that becomes `auth.uid()` for that device. No user-facing account or sign-in UI. The bundled non-secret anon key (`SUPABASE_ANON_KEY`) is the only credential the client holds. See ADR-0027.
+_Avoid_: keychain UUID (retired), locally-generated user ID, placeholder identity
+
+**`resolvedUserId`**:
+The iOS app's canonical user identifier — always `auth.uid()` from the live Supabase session (not a keychain-generated UUID). Written to `users.id` at onboarding, used as `user_id` on all owner-scoped tables. See ADR-0027.
+_Avoid_: device UUID, keychain UUID (both were the pre-ADR-0027 source, now retired)
+
+**Row Level Security (RLS)**:
+Enforced on all six core tables (`workout_sessions`, `programs`, `trainee_models`, `users`, `set_logs`, `gym_profiles`) via migration `20260612020101_enable_rls_owner_policies.sql`. Each table carries a `FOR ALL USING(user_id = auth.uid()) WITH CHECK(user_id = auth.uid())` owner policy (or equivalent for tables whose PK is the user id, or whose ownership is via a foreign key). An anon-role connection with `auth.uid() = NULL` matches no rows. See ADR-0027.
+_Avoid_: "RLS is on" without context — RLS was off on the core tables until ADR-0027 (2026-06-12)
+
+**Edge Function ownership check** (JWT `sub` gate):
+Both Edge Functions (`update-trainee-model`, `update-trainee-goal`) connect as `postgres` (`BYPASSRLS`), so RLS cannot protect their write path. `supabase/functions/_shared/jwt-owner.ts` decodes the `Authorization: Bearer` JWT and asserts `sub == body.user_id`; a mismatch yields 403, a missing/malformed token yields 401. This is the IDOR fix and the EF's access gate — it is structural, not belt-and-suspenders. See ADR-0027.
+_Avoid_: "RLS protects the EF path" (it cannot — postgres role bypasses RLS)
+
 ### Build process (Mattpocock skills vocabulary)
 
 **HITL**:
