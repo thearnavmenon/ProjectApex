@@ -7,6 +7,20 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — The database now hides everyone else's data from you (auth slice 5 — the gate-flip, part of #369)
+
+**Problem.** This is the keystone of the auth work. Up to now the database had *no* lock on the core tables — workouts, programs, your trainee model, your user row, and your set logs were all readable and writable by any logged-in client, because "row-level security" (the database's own per-user filter) was switched off on them. The two tables that *did* have it on were either fine (the memory embeddings) or wide open anyway (gym profiles had an "anon full access" rule that let everyone see everything). Slices 1–4 set up real per-user identities and made the server functions check them; this slice finally turns the database lock itself.
+
+**What changed.** One forward migration (plus its documentation-only reverse). It (1) turns on row-level security for the five unprotected tables; (2) adds an "owner access" rule to each that says, in effect, *you can only see and only write rows tagged with your own login id* — both the read side (USING) and the write side (WITH CHECK), so a client can't even sneak in a row owned by someone else; for set logs (which have no owner column of their own) ownership is traced through the workout session they belong to; for the user table the row's own id is the owner; and (3) replaces the gym-profiles "everyone sees everything" rule with the same owner-only rule. No changes to who's granted access at the coarse level — once these id-based rules are on, the anonymous role matches no rows anyway, so the old grants are harmless. The server functions keep working because they connect with the privileged account that skips these rules and do their own id check (from slice 4).
+
+**How checked.** SQL review against the baseline schema only — I could not run it against a database here (the local Postgres in Docker is down; `supabase db lint` / `migration list` both failed with connection-refused, as expected). I read the exact current table, column, and policy names out of the baseline and confirmed every "drop the old rule" line names the real existing rule verbatim, the owner columns are right, and the paren-balanced SQL matches the baseline's style. I also checked the reverse migration exactly undoes the forward one (turns the lock back off on those five tables, drops the new rules, and restores the original gym-profiles "anon full access" rule). Touched only the two migration files and this diary — no app code, no server functions, no other files.
+
+**Heads-up for whoever merges this:** merging runs `db push` in CI, which **turns the lock on in production** — this is the live data-visibility flip. Any rows still tagged with the old placeholder id (not a real login id) become invisible to everyone; that's the accepted alpha data-wipe, and clients must already be on the slice-3 build (which tags data with the real login id) for their data to remain visible.
+
+**Status:** merged as PR #386 — RLS enabled on production (the gate-flip), with the user's explicit go.
+
+---
+
 ## 2026-06-12 — Fix: the end-to-end smoke test now sends a login token (PR #387, part of #369)
 
 **Problem.** Slice 4 added the server-side ownership check (the function rejects a request whose login token doesn't match the body's user id). But the end-to-end "smoke" test for the trainee-model function fires a real HTTP request at the served function with **no** login token — so the new check correctly returned 401, the smoke test failed, and because CI's deploy step only runs when the Edge-Function tests pass, **the deploy was skipped and slice 4's check never actually went live.** (The slice-4 agent couldn't catch this — the smoke test needs a live local Postgres in Docker, which wasn't available, so it only ran the unit tests.)
