@@ -9,11 +9,17 @@
 //   deno test supabase/functions/update-trainee-model/index_test.ts
 
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { capTopSets, derivedTrainedSets, validateRequest } from "./index.ts";
+import {
+  capTopSets,
+  derivedTrainedSets,
+  handleRequest,
+  validateRequest,
+} from "./index.ts";
 import { TOP_SET_RETENTION_COUNT } from "../_shared/constants.ts";
 
 const VALID_USER_ID = "11111111-1111-4111-8111-111111111111";
 const VALID_SESSION_ID = "22222222-2222-4222-8222-222222222222";
+const OTHER_USER_ID = "33333333-3333-4333-8333-333333333333";
 
 function baseRequest(payloadOverrides: Record<string, unknown> = {}) {
   return {
@@ -264,4 +270,85 @@ Deno.test("capTopSets_over_count_keeps_newest_N_from_tail", () => {
   // Spot-check the ends: oldest dropped, newest retained.
   assertEquals(capped[0], extra);
   assertEquals(capped[capped.length - 1], TOP_SET_RETENTION_COUNT + extra - 1);
+});
+
+// ─── #369 slice 4: handleRequest JWT-`sub` ownership check (closes the IDOR) ──
+//
+// The handler derives the caller from the verified JWT `sub` (decode-only; the
+// platform verifies the signature) and rejects when it doesn't match the body
+// `user_id`. The reject paths return BEFORE getSql, so no DB is needed. A
+// fake-but-well-formed JWT (header.payload.signature; payload base64url-encodes
+// the claims; dummy signature) drives every case.
+
+function b64url(s: string): string {
+  const bytes = new TextEncoder().encode(s);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function fakeJwt(sub: string): string {
+  const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payload = b64url(JSON.stringify({ sub, role: "authenticated" }));
+  return `${header}.${payload}.dummy-signature-not-verified`;
+}
+
+function postRequest(
+  body: Record<string, unknown>,
+  authorization?: string,
+): Request {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (authorization !== undefined) headers.Authorization = authorization;
+  return new Request("https://example.test/update-trainee-model", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
+
+function validBody(): Record<string, unknown> {
+  return {
+    user_id: VALID_USER_ID,
+    session_id: VALID_SESSION_ID,
+    session_payload: {},
+  };
+}
+
+Deno.test("handleRequest_sub_mismatch_returns_403", async () => {
+  // Authenticated as OTHER, but body claims VALID_USER_ID → IDOR → 403.
+  const res = await handleRequest(
+    postRequest(validBody(), `Bearer ${fakeJwt(OTHER_USER_ID)}`),
+  );
+  assertEquals(res.status, 403);
+});
+
+Deno.test("handleRequest_missing_authorization_returns_401", async () => {
+  const res = await handleRequest(postRequest(validBody()));
+  assertEquals(res.status, 401);
+});
+
+Deno.test("handleRequest_malformed_jwt_returns_401", async () => {
+  const res = await handleRequest(
+    postRequest(validBody(), "Bearer garbage-not-a-jwt"),
+  );
+  assertEquals(res.status, 401);
+});
+
+Deno.test("handleRequest_sub_match_passes_ownership_gate", async () => {
+  // sub === body.user_id → the gate lets it through. With no SUPABASE_DB_URL
+  // set in the unit-test env, getSql throws and the handler returns 500 — which
+  // proves the request PASSED the ownership gate (it is neither 403 nor 401).
+  // The 200 happy path is covered by the DB-integration tests (orchestrator).
+  const prior = Deno.env.get("SUPABASE_DB_URL");
+  Deno.env.delete("SUPABASE_DB_URL");
+  try {
+    const res = await handleRequest(
+      postRequest(validBody(), `Bearer ${fakeJwt(VALID_USER_ID)}`),
+    );
+    await res.body?.cancel();
+    assertEquals(res.status !== 403 && res.status !== 401, true);
+    assertEquals(res.status, 500);
+  } finally {
+    if (prior !== undefined) Deno.env.set("SUPABASE_DB_URL", prior);
+  }
 });

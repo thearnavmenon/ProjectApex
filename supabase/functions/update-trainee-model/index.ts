@@ -135,6 +135,7 @@ import {
 import { LLMPermanentError, LLMTransientError } from "../_shared/llm-retry.ts";
 import { backfillPatternConfidence } from "../_shared/pattern-confidence-backfill.ts";
 import { backfillPatternSessionCount } from "../_shared/pattern-session-count-backfill.ts";
+import { checkOwnership } from "../_shared/jwt-owner.ts";
 
 export interface UpdateTraineeModelRequest {
   user_id: string;
@@ -2501,6 +2502,17 @@ export async function handleRequest(req: Request): Promise<Response> {
   const validated = validateRequest(body);
   if ("error" in validated) {
     return jsonResponse({ error: validated.error }, 400);
+  }
+
+  // #369 (slice 4, ADR-0027): close the IDOR. The EF connects as `postgres`
+  // (BYPASSRLS) via SUPABASE_DB_URL, so RLS cannot protect this write path —
+  // enforce ownership here. The caller is the verified JWT `sub` (platform
+  // verified the signature; we only decode it); reject when it doesn't match
+  // the body `user_id`. Runs BEFORE getSql so a rejected caller never touches
+  // the DB.
+  const ownership = checkOwnership(req, validated.user_id);
+  if (!ownership.ok) {
+    return jsonResponse({ error: ownership.error }, ownership.status);
   }
 
   let sql: Sql;
