@@ -17,7 +17,19 @@ Started 2026-06-07.
 
 **Heads-up for whoever merges this:** merging runs `db push` in CI, which **turns the lock on in production** — this is the live data-visibility flip. Any rows still tagged with the old placeholder id (not a real login id) become invisible to everyone; that's the accepted alpha data-wipe, and clients must already be on the slice-3 build (which tags data with the real login id) for their data to remain visible.
 
-**Status:** opened as PR (see below); NOT merged, NOT deployed — the gate-flip is the orchestrator's call.
+**Status:** merged as PR #386 — RLS enabled on production (the gate-flip), with the user's explicit go.
+
+---
+
+## 2026-06-12 — Fix: the end-to-end smoke test now sends a login token (PR #387, part of #369)
+
+**Problem.** Slice 4 added the server-side ownership check (the function rejects a request whose login token doesn't match the body's user id). But the end-to-end "smoke" test for the trainee-model function fires a real HTTP request at the served function with **no** login token — so the new check correctly returned 401, the smoke test failed, and because CI's deploy step only runs when the Edge-Function tests pass, **the deploy was skipped and slice 4's check never actually went live.** (The slice-4 agent couldn't catch this — the smoke test needs a live local Postgres in Docker, which wasn't available, so it only ran the unit tests.)
+
+**What changed.** The smoke harness's shared `postWithRetry` helper now attaches an `Authorization: Bearer …` header carrying a token whose `sub` equals the request's `user_id` (the local serve runs with `--no-verify-jwt` and the code only decodes the token, so the signature is a placeholder). Both smoke cases now pass the ownership gate and reach the orchestrator.
+
+**How checked.** Verified the token the helper builds is accepted by slice 4's real `subFromAuthorization` decoder (extracts the matching `sub`). Can't run the full smoke test here (no Docker); CI runs it on merge — and a green Edge-Function-tests job is exactly what re-enables the deploy.
+
+**Status:** merged as PR #387. Unblocks the auto-deploy so slice 4's ownership check finally deploys.
 
 ---
 

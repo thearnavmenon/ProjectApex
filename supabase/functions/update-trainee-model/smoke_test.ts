@@ -38,12 +38,26 @@ const sql = postgres(DB_URL, { max: 4 });
  * window. Tests retry to absorb the flake — the underlying HTTP path is
  * the production target; the flake is local-dev / CI infrastructure.
  */
+// #369 slice 4 added a handler-level ownership check: the function decodes the
+// JWT `sub` from the Authorization header and rejects (401/403) when it doesn't
+// match the body `user_id`. The smoke harness serves with `--no-verify-jwt`, so
+// the signature is never checked — but the header must still be present and the
+// `sub` must match. Build a decode-only Bearer token carrying `sub = user_id`.
+function smokeAuthHeader(body: string): Record<string, string> {
+  const sub = (JSON.parse(body) as { user_id?: string }).user_id ?? "";
+  const payload = btoa(JSON.stringify({ sub }))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return {
+    Authorization: `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${payload}.smoke`,
+  };
+}
+
 async function postWithRetry(body: string, maxAttempts = 5): Promise<Response> {
   let lastRes: Response | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const res = await fetch(EDGE_FUNCTION_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...smokeAuthHeader(body) },
       body,
     });
     if (res.status !== 502 && res.status !== 503 && res.status !== 504) {
