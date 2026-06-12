@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-06-01
 
+> **Partial supersession note (2026-06-12):** This ADR stated that "all client database access … is subject to RLS." That invariant was not in force at the time of writing — RLS was off on the five core tables (`workout_sessions`, `programs`, `trainee_models`, `users`, `set_logs`), so there was nothing to be subject to. [ADR-0027](0027-supabase-anon-auth-and-enforced-rls.md) (accepted 2026-06-12) actually enabled RLS on those tables and established the anonymous-auth identity that makes `auth.uid()` non-NULL. The client-side service-role prohibition documented here is unaffected; only the "RLS is already enforcing" assumption was premature.
+
 ## Context
 
 Until PR #206 (issue #191), the iOS client carried a code path for the Supabase **service-role key** — a credential that bypasses Row Level Security and grants unrestricted read/write across every table. The path was an artifact of MVP-era developer ergonomics: it let the app stand in for back-end work that had not yet been migrated to Edge Functions. The risks are well known:
@@ -46,4 +48,4 @@ If an operation cannot be expressed under RLS, the right move is to (a) write an
 
 ## Supersedes / supersedes-by
 
-Supersedes the MVP-era practice (pre-PR #206) of carrying a client-side service-role path in `SupabaseClient`, `AppDependencies`, and `DeveloperSettingsView`. Not yet superseded.
+Supersedes the MVP-era practice (pre-PR #206) of carrying a client-side service-role path in `SupabaseClient`, `AppDependencies`, and `DeveloperSettingsView`. Partially superseded by [ADR-0027](0027-supabase-anon-auth-and-enforced-rls.md): the "RLS is enforcing" assumption is now correct (RLS enabled on core tables); the service-role prohibition itself stands.
