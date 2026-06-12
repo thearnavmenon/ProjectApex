@@ -19,7 +19,7 @@ Started 2026-06-07.
 
 **Follow-up filed.** The deeper fix — so this can never happen again to any future user — is a database trigger that creates the `users` row automatically the moment a new login is made, instead of relying on onboarding. Logged as a separate issue.
 
-**Status:** fix on branch, building green, PR to follow.
+**Status:** merged as PR #389 — the reset button now clears the login session; whole app still builds green.
 
 ---
 
