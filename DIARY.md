@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — The server now checks it's really you before saving your data (auth slice 4, part of #369)
+
+**Problem.** Two of our server functions — the one that updates your trainee model after a workout, and the one that saves your goal — trusted the `user_id` written in the request body, no questions asked. That meant a logged-in person could put *someone else's* id in the body and write to that person's data (a classic "insecure direct object reference" hole). And we can't lean on the database's own row-level security to stop it here, because these functions connect with a super-privileged account that bypasses those row rules. So the function itself has to be the bouncer.
+
+**What changed.** Before either function does any database work, it now reads the login token the platform already verified, pulls out the user id baked into that token, and checks it matches the `user_id` in the request body. If they don't match, it refuses (403). If there's no token, or the token is garbled, or it has no user id, it also refuses (fail-closed, 401) — it never quietly lets the write through. The token-reading logic lives in one small shared helper so both functions use exactly the same check. We only *read* the id from the token, we don't re-check its signature — the platform already did that.
+
+**How checked.** Added unit tests for the shared helper (14) covering the good decode and every fail-closed case, plus four handler tests on each function (mismatch → 403, no token → 401, garbled token → 401, matching id → passes the gate). All pass. The existing tests still pass: shared helpers 390, model validator 21, goal validator 31. The database-integration tests can't run here (they need a local Postgres in Docker, which is down — they failed with connection-refused as expected and will run on CI when merged). Did NOT turn on row-level security, add migrations, touch the app, or deploy — those are other slices / the orchestrator's job.
+
+**Status:** opened as PR (see below); NOT merged, NOT deployed.
+
+---
+
 ## 2026-06-12 — The app now uses your real login identity instead of a stand-in (auth slice 3, part of #369)
 
 **Problem.** Until now every install used the same hardcoded placeholder id (`…0001`) or a random one minted at onboarding to tag all your data. Earlier in this auth work (slice 1) the app started quietly logging itself in anonymously at launch, which gives it a real, stable identity — but nothing was using that identity yet. For the upcoming security lock (slice 5, which will only let you read rows that are tagged with *your* id), the data has to be keyed to that real login id, not the placeholder.
