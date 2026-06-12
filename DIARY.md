@@ -19,6 +19,22 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — A camera for the hand-drawn charts (PR, part of #342)
+
+**Problem.** The redesign draws its charts and gauges by hand, pixel by pixel — a 2px "floor" line that has to read heavier than a 1px "stretch" line, solid dots for real data versus hollow dots for guesses, dashed lines for predictions. None of that shows up when you read the code; you only see if it's wrong by looking at the picture. Until now the app had no way to take a picture of a chart and notice when it changes.
+
+**What changed.** Two things. First, a set of cheap, fast checks that read the exact numbers behind the drawings — that the floor line really is 2px and the stretch line really is 1px, that the prediction dash is the 4-2 pattern, that the spacing scale is 4/8/16/24/32/48, that the "work is dark ink, time is light pencil" colour split always holds. These run on every push and need no saved pictures. Second, the camera itself: a small harness (built on a well-known open-source tool, swift-snapshot-testing — our very first outside dependency, pinned to one exact version) that photographs a component and compares it to a saved reference, failing if anything drifts. The worked example photographs the whole token gallery in light and dim, at normal and largest text sizes.
+
+**One deliberate gap.** The reference photos are NOT recorded yet — on purpose. My machine runs a slightly newer Xcode than the build server, and a photo taken on the wrong toolchain would bake in the wrong fonts and subtly-off colours, poisoning every later comparison. So the camera is wired up but parked: the photo tests are switched off by default (behind a `APEX_SNAPSHOT_TESTS` flag) and a human/CI step on the pinned Xcode must take the first reference photos. The fast number-checks run regardless.
+
+**Also fixed a quiet contradiction.** The test plan secretly forced the "run the expensive live-API tests" flag on, while a comment in the build server config claimed it was off. Removed the flag from the test plan so the comment is finally true — the live-API tests are genuinely opt-in now.
+
+**How checked.** The fast geometry/number suite builds and passes; the outside dependency resolves and links (the whole app + tests compile against it). The photo suite is intentionally reference-pending and stays off.
+
+**Status:** open PR, part of #342 (not closed — recording the reference photos and signing off on how they look is still to come).
+
+---
+
 ## 2026-06-12 — Two-day-a-week lifters can now onboard honestly (PR #380, part of #369)
 
 **Problem.** The onboarding "days per week" picker only offered 3, 4, 5 and 6. Someone who trains twice a week had no honest option and was forced to claim 3 — even though the program engine fully supports 2-day weeks (the phase-advance math handles down to 1 day; the macro-plan prompt builds exactly as many days as you pick) and the redesign spec explicitly lists 2 / 3 / 4 / 5+.
