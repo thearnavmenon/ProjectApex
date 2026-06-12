@@ -52,6 +52,11 @@ jobs:
 
       - name: Build & Test
         # APEX_INTEGRATION_TESTS is intentionally absent — live-API tests are skipped.
+        # The testplan no longer sets it either (it used to set =1 in defaultOptions,
+        # which contradicted this comment and silently un-gated the live-API tests in
+        # the -testPlan run); reconciled in #342. Same applies to APEX_SNAPSHOT_TESTS:
+        # absent here, so the image-snapshot suite stays gated off in the mandatory CI
+        # path. References are recorded by a separate record-mode job on Xcode 26.3.
         run: |
           xcodebuild test \
             -project ProjectApex.xcodeproj \
