@@ -7,6 +7,7 @@ Started 2026-06-07.
 
 ---
 
+
 ## 2026-06-14 — The Train program root: your plan drawn as a vertical day-spine (Phase 3 UI, Slice 15 #357)
 
 **What it is.** The new Train tab's main screen, drawn as a single vertical spine running down the page — the left edge is the timeline, and each training day hangs off it. This week shows in full: each day a row with a small status mark (a filled dot = done, a hollow dot = scheduled-but-not-done) and a short list of that day's exercises. Days you don't train are first-class "rest" nodes on the spine, not blank gaps. Below this week, the rest of the plan shows compressed and faint — pattern/focus only, no fake numbers — because the coach hasn't worked those days out yet.
@@ -321,6 +322,29 @@ The design specced a single band drawing that works in three places — onboardi
 **How checked.** The fast geometry/number suite builds and passes; the outside dependency resolves and links (the whole app + tests compile against it). The photo suite is intentionally reference-pending and stays off.
 
 **Status:** open PR, part of #342 (not closed — recording the reference photos and signing off on how they look is still to come).
+
+## 2026-06-12 — Coach-voice constitution drafted (PR for #330)
+
+**What.** Wrote `docs/design/coach-voice.md` — a single reference document that
+governs the voice and honesty rules for every coach-voiced string in the app:
+AI-generated Today lines, post-workout reads, per-set coaching cues and set
+framings, and static UI strings (alerts, rest-day cards, calibration notices).
+
+**Why.** The flow audit (G-F13, #316) found three different registers in three
+prompts — the inference prompt enforces terse anti-platitude copy, the swap
+assistant says "Happy to help", the post-workout insights are a third voice — and
+no single source governed all of them. The rebuild needs one constitution before
+the first coach-line screen (#348) is written.
+
+**What it covers.** The honesty laws (grounded-in-numbers, deterministic fallback,
+no fabricated precision, no echo, witness rule), the banned registers (praise-
+inflation, hype, mascot-cheer, accent-colored keywords), length and format
+contracts per surface (Today line, post-workout two-deck read, coaching cue, set
+framing, swap display_message), and a short "how to apply" section for both prompt
+authors and UI-string authors. Cites the source docs throughout.
+
+**Status:** opened as a DRAFT PR (human review required — voice is the product
+owner's call). Not merged. Part of #330.
 
 ---
 
