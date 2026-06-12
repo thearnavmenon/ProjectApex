@@ -7,6 +7,20 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — Sign-in no longer gives up too early on a good network (the real reason saves were failing)
+
+**What went wrong.** After the reset fix, saving a workout *still* failed — but for a new reason. On a perfectly good wifi, the app's anonymous sign-in (the thing that gets you a login) was timing out, so the app had no login at all. With no login, it fell back to a placeholder id and the database refused every save with a "row-level security" rejection. The console was full of `quic… max 5 reached` and "Operation timed out".
+
+**Why it was the app, not the wifi.** Earlier in the same run, a different request to the database *succeeded* — so the network was fine. The problem: the sign-in only waited **5 seconds**, tried **once**, and shared its connection with the rest of the app. iOS had learned the server supports a newer connection type (HTTP/3, "QUIC"), tried it for sign-in, and that handshake stalled. Five seconds wasn't enough to recover, so sign-in quit and the app carried on with no login.
+
+**What I changed.** Three small things in the sign-in code: (1) each attempt now gives up after 8 seconds of silence instead of hanging; (2) it **retries up to three times** — and a failed first try makes iOS drop back to the older, reliable connection type, so the retry goes through; (3) the overall wait went from 5 to 30 seconds. The longer wait is safe because sign-in runs in the background — it never freezes the app's screen; it only gives onboarding more time to get a login before it sets you up.
+
+**How I checked.** The whole app builds, and all 7 sign-in tests pass (the change doesn't affect the failure/timeout cases). The user spotted that this was a timing problem, not a wifi problem — they were right.
+
+**Status:** fix on branch, building green, tests green, PR to follow.
+
+---
+
 ## 2026-06-12 — The "reset app" button now actually gives you a fresh start (found from a gym-log crash)
 
 **What went wrong.** After the database lock went live (the auth work), I tried to start a workout and it wouldn't save — the app kept retrying and then gave up. The reason: turning on the lock gave my install a brand-new login id, but nothing ever created a matching row for that new id in the `users` table. Every save points back to that table, so the database rejected the workout. Onboarding is the *only* place that creates the `users` row, and my install had onboarded long ago, so it never re-ran.
