@@ -58,6 +58,9 @@
 		DE51900000000000DE519002 /* DesignSystemTokensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE51900000000000DE519001 /* DesignSystemTokensTests.swift */; };
 		A1C0F19329000000APIKEY04 /* BundledKeyResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */; };
 		5A30343A0000000000FE5102 /* AppShellRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A30343A0000000000FE5101 /* AppShellRouteTests.swift */; };
+		DE52000000000000DE520002 /* DesignSystemGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */; };
+		DE53000000000000DE530002 /* DrawnInstrumentSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */; };
+		DE54000000000000DE540002 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = DE54000000000000DE540001 /* SnapshotTesting */; };
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
 		C0D12694855E73899CCFE137 /* TraineeModelDigestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DEB429BB2AB6D155566038C /* TraineeModelDigestTests.swift */; };
@@ -125,6 +128,8 @@
 		22000000000000000000F012 /* PromptLoaderTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PromptLoaderTests.swift; sourceTree = "<group>"; };
 		DE51900000000000DE519001 /* DesignSystemTokensTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DesignSystemTokensTests.swift; sourceTree = "<group>"; };
 		5A30343A0000000000FE5101 /* AppShellRouteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppShellRouteTests.swift; sourceTree = "<group>"; };
+		DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DesignSystemGeometryTests.swift; sourceTree = "<group>"; };
+		DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DrawnInstrumentSnapshotTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
 		DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SetPrescriptionIntentValidationTests.swift; sourceTree = "<group>"; };
 		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
@@ -164,6 +169,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				6ED5B7636B15C7C513C11C2E /* Foundation.framework in Frameworks */,
+				DE54000000000000DE540002 /* SnapshotTesting in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -268,6 +274,8 @@
 				DE51900000000000DE519001 /* DesignSystemTokensTests.swift */,
 				A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */,
 				5A30343A0000000000FE5101 /* AppShellRouteTests.swift */,
+				DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */,
+				DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -289,6 +297,9 @@
 				79B86F7D6F8F83A54328459B /* PBXTargetDependency */,
 			);
 			name = ProjectApexTests;
+			packageProductDependencies = (
+				DE54000000000000DE540001 /* SnapshotTesting */,
+			);
 			productName = ProjectApexTests;
 			productReference = EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
@@ -337,6 +348,9 @@
 			);
 			mainGroup = 47D91BB72F60266A007B3B34;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				DE55000000000000DE550001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 47D91BC12F60266A007B3B34 /* Products */;
 			projectDirPath = "";
@@ -427,6 +441,8 @@
 				DE51900000000000DE519002 /* DesignSystemTokensTests.swift in Sources */,
 				A1C0F19329000000APIKEY04 /* BundledKeyResolutionTests.swift in Sources */,
 				5A30343A0000000000FE5102 /* AppShellRouteTests.swift in Sources */,
+				DE52000000000000DE520002 /* DesignSystemGeometryTests.swift in Sources */,
+				DE53000000000000DE530002 /* DrawnInstrumentSnapshotTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -698,6 +714,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DE55000000000000DE550001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing";
+			requirement = {
+				kind = exactVersion;
+				version = 1.18.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DE54000000000000DE540001 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DE55000000000000DE550001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 47D91BB82F60266A007B3B34 /* Project object */;
 }
