@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — The app now uses your real login identity instead of a stand-in (auth slice 3, part of #369)
+
+**Problem.** Until now every install used the same hardcoded placeholder id (`…0001`) or a random one minted at onboarding to tag all your data. Earlier in this auth work (slice 1) the app started quietly logging itself in anonymously at launch, which gives it a real, stable identity — but nothing was using that identity yet. For the upcoming security lock (slice 5, which will only let you read rows that are tagged with *your* id), the data has to be keyed to that real login id, not the placeholder.
+
+**What changed.** Two things. (1) The single place the app asks "who am I?" now answers with the real anonymous-login id (read instantly from where slice 1 saved it), falling back to the old placeholder only in the brief moment on a brand-new install before the background login finishes — that fallback is safe right now because the security lock is still off, and it goes away for good once slice 5 lands. (2) Onboarding now writes your user row tagged with that real login id (and skips writing the row entirely if the login somehow hasn't finished yet, rather than saving a row under the placeholder that the security lock would later orphan). Pulled the "who am I?" logic into a small, separately-testable helper so the priority order is pinned down by unit tests.
+
+**How checked.** Build passed (build-exit=0). Added six unit tests for the identity helper (real id wins over the placeholder and over the older mirror; placeholder only when nothing else exists; onboarding refuses to write under the placeholder) — all pass. Full suite: 561 run, 10 skipped (the live-API tests, off by default), 1 failure — and that one is the known network-timeout flake unrelated to this change; it passed on its own when re-run. Did NOT turn on the security lock or touch any server functions or migrations — that's later slices.
+
+**Status:** opened as PR (see below); NOT merged, awaiting review.
+
+---
+
 ## 2026-06-12 — Two-day-a-week lifters can now onboard honestly (PR #380, part of #369)
 
 **Problem.** The onboarding "days per week" picker only offered 3, 4, 5 and 6. Someone who trains twice a week had no honest option and was forced to claim 3 — even though the program engine fully supports 2-day weeks (the phase-advance math handles down to 1 day; the macro-plan prompt builds exactly as many days as you pick) and the redesign spec explicitly lists 2 / 3 / 4 / 5+.

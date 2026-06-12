@@ -44,8 +44,9 @@ enum KeychainKey: String, CaseIterable {
     case supabaseRefreshToken = "com.projectapex.keychain.supabaseRefreshToken"
     /// Access-token expiry as a Unix-epoch seconds string (e.g. "1718200000").
     case supabaseSessionExpiry = "com.projectapex.keychain.supabaseSessionExpiry"
-    /// The GoTrue `user.id` (UUID string) of the authenticated session. This is
-    /// the auth subject; it is NOT yet wired to `resolvedUserId` (later slice).
+    /// The GoTrue `user.id` (UUID string) of the authenticated session — the
+    /// `auth.uid()`. As of #369 slice 3 this is the primary source for
+    /// `AppDependencies.resolvedUserId` (the app's user identity).
     case supabaseAuthUserId   = "com.projectapex.keychain.supabaseAuthUserId"
 }
 

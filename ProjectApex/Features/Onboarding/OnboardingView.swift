@@ -14,8 +14,11 @@
 //   6 — Ready confirmation         → dismisses to Program tab
 //
 // First-run detection: KeychainService.retrieve(.userId) == nil
-// On completion: UUID written to Keychain.userId; onboardingCompleted stored
-// in UserDefaults so subsequent launches skip this view immediately.
+// On completion (#369 slice 3): the anonymous-auth `auth.uid()` is written to
+// Keychain.userId (mirroring the auth subject, not a fresh UUID()); the
+// public.users row is keyed to that same uid so slice 5's RLS policy matches.
+// onboardingCompleted is stored in UserDefaults so subsequent launches skip
+// this view immediately.
 
 import SwiftUI
 import UserNotifications
@@ -922,29 +925,29 @@ struct OnboardingView: View {
     /// without a Supabase round-trip during active sessions (FB-003).
     private func persistUserIfNeeded() async {
         let keychain = deps.keychainService
-        // If userId is already stored, nothing to do for the Keychain+Supabase write —
-        // but still persist any updated biometrics to UserDefaults.
-        let isNewUser: Bool
-        if let existing = try? keychain.retrieve(.userId), !existing.isEmpty {
-            isNewUser = false
-        } else {
-            isNewUser = true
-        }
 
-        let userId: UUID
-        if isNewUser {
-            userId = UUID()
-            try? keychain.store(userId.uuidString, for: .userId)
-        } else {
-            userId = deps.resolvedUserId
-        }
-
-        // Persist biometrics to UserDefaults for fast in-session access.
+        // Persist biometrics to UserDefaults for fast in-session access. These are
+        // not identity-keyed, so they are written regardless of session state.
         UserDefaults.standard.set(profile.bodyweightKg, forKey: UserProfileConstants.bodyweightKgKey)
         UserDefaults.standard.set(profile.heightCm, forKey: UserProfileConstants.heightCmKey)
         UserDefaults.standard.set(profile.age, forKey: UserProfileConstants.ageKey)
         UserDefaults.standard.set(profile.trainingAge.rawValue, forKey: UserProfileConstants.trainingAgeKey)
         UserDefaults.standard.set(profile.primaryGoal.rawValue, forKey: UserProfileConstants.primaryGoalKey)
+
+        // #369 slice 3: the `users` row's id MUST be the anonymous-auth
+        // `auth.uid()` so slice 5's RLS policy (`id = auth.uid()`) will match.
+        // The session is established at launch (slice 1); onboarding runs after,
+        // so await the slice-1 readiness to make sure the uid has resolved before
+        // we read it. If it still hasn't (sign-in failed/timed out), skip the
+        // insert and the `.userId` mirror — do NOT write a placeholder-keyed row
+        // that slice 5's RLS would orphan; the next onboarding run retries.
+        _ = await deps.supabaseAuth.awaitFirstResolution()
+        guard let userId = UserIdentityResolver.onboardingUserId(
+            keychain: keychain,
+            placeholder: AppDependencies.placeholderUserId
+        ) else { return }
+        // Mirror the auth uid into `.userId` (first-run signal + secondary read).
+        try? keychain.store(userId.uuidString, for: .userId)
 
         // Best-effort upsert into users table — failure is non-fatal for onboarding.
         let nameStr = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
