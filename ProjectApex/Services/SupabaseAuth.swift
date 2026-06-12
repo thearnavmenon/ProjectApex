@@ -118,8 +118,18 @@ actor SupabaseAuth {
     private let session: URLSession
     private let keychain: KeychainService
     /// Hard ceiling on the first-resolution wait so a fresh launch can never
-    /// hang the app waiting on a slow/hung sign-in.
+    /// hang the app waiting on a slow/hung sign-in. Sized to allow a few bounded
+    /// sign-in attempts (see `signInAnonymouslyWithRetry`) — resolution runs in a
+    /// background Task (AppDependencies), so this never blocks the UI; it only
+    /// bounds how long onboarding's user-row provisioning waits for a session.
     private let signInTimeout: TimeInterval
+
+    /// Per-attempt inactivity timeout for a single GoTrue call. Kept short so a
+    /// stalled connection (e.g. an HTTP/3 / QUIC handshake that hangs on an
+    /// otherwise-healthy network) fails fast and the retry can force a fresh
+    /// connection that falls back to HTTP/2 over TCP, instead of burning the
+    /// whole ceiling on one hung request.
+    private let perAttemptTimeout: TimeInterval = 8
 
     private let decoder: JSONDecoder
     private static let logger = Logger(subsystem: "com.projectapex", category: "SupabaseAuth")
@@ -140,7 +150,7 @@ actor SupabaseAuth {
         anonKey: String,
         keychain: KeychainService = .shared,
         urlSession: URLSession = .shared,
-        signInTimeout: TimeInterval = 5
+        signInTimeout: TimeInterval = 30
     ) {
         self.baseURL = supabaseURL
         self.anonKey = anonKey
@@ -191,12 +201,7 @@ actor SupabaseAuth {
         let result = await withTaskGroup(of: SupabaseSession?.self) { group -> SupabaseSession? in
             group.addTask { [weak self] in
                 guard let self else { return nil }
-                do {
-                    return try await self.signInAnonymously()
-                } catch {
-                    await SupabaseAuth.log("anonymous sign-in failed; proceeding as anon", error)
-                    return nil
-                }
+                return await self.signInAnonymouslyWithRetry()
             }
             group.addTask {
                 try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
@@ -212,6 +217,27 @@ actor SupabaseAuth {
             SupabaseAuth.logger.log("anonymous sign-in timed out after \(timeout, privacy: .public)s; proceeding as anon")
         }
         return result
+    }
+
+    /// Anonymous sign-in with bounded retries. The first connection on a fresh
+    /// launch can stall on an HTTP/3 / QUIC handshake even when the network is
+    /// healthy (the PostgREST path having taught `URLSession.shared` that the
+    /// host speaks HTTP/3); each attempt is inactivity-bounded by
+    /// `perAttemptTimeout`, and a failed attempt makes URLSession mark HTTP/3
+    /// broken for the host, so the retry typically completes over HTTP/2/TCP.
+    /// Returns `nil` only after every attempt fails (caller falls back to anon).
+    private func signInAnonymouslyWithRetry(maxAttempts: Int = 3) async -> SupabaseSession? {
+        for attempt in 1...maxAttempts {
+            do {
+                return try await signInAnonymously()
+            } catch {
+                await SupabaseAuth.log("anonymous sign-in attempt \(attempt)/\(maxAttempts) failed", error)
+                if attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s backoff
+                }
+            }
+        }
+        return nil
     }
 
     // MARK: - GoTrue calls
@@ -289,6 +315,10 @@ actor SupabaseAuth {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
         request.httpBody = body
+        // Bound a single attempt so a stalled (e.g. QUIC-hung) connection fails
+        // fast and the caller's retry can force a fresh, TCP-fallback connection
+        // rather than hanging on URLSession's 60s default.
+        request.timeoutInterval = perAttemptTimeout
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
