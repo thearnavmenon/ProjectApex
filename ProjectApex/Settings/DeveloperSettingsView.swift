@@ -584,6 +584,11 @@ struct DeveloperSettingsView: View {
     ///   1. All UserDefaults for this app's bundle domain (onboarding flags, scan-skipped flag, etc.)
     ///   2. GymFactStore weight-correction facts (UserDefaults-backed)
     ///   3. The userId Keychain entry so onboarding generates a fresh identity
+    ///   4. The Supabase anonymous-auth session (#369) — access/refresh tokens, expiry,
+    ///      and the persisted `auth.uid()`. Without this, `restoreFromKeychain()` re-pins
+    ///      the OLD identity on the next launch, so "reset" would not mint a fresh user and
+    ///      the freshly-onboarded `users` row would not match a brand-new `auth.uid()`.
+    ///      A new anonymous session (and uid) is minted on the next launch.
     ///   (API keys — anthropicAPIKey, openAIAPIKey, supabaseAnonKey — are intentionally preserved)
     @MainActor
     private func performResetAll() async {
@@ -598,9 +603,19 @@ struct DeveloperSettingsView: View {
         // 3. Remove the persisted userId so onboarding creates a fresh identity
         try? keychain.delete(.userId)
 
-        // Navigate to onboarding without a relaunch
+        // 4. Clear the persisted Supabase anonymous-auth session (#369) so the next launch
+        //    signs in fresh and mints a new auth.uid(). Otherwise the restored session
+        //    re-pins the old identity and the reset is not a true zero.
+        try? keychain.delete(.supabaseAccessToken)
+        try? keychain.delete(.supabaseRefreshToken)
+        try? keychain.delete(.supabaseSessionExpiry)
+        try? keychain.delete(.supabaseAuthUserId)
+
+        // Navigate to onboarding immediately; the fresh anon identity is established on the
+        // next launch (the in-memory auth session is only re-resolved at startup), so the
+        // banner tells the user to relaunch before onboarding.
         onResetAll?()
-        showBanner("All app data cleared.", isError: false)
+        showBanner("All app data cleared. Quit and reopen the app, then complete onboarding.", isError: false)
     }
 
     /// Clears onboarding flags and the cached program so re-running onboarding

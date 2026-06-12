@@ -7,6 +7,22 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-12 — The "reset app" button now actually gives you a fresh start (found from a gym-log crash)
+
+**What went wrong.** After the database lock went live (the auth work), I tried to start a workout and it wouldn't save — the app kept retrying and then gave up. The reason: turning on the lock gave my install a brand-new login id, but nothing ever created a matching row for that new id in the `users` table. Every save points back to that table, so the database rejected the workout. Onboarding is the *only* place that creates the `users` row, and my install had onboarded long ago, so it never re-ran.
+
+**Why it matters.** Since there's only one user right now (me), the clean fix is to wipe and start over from week one. But the in-app "Reset All App Data" button was written before the auth work — it cleared everything *except* the new login session. So a reset would quietly keep the same broken login, and you'd land right back in the same hole.
+
+**What I changed.** The reset button now also clears the saved login session (the access token, refresh token, expiry, and the login id). The next launch then signs in fresh, mints a new login id, and onboarding creates the matching `users` row for it — so saving works again. I also changed the confirmation message to tell you to quit and reopen the app before onboarding, because the fresh login only kicks in on the next launch.
+
+**How I checked.** Confirmed the four login keys are real, that nothing else in the app does an "identity wipe" that would need the same fix, and that the whole app still builds (BUILD SUCCEEDED). The old failed-and-parked workout in the local queue lives in the same storage the reset wipes, so it's gone after the reset too.
+
+**Follow-up filed.** The deeper fix — so this can never happen again to any future user — is a database trigger that creates the `users` row automatically the moment a new login is made, instead of relying on onboarding. Logged as a separate issue.
+
+**Status:** fix on branch, building green, PR to follow.
+
+---
+
 ## 2026-06-12 — Writing down what the auth work decided, so we don't forget (auth slice 6, docs — part of #369)
 
 **What this is.** Slices 1–5 of the auth/RLS workstream all shipped and the database lock is now live. This last slice is just paperwork: it writes down the decisions in a permanent record (ADR-0027) so future contributors understand why we went the way we did, and it fixes two older records that had an assumption that turned out to be wrong.
