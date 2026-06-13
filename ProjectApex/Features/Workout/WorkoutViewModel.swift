@@ -105,10 +105,24 @@ final class WorkoutViewModel {
 
     // MARK: - Public Actions
 
-    /// Starts a new session for the given day. Manages isStartingSession flag.
-    func startSession(trainingDay: TrainingDay, programId: UUID, userId: UUID, weekNumber: Int = 1, startingExerciseIndex: Int = 0) {
+    /// Starts a new session for the given day. Awaits auth resolution so the
+    /// session is stamped with the real `auth.uid()`; aborts silently (resetting
+    /// `isStartingSession`) when auth has not resolved, so no placeholder-keyed
+    /// row is ever written (the RLS-403 owner-mismatch root cause). The
+    /// `isStartingSession` flag keeps the Start button disabled / spinner visible
+    /// during the brief await.
+    func startSession(trainingDay: TrainingDay, programId: UUID, deps: AppDependencies, weekNumber: Int = 1, startingExerciseIndex: Int = 0) {
+        // Re-entrancy guard (mirrors onSetComplete/onSkipSet): the auth await below
+        // widens the window between tap and session creation, so a second invocation
+        // before SwiftUI re-renders the disabled state could start two sessions.
+        guard !isStartingSession else { return }
         isStartingSession = true
         Task {
+            guard let userId = await deps.resolvedOwnerUserId() else {
+                // Auth did not resolve — do NOT stamp a placeholder-keyed row.
+                isStartingSession = false
+                return
+            }
             await manager.startSession(trainingDay: trainingDay, programId: programId, userId: userId, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
             await pullState()
             isStartingSession = false

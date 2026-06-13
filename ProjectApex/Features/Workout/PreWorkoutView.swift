@@ -669,7 +669,7 @@ struct PreWorkoutView: View {
 
     private var startWorkoutButton: some View {
         Button {
-            viewModel.startSession(trainingDay: trainingDay, programId: programId, userId: deps.resolvedUserId, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
+            viewModel.startSession(trainingDay: trainingDay, programId: programId, deps: deps, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
         } label: {
             HStack(spacing: 10) {
                 if viewModel.isStartingSession {
