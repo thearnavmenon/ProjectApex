@@ -372,9 +372,28 @@ final class WorkoutViewModel {
 
     /// Resumes a paused session. Flushes the write-ahead queue first so all
     /// set_log writes from the prior session are in Supabase before fetching.
-    func resumeSession(pausedState: PausedSessionState, trainingDay: TrainingDay, supabase: SupabaseClient) {
+    func resumeSession(pausedState: PausedSessionState, trainingDay: TrainingDay, supabase: SupabaseClient, supabaseAuth: SupabaseAuth) {
         isStartingSession = true
         Task {
+            // 0. Ownership gate (#369 slice 4): the paused session carries the owner
+            //    frozen at start time. If it doesn't match the current real auth uid
+            //    (identity changed across launches, or it was the placeholder),
+            //    replaying it — and re-inserting the workout_sessions row under the old
+            //    owner at step 2 — is rejected by RLS (42501). Discard instead of
+            //    replaying. awaitFirstResolution() is bounded; nil (sign-in unresolved)
+            //    is treated as a mismatch — an unverifiable session can't be resumed safely.
+            let resolvedUid = await supabaseAuth.awaitFirstResolution()?.userId
+            if resolvedUid != pausedState.userId {
+                await manager.discardStalePausedSession()
+                resumeRepairNotice = "Couldn't confirm your previous workout for this account — it was cleared. Start a new one when you're ready."
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    self?.resumeRepairNotice = nil
+                }
+                isStartingSession = false
+                return
+            }
+
             // 1. Attempt to flush WAQ so pending set_logs land in Supabase before the fetch.
             //    If offline, flush is best-effort — unflushed items stay in the WAQ.
             await manager.flushWriteAheadQueue()

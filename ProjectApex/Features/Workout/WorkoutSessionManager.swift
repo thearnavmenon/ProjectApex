@@ -793,6 +793,17 @@ actor WorkoutSessionManager {
         print("[WorkoutSessionManager] Session \(sessionId) marked abandoned via recovery dismiss")
     }
 
+    /// Discards a stale paused session whose owner does not match the current
+    /// authenticated uid. Clears the write-ahead queue (live + dead-letter) and the
+    /// paused snapshot, but issues NO Supabase write — the frozen session_id and
+    /// set_logs belong to a different owner, so every write against them is rejected
+    /// by RLS (42501). (#369 owner-mismatch campaign, slice 4.)
+    func discardStalePausedSession() async {
+        await writeAheadQueue.clearAll()
+        PausedSessionState.clear()
+        print("[WorkoutSessionManager] stale-owner paused session discarded — WAQ cleared")
+    }
+
     /// Returns a hint string showing the available weight options near `weight` for the given
     /// equipment type, based on confirmed GymFactStore corrections for this user's gym.
     ///
