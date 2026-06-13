@@ -174,6 +174,26 @@ actor SupabaseClient {
         try await perform(request)
     }
 
+    /// Upserts `item` into `table`, merging on a primary-key conflict.
+    ///
+    /// Sends `Prefer: return=representation, resolution=merge-duplicates` so a row
+    /// that already exists (same PK) is updated in place rather than producing a
+    /// 409. Use instead of `insert` when the row may already exist — e.g. the
+    /// `users` table, where the `handle_new_user` trigger may have pre-provisioned
+    /// a bare `id` row before onboarding writes the full profile.
+    ///
+    /// - Parameters:
+    ///   - item: An `Encodable` value whose JSON representation matches the table columns.
+    ///   - table: The PostgREST table name.
+    /// - Throws: `SupabaseError` on HTTP or encoding failure.
+    func upsert<T: Encodable>(_ item: T, table: String) async throws {
+        let url = try tableURL(table: table)
+        var request = baseRequest(url: url, method: "POST")
+        request.setValue("return=representation, resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
+        request.httpBody = try encoder.encode(item)
+        try await perform(request)
+    }
+
     /// Inserts `item` into `table` and returns the echoed-back row.
     ///
     /// - Parameters:
