@@ -126,7 +126,21 @@ final class AppDependencies {
         // repointed and RLS is still off, so behavior is unchanged this slice.
         // A stored session restores instantly; a fresh launch signs in anonymously
         // in the background and falls back to the anon key on failure/timeout.
-        let auth = SupabaseAuth(supabaseURL: Config.supabaseURL, anonKey: supabaseAnonKey)
+        // GoTrue gets its OWN ephemeral URLSession rather than URLSession.shared.
+        // The shared session, once the PostgREST path teaches it the host advertises
+        // HTTP/3, attempts QUIC for sign-in; on some networks that handshake stalls
+        // and the launch sign-in times out with no session (→ placeholder uid →
+        // RLS 403 on every owned write). A fresh ephemeral session carries no cached
+        // Alt-Svc, so its first request negotiates HTTP/2 over TCP — which the server
+        // serves fine. waitsForConnectivity rides out a brief connectivity drop.
+        let authSessionConfig = URLSessionConfiguration.ephemeral
+        authSessionConfig.waitsForConnectivity = true
+        authSessionConfig.timeoutIntervalForRequest = 15
+        let auth = SupabaseAuth(
+            supabaseURL: Config.supabaseURL,
+            anonKey: supabaseAnonKey,
+            urlSession: URLSession(configuration: authSessionConfig)
+        )
         self.supabaseAuth = auth
         // Wire the refresh/401-retry hooks so authed requests stay valid.
         Task {

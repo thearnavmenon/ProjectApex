@@ -191,9 +191,11 @@ actor SupabaseAuth {
     private func resolveFirstSession() async -> SupabaseSession? {
         // 1. Restore a stored session instantly (no network) if present.
         if let restored = restoreFromKeychain() {
+            print("[SupabaseAuth] restored persisted session — uid: \(restored.userId)")
             currentSession = restored
             return restored
         }
+        print("[SupabaseAuth] no stored session — starting fresh anonymous sign-in")
 
         // 2. Fresh launch → anonymous sign-in, bounded by signInTimeout so a
         //    hung/slow endpoint (or an unreachable network) can't block launch.
@@ -214,6 +216,7 @@ actor SupabaseAuth {
         }
 
         if result == nil {
+            print("[SupabaseAuth] first-resolution returned NO session after \(timeout)s ceiling — proceeding as anon (placeholder)")
             SupabaseAuth.logger.log("anonymous sign-in timed out after \(timeout, privacy: .public)s; proceeding as anon")
         }
         return result
@@ -229,14 +232,18 @@ actor SupabaseAuth {
     private func signInAnonymouslyWithRetry(maxAttempts: Int = 3) async -> SupabaseSession? {
         for attempt in 1...maxAttempts {
             do {
-                return try await signInAnonymously()
+                let session = try await signInAnonymously()
+                print("[SupabaseAuth] anonymous sign-in succeeded on attempt \(attempt)/\(maxAttempts) — uid: \(session.userId)")
+                return session
             } catch {
+                print("[SupabaseAuth] anonymous sign-in attempt \(attempt)/\(maxAttempts) FAILED: \(error.localizedDescription) — \(error)")
                 await SupabaseAuth.log("anonymous sign-in attempt \(attempt)/\(maxAttempts) failed", error)
                 if attempt < maxAttempts {
                     try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5s backoff
                 }
             }
         }
+        print("[SupabaseAuth] anonymous sign-in EXHAUSTED all \(maxAttempts) attempts — no session (app falls back to placeholder; owned writes will RLS-403)")
         return nil
     }
 
