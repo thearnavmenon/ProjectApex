@@ -59,6 +59,7 @@
 		A1C0F19329000000APIKEY04 /* BundledKeyResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */; };
 		5A30343A0000000000FE5102 /* AppShellRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A30343A0000000000FE5101 /* AppShellRouteTests.swift */; };
 		CB34500000000000CB345002 /* CapabilityBandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB34500000000000CB345001 /* CapabilityBandTests.swift */; };
+		LE34600000000000LE346002 /* LensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = LE34600000000000LE346001 /* LensTests.swift */; };
 		DE52000000000000DE520002 /* DesignSystemGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */; };
 		DE53000000000000DE530002 /* DrawnInstrumentSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */; };
 		DE54000000000000DE540002 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = DE54000000000000DE540001 /* SnapshotTesting */; };
@@ -130,6 +131,7 @@
 		DE51900000000000DE519001 /* DesignSystemTokensTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DesignSystemTokensTests.swift; sourceTree = "<group>"; };
 		5A30343A0000000000FE5101 /* AppShellRouteTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppShellRouteTests.swift; sourceTree = "<group>"; };
 		CB34500000000000CB345001 /* CapabilityBandTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CapabilityBandTests.swift; sourceTree = "<group>"; };
+		LE34600000000000LE346001 /* LensTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensTests.swift; sourceTree = "<group>"; };
 		DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DesignSystemGeometryTests.swift; sourceTree = "<group>"; };
 		DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DrawnInstrumentSnapshotTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
@@ -277,6 +279,7 @@
 				A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */,
 				5A30343A0000000000FE5101 /* AppShellRouteTests.swift */,
 				CB34500000000000CB345001 /* CapabilityBandTests.swift */,
+				LE34600000000000LE346001 /* LensTests.swift */,
 				DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */,
 				DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */,
 			);
@@ -445,6 +448,7 @@
 				A1C0F19329000000APIKEY04 /* BundledKeyResolutionTests.swift in Sources */,
 				5A30343A0000000000FE5102 /* AppShellRouteTests.swift in Sources */,
 				CB34500000000000CB345002 /* CapabilityBandTests.swift in Sources */,
+				LE34600000000000LE346002 /* LensTests.swift in Sources */,
 				DE52000000000000DE520002 /* DesignSystemGeometryTests.swift in Sources */,
 				DE53000000000000DE530002 /* DrawnInstrumentSnapshotTests.swift in Sources */,
 			);
