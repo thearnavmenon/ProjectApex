@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — Started the real fix for the gym-save failures: wait for login before starting a workout (1 of 6)
+
+**The problem, in plain words.** Even after login was fixed, saving a workout still failed. A team of review agents traced it to one habit the whole app shares: it stamps "who owns this data" at the moment a row is created and never re-checks it when the data is actually sent. So if a workout was started in the split-second before login finished, it got stamped with a stand-in "nobody" id — and the database later rejected every save tied to it.
+
+**What I changed (this slice).** The first and most important fix: when you tap "Start Workout," the app now **waits for your real login to be ready** before creating the workout, instead of grabbing whatever id is lying around. If login genuinely can't be established, it does nothing rather than create a doomed, unsavable workout. I built this as a single shared "get the real owner, or stop" helper so the other five fixes all use the exact same rule instead of five slightly-different versions.
+
+**How it was checked.** A new test proves the order is right: before login lands the helper says "not ready" (so nothing is stamped), and the instant login lands it returns your real id — never the stand-in. All 14 login/identity tests pass; the whole app still compiles. An independent review agent (a second, adversarial pass) found no blockers and caught one real thing — a fast double-tap could start two workouts — which I fixed by adding the same guard the other buttons already use. It also flagged that tapping Start and silently getting nothing is poor feedback; I filed that as #399.
+
+**Status:** merged as PR #400 (Slice 1 of 6). Next: make sure a brand-new login always gets a profile row (so the very first save can't fail), then the reset/cleanup and replay-safety slices.
+
+---
+
 ## 2026-06-13 — Built the Lens: a 6-blade camera-iris readiness gauge (Phase 3 UI, Slice 5)
 
 **What it is.** The Lens is a camera-iris aperture drawn in code — six blade shapes that rotate into alignment and open wider as readiness goes up. It always shows a literal number plus a state word so it is readable in a dark gym without needing to understand the shape. It is built DORMANT: finished and tested, but not yet wired into the live shell.
