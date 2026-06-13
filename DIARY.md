@@ -7,6 +7,24 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — Built the Lens: a 6-blade camera-iris readiness gauge (Phase 3 UI, Slice 5)
+
+**What it is.** The Lens is a camera-iris aperture drawn in code — six blade shapes that rotate into alignment and open wider as readiness goes up. It always shows a literal number plus a state word so it is readable in a dark gym without needing to understand the shape. It is built DORMANT: finished and tested, but not yet wired into the live shell.
+
+**Three states.** Focused iris + number (resolved, score known); unfocused iris + "—" (calibrating / unknown / first day); slow oscillation + "Updating" (computing in the background). The state word lexicon has five entries: Optimal, Good, Reduced, Poor, Calibrating, Updating. Layout is sized to "Calibrating" — the longest — so the compact gauge never reflows when the word changes.
+
+**The disclosure sheet.** Tapping the gauge opens a small sheet: big iris + number + state word, then one or two training-load numbers explaining why, a line saying "Based on your training load — no sleep or HRV data", and two expandable sections ("How to read this" / "How it's calculated"). No deep-view creep — it stays small.
+
+**Colour rule.** Only DesignSystem ink and accent-ink tokens. The legacy `ReadinessScore.tintColor` multi-hue palette is deliberately ignored.
+
+**Motion.** Blades animate via the `gauge-focus` spring (response 0.5, damping 0.7, tiny overshoot) when state changes. Reduce Motion falls back to a 150ms crossfade. The bare component has no entrance or idle animation so it snapshots at frame 1.
+
+**Tests.** 15 unconditional tests pass: all four label cases, the unknown/calibrating case, the computing case, lexicon length, longest-word sizing, accessibility labels (number + state word, not just "image"), WCAG-relevant token hygiene, isFocused logic, aperture proportionality. Gated snapshot cases (APEX_SNAPSHOT_TESTS=1) cover all states × light + dim for both compact and sheet — wired but reference-pending per the CI record discipline.
+
+**Status:** PR opened, Closes #346.
+
+---
+
 ## 2026-06-13 — Built the capability band: one component, three contexts (Slice 4, #345)
 
 The design specced a single band drawing that works in three places — onboarding model reveal, post-workout evidence strip, and the Progress ledger row. Instead of building three separate views, the spec said build one and configure it. That's what shipped today.
