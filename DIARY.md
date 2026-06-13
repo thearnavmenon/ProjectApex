@@ -7,6 +7,20 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — Proved the server was fine, then stopped the app from using the connection type that was hanging
+
+**What I did first — proof, not a guess.** Two earlier fixes hadn't cleared the problem, so instead of guessing again I called the real login endpoint myself from my computer. It answered instantly with a valid login. That proved the server, the key, and the login feature are all healthy — it is **not** a rate limit and **not** the wifi. The problem had to be in how the app makes the connection.
+
+**What was actually wrong.** Phones and servers can talk over two connection types: a newer one (HTTP/3, also called "QUIC") and an older, rock-solid one (HTTP/2). The app shares one connection pool for everything, and once it learned the server *offers* the newer type, it tried to use it for login — and on this phone that newer connection just hangs. My own test from the computer used the older type and worked in a fifth of a second. So: healthy server, but the phone was knocking on a door that wouldn't open.
+
+**What I changed.** I gave the login its **own private connection** that starts fresh and uses the older, reliable type — so it stops trying the one that hangs. I also added plain status messages to the log (does it restore an old login, start a new one, succeed, or fail — and the exact reason) so if anything is still off, the next run *tells us* instead of leaving us to guess.
+
+**How I checked.** The live endpoint test returned success over the older connection type; all 7 login tests pass; the app builds.
+
+**Status:** merged as PR #394. Real root-cause fix on top of the earlier two (#389 reset, #392 retry). Remaining safety net tracked in #391.
+
+---
+
 ## 2026-06-12 — Sign-in no longer gives up too early on a good network (the real reason saves were failing)
 
 **What went wrong.** After the reset fix, saving a workout *still* failed — but for a new reason. On a perfectly good wifi, the app's anonymous sign-in (the thing that gets you a login) was timing out, so the app had no login at all. With no login, it fell back to a placeholder id and the database refused every save with a "row-level security" rejection. The console was full of `quic… max 5 reached` and "Operation timed out".
