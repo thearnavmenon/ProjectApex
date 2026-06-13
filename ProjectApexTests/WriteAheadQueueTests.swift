@@ -325,6 +325,47 @@ final class WriteAheadQueueTests: XCTestCase {
         XCTAssertEqual(pending, 0, "clearAll during in-flight flush must leave an empty queue without trapping")
     }
 
+    /// #369 slice 3 (Reset All): clearAll() must drain a POPULATED dead-letter and
+    /// remove its on-disk persistence — not just an empty queue. This is the exact
+    /// behaviour performResetAll relies on: the live WAQ actor holds dead-lettered
+    /// owner-mismatched writes in memory + UserDefaults, and a reset that doesn't
+    /// call clearAll() would let them replay RLS-403s after re-onboarding.
+    func testClearAll_drainsPopulatedDeadLetter_andItsPersistence() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults, baseRetryDelay: 0.001)
+
+        // Drive an item into the dead-letter store via the permanent-failure path.
+        await queue.registerFlushHandler(forTable: "set_logs") { _ in
+            .permanentFailure("seed dead-letter")
+        }
+        try await queue.enqueue(TestSetLogPayload.mock(), table: "set_logs")
+
+        // Poll until the permanent-failure path dead-letters the item (avoids a
+        // fixed-sleep flake on a loaded runner — 1s ceiling).
+        var deadBefore = await queue.failedWrites()
+        for _ in 0..<100 where deadBefore.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            deadBefore = await queue.failedWrites()
+        }
+        XCTAssertEqual(deadBefore.count, 1, "precondition: one item dead-lettered")
+
+        await queue.clearAll()
+
+        let pendingAfter = await queue.pendingCount
+        XCTAssertEqual(pendingAfter, 0, "queue empty after clearAll")
+        let deadAfter = await queue.failedWrites()
+        XCTAssertTrue(deadAfter.isEmpty, "in-memory dead-letter drained by clearAll")
+
+        // Reload from the same UserDefaults — proves clearAll removed the persisted
+        // dead-letter, not just the in-memory copy (otherwise the reset's poison
+        // would survive a relaunch).
+        let reloaded = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults)
+        let reloadedPending = await reloaded.pendingCount
+        XCTAssertEqual(reloadedPending, 0, "persisted queue empty after clearAll")
+        let reloadedDead = await reloaded.failedWrites()
+        XCTAssertTrue(reloadedDead.isEmpty, "persisted dead-letter empty after clearAll")
+    }
+
     // MARK: Test 8 (#184): retry-exhausted items are dead-lettered, not dropped
 
     /// Reproduces #184: an item that exhausts its retries was silently removed

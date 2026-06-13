@@ -600,6 +600,15 @@ struct DeveloperSettingsView: View {
         // 2. Clear GymFactStore weight corrections (belt-and-suspenders after UserDefaults wipe)
         await deps.gymFactStore.clearAll()
 
+        // 2b. Drain the LIVE write-ahead queue actor (queue + dead-letter) and clear
+        // any paused session. removePersistentDomain wiped their on-disk UserDefaults,
+        // but the in-memory WAQ actor would re-persist its stale items on the next
+        // enqueue — so a reset without this leaves old-owner/placeholder writes that
+        // replay RLS-403s after re-onboarding (#369 owner-mismatch campaign, slice 3).
+        // PausedSessionState.clear() also resets the in-memory repairPending flag.
+        await deps.writeAheadQueue.clearAll()
+        PausedSessionState.clear()
+
         // 3. Remove the persisted userId so onboarding creates a fresh identity
         try? keychain.delete(.userId)
 
