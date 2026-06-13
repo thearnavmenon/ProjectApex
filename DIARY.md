@@ -7,6 +7,21 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — Built the Progress root: the capability ledger (Phase 3 UI, Slice 12 #354)
+
+**What it is.** The new Progress root screen — the "capability ledger." Instead of the old progress tab, the rebuilt shell now routes to a scrollable list of capability bands, one row per movement pattern, all aligned on a shared vertical spine. The spine is the key visual: every row's floor tick sits at the same x-position, so when you look at the screen you see one continuous 2px vertical line running from top to bottom. That line is the app saying "here is every pattern's floor, side by side."
+
+**Row anatomy.** Each active pattern gets three lines: the pattern name (Squat, Hip Hinge, etc.), a compact band strip showing floor, stretch, and today's dot at list scale, and an annotation line. The annotation always reserves its height so the layout never reflows when content changes. For patterns that are calibrating the annotation says "still calibrating." For everything else, the forward hook reads "ratchet within reach" — a permanent instrument annotation telling you the next floor increase is achievable. This is qualitative on purpose: the model doesn't yet expose how many sessions you are away from the next ratchet, so we don't invent a number. That count comes in a later model-API slice.
+
+**Canonical order, always.** Patterns appear in the model's own taxonomy order (Squat → Hip Hinge → Horizontal Push → Vertical Push → Horizontal Pull → Vertical Pull → Lunge → Isolation) and never reshuffle. Dormant patterns (those you haven't trained recently) hold their position but compact to a single muted line with a date instead of showing a full band strip.
+
+**Important: still dormant.** The 3-tab shell (`AppShell`) is behind `useNewShell = false` in the app, so real users still see the old `ContentView`. Only the `.progress` branch of `AppShell.surface(for:)` changed — one line swapping `ProgressTabView(...)` for `ProgressRootLedgerHost()`. `ContentView`, `ProgressTabView`, and `ProgramOverviewView` are untouched.
+
+**Tests.** 12 new unconditional tests cover: canonical sort order (squat first, isolation last), the 2px spine constant, list-scale band context, the honest-absence annotation (no fabricated session count), cold-start produces zero rows, dormant detection. Image-snapshot tests for light + dim + AX5 are wired up but reference images are not recorded here — the CI record job on Xcode 26.3 does that.
+
+**Status:** PR open from `feat/354-progress-root`. 393 tests (12 new + 381 existing), all green.
+
+
 ## 2026-06-13 — When the app reopens an old paused workout, it now checks it's really yours first (4 of 6)
 
 **The problem, in plain words.** If you paused a workout and came back later, the app would pick it back up and try to save to it. But if that paused workout was created under an old/temporary login (which is exactly what was happening), the database rejects every save against it — and worse, the app would try to *re-create* that workout under the old owner, which also fails. This was the exact thing in your gym log: the app resumed an old session and the saves piled up red.

@@ -132,11 +132,10 @@ struct AppShell: View {
                 note: "The program surface re-homes here in the Train slice."
             )
         case .progress:
-            ProgressTabView(
-                supabaseClient: deps.supabaseClient,
-                userId: deps.resolvedUserId,
-                traineeModelService: deps.traineeModelService
-            )
+            // #354: new Progress root — the capability ledger (progress.md §3).
+            // ProgressTabView is preserved for the live ContentView; only this
+            // dormant AppShell branch changes.
+            ProgressRootLedgerHost()
         }
     }
 
