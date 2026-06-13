@@ -73,7 +73,7 @@ private final class LiveLoopSucceedURLProtocol: URLProtocol {
 }
 
 @MainActor
-private func makeLiveLoopViewModel(weightKg: Double = 80.0, reps: Int = 8) -> WorkoutViewModel {
+private func makeLiveLoopViewModel(weightKg: Double = 80.0, reps: Int = 8) -> (vm: WorkoutViewModel, manager: WorkoutSessionManager) {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [LiveLoopSucceedURLProtocol.self]
     let supabase = SupabaseClient(
@@ -99,7 +99,7 @@ private func makeLiveLoopViewModel(weightKg: Double = 80.0, reps: Int = 8) -> Wo
         gymFactStore: gymFactStore,
         writeAheadQueue: waq
     )
-    return WorkoutViewModel(manager: manager)
+    return (WorkoutViewModel(manager: manager), manager)
 }
 
 private func makeLiveLoopDay(exerciseCount: Int = 1, setsPerExercise: Int = 2) -> TrainingDay {
@@ -297,10 +297,16 @@ final class LiveLoopBindingTests: XCTestCase {
 
     @MainActor
     func test_start_logViaDone_restMorph_nextSet() async {
-        let vm = makeLiveLoopViewModel()
+        let (vm, manager) = makeLiveLoopViewModel()
         let day = makeLiveLoopDay(exerciseCount: 1, setsPerExercise: 2)
 
-        vm.startSession(trainingDay: day, programId: UUID(), userId: UUID())
+        // Drive the FSM through the manager directly (the way WorkoutSessionManagerTests
+        // does): the VM's startSession now awaits real auth (deps.resolvedOwnerUserId),
+        // which has no test seam. The underlying manager.startSession has a defaulted
+        // userId and no auth gate, so we start there and sync the VM to publish the state.
+        await manager.startSession(trainingDay: day, programId: UUID())
+        await vm.pullState()
+        vm.beginStatePolling()
         await waitFor(vm) { if case .active = $0.sessionState { return true }; return false }
 
         // Active on set 1, model in .set, Done (not last) enabled.
@@ -337,9 +343,11 @@ final class LiveLoopBindingTests: XCTestCase {
 
     @MainActor
     func test_doubleLogGuard_secondCompleteIsRejectedWhileInFlight() async {
-        let vm = makeLiveLoopViewModel()
+        let (vm, manager) = makeLiveLoopViewModel()
         let day = makeLiveLoopDay(exerciseCount: 1, setsPerExercise: 3)
-        vm.startSession(trainingDay: day, programId: UUID(), userId: UUID())
+        await manager.startSession(trainingDay: day, programId: UUID())
+        await vm.pullState()
+        vm.beginStatePolling()
         await waitFor(vm) { if case .active = $0.sessionState { return true }; return false }
 
         let rx = vm.currentPrescription!
