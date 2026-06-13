@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — When the app reopens an old paused workout, it now checks it's really yours first (4 of 6)
+
+**The problem, in plain words.** If you paused a workout and came back later, the app would pick it back up and try to save to it. But if that paused workout was created under an old/temporary login (which is exactly what was happening), the database rejects every save against it — and worse, the app would try to *re-create* that workout under the old owner, which also fails. This was the exact thing in your gym log: the app resumed an old session and the saves piled up red.
+
+**What I changed.** Before resuming a paused workout, the app now asks "does this workout belong to the login I'm signed in as right now?" If yes, it resumes exactly as before. If it belongs to a different (old) login, it doesn't try to replay it — it clears it out and shows a short note: "couldn't confirm your previous workout for this account — it was cleared. Start a new one." So instead of an endless wall of failed saves, you get a clean start.
+
+**How it was checked.** Two tests: one proves the "clear it out" routine empties the outbox and the paused snapshot; the other drives the real flow — a paused workout stamped with login A, the app signed in as login B — and proves the app stays idle, clears the old workout, and shows the note (it would fail if the ownership check were removed). A review agent confirmed the check runs *before* any save attempt, that clearing the whole outbox here is correct (everything in it belongs to the old login at that moment), and that the two tests are now load-bearing — I tightened one of them after it pointed out the original didn't really prove anything.
+
+**Status:** merged as PR #406 (Slice 4 of 6). Next: as a safety net, have the outbox itself refuse to retry a save whose owner doesn't match the current login.
+
+---
+
 ## 2026-06-13 — Built the new "do the set" screen (numbers big, one tap to log, then it becomes the rest timer)
 
 **What this is.** The first piece of the redesigned workout screen. It shows one set at a time: the exercise name, then the target weight and reps as big numbers you can read from across the gym. A full-width ink bar sits at the bottom that just says **Done**. Tap it once and the set is logged exactly as prescribed — no pop-up form, no fiddling with fields. The screen then smoothly turns into the rest timer in place, and when rest is over it shows the next set.
