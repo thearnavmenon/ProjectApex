@@ -468,4 +468,49 @@ final class UserIdentityResolverTests: XCTestCase {
             "no auth session yet → onboarding must NOT write a placeholder-keyed users row")
         clearIdentityKeys(keychain)
     }
+
+    // MARK: Keystone (Slice 1) — resolve-before-stamp ordering
+
+    /// The shared `AppDependencies.resolvedOwnerUserId()` gate awaits the first
+    /// session resolution BEFORE reading the identity. This proves the ordering
+    /// that makes that safe: on a fresh launch (empty Keychain) the guard is nil
+    /// (so a caller aborts rather than stamping the placeholder), and once
+    /// `awaitFirstResolution()` has signed in and persisted `.supabaseAuthUserId`,
+    /// the very next read is the REAL auth uid — never the placeholder. Regression
+    /// guard against reading the Keychain before sign-in lands.
+    func test_resolveBeforeStamp_awaitFirstResolutionThenRead_isRealUid_notPlaceholder() async throws {
+        let keychain = makeScopedKeychain()
+        clearAuthKeys(keychain)
+        clearIdentityKeys(keychain)
+        let uid = UUID()
+        GoTrueMockURLProtocol.reset()
+        GoTrueMockURLProtocol.stubs = [
+            ("/auth/v1/signup", .init(
+                statusCode: 200,
+                data: tokenJSON(access: "a", refresh: "r",
+                                expiresAt: Int(Date().timeIntervalSince1970) + 3600,
+                                userId: uid)
+            ))
+        ]
+        let auth = SupabaseAuth(
+            supabaseURL: testURL, anonKey: "anon",
+            keychain: keychain, urlSession: makeMockSession()
+        )
+
+        // Before resolution: no identity yet → guard is nil (caller must abort).
+        XCTAssertNil(
+            UserIdentityResolver.onboardingUserId(keychain: keychain, placeholder: placeholder),
+            "fresh launch, pre-resolution: the gate must be nil so no placeholder row is stamped"
+        )
+
+        // The gate awaits resolution first — this signs in and persists .supabaseAuthUserId.
+        _ = await auth.awaitFirstResolution()
+
+        // ...so the subsequent read is the real uid, never the placeholder.
+        let owner = UserIdentityResolver.onboardingUserId(keychain: keychain, placeholder: placeholder)
+        XCTAssertEqual(owner, uid, "after awaitFirstResolution the gate returns the real auth uid")
+        XCTAssertNotEqual(owner, placeholder)
+        clearAuthKeys(keychain)
+        clearIdentityKeys(keychain)
+    }
 }

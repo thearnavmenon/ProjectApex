@@ -76,6 +76,27 @@ final class AppDependencies {
         UserIdentityResolver.resolve(keychain: keychainService, placeholder: Self.placeholderUserId)
     }
 
+    /// Awaits the first GoTrue session resolution, then returns the real auth uid
+    /// IFF it is not the placeholder. Returns `nil` when auth never resolved
+    /// (sign-in failed/timed out) or resolved only to the placeholder — callers
+    /// MUST treat nil as "abort this owner-stamped write" and never fall back to
+    /// the placeholder, mirroring the guard in `OnboardingView.persistUserIfNeeded`
+    /// (`UserIdentityResolver.onboardingUserId`). This is the resolve-before-stamp
+    /// surface owned writes adopt — workout-start as of this slice; later slices
+    /// migrate the remaining sync `resolvedUserId` sites onto it. Do not define a
+    /// second copy.
+    ///
+    /// Safe from any async context: `awaitFirstResolution` is internally bounded
+    /// (signInTimeout ceiling) and never hangs. On a restored session it returns in
+    /// microseconds; only a true fresh launch pays the sign-in latency.
+    func resolvedOwnerUserId() async -> UUID? {
+        _ = await supabaseAuth.awaitFirstResolution()
+        return UserIdentityResolver.onboardingUserId(
+            keychain: keychainService,
+            placeholder: Self.placeholderUserId
+        )
+    }
+
     // MARK: Private: Stored Anthropic key for re-init
 
     private let anthropicKey: String
