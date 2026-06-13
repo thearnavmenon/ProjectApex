@@ -62,6 +62,7 @@
 		LE34600000000000LE346002 /* LensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = LE34600000000000LE346001 /* LensTests.swift */; };
 		DE52000000000000DE520002 /* DesignSystemGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */; };
 		DE53000000000000DE530002 /* DrawnInstrumentSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */; };
+		DE56000000000000DE560002 /* LiveLoopCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE56000000000000DE560001 /* LiveLoopCoreTests.swift */; };
 		DE54000000000000DE540002 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = DE54000000000000DE540001 /* SnapshotTesting */; };
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
@@ -134,6 +135,7 @@
 		LE34600000000000LE346001 /* LensTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LensTests.swift; sourceTree = "<group>"; };
 		DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DesignSystemGeometryTests.swift; sourceTree = "<group>"; };
 		DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DrawnInstrumentSnapshotTests.swift; sourceTree = "<group>"; };
+		DE56000000000000DE560001 /* LiveLoopCoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiveLoopCoreTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
 		DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SetPrescriptionIntentValidationTests.swift; sourceTree = "<group>"; };
 		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
@@ -282,6 +284,7 @@
 				LE34600000000000LE346001 /* LensTests.swift */,
 				DE52000000000000DE520001 /* DesignSystemGeometryTests.swift */,
 				DE53000000000000DE530001 /* DrawnInstrumentSnapshotTests.swift */,
+				DE56000000000000DE560001 /* LiveLoopCoreTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -451,6 +454,7 @@
 				LE34600000000000LE346002 /* LensTests.swift in Sources */,
 				DE52000000000000DE520002 /* DesignSystemGeometryTests.swift in Sources */,
 				DE53000000000000DE530002 /* DrawnInstrumentSnapshotTests.swift in Sources */,
+				DE56000000000000DE560002 /* LiveLoopCoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

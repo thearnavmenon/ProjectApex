@@ -7,6 +7,22 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — Built the new "do the set" screen (numbers big, one tap to log, then it becomes the rest timer)
+
+**What this is.** The first piece of the redesigned workout screen. It shows one set at a time: the exercise name, then the target weight and reps as big numbers you can read from across the gym. A full-width ink bar sits at the bottom that just says **Done**. Tap it once and the set is logged exactly as prescribed — no pop-up form, no fiddling with fields. The screen then smoothly turns into the rest timer in place, and when rest is over it shows the next set.
+
+**Two nice touches from the design.** On the very last set of the whole workout, the bottom bar quietly changes its word from "Done" to **Finish** — so the end of the session is obvious. And there's a rule the designers call "work is ink, time is pencil": the weights and reps (the work you did) are drawn in full-strength ink, while the rest-timer digits (just time passing) are drawn in a lighter grey. Same handwriting, lighter pencil — so the two read as one calm system.
+
+**Guards so a tap is never a mistake.** The Done bar ignores a stray brush of the thumb, and it goes dead the instant you tap it so a double-tap can't log the same set twice. The little plate-thud buzz fires at the moment the set is committed, not when you first touch down.
+
+**Important: this is built but not switched on yet.** It's a brand-new screen that nothing in the live app routes to. The old workout screens are completely untouched and still run the real app. This is the same "build it behind a curtain, swap later" approach we've used for the rest of the redesign.
+
+**What's deliberately left for the next slice (#351).** The "tap a number to change it" adjuster, the AMRAP (max-reps) counter, and the dramatic ink-flood entrance animation — all hooks are in place but the work is parked. This slice is just the core loop: see the set, tap Done, rest, next set.
+
+**How I checked.** 16 tests, all green: they drive the real workout engine through start → log → rest → next set, prove the Done→Finish relabel only flips on the true last set, prove the double-tap and stray-brush guards hold, and prove the ink-vs-pencil colour split. Picture-comparison tests for the set and rest screens (light and dark) are wired up but their reference images are recorded later on the build server, by design. The screen builds with no new warnings.
+
+**Status:** opened as a PR off `feat/350-live-loop-core`. Dormant build — new screen only; old views still live.
+
 ## 2026-06-13 — Make sure every new login gets a profile row, automatically (2 of 6)
 
 **The problem, in plain words.** Lots of saves point back to a "profile" row keyed to your login. Today that row is only created during onboarding. So if a save ever fires before onboarding finishes — or if onboarding is skipped — there's no profile row and the database refuses the save. Belt with no suspenders.
