@@ -289,6 +289,35 @@ private func makeManager(
     )
 }
 
+/// Minimal Encodable payload for seeding the write-ahead queue in tests. File-scope
+/// (not a local type) so its Encodable conformance is non-isolated and satisfies
+/// `enqueue`'s `Sendable` requirement. #369 slice 4.
+nonisolated private struct DummyWAQItem: Encodable, Sendable { let id = UUID().uuidString }
+
+/// Like `makeManager` but also returns the injected `WriteAheadQueue` so tests can
+/// assert on it directly (the manager's `writeAheadQueue` is private). #369 slice 4.
+private func makeManagerWithWAQ(
+    provider: any LLMProvider = MockLLMProvider(response: prescriptionJSON()),
+    gymProfile: GymProfile? = nil
+) -> (WorkoutSessionManager, WriteAheadQueue) {
+    let inferenceService = AIInferenceService(provider: provider, gymProfile: gymProfile, maxRetries: 0)
+    let supabase = makeTestSupabase()
+    let memoryService = MemoryService(supabase: supabase, embeddingAPIKey: "")
+    let suiteName = "com.test.wsm.\(UUID().uuidString)"
+    let testDefaults = UserDefaults(suiteName: suiteName)!
+    let gymFactStore = GymFactStore(userDefaults: testDefaults)
+    let waq = WriteAheadQueue(supabase: supabase, userDefaults: testDefaults)
+    let manager = WorkoutSessionManager(
+        aiInference: inferenceService,
+        healthKit: HealthKitService(),
+        memoryService: memoryService,
+        supabase: supabase,
+        gymFactStore: gymFactStore,
+        writeAheadQueue: waq
+    )
+    return (manager, waq)
+}
+
 // MARK: - WorkoutSessionManagerTests
 
 final class WorkoutSessionManagerTests: XCTestCase {
@@ -305,6 +334,96 @@ final class WorkoutSessionManagerTests: XCTestCase {
     override func tearDown() {
         PausedSessionState.clear()
         super.tearDown()
+    }
+
+    // MARK: #369 slice 4 — discard stale-owner paused session on resume
+
+    /// discardStalePausedSession() clears the write-ahead queue (+ dead-letter) and
+    /// the paused snapshot, leaving a clean slate with no Supabase write.
+    func testDiscardStalePausedSession_clearsQueueDeadLetterAndPausedState() async throws {
+        let (manager, waq) = makeManagerWithWAQ()
+        // Seed a dead-letter that SURVIVES until discard (permanent-failure path).
+        // A success-stub would auto-flush the item away, making the WAQ-clear
+        // assertion vacuous; this keeps it load-bearing.
+        await waq.registerFlushHandler(forTable: "set_logs") { _ in .permanentFailure("seed") }
+        try? await waq.enqueue(DummyWAQItem(), table: "set_logs")
+        var deadBefore = await waq.failedWrites()
+        for _ in 0..<100 where deadBefore.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            deadBefore = await waq.failedWrites()
+        }
+        XCTAssertEqual(deadBefore.count, 1, "precondition: one item dead-lettered and pending")
+
+        let paused = PausedSessionState(
+            sessionId: UUID(), trainingDayId: UUID(), weekId: UUID(),
+            weekNumber: 1, exerciseIndex: 0, currentSetNumber: 1,
+            dayType: "Push_A", programId: UUID(), userId: UUID(), pausedAt: Date()
+        )
+        paused.save()
+        XCTAssertNotNil(PausedSessionState.load(), "precondition: paused session saved")
+
+        await manager.discardStalePausedSession()
+
+        let dl = await waq.failedWrites()
+        XCTAssertTrue(dl.isEmpty, "dead-letter drained by discard (clearAll)")
+        XCTAssertNil(PausedSessionState.load(), "paused state cleared after discard")
+    }
+
+    /// When the paused session's owner != the current auth uid, resumeSession must
+    /// discard it (not replay/re-insert under the old owner → RLS 403), leave the
+    /// manager idle, clear the paused snapshot, and surface a repair notice.
+    func testResumeSession_staleOwner_discardsAndStaysIdle() async throws {
+        let realUid = UUID()    // current real auth uid (B)
+        let frozenUid = UUID()  // uid frozen in the paused session (A) — different
+
+        // Scoped keychain with a restorable (future-expiry) session for the real uid,
+        // so awaitFirstResolution() returns it offline (no network).
+        let kc = KeychainService(serviceName: "com.projectapex.tests.stale.\(UUID().uuidString)")
+        try? kc.store("access-token", for: .supabaseAccessToken)
+        try? kc.store("refresh-token", for: .supabaseRefreshToken)
+        try? kc.store(String(Int(Date().addingTimeInterval(3600).timeIntervalSince1970)), for: .supabaseSessionExpiry)
+        try? kc.store(realUid.uuidString, for: .supabaseAuthUserId)
+        let auth = SupabaseAuth(supabaseURL: URL(string: "https://test.supabase.co")!, anonKey: "k", keychain: kc)
+
+        let manager = makeManager()
+        let vm = await WorkoutViewModel(manager: manager)
+
+        let paused = PausedSessionState(
+            sessionId: UUID(), trainingDayId: UUID(), weekId: UUID(),
+            weekNumber: 1, exerciseIndex: 0, currentSetNumber: 1,
+            dayType: "Push_A", programId: UUID(), userId: frozenUid, pausedAt: Date()
+        )
+        paused.save()
+
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+        await vm.resumeSession(pausedState: paused, trainingDay: day,
+                               supabase: makeTestSupabase(), supabaseAuth: auth)
+
+        // resumeSession spawns a Task; poll on the LAST state the gate sets
+        // (resumeRepairNotice, assigned after the discard) so we never observe a
+        // half-applied gate. 1s ceiling.
+        var settled = false
+        for _ in 0..<100 where !settled {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            settled = await MainActor.run { vm.resumeRepairNotice != nil }
+        }
+
+        let state = await manager.sessionState
+        XCTAssertEqual(state, .idle, "manager stays idle when a stale-owner session is discarded")
+        XCTAssertNil(PausedSessionState.load(), "paused state cleared")
+        await MainActor.run {
+            XCTAssertNotNil(vm.resumeRepairNotice, "resumeRepairNotice surfaced")
+            XCTAssertFalse(vm.isStartingSession, "isStartingSession reset")
+        }
+
+        clearAuthKeysForStaleTest(kc)
+    }
+
+    private func clearAuthKeysForStaleTest(_ kc: KeychainService) {
+        try? kc.delete(.supabaseAccessToken)
+        try? kc.delete(.supabaseRefreshToken)
+        try? kc.delete(.supabaseSessionExpiry)
+        try? kc.delete(.supabaseAuthUserId)
     }
 
     // MARK: Test 1: startSession → .active state transition

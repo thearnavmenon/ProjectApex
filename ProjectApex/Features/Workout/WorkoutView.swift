@@ -524,7 +524,8 @@ struct WorkoutView: View {
         vm.resumeSession(
             pausedState: state,
             trainingDay: trainingDay,
-            supabase: deps.supabaseClient
+            supabase: deps.supabaseClient,
+            supabaseAuth: deps.supabaseAuth
         )
     }
 
