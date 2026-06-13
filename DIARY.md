@@ -7,6 +7,22 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — Built the capability band: one component, three contexts (Slice 4, #345)
+
+The design specced a single band drawing that works in three places — onboarding model reveal, post-workout evidence strip, and the Progress ledger row. Instead of building three separate views, the spec said build one and configure it. That's what shipped today.
+
+**What the band draws.** A filled region between the floor (the heaviest tick — 2 px, full ink) and the stretch (a hairline tick — 1 px). The fill is the accent color at 8% in light mode, 12% in dim. Today's dot is solid when the model has enough data to trust the number ("measured"), hollow when it's still a guess ("estimated"). The dashed band edges give the same estimated/measured signal on the band itself — solid edges when established or seasoned, dashed when still calibrating.
+
+**The three contexts.** `.full` is the complete drawing with labels and a caption slot — this is what the post-workout strip and the Progress detail use. `.onboarding` is the same anatomy at a slightly smaller height — same component, same labeling. `.list` strips it down to an unlabeled 5 pt dot and no bracket, because the Progress root rows put the numbers in the row annotation below, not on the drawing itself.
+
+**The binding.** The component takes a `PatternProjection` (floor/stretch/progress) plus an `AxisConfidence` separately, because `PatternProjection` has no confidence field. The caller supplies confidence from `PatternProfile.confidence`.
+
+**Tests.** Twelve unconditional geometry/token tests run on every push: tick widths, fill opacities for light and dim, the full four-case confidence mapping, minimum band width enforcement, and out-of-band dot plotting. Seven snapshot cases are wired in but gated — they will record references when CI runs on the pinned Xcode 26.3 toolchain.
+
+**DORMANT.** The component is built and tested but not wired into any live screen — the old views are untouched. The post-workout, Progress, and onboarding slices will each pull it in when they build.
+
+**Status:** PR open, 324/324 tests passing.
+
 ## 2026-06-13 — Proved the server was fine, then stopped the app from using the connection type that was hanging
 
 **What I did first — proof, not a guess.** Two earlier fixes hadn't cleared the problem, so instead of guessing again I called the real login endpoint myself from my computer. It answered instantly with a valid login. That proved the server, the key, and the login feature are all healthy — it is **not** a rate limit and **not** the wifi. The problem had to be in how the app makes the connection.
