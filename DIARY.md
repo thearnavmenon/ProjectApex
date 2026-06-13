@@ -23,6 +23,20 @@ Started 2026-06-07.
 
 **Status:** opened as a PR off `feat/350-live-loop-core`. Dormant build — new screen only; old views still live.
 
+---
+
+## 2026-06-13 — "Reset All" now truly empties the outbox, not just the on-disk copy (3 of 6)
+
+**The problem, in plain words.** The app keeps an "outbox" of saves waiting to reach the server. When you tap "Reset All," the app wiped the saved-to-disk copy of that outbox — but the *running* copy already loaded in memory survived, and would quietly re-save itself the moment anything new got added. So a reset could leave behind stale, mis-owned saves that fail again after you set the app up fresh.
+
+**What I changed.** Two small lines in the reset routine: actually tell the live outbox to empty itself (in memory and on disk), and clear any paused-workout snapshot. Now a reset is a true clean slate — provided you quit and reopen afterward, which the reset message already tells you to do.
+
+**How it was checked.** I added a test that fills the outbox's "failed pile," empties it via the reset call, and then re-opens it from scratch to prove nothing came back — the gap the old test missed (it only ever cleared an already-empty outbox). A review agent confirmed the ordering is safe and flagged one real edge — a workout that's *actively in progress* at the instant you reset isn't cleared from memory — which I filed as #403 (it's covered in practice by the quit-and-reopen step). I also made the test poll instead of sleeping a fixed time, so it can't flake.
+
+**Status:** merged as PR #404 (Slice 3 of 6). Next: when the app reopens an old paused workout, check it still belongs to you before replaying it.
+
+---
+
 ## 2026-06-13 — Make sure every new login gets a profile row, automatically (2 of 6)
 
 **The problem, in plain words.** Lots of saves point back to a "profile" row keyed to your login. Today that row is only created during onboarding. So if a save ever fires before onboarding finishes — or if onboarding is skipped — there's no profile row and the database refuses the save. Belt with no suspenders.
