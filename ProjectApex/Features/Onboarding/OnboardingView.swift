@@ -949,7 +949,9 @@ struct OnboardingView: View {
         // Mirror the auth uid into `.userId` (first-run signal + secondary read).
         try? keychain.store(userId.uuidString, for: .userId)
 
-        // Best-effort upsert into users table — failure is non-fatal for onboarding.
+        // Best-effort upsert into users table — ON CONFLICT (id) DO UPDATE so the
+        // row the handle_new_user trigger pre-provisioned (bare id) is overwritten
+        // with the full profile. Failure is non-fatal for onboarding.
         let nameStr = profile.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let userRow = UserInsertRow(
             id: userId,
@@ -959,7 +961,7 @@ struct OnboardingView: View {
             age: profile.age,
             trainingAge: profile.trainingAge.rawValue
         )
-        try? await deps.supabaseClient.insert(userRow, table: "users")
+        try? await deps.supabaseClient.upsert(userRow, table: "users")
 
         // #147: hydrate trainee_models.model_json.goal via the
         // update-trainee-goal Edge Function. Best-effort — failure leaves
@@ -1040,6 +1042,19 @@ private struct UserInsertRow: Codable, Sendable {
         case heightCm     = "height_cm"
         case age
         case trainingAge  = "training_age"
+    }
+
+    /// Omit nil fields rather than encoding them as JSON `null`. With the upsert
+    /// (`resolution=merge-duplicates`) a `null` would overwrite a previously-set
+    /// column on a re-onboard; omitting absent fields makes the merge additive.
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encodeIfPresent(displayName, forKey: .displayName)
+        try c.encodeIfPresent(bodyweightKg, forKey: .bodyweightKg)
+        try c.encodeIfPresent(heightCm, forKey: .heightCm)
+        try c.encodeIfPresent(age, forKey: .age)
+        try c.encodeIfPresent(trainingAge, forKey: .trainingAge)
     }
 }
 

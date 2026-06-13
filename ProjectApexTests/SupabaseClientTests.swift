@@ -160,6 +160,56 @@ final class SupabaseClientTests: XCTestCase {
         XCTAssertEqual(req.value(forHTTPHeaderField: "Prefer"), "return=representation")
     }
 
+    /// upsert() must send Prefer: return=representation, resolution=merge-duplicates
+    /// and POST to the table URL (used by onboarding's users write so the
+    /// trigger-provisioned bare row merges instead of 409-ing).
+    func test_upsert_sendsResolutionMergeDuplicatesHeader() async throws {
+        StubURLProtocol.stubbedStatusCode = 200
+        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+
+        let client = makeClient()
+        try await client.upsert(TestRow(userId: UUID(), dayType: "push"), table: "users")
+
+        let req = try XCTUnwrap(StubURLProtocol.lastRequest)
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(
+            req.value(forHTTPHeaderField: "Prefer"),
+            "return=representation, resolution=merge-duplicates"
+        )
+        XCTAssertTrue(req.url?.path.hasSuffix("/rest/v1/users") == true,
+                      "URL path must end with /rest/v1/users, got \(req.url?.path ?? "nil").")
+    }
+
+    /// upsert() succeeds against a 200 where insert() of the same row would 409.
+    func test_upsert_doesNotThrow_whenServerReturns200() async throws {
+        StubURLProtocol.stubbedStatusCode = 200
+        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+
+        let client = makeClient()
+        do {
+            try await client.upsert(TestRow(userId: UUID(), dayType: "pull"), table: "users")
+        } catch {
+            XCTFail("upsert should not throw on 200, got \(error)")
+        }
+    }
+
+    /// Regression guard: insert() must NOT carry resolution=merge-duplicates, so the
+    /// two methods stay distinct (insert keeps plain return=representation).
+    func test_insert_doesNotSendResolutionHeader() async throws {
+        StubURLProtocol.stubbedStatusCode = 201
+        StubURLProtocol.stubbedData = "[]".data(using: .utf8)!
+
+        let client = makeClient()
+        try await client.insert(TestRow(userId: UUID(), dayType: "legs"), table: "users")
+
+        let req = try XCTUnwrap(StubURLProtocol.lastRequest)
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Prefer"), "return=representation")
+        XCTAssertFalse(
+            req.value(forHTTPHeaderField: "Prefer")?.contains("merge-duplicates") ?? false,
+            "insert() must not request merge-duplicates resolution"
+        )
+    }
+
     /// fetch() with filters must append PostgREST-syntax query params.
     func test_fetch_withFilters_appendsQueryParams() async throws {
         StubURLProtocol.stubbedStatusCode = 200

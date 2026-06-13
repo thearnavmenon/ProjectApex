@@ -7,6 +7,18 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-13 — Make sure every new login gets a profile row, automatically (2 of 6)
+
+**The problem, in plain words.** Lots of saves point back to a "profile" row keyed to your login. Today that row is only created during onboarding. So if a save ever fires before onboarding finishes — or if onboarding is skipped — there's no profile row and the database refuses the save. Belt with no suspenders.
+
+**What I changed.** Two things. (1) A tiny database rule (a "trigger") that **automatically creates a bare profile row the instant a new login is made**, server-side, before the app even asks. Onboarding then fills in the details on top. (2) Changed onboarding's profile write from "insert" to "upsert" (insert-or-update) so it cleanly lands on top of the row the trigger just made instead of colliding with it — and I made it only write the fields you actually provided, so re-doing onboarding can't blank out details you'd already set.
+
+**How it was checked.** New tests prove the upsert sends the right "merge, don't collide" instruction and that a plain insert still doesn't. An adversarial review agent did the most important check by hand: reading the real table definition to confirm the auto-create rule **cannot** accidentally block new sign-ins (the only required field is the id, which the rule always provides). It also caught that the auto-create rule's safety depends on it running as the database owner — so I made that explicit instead of relying on a default, matching how the app's other database rules are written.
+
+**Status:** code merged as PR #402 (Slice 2 of 6). One deliberate step remains: actually switching the database rule on in production — I'm gating that on a careful go-live check because a faulty rule there could block sign-ins, so it's not something to flip casually.
+
+---
+
 ## 2026-06-13 — Started the real fix for the gym-save failures: wait for login before starting a workout (1 of 6)
 
 **The problem, in plain words.** Even after login was fixed, saving a workout still failed. A team of review agents traced it to one habit the whole app shares: it stamps "who owns this data" at the moment a row is created and never re-checks it when the data is actually sent. So if a workout was started in the split-second before login finished, it got stamped with a stand-in "nobody" id — and the database later rejected every save tied to it.
