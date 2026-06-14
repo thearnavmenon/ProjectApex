@@ -7,6 +7,20 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-14 — Last piece: the goal/calibration/manual-log screens now wait for login before saving (6 of 6)
+
+**The problem, in plain words.** A handful of less-common save points — editing your goal, reviewing a calibration, logging a past workout by hand — still grabbed "who am I" the old, instant way, which during the first second after opening the app can be the temporary stand-in id. A save stamped that way gets rejected. The main workout flow was already fixed in the earlier pieces; this is the long tail.
+
+**What I changed.** Those three screens now wait for the real login the same way the workout screen does. For the two "best-effort" syncs (goal and calibration), only the part that talks to the server waits for login — the bit that updates your screen still happens instantly, so nothing feels slower. For logging a past workout by hand (which actually creates records), it now waits for login and, if it genuinely can't confirm one, shows "sign-in isn't confirmed yet, please try again" instead of silently doing nothing.
+
+**What I deliberately left for later (and why).** A few remaining save points live inside the app's main container screen, which a *separate* redesign is actively rebuilding right now. Editing it today would collide with that work and likely get thrown away when the redesign swaps it out. So I wrote those up as a tracked task (#409) to do once the redesign lands. I also confirmed the workout-note and AI-memory saves are already safe, because they're tied to the workout — and the workout itself can no longer start under the wrong login (earlier pieces).
+
+**How it was checked.** The whole app builds; a review agent confirmed each screen still updates locally regardless, that the "wait for login" step doesn't slow anything (the login is already settled by the time you reach these screens), and that no nearby save in the same files was missed.
+
+**Status:** merged as PR #412 (Slice 6 of 6 — the owner-mismatch campaign is complete bar the one tracked follow-up #409 and switching the database auto-create rule on in production).
+
+---
+
 ## 2026-06-13 — Built the Progress root: the capability ledger (Phase 3 UI, Slice 12 #354)
 
 **What it is.** The new Progress root screen — the "capability ledger." Instead of the old progress tab, the rebuilt shell now routes to a scrollable list of capability bands, one row per movement pattern, all aligned on a shared vertical spine. The spine is the key visual: every row's floor tick sits at the same x-position, so when you look at the screen you see one continuous 2px vertical line running from top to bottom. That line is the app saying "here is every pattern's floor, side by side."
