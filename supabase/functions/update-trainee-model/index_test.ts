@@ -8,14 +8,20 @@
 // Run locally:
 //   deno test supabase/functions/update-trainee-model/index_test.ts
 
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
+  assertAlmostEquals,
+  assertEquals,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  applyPerExerciseRules,
+  applyPerPatternRules,
   capTopSets,
   derivedTrainedSets,
   handleRequest,
   validateRequest,
 } from "./index.ts";
 import { TOP_SET_RETENTION_COUNT } from "../_shared/constants.ts";
+import { e1rm } from "../_shared/ewma-engine.ts";
 
 const VALID_USER_ID = "11111111-1111-4111-8111-111111111111";
 const VALID_SESSION_ID = "22222222-2222-4222-8222-222222222222";
@@ -36,7 +42,11 @@ function baseRequest(payloadOverrides: Record<string, unknown> = {}) {
 Deno.test("derivedTrainedSets_rejects_unknown_primary_muscle", () => {
   const trained = derivedTrainedSets({
     set_logs: [
-      { exercise_id: "ex-1", primary_muscle: "posterior_deltoid", intent: "top" },
+      {
+        exercise_id: "ex-1",
+        primary_muscle: "posterior_deltoid",
+        intent: "top",
+      },
     ],
   });
   assertEquals(
@@ -54,8 +64,16 @@ Deno.test("derivedTrainedSets_keeps_canonical_primary_muscle", () => {
       { exercise_id: "ex-2", primary_muscle: "quads", intent: "top" },
     ],
   });
-  assertEquals(trained.muscleGroups.has("chest"), true, "canonical group retained");
-  assertEquals(trained.muscleGroups.has("legs"), true, "leg subgroup collapses to legs");
+  assertEquals(
+    trained.muscleGroups.has("chest"),
+    true,
+    "canonical group retained",
+  );
+  assertEquals(
+    trained.muscleGroups.has("legs"),
+    true,
+    "leg subgroup collapses to legs",
+  );
 });
 
 // ─── #239 (#167 sibling): derivedTrainedSets rejects non-canonical e.pattern ──
@@ -74,7 +92,11 @@ Deno.test("derivedTrainedSets_rejects_unknown_pattern", () => {
     false,
     "unknown pattern must not leak into patterns",
   );
-  assertEquals(trained.patterns.size, 0, "no library fallback without exercise_id");
+  assertEquals(
+    trained.patterns.size,
+    0,
+    "no library fallback without exercise_id",
+  );
 });
 
 // A canonical client pattern still flows through unchanged.
@@ -230,7 +252,10 @@ Deno.test("validateRequest_set_log_entry_null_returns_400", () => {
   if (!("error" in result)) {
     throw new Error("expected error response");
   }
-  assertEquals(result.error, "session_payload.set_logs[0] must be a JSON object");
+  assertEquals(
+    result.error,
+    "session_payload.set_logs[0] must be a JSON object",
+  );
 });
 
 // ─── #369 [12]: ExerciseProfile.topSets bounded retention (capTopSets) ───────
@@ -284,7 +309,10 @@ function b64url(s: string): string {
   const bytes = new TextEncoder().encode(s);
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(
+    /=+$/,
+    "",
+  );
 }
 
 function fakeJwt(sub: string): string {
@@ -297,7 +325,9 @@ function postRequest(
   body: Record<string, unknown>,
   authorization?: string,
 ): Request {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
   if (authorization !== undefined) headers.Authorization = authorization;
   return new Request("https://example.test/update-trainee-model", {
     method: "POST",
@@ -351,4 +381,118 @@ Deno.test("handleRequest_sub_match_passes_ownership_gate", async () => {
   } finally {
     if (prior !== undefined) Deno.env.set("SUPABASE_DB_URL", prior);
   }
+});
+
+// ─── #369 Slice 3: long-absence estimate-layer re-anchor (applyPerExerciseRules)
+//
+// When the PRE-append last loggedAt for an exercise is >= 28 days before the
+// incoming session, the estimate flips into transition mode AND trims pre-gap
+// sessions, so e1rmCurrent re-anchors on the measured post-return session
+// rather than the stale, inflated EWMA. The trigger is per-exercise (its own
+// baseTopSets gap), the trim cutoff is the pre-append max loggedAt.
+
+const EX = "barbell_back_squat"; // canonical → pattern "squat" (used in Slice 4)
+
+// Stored topSet shape: loggedAt is an ISO string (what the orchestrator writes).
+const storedTopSet = (
+  weight: number,
+  reps: number,
+  loggedAtIso: string,
+  sessionId: string,
+) => ({ weight, reps, loggedAt: loggedAtIso, sessionId });
+
+const topSetLog = (weight: number, reps: number) => ({
+  exercise_id: EX,
+  intent: "top",
+  weight_kg: weight,
+  reps_completed: reps,
+});
+
+// Pre-gap history S1..S5 (consecutive days, ending 2026-01-05) — the 6-week-gap
+// worked scenario from Slice 2. Return session is 2026-02-16 (>28d after Jan 5).
+const preGapHistory = () => [
+  storedTopSet(100, 5, "2026-01-01T10:00:00Z", "S1"),
+  storedTopSet(100, 5, "2026-01-02T10:00:00Z", "S2"),
+  storedTopSet(102.5, 5, "2026-01-03T10:00:00Z", "S3"),
+  storedTopSet(102.5, 5, "2026-01-04T10:00:00Z", "S4"),
+  storedTopSet(105, 5, "2026-01-05T10:00:00Z", "S5"),
+];
+const RETURN_LOGGED_AT = new Date("2026-02-16T10:00:00Z"); // 42 days after S5
+const RETURN_SESSION_ID = "S6";
+
+Deno.test("Slice 3 (a): >=28d pre-append gap → e1rmCurrent re-anchors to the TRIMMED post-return mean (110.83), not EWMA, not no-trim", () => {
+  const exercises = {
+    [EX]: {
+      exerciseId: EX,
+      topSets: preGapHistory(),
+      e1rmCurrent: e1rm(105, 5), // stale inflated estimate before this apply
+      sessionCount: 5,
+      confidence: "established",
+    },
+  };
+  const result = applyPerExerciseRules(
+    exercises,
+    [topSetLog(95, 5)], // return session: 95×5 → 110.83
+    RETURN_LOGGED_AT,
+    RETURN_SESSION_ID,
+  );
+  const e1rmCurrent = result.exercises[EX].e1rmCurrent as number;
+  // Re-anchored to the trimmed transition-mode mean = e1rm(95,5) = 110.833.
+  assertAlmostEquals(e1rmCurrent, e1rm(95, 5)!, 1e-9);
+  assertAlmostEquals(e1rmCurrent, 110.833, 1e-3);
+  // NOT the no-trim last-3 mean {S4,S5,S6} ≈ 117.64.
+  const noTrim = (e1rm(102.5, 5)! + e1rm(105, 5)! + e1rm(95, 5)!) / 3;
+  assertEquals(Math.abs(e1rmCurrent - noTrim) > 1, true);
+  // The long-absence rule is tagged.
+  assertEquals(result.rulesFired.has("long-absence-transition"), true);
+  assertEquals(
+    result.fieldsChanged.includes(`exercises.${EX}.e1rmCurrent`),
+    true,
+  );
+});
+
+Deno.test("Slice 3 (b): no-gap exercise still uses standard EWMA (no re-anchor)", () => {
+  // Prior history ends 2026-02-15; incoming 2026-02-16 — a 1-day gap, no
+  // absence. e1rmCurrent must equal the standard EWMA over the full window.
+  const recent = [
+    storedTopSet(100, 5, "2026-02-11T10:00:00Z", "r1"),
+    storedTopSet(102, 5, "2026-02-12T10:00:00Z", "r2"),
+    storedTopSet(104, 5, "2026-02-13T10:00:00Z", "r3"),
+    storedTopSet(106, 5, "2026-02-14T10:00:00Z", "r4"),
+    storedTopSet(108, 5, "2026-02-15T10:00:00Z", "r5"),
+  ];
+  const exercises = {
+    [EX]: { exerciseId: EX, topSets: recent, e1rmCurrent: 0, sessionCount: 5 },
+  };
+  const result = applyPerExerciseRules(
+    exercises,
+    [topSetLog(110, 5)],
+    new Date("2026-02-16T10:00:00Z"),
+    "r6",
+  );
+  // Recompute the expected EWMA over the appended window (last 5 valid).
+  const e1rms = [102, 104, 106, 108, 110].map((w) => e1rm(w, 5)!);
+  const a = 0.333;
+  let ema = e1rms[0];
+  for (let i = 1; i < e1rms.length; i++) ema = a * e1rms[i] + (1 - a) * ema;
+  assertAlmostEquals(result.exercises[EX].e1rmCurrent as number, ema, 1e-9);
+  assertEquals(result.rulesFired.has("long-absence-transition"), false);
+  assertEquals(result.rulesFired.has("ewma"), true);
+});
+
+Deno.test("Slice 3 (c): first-ever exercise (empty baseTopSets / null prior) uses EWMA, does NOT fire", () => {
+  const result = applyPerExerciseRules(
+    {}, // no pre-existing profile → bootstrap → empty baseTopSets
+    [topSetLog(100, 5)],
+    RETURN_LOGGED_AT,
+    "first",
+  );
+  // Single valid set → EWMA degenerates to that set's Epley e1RM.
+  assertAlmostEquals(
+    result.exercises[EX].e1rmCurrent as number,
+    e1rm(100, 5)!,
+    1e-9,
+  );
+  assertEquals(result.rulesFired.has("long-absence-transition"), false);
+  assertEquals(result.rulesFired.has("ewma"), true);
 });

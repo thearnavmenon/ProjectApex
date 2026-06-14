@@ -39,6 +39,7 @@ import {
   computeE1RM,
   type TopSet as EwmaTopSet,
 } from "../_shared/ewma-engine.ts";
+import { gapDays, isLongAbsence } from "../_shared/long-absence.ts";
 import {
   type ConfidenceWriteState,
   monotonicAdvance,
@@ -377,7 +378,7 @@ export function capTopSets<T>(topSets: T[]): T[] {
  * (e1rmMedian, e1rmPeak, formDegradationFlag, confidence) are owned by
  * subsequent slices that extend this loop.
  */
-function applyPerExerciseRules(
+export function applyPerExerciseRules(
   exercises: Record<string, Record<string, unknown>>,
   setLogs: Array<Record<string, unknown>>,
   incomingLoggedAt: Date,
@@ -471,19 +472,45 @@ function applyPerExerciseRules(
 
       newProfile.topSets = cappedTopSets;
 
-      // Compute EWMA over the retained topSets list (ewma-engine windows the
-      // last 5 valid internally per ADR-0005). Standard branch — transition
-      // mode wires when transition triggers ship.
+      // Long-absence re-anchor trigger (#369). The estimate flips into
+      // transition mode when the PRE-append last loggedAt for this exercise is
+      // a flat >= 28 calendar days before the incoming session (matches the
+      // client's requiresReturnPhaseOverride cue). On a fire, the
+      // transition-mode mean trims pre-gap sessions via preGapCutoff so the
+      // estimate re-anchors on measured post-return sessions instead of the
+      // stale, inflated EWMA. Otherwise the standard EWMA branch runs.
+      //
+      // priorLoggedAt is the max loggedAt over baseTopSets (the sets that
+      // existed BEFORE this session's appends); null for a first-ever
+      // exercise. preGapCutoff = priorLoggedAt: transitionModeMean drops any
+      // session whose representative loggedAt is at-or-before the cutoff, and
+      // every pre-gap session is <= the max, so the cutoff drops them all and
+      // keeps only this session's just-appended (strictly-later) sets.
+      let priorLoggedAt: Date | null = null;
+      for (const s of baseTopSets) {
+        const iso = s.loggedAt;
+        if (typeof iso !== "string") continue;
+        const d = new Date(iso);
+        if (priorLoggedAt === null || d.getTime() > priorLoggedAt.getTime()) {
+          priorLoggedAt = d;
+        }
+      }
+      const longAbsenceFires = isLongAbsence(
+        gapDays(priorLoggedAt, incomingLoggedAt),
+      );
+
       const ewmaInput: EwmaTopSet[] = cappedTopSets.map((s) => ({
         weight: s.weight as number,
         reps: s.reps as number,
         loggedAt: new Date(s.loggedAt as string),
         sessionId: s.sessionId as string,
       }));
-      const newE1RM = computeE1RM(ewmaInput, false);
+      const newE1RM = longAbsenceFires
+        ? computeE1RM(ewmaInput, true, priorLoggedAt!)
+        : computeE1RM(ewmaInput, false);
       if (newE1RM !== null) {
         newProfile.e1rmCurrent = newE1RM;
-        rulesFired.add("ewma");
+        rulesFired.add(longAbsenceFires ? "long-absence-transition" : "ewma");
         fieldsChanged.push(`exercises.${exerciseId}.e1rmCurrent`);
       }
 
