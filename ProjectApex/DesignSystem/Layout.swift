@@ -50,4 +50,8 @@ enum DesignGeometry {
     static let listScaleDot: CGFloat = 5
     /// `projection` — dashed 4-2; anything projected/estimated is dashed.
     static let projectionDash: [CGFloat] = [4, 2]
+    /// Day-status tick diameter — 4pt, matching the live-loop set-position tick.
+    static let dayStatusTick: CGFloat = 4
+    /// Day-status hollow tick stroke width — 1.5px, mirroring CapabilityBand's hollow dot.
+    static let dayStatusTickStroke: CGFloat = 1.5
 }

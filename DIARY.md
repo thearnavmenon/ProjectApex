@@ -7,6 +7,23 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-14 — Built the StatusTick instrument: filled/hollow/undrawn day-status + today marker (Phase 3 UI, Slice 5 #410)
+
+**What it is.** A shared drawn instrument for day/set status on the Train spine — the drawn replacement for the green check that the design bans (train.md §3). Three values: `filled` (done, solid ink dot), `hollow` (committed-not-done, ink stroke with paper interior), `undrawn` (skeleton/below-horizon, renders nothing — the drafting-rule zone, a sibling slice, is the only mark there). A `isToday` flag layers a quiet 2px ink left-margin rule, static, no animation.
+
+**Why a primitive.** The mapping from model state (completed / generated / skeleton / skipped) to filled/hollow/undrawn depends on the generation horizon — that logic belongs in the consuming Train screen (#357), not here. This instrument is "dumb": it draws whatever value it is handed.
+
+**RestWellNode.** A sibling view in the same file — a recessed `well` row for rest days on the Train spine. Not a tick. Rest is derived from day-of-week gaps (no model change); the node states what recovery buys. The caller supplies the recovery line; the view applies the `well` token background and `inkMuted` text.
+
+**Geometry constants.** Added `DesignGeometry.dayStatusTick = 4` (matching the live-loop §3 spec) and `DesignGeometry.dayStatusTickStroke = 1.5` (mirroring CapabilityBand's hollow dot) to Layout.swift.
+
+**Cross-cutting grep.** Checked LiveLoopView.swift and PostWorkoutSummaryView.swift for existing filled/hollow tick rendering. LiveLoopView renders the set-position as plain text (`setPositionText` = "set 2 of 5" at line 254) — no drawn ticks, not yet using StatusTick. PostWorkoutSummaryView has Circle draws at lines 307–312 and 519–520, but these are the GymStreak ring (a legacy multi-hue progress arc) — not set-grain ticks. Neither site was touched; unifying them onto StatusTick is a future authorized step.
+
+**Still dormant.** Not wired into any live screen. The 3-tab shell is still behind `useNewShell = false`; ContentView is untouched.
+
+**Tests.** 8 unconditional tests cover: `dayStatusTick` constant (4pt), stroke constant (1.5px), the three value cases, the no-numeric-content guard (honesty law), and today-marker is a static Bool. Image-snapshot tests for filled/hollow/undrawn × light+dim, filled+today, AX5, and RestWellNode light+dim are wired up but reference images are not recorded here — the CI record job on Xcode 26.3 does that. `APEX_RECORD_SNAPSHOTS` was never set.
+
+
 ## 2026-06-14 — Last piece: the goal/calibration/manual-log screens now wait for login before saving (6 of 6)
 
 **The problem, in plain words.** A handful of less-common save points — editing your goal, reviewing a calibration, logging a past workout by hand — still grabbed "who am I" the old, instant way, which during the first second after opening the app can be the temporary stand-in id. A save stamped that way gets rejected. The main workout flow was already fixed in the earlier pieces; this is the long tail.
