@@ -171,7 +171,11 @@ data-viz:
   series-primary:   "accent-ink line, 2pt"
   series-compare:   "ink at 30% opacity, 2pt"
   band:             "accent at 8% fill, hairline edges (floor/stretch capability band)"
-  projection:       "dashed 4-2, accent-ink — anything projected/estimated is dashed"
+  projection:       "dashed 4-2 — anything projected/estimated is dashed. Colour is
+                     context-scoped: a projected chart SERIES is accent-ink (it is the
+                     accent line, dashed); a projected band/datum EDGE is hairline (it is
+                     the band's structural edge, dashed) — matching the shipped band, whose
+                     estimated edges draw in `hairline`/`bandEdge`, not accent-ink"
   point-measured:   "solid accent-ink dot"
   point-estimated:  "hollow dot (ink stroke) — low-confidence data LOOKS less certain"
   axis:             "label type, ink-muted; hairline gridlines, horizontal only"
