@@ -270,20 +270,24 @@ struct CalibrationReviewView: View {
             updatedAt: isoFormatter.string(from: goalState.updatedAt)
         )
 
-        let payload = Self.makeCalibrationStretchPayload(
-            userId: deps.resolvedUserId,
-            goal: goalBody,
-            editedStretch: editedStretch,
-            original: projections,
-            now: Date()
-        )
-
-        // Best-effort server write, mirroring GoalReviewView.save().
-        if let encoded = try? JSONEncoder().encode(payload) {
-            _ = try? await deps.supabaseClient.invokeFunction(
-                "update-trainee-goal",
-                body: encoded
+        // #369 slice 6: send the owned server write only under a resolved real
+        // owner; the placeholder would be rejected by the EF's ownership check.
+        // The local cache update + ack below still run regardless.
+        if let userId = await deps.resolvedOwnerUserId() {
+            let payload = Self.makeCalibrationStretchPayload(
+                userId: userId,
+                goal: goalBody,
+                editedStretch: editedStretch,
+                original: projections,
+                now: Date()
             )
+            // Best-effort server write, mirroring GoalReviewView.save().
+            if let encoded = try? JSONEncoder().encode(payload) {
+                _ = try? await deps.supabaseClient.invokeFunction(
+                    "update-trainee-goal",
+                    body: encoded
+                )
+            }
         }
 
         // Local cache update + ack so the banner hides immediately. Apply only
