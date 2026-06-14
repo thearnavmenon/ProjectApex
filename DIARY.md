@@ -8,6 +8,21 @@ Started 2026-06-07.
 ---
 
 
+## 2026-06-14 — Moving the "brains" of the app into the new shell, without flipping the switch (Phase 3 UI, #376 — commit 1 of 2)
+
+**The big one, done carefully.** For weeks the new 3-tab look has been built but switched off, while the real app kept running on the old screen (`ContentView`). That old screen quietly owns the most fragile, most important plumbing in the whole app: the first-launch setup, the "you have an unfinished workout — resume or abandon?" recovery after a crash, and the exact rules for picking the right session back up. This task copied all of that plumbing into the new shell — faithfully, line for line where it mattered — so the new shell can stand on its own. **But I did not flip the switch.** The old screen is still the live one, completely untouched. Nothing a user sees changed.
+
+**Why split it this way.** Turning the new shell on is the genuinely scary step — if the resume logic dropped a thread, someone could lose a workout they were halfway through. So this is deliberately commit 1 of 2: this commit *moves* the plumbing (safe, dormant, reversible by one undo), and a later separate commit flips the switch — and that flip only happens after a hands-on "force-quit mid-set on a real phone" test. This PR is explicitly **not** to be auto-merged; a human reviews it.
+
+**The six pieces moved.** The program "view model" and its whole life-cycle (born on launch, reborn after onboarding, wiped on reset); the onboarding cover; the crash-recovery alert chain — including a subtle fix from earlier (#318) where two alerts firing at once would silently eat one of them, copied across *exactly* so it can't regress; the paused-session resume with its three branches; the workout loop and the settings screen (which are joined at the hip to the view model); and the "this build needs setup" gate, which I lifted up one level so it now guards **both** the old and new screens from a single place.
+
+**Loop look at go-live.** When the switch eventually flips, the workout itself will still use the *current* in-session screens, so the day it goes live it behaves identically to today. The brand-new live-loop visuals turn on later, as their own separate, undoable step.
+
+**How I made the scary parts testable.** The two riskiest pieces — which resume branch to take, and the two-alerts-collide rule — I pulled into small plain functions the new shell calls, so I could write tests that prove all three resume branches and the alert-collision rule behave correctly against the new shell (the codebase tests logic, not live screens). The alert *ordering* itself was copied across untouched.
+
+**Status:** PR open from `feat/376-machinery-lift`, switch still **off**, old screen still live and untouched. 15 new tests green; the full suite (506 tests) was green before the run. Flagged in the PR: the small "pull the decision into a testable function" deviation, since the brief asked for a verbatim move.
+
+
 ## 2026-06-14 — Coming back after a long break no longer fools the strength estimate (#418)
 
 **The problem in plain words.** The app tracks how strong you are with a moving average that only looks at your last few *workouts*, not the calendar. That works great while you're training regularly. But if you vanish for six weeks and come back, the math treats your first workout back as if it happened the very next day — so it quietly assumes you're as strong as you were before the break. You're not. Real strength fades during a long layoff, and the old code couldn't see that.
@@ -19,7 +34,6 @@ Started 2026-06-07.
 **How it was checked.** Built test-first across the slices; the full Edge-Function suite is green (452 tests, 0 failing) and the type-checker is clean. An independent review caught one real bug along the way — a naive version actually moved the estimate the *wrong* way — which is why trimming the old workouts is mandatory, not optional. The iOS side compiles against the real type definitions but isn't visually QA'd yet (no simulator here); that and snapshot images are owed. Decisions recorded in ADR-0005/0015/0020/0023.
 
 **Status:** MERGED to main (PR #418, squash `b780549`). Does **not** close the #369 audit umbrella. One follow-up noted for later: a fatigue-pairing calculation also reads the strength estimate and may want the same break-aware gating — reported, not yet acted on.
-
 
 ## 2026-06-14 — The Today screen: your next workout, one tap to start, one honest coach line (Phase 3 UI, #348)
 

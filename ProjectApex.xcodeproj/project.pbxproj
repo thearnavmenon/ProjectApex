@@ -68,6 +68,7 @@
 		DR41100000000000DR411002 /* DraftingRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DR41100000000000DR411001 /* DraftingRuleTests.swift */; };
 		TR35700000000000TR357002 /* TrainProgramRootTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TR35700000000000TR357001 /* TrainProgramRootTests.swift */; };
 		TD34800000000000TD348002 /* TodayViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = TD34800000000000TD348001 /* TodayViewTests.swift */; };
+		ML37600000000000ML376002 /* AppShellMachineryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ML37600000000000ML376001 /* AppShellMachineryTests.swift */; };
 		DE54000000000000DE540002 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = DE54000000000000DE540001 /* SnapshotTesting */; };
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
@@ -146,6 +147,7 @@
 		DR41100000000000DR411001 /* DraftingRuleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DraftingRuleTests.swift; sourceTree = "<group>"; };
 		TR35700000000000TR357001 /* TrainProgramRootTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TrainProgramRootTests.swift; sourceTree = "<group>"; };
 		TD34800000000000TD348001 /* TodayViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TodayViewTests.swift; sourceTree = "<group>"; };
+		ML37600000000000ML376001 /* AppShellMachineryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppShellMachineryTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
 		DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SetPrescriptionIntentValidationTests.swift; sourceTree = "<group>"; };
 		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
@@ -300,6 +302,7 @@
 				DR41100000000000DR411001 /* DraftingRuleTests.swift */,
 				TR35700000000000TR357001 /* TrainProgramRootTests.swift */,
 				TD34800000000000TD348001 /* TodayViewTests.swift */,
+				ML37600000000000ML376001 /* AppShellMachineryTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -475,6 +478,7 @@
 				DR41100000000000DR411002 /* DraftingRuleTests.swift in Sources */,
 				TR35700000000000TR357002 /* TrainProgramRootTests.swift in Sources */,
 				TD34800000000000TD348002 /* TodayViewTests.swift in Sources */,
+				ML37600000000000ML376002 /* AppShellMachineryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
