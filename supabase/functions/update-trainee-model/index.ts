@@ -39,7 +39,12 @@ import {
   computeE1RM,
   type TopSet as EwmaTopSet,
 } from "../_shared/ewma-engine.ts";
-import { gapDays, isLongAbsence, postReturnSessions } from "../_shared/long-absence.ts";
+import {
+  gapDays,
+  isLongAbsence,
+  mostRecentAbsenceCutoff,
+  postReturnSessions,
+} from "../_shared/long-absence.ts";
 import {
   type ConfidenceWriteState,
   monotonicAdvance,
@@ -472,42 +477,32 @@ export function applyPerExerciseRules(
 
       newProfile.topSets = cappedTopSets;
 
-      // Long-absence re-anchor trigger (#369). The estimate flips into
-      // transition mode when the PRE-append last loggedAt for this exercise is
-      // a flat >= 28 calendar days before the incoming session (matches the
-      // client's requiresReturnPhaseOverride cue). On a fire, the
-      // transition-mode mean trims pre-gap sessions via preGapCutoff so the
-      // estimate re-anchors on measured post-return sessions instead of the
-      // stale, inflated EWMA. Otherwise the standard EWMA branch runs.
-      //
-      // priorLoggedAt is the max loggedAt over baseTopSets (the sets that
-      // existed BEFORE this session's appends); null for a first-ever
-      // exercise. preGapCutoff = priorLoggedAt: transitionModeMean drops any
-      // session whose representative loggedAt is at-or-before the cutoff, and
-      // every pre-gap session is <= the max, so the cutoff drops them all and
-      // keeps only this session's just-appended (strictly-later) sets.
-      let priorLoggedAt: Date | null = null;
-      for (const s of baseTopSets) {
-        const iso = s.loggedAt;
-        if (typeof iso !== "string") continue;
-        const d = new Date(iso);
-        if (priorLoggedAt === null || d.getTime() > priorLoggedAt.getTime()) {
-          priorLoggedAt = d;
-        }
-      }
-      const longAbsenceFires = isLongAbsence(
-        gapDays(priorLoggedAt, incomingLoggedAt),
-      );
-
+      // Long-absence re-anchor (#369), persisting across the transition window.
+      // The estimate flips into transition mode whenever a flat >= 28 calendar-
+      // day gap still sits between adjacent sessions in the RETAINED top-set
+      // window — not only on the return apply. While such a gap is present the
+      // transition-mode mean trims the pre-gap sessions (preGapCutoff = the
+      // loggedAt just before the most-recent gap), so the estimate re-anchors on
+      // measured post-return sessions instead of the stale, inflated EWMA.
+      // Keying off the data window (not this apply's gap) means it KEEPS
+      // re-anchoring on subsequent post-return sessions and self-terminates once
+      // the pre-gap sets age out of retention — then the standard EWMA branch
+      // resumes on post-return data. The >= 28d threshold matches the client's
+      // requiresReturnPhaseOverride cue; trimming is data SELECTION, not a
+      // guessed decay.
       const ewmaInput: EwmaTopSet[] = cappedTopSets.map((s) => ({
         weight: s.weight as number,
         reps: s.reps as number,
         loggedAt: new Date(s.loggedAt as string),
         sessionId: s.sessionId as string,
       }));
-      const newE1RM = longAbsenceFires
-        ? computeE1RM(ewmaInput, true, priorLoggedAt!)
-        : computeE1RM(ewmaInput, false);
+      const preGapCutoff = mostRecentAbsenceCutoff(ewmaInput);
+      const longAbsenceFires = preGapCutoff !== null;
+      const newE1RM = computeE1RM(
+        ewmaInput,
+        longAbsenceFires,
+        preGapCutoff ?? undefined,
+      );
       if (newE1RM !== null) {
         newProfile.e1rmCurrent = newE1RM;
         rulesFired.add(longAbsenceFires ? "long-absence-transition" : "ewma");

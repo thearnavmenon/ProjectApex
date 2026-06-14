@@ -19,6 +19,7 @@ import {
   gapDays,
   isLongAbsence,
   LONG_ABSENCE_DAYS,
+  mostRecentAbsenceCutoff,
   postReturnSessions,
 } from "./long-absence.ts";
 import { currentCapability } from "./calibration-projection.ts";
@@ -160,6 +161,54 @@ Deno.test("postReturnSessions + currentCapability: progress capability re-anchor
   const fresh = currentCapability(postReturnSessions(sessions), 3)!;
   assertEquals(fresh, 110);
   assertEquals(stale > fresh, true);
+});
+
+// ─── mostRecentAbsenceCutoff: the boundary that PERSISTS the re-anchor ─────────
+
+Deno.test("mostRecentAbsenceCutoff: no qualifying gap → null", () => {
+  const items = [sess(PRIOR, 0, 100), sess(PRIOR, 3, 101), sess(PRIOR, 6, 102)];
+  assertEquals(mostRecentAbsenceCutoff(items), null);
+});
+
+Deno.test("mostRecentAbsenceCutoff: a >= 28d gap → loggedAt of the item just before it", () => {
+  const items = [
+    sess(PRIOR, 0, 120),
+    sess(PRIOR, 3, 121), // pre-gap boundary
+    sess(PRIOR, 45, 110), // 42d gap
+    sess(PRIOR, 48, 112),
+  ];
+  assertEquals(mostRecentAbsenceCutoff(items), daysAfter(PRIOR, 3));
+});
+
+Deno.test("mostRecentAbsenceCutoff: still fires while a gap remains in the window (persistence)", () => {
+  // The window holds the pre-gap block AND two post-return sessions — the
+  // cutoff is still returned, so the estimate keeps re-anchoring on session 2+.
+  const items = [
+    sess(PRIOR, 0, 120),
+    sess(PRIOR, 3, 122), // pre-gap boundary
+    sess(PRIOR, 45, 110), // return session (42d gap)
+    sess(PRIOR, 47, 113), // second post-return session
+  ];
+  assertEquals(mostRecentAbsenceCutoff(items), daysAfter(PRIOR, 3));
+  // And once the pre-gap block has aged out (all post-return, no gap) → null,
+  // so the re-anchor self-terminates and standard EWMA resumes.
+  const postOnly = [sess(PRIOR, 45, 110), sess(PRIOR, 47, 113), sess(PRIOR, 49, 114)];
+  assertEquals(mostRecentAbsenceCutoff(postOnly), null);
+});
+
+Deno.test("mostRecentAbsenceCutoff: multiple gaps → boundary of the MOST RECENT one", () => {
+  const items = [
+    sess(PRIOR, 0, 100),
+    sess(PRIOR, 40, 105), // older gap
+    sess(PRIOR, 43, 106), // most-recent pre-gap boundary
+    sess(PRIOR, 90, 95), // most-recent gap (47d)
+  ];
+  assertEquals(mostRecentAbsenceCutoff(items), daysAfter(PRIOR, 43));
+});
+
+Deno.test("mostRecentAbsenceCutoff: empty / single-element input → null", () => {
+  assertEquals(mostRecentAbsenceCutoff([] as E1RMSession[]), null);
+  assertEquals(mostRecentAbsenceCutoff([sess(PRIOR, 0, 100)]), null);
 });
 
 Deno.test("purity: long-absence module reads no clock (no Date.now / new Date())", async () => {

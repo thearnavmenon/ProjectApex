@@ -480,6 +480,51 @@ Deno.test("Slice 3 (b): no-gap exercise still uses standard EWMA (no re-anchor)"
   assertEquals(result.rulesFired.has("ewma"), true);
 });
 
+Deno.test("Slice 3 (a2): re-anchor PERSISTS on the 2nd post-return session (does not re-inflate to EWMA while the gap is still in the window)", () => {
+  // After the return session S6 is stored, the next session S7 (2 days later)
+  // has only a small per-apply gap — but the 42d S5→S6 gap is still in the
+  // retained window, so the estimate must KEEP re-anchoring on the post-return
+  // block {S6, S7}, not bounce back up to the stale-tail EWMA.
+  const storedAfterReturn = [
+    ...preGapHistory(),
+    storedTopSet(95, 5, "2026-02-16T10:00:00Z", "S6"), // the return session
+  ];
+  const exercises = {
+    [EX]: {
+      exerciseId: EX,
+      topSets: storedAfterReturn,
+      e1rmCurrent: e1rm(95, 5), // re-anchored value from the return apply
+      sessionCount: 6,
+      confidence: "established",
+    },
+  };
+  const result = applyPerExerciseRules(
+    exercises,
+    [topSetLog(97, 5)], // S7: 97×5 → 113.167
+    new Date("2026-02-18T10:00:00Z"), // 2 days after S6 — small per-apply gap
+    "S7",
+  );
+  const e1rmCurrent = result.exercises[EX].e1rmCurrent as number;
+  // Trimmed transition-mean over the post-return block {S6, S7}.
+  const postReturnMean = (e1rm(95, 5)! + e1rm(97, 5)!) / 2;
+  assertAlmostEquals(e1rmCurrent, postReturnMean, 1e-9);
+  assertAlmostEquals(e1rmCurrent, 112.0, 1e-3);
+  // It must be BELOW the stale-tail EWMA (which carries the pre-gap sessions) —
+  // proving it did not re-inflate.
+  const e1rms = [
+    e1rm(102.5, 5)!,
+    e1rm(102.5, 5)!,
+    e1rm(105, 5)!,
+    e1rm(95, 5)!,
+    e1rm(97, 5)!,
+  ];
+  const a = 0.333;
+  let ema = e1rms[0];
+  for (let i = 1; i < e1rms.length; i++) ema = a * e1rms[i] + (1 - a) * ema;
+  assertEquals(e1rmCurrent < ema, true, "re-anchored estimate must not re-inflate to the stale-tail EWMA");
+  assertEquals(result.rulesFired.has("long-absence-transition"), true);
+});
+
 Deno.test("Slice 3 (c): first-ever exercise (empty baseTopSets / null prior) uses EWMA, does NOT fire", () => {
   const result = applyPerExerciseRules(
     {}, // no pre-existing profile → bootstrap → empty baseTopSets

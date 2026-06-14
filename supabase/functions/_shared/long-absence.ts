@@ -52,6 +52,24 @@ export function isLongAbsence(gapDays: number | null): boolean {
 }
 
 /**
+ * Index of the first item AFTER the most-recent long-absence gap in a series
+ * sorted ascending by loggedAt — i.e. the start of the post-return block. 0
+ * when no adjacent pair is separated by >= `thresholdDays`.
+ */
+function postReturnStartIndex<T extends { loggedAt: Date }>(
+  items: T[],
+  thresholdDays: number,
+): number {
+  let cut = 0;
+  for (let i = 1; i < items.length; i++) {
+    const gap = (items[i].loggedAt.getTime() - items[i - 1].loggedAt.getTime()) /
+      MS_PER_DAY;
+    if (gap >= thresholdDays) cut = i;
+  }
+  return cut;
+}
+
+/**
  * Drop everything before the most-recent long-absence gap, returning only the
  * post-return suffix — the same "re-anchor on the freshest training block"
  * principle the estimate-layer trim (ewma-engine `preGapCutoff`) uses, applied
@@ -67,11 +85,27 @@ export function postReturnSessions<T extends { loggedAt: Date }>(
   items: T[],
   thresholdDays: number = LONG_ABSENCE_DAYS,
 ): T[] {
-  let cut = 0;
-  for (let i = 1; i < items.length; i++) {
-    const gap = (items[i].loggedAt.getTime() - items[i - 1].loggedAt.getTime()) /
-      MS_PER_DAY;
-    if (gap >= thresholdDays) cut = i;
-  }
-  return items.slice(cut);
+  return items.slice(postReturnStartIndex(items, thresholdDays));
+}
+
+/**
+ * The loggedAt boundary of the most-recent long-absence gap within a series
+ * sorted ascending by loggedAt: the loggedAt of the item immediately BEFORE the
+ * most-recent adjacent pair separated by >= `thresholdDays`, or null when no
+ * such gap exists.
+ *
+ * Pass the result as `preGapCutoff` to drop the pre-gap tail and re-anchor on
+ * the post-return block. Unlike a single-apply gap check, this fires for as
+ * long as a qualifying gap remains in the (retained) window — so the re-anchor
+ * PERSISTS across the transition and self-terminates once the pre-gap data ages
+ * out of the window.
+ *
+ * Pure: no clock reads.
+ */
+export function mostRecentAbsenceCutoff<T extends { loggedAt: Date }>(
+  items: T[],
+  thresholdDays: number = LONG_ABSENCE_DAYS,
+): Date | null {
+  const cut = postReturnStartIndex(items, thresholdDays);
+  return cut === 0 ? null : items[cut - 1].loggedAt;
 }

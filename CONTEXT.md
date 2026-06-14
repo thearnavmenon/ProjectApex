@@ -91,7 +91,7 @@ Exponentially weighted moving average over the last 5 valid top sets, α = 0.333
 _Avoid_: rolling average, moving average (without qualifier)
 
 **Transition mode**:
-A per-pattern flag that collapses the e1RM update window from N=5 EWMA to N=3 plain-mean over recent sessions. Triggered by calibration recency, deload-end, phase transition, or long-absence return. The **long-absence** case (flat gap ≥ 28 calendar days) additionally trims the pre-gap sessions out of the window, so the estimate re-anchors on post-return data only rather than blending the stale pre-break number; it also pauses the calibration-projection floor up-ratchet until the window expires. **Unrelated to mesocycle phase transition.** See ADR-0005.
+A per-pattern flag that collapses the e1RM update window from N=5 EWMA to N=3 plain-mean over recent sessions. Triggered by calibration recency, deload-end, phase transition, or long-absence return. The **long-absence** case (flat gap ≥ 28 calendar days still present in the retained window) additionally trims the pre-gap sessions out of the window, so the estimate re-anchors on post-return data only rather than blending the stale pre-break number — and it keeps re-anchoring across subsequent sessions until the pre-gap data ages out of retention (it does not re-inflate on session 2). It also pauses the calibration-projection floor up-ratchet while the pattern's transition window is active. **Unrelated to mesocycle phase transition.** See ADR-0005.
 _Avoid_: phase transition
 
 ### Coaching signals
