@@ -256,18 +256,23 @@ struct GoalReviewView: View {
         defer { isSaving = false }
 
         // Both writes are best-effort, mirroring onboarding's goal hydration.
-        let payload = Self.makeGoalPayload(
-            userId: deps.resolvedUserId,
-            statement: statement,
-            focusAreas: selectedFocusAreas,
-            triggeringSessionCount: triggeringSessionCount,
-            now: Date()
-        )
-        if let encoded = try? JSONEncoder().encode(payload) {
-            _ = try? await deps.supabaseClient.invokeFunction(
-                "update-trainee-goal",
-                body: encoded
+        // #369 slice 6: send the owned server write only under a resolved real
+        // owner (a placeholder would be rejected by the EF). The local banner-hide
+        // below still runs regardless.
+        if let userId = await deps.resolvedOwnerUserId() {
+            let payload = Self.makeGoalPayload(
+                userId: userId,
+                statement: statement,
+                focusAreas: selectedFocusAreas,
+                triggeringSessionCount: triggeringSessionCount,
+                now: Date()
             )
+            if let encoded = try? JSONEncoder().encode(payload) {
+                _ = try? await deps.supabaseClient.invokeFunction(
+                    "update-trainee-goal",
+                    body: encoded
+                )
+            }
         }
 
         // Local banner-hide (Slice F1): only when a banner triggered this

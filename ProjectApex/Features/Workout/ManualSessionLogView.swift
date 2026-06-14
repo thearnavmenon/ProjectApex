@@ -318,7 +318,14 @@ struct ManualSessionLogView: View {
         isSubmitting = true
         defer { isSubmitting = false }
 
-        let userId = deps.resolvedUserId
+        // #369 slice 6: a manual session creates owned workout_sessions/set_logs
+        // rows, so resolve the real owner first and abort rather than stamping the
+        // placeholder (which RLS would reject). isSubmitting resets via the defer;
+        // surface the reason via the existing Log-Failed alert rather than silently.
+        guard let userId = await deps.resolvedOwnerUserId() else {
+            errorMessage = "Sign-in isn't confirmed yet. Please wait a moment and try again."
+            return
+        }
 
         // DATE column (session_date): use local calendar date string to avoid UTC-offset rollover.
         let dateFormatter = DateFormatter()
