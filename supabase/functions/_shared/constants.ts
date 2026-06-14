@@ -162,6 +162,17 @@ export const TRANSITION_MODE_NIL_CADENCE_FALLBACK_DAYS = 21;
 /** Multiplier on cadence for `disruptedPatterns` derivation per ADR-0005. */
 export const DISRUPTED_PATTERN_CADENCE_MULTIPLIER = 2;
 
+/**
+ * Long-absence re-anchor TRIGGER: a FLAT >= 28 calendar-day gap since the
+ * prior logged session re-anchors a stale, inflated estimate. Matches the
+ * client's `requiresReturnPhaseOverride` cue (`daysSinceLastSession >= 28`)
+ * in SessionPlanService.swift. This is the flat-28 absence TRIGGER and is
+ * deliberately NOT cadence-aware — distinct from the cadence-aware
+ * transition-mode DURATION computed in `computeTransitionModeUntil`
+ * (max(14d, 3 × cadence), unchanged here).
+ */
+export const LONG_ABSENCE_DAYS = 28;
+
 // ─── Stimulus classifier (Q3 PRD-internal) ───────────────────────────────────
 
 /**
