@@ -8,6 +8,23 @@ Started 2026-06-07.
 ---
 
 
+## 2026-06-14 — The Today screen: your next workout, one tap to start, one honest coach line (Phase 3 UI, #348)
+
+**What it is.** The new Today tab's main screen — the "what does my coach want from me right now?" surface. At the top: the date and a small readiness gauge (the Lens). Below that: one short coach line. Then the hero — a single card showing your next session (its title, up to three exercises with their sets and reps drawn as a crisp number lockup, a rough time estimate) and one big full-width **Start** button, the only coloured thing on the screen. Any coach alerts sit as a calm list *below* Start — never a pop-up jumping in front of it.
+
+**The coach line is the careful part.** It's one short sentence, always grounded in a real number from your trainee model — your squat floor, the gap to your next floor, your session count — and it's written by plain rules with **no AI call at all**. The AI version is a future upgrade, never something the screen depends on. If the rules have nothing genuinely true to say, the line collapses to an empty space — never filler, never "You got this!". The whole thing is governed by our ratified coach-voice rules: instrument-grade, factual, no warmth/praise/hype. I even added a test that scans every possible output against a banned-cheerleading word list to prove it.
+
+**The rules, ranked.** (1) If a pattern is still calibrating, say so and give the model's own session count. (2) Otherwise state the floor as a held fact ("Squat floor at 105 kg — square in the band"). (3) If you're pushing the top of your band, give the deterministic distance to the next floor. (4) Last resort: a plain session tally. Each is capped at a hard 80-character budget; anything over, or anything with an ellipsis, fails and the next rule (ultimately the empty collapse) takes over.
+
+**How it gets its data (the seam).** Like the sibling Train and Progress screens, the new shell doesn't own the live program "view model" yet, so the screen takes its data as a plain input tests can hand it, and the live host reads the same saved-program cache and trainee-model the old screens read. Start is wired to a clearly-marked TODO (#376) for the real session-start path — it's tappable now, live at the flip. No backend or model change.
+
+**Still dormant.** Brand-new screen wired only into the off-by-default new 3-tab shell. The live app runs the old screens untouched — nothing users see changed.
+
+**Tests.** Unconditional tests cover which rule fires for which model state, the no-AI fallback, the empty-collapse, the character budget, the no-warmth guard, the evidence-number formatting, and that Start fires its wired action. Image snapshots (light + dim + an accessibility size) are wired but their reference images aren't recorded here — the CI record job does that.
+
+**Status:** PR open from `feat/348-today`. New suites all green (21 tests in the scoped run); whole app + tests compile with no new warnings.
+
+
 ## 2026-06-14 — The Train program root: your plan drawn as a vertical day-spine (Phase 3 UI, Slice 15 #357)
 
 **What it is.** The new Train tab's main screen, drawn as a single vertical spine running down the page — the left edge is the timeline, and each training day hangs off it. This week shows in full: each day a row with a small status mark (a filled dot = done, a hollow dot = scheduled-but-not-done) and a short list of that day's exercises. Days you don't train are first-class "rest" nodes on the spine, not blank gaps. Below this week, the rest of the plan shows compressed and faint — pattern/focus only, no fake numbers — because the coach hasn't worked those days out yet.
