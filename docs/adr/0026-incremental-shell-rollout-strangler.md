@@ -41,3 +41,23 @@ A **strangler-fig**: a new sibling root `AppShell.swift` renders the locked 3-ta
 - **Parallel-session handshake:** the bootstrap slice's one shared edit is `ProjectApexApp.swift`; worth a heads-up that this line changes and `ContentView.swift` is to stay frozen, so neither side reformats it.
 
 *Advisor dissent recorded: advisor 1's enum-now + machinery-now moves overruled (race + regression risk); its grep-before-done discipline kept. Advisors 2 & 3 form the adopted spine; the synchronized-group pbxproj fact is the enabling premise.*
+
+## Amendment — the machinery-lift + flip gate (#376, 2026-06-14)
+
+The "machinery-last" deferral above is discharged by [#376](https://github.com/thearnavmenon/ProjectApex/issues/376), shipped as **one slice, two commits**:
+
+- **Commit 1/2 — the reversible lift (this PR).** `AppShell` gains faithful COPIES of the six machineries the frozen `ContentView` still owns and runs: the `ProgramViewModel` lifecycle (`@State` created in `.task`, recreated on onboarding completion, nil'd on reset), the onboarding `fullScreenCover`, the crash-recovery `.task` + alert chain (the #318 alert-ordering moved verbatim), the paused-session resume (`crashResumeToPass` / `crashResumeDay` + the three Resume branches), the workout-loop host + the settings root (coupled to the view model for regenerate/reset/rescan), and the launch/setup gate. **`useNewShell` STAYS `false`** — `ContentView` is untouched and remains the live root, so the lifted machinery is exercised only by unit tests until the flip. This is a single-`git revert` reversible commit (the additions are dormant; reverting them changes no live behaviour).
+  - **Single-root invariant preserved:** because `useNewShell` is still false, exactly one of `{ContentView, AppShell}` is mounted, so onboarding/migration/crash alerts cannot double-fire (the consequence above still holds — both roots now *contain* the machinery, but only one is ever instantiated).
+  - **Testability seam:** the two most regression-critical pieces — the crash-resume branch decision and the #318 migration-notice gate — are lifted into pure functions (`ResumeOutcome.decide`, `AppShell.migrationNoticeShouldArm`) that the verbatim view closures call, so the codebase's reducer-test convention (no ViewInspector) can pin all three Resume branches + the collision gate against `AppShell`. The `.task` ORDERING itself (crash check first, populating `crashAlertArmed`; migration gate second) is copied verbatim from `ContentView`.
+
+- **Commit 2/2 — the one-line flip (separate, human-gated).** `useNewShell = true`. Reversible by a single `git revert`. **Gated by an on-device force-quit-mid-set drill** (process death can't be fully unit-tested, AC §"Manual on-device drill").
+
+**The launch/setup gate is hoisted** out of `ContentView` (lines 83-87) into `ProjectApexApp.body` ABOVE the `useNewShell` switch, so the `hasResolvableAIKey && hasResolvableSupabaseKey` → `NeedsSetupView` guard protects BOTH roots and #363 has one fewer thing to delete. `ContentView`'s own internal gate stays (now redundant, harmless — #363 removes it).
+
+### Flip-gate preconditions (when `useNewShell = true` is allowed)
+
+After **Wave 2** is built dormant — #348 (Today) + #350 (loop core, dormant) + #354 (Progress root) + #357 (Train root) — so go-live ships **no interim placeholder tab** to users.
+
+### Loop chrome at the flip (resolved fork)
+
+The flip presents the **OLD** in-session chrome (`WorkoutView` → `ActiveSetView` / `RestTimerView`) over Today — the loop "rises through" Start as a covered surface, off-tab (`splash-today.md`). It does **NOT** present #350's new `LiveLoopView` core; that activates at **#351** (correction surface / AMRAP / feel pill) as its own revertable commit. This keeps go-live behaviour-identical to today's loop. (`ActiveSetView` — 1630 lines — is retired at close-out #363, not at the flip.)

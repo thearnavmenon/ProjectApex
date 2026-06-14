@@ -29,10 +29,20 @@ struct ProjectApexApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if useNewShell {
-                    AppShell()
+                // Honest launch gate (#329 / O-F1, #369 slice 2), hoisted here in #376
+                // ABOVE the root switch so it guards BOTH roots: when either required
+                // key is missing — neither in the Keychain nor bundled into the build —
+                // show the "needs setup" screen instead of letting onboarding start and
+                // die mid-gym-scan or mid-Supabase call. ContentView keeps its own
+                // internal gate (now redundant, harmless — #363 removes it).
+                if deps.hasResolvableAIKey && deps.hasResolvableSupabaseKey {
+                    if useNewShell {
+                        AppShell()
+                    } else {
+                        ContentView()
+                    }
                 } else {
-                    ContentView()
+                    NeedsSetupView()
                 }
             }
             .environment(deps)
