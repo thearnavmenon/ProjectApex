@@ -55,6 +55,11 @@ struct ProgressRootLedger: View {
         let isActive: Bool
         /// Last trained date for dormant rows (displayed when !isActive). Nil when active.
         let lastTrainedDate: Date?
+        /// True iff the pattern is re-anchoring after a long absence
+        /// (PatternProfile.inTransitionMode). When true the row carries a small
+        /// transition marker so the band's floor/stretch isn't read as settled.
+        /// Defaulted so existing fixtures stay valid.
+        let inTransition: Bool = false
     }
 
     // MARK: Inputs
@@ -199,6 +204,14 @@ private struct ActivePatternRow: View {
             // Line 3 — annotation (two-tone, reserved line height)
             annotationView
                 .frame(minHeight: 16, alignment: .leading)  // reserved line height
+
+            // Long-absence re-anchoring marker — the band is provisional while the
+            // pattern re-establishes; surface that rather than read it as settled.
+            if row.inTransition {
+                Text("Re-establishing after a break")
+                    .apexFont(.label)
+                    .foregroundStyle(theme.inkMuted.color)
+            }
         }
         .padding(.vertical, Spacing.sm)
         .contentShape(Rectangle())
@@ -242,7 +255,8 @@ private struct ActivePatternRow: View {
         let patternName = row.projection.pattern.displayName
         let floor = formatKg(row.projection.floor)
         let stretch = formatKg(row.projection.stretch)
-        return "\(patternName). Capability band, floor \(floor) to stretch \(stretch). Ratchet within reach."
+        let base = "\(patternName). Capability band, floor \(floor) to stretch \(stretch). Ratchet within reach."
+        return row.inTransition ? base + " Re-establishing after a break." : base
     }
 
     // MARK: Formatting
@@ -264,12 +278,22 @@ private struct DormantPatternRow: View {
     @Environment(\.apexTheme) private var theme
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
-            Text(row.projection.pattern.displayName)
-                .apexFont(.body)
-                .foregroundStyle(theme.inkMuted.color)
-            Spacer(minLength: 0)
-            annotationText
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Spacing.sm) {
+                Text(row.projection.pattern.displayName)
+                    .apexFont(.body)
+                    .foregroundStyle(theme.inkMuted.color)
+                Spacer(minLength: 0)
+                annotationText
+            }
+
+            // Long-absence re-anchoring marker — the floor is provisional while the
+            // pattern re-establishes; surface that rather than read it as settled.
+            if row.inTransition {
+                Text("Re-establishing after a break")
+                    .apexFont(.label)
+                    .foregroundStyle(theme.inkMuted.color)
+            }
         }
         .padding(.vertical, Spacing.sm)
         .contentShape(Rectangle())
@@ -333,11 +357,15 @@ extension ProgressRootLedger {
             let lastDate = profile?.recentSessionDates.max()
             // A pattern is considered active if it has had any recent sessions.
             let isActive = !(profile?.recentSessionDates.isEmpty ?? true)
+            // Re-anchoring after a long absence: the band is provisional until the
+            // transition window expires (inTransitionMode defaults its clock to now).
+            let inTransition = profile?.inTransitionMode() ?? false
             return PatternRow(
                 projection: proj,
                 confidence: confidence,
                 isActive: isActive,
-                lastTrainedDate: isActive ? nil : lastDate
+                lastTrainedDate: isActive ? nil : lastDate,
+                inTransition: inTransition
             )
         }
     }

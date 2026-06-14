@@ -46,6 +46,7 @@ import {
   TRANSITION_MODE_CADENCE_MULTIPLIER,
   TRANSITION_MODE_NIL_CADENCE_FALLBACK_DAYS,
   DISRUPTED_PATTERN_CADENCE_MULTIPLIER,
+  LONG_ABSENCE_DAYS,
   // Stimulus classifier
   STIMULUS_RPE_BUMP_TRIGGER,
   STIMULUS_RPE_BUMP_REP_MIN,
@@ -218,6 +219,10 @@ Deno.test("Q5: nil-cadence transition-mode fallback is 21 days not 14 or 28", ()
 
 Deno.test("ADR-0005: disrupted-pattern cadence multiplier is 2 not 1.5 or 3", () => {
   assertEquals(DISRUPTED_PATTERN_CADENCE_MULTIPLIER, 2);
+});
+
+Deno.test("long-absence re-anchor trigger is a flat 28 days not 14 or 21 (matches client requiresReturnPhaseOverride cue)", () => {
+  assertEquals(LONG_ABSENCE_DAYS, 28);
 });
 
 // ─── Stimulus classifier (Q3 PRD-internal) ───────────────────────────────────

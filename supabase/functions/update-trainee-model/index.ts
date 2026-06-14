@@ -40,6 +40,12 @@ import {
   type TopSet as EwmaTopSet,
 } from "../_shared/ewma-engine.ts";
 import {
+  gapDays,
+  isLongAbsence,
+  mostRecentAbsenceCutoff,
+  postReturnSessions,
+} from "../_shared/long-absence.ts";
+import {
   type ConfidenceWriteState,
   monotonicAdvance,
 } from "../_shared/confidence-lifecycle.ts";
@@ -377,7 +383,7 @@ export function capTopSets<T>(topSets: T[]): T[] {
  * (e1rmMedian, e1rmPeak, formDegradationFlag, confidence) are owned by
  * subsequent slices that extend this loop.
  */
-function applyPerExerciseRules(
+export function applyPerExerciseRules(
   exercises: Record<string, Record<string, unknown>>,
   setLogs: Array<Record<string, unknown>>,
   incomingLoggedAt: Date,
@@ -471,19 +477,35 @@ function applyPerExerciseRules(
 
       newProfile.topSets = cappedTopSets;
 
-      // Compute EWMA over the retained topSets list (ewma-engine windows the
-      // last 5 valid internally per ADR-0005). Standard branch — transition
-      // mode wires when transition triggers ship.
+      // Long-absence re-anchor (#369), persisting across the transition window.
+      // The estimate flips into transition mode whenever a flat >= 28 calendar-
+      // day gap still sits between adjacent sessions in the RETAINED top-set
+      // window — not only on the return apply. While such a gap is present the
+      // transition-mode mean trims the pre-gap sessions (preGapCutoff = the
+      // loggedAt just before the most-recent gap), so the estimate re-anchors on
+      // measured post-return sessions instead of the stale, inflated EWMA.
+      // Keying off the data window (not this apply's gap) means it KEEPS
+      // re-anchoring on subsequent post-return sessions and self-terminates once
+      // the pre-gap sets age out of retention — then the standard EWMA branch
+      // resumes on post-return data. The >= 28d threshold matches the client's
+      // requiresReturnPhaseOverride cue; trimming is data SELECTION, not a
+      // guessed decay.
       const ewmaInput: EwmaTopSet[] = cappedTopSets.map((s) => ({
         weight: s.weight as number,
         reps: s.reps as number,
         loggedAt: new Date(s.loggedAt as string),
         sessionId: s.sessionId as string,
       }));
-      const newE1RM = computeE1RM(ewmaInput, false);
+      const preGapCutoff = mostRecentAbsenceCutoff(ewmaInput);
+      const longAbsenceFires = preGapCutoff !== null;
+      const newE1RM = computeE1RM(
+        ewmaInput,
+        longAbsenceFires,
+        preGapCutoff ?? undefined,
+      );
       if (newE1RM !== null) {
         newProfile.e1rmCurrent = newE1RM;
-        rulesFired.add("ewma");
+        rulesFired.add(longAbsenceFires ? "long-absence-transition" : "ewma");
         fieldsChanged.push(`exercises.${exerciseId}.e1rmCurrent`);
       }
 
@@ -818,7 +840,7 @@ function readVolumeLoadHistoryAsSessions(
     .filter((v): v is VolumeLoadSession => v !== null);
 }
 
-function applyPerPatternRules(
+export function applyPerPatternRules(
   patterns: Record<string, Record<string, unknown>>,
   trainedPatterns: Set<string>,
   incomingLoggedAt: Date,
@@ -946,6 +968,42 @@ function applyPerPatternRules(
       ).toISOString();
       rulesFired.add("transition-mode-expiry");
       fieldsChanged.push(`patterns.${patternKey}.transitionModeUntil`);
+    }
+
+    // Long-absence pattern-flag trigger (#369). Sibling of the deload-end
+    // block above. Gated on wasTrainedThisSession: an untrained pattern with a
+    // stale recentSessionDates must NOT flip on an apply that does not touch
+    // it. priorLoggedAt is the last entry of the PRE-append recentSessionDates
+    // (gap-EXCLUSIVE — this session's own date is not yet in the gap window),
+    // and a flat >= 28d gap to incomingLoggedAt fires (the flat-28 TRIGGER).
+    //
+    // currentUntil reads the LOCAL just-mutated newTransitionModeUntil so a
+    // same-apply deload-end + absence composes via computeTransitionModeUntil's
+    // max-of-untils (no clobber, no double-extend). cadenceDays stays whatever
+    // the site computes — the transition-mode DURATION is allowed to remain
+    // cadence-aware; only the absence TRIGGER is flat-28.
+    if (wasTrainedThisSession) {
+      const priorLoggedAtIso = baseRecentDates.length > 0
+        ? baseRecentDates[baseRecentDates.length - 1]
+        : null;
+      const priorLoggedAt = priorLoggedAtIso !== null
+        ? new Date(priorLoggedAtIso)
+        : null;
+      if (isLongAbsence(gapDays(priorLoggedAt, incomingLoggedAt))) {
+        const currentUntil = newTransitionModeUntil !== null
+          ? new Date(newTransitionModeUntil)
+          : null;
+        const composed = computeTransitionModeUntil(
+          incomingLoggedAt,
+          cadenceDays,
+          currentUntil,
+        ).toISOString();
+        if (composed !== newTransitionModeUntil) {
+          newTransitionModeUntil = composed;
+          fieldsChanged.push(`patterns.${patternKey}.transitionModeUntil`);
+        }
+        rulesFired.add("transition-mode-expiry");
+      }
     }
 
     if (advanced.fired !== "no-op") {
@@ -1997,6 +2055,18 @@ export async function applySession(
           sessionsCadenceDays(
             (patternsForProj[mp]?.recentSessionDates as string[] | undefined) ?? [],
           );
+        // A pattern is in long-absence transition when its just-resolved
+        // transitionModeUntil (set by the deload-end / long-absence branches
+        // above) is still in the future as of this session. The projection
+        // consumer gates on this: during re-establishment the stale pre-gap
+        // sessions must not drive the band (ADR-0023 / #305).
+        const inTransitionFor = (mp: string): boolean => {
+          const until = patternsForProj[mp]?.transitionModeUntil as
+            | string
+            | null
+            | undefined;
+          return until != null && new Date(until) > incomingLoggedAt;
+        };
         const projById = new Map<string, PatternProjection>();
         for (const p of priorProjections?.patternProjections ?? []) {
           projById.set(p.pattern, p);
@@ -2034,6 +2104,12 @@ export async function applySession(
         for (const mp of establishedMajors) {
           const existing = projById.get(mp);
           if (existing === undefined) continue;
+          // ADR-0023 floor is a monotone watermark — never ratchet it UP while
+          // the pattern is re-establishing after a long absence: the window is
+          // dominated by stale pre-gap sessions that would falsely "outgrow"
+          // the band. The floor stays put (a break does not un-prove demonstrated
+          // capability); ratcheting resumes once transition expires on fresh data.
+          if (inTransitionFor(mp)) continue;
           const recal = rederiveOutgrownProjection(
             existing,
             patternE1RMSessions(mp, exercisesForProj),
@@ -2047,10 +2123,17 @@ export async function applySession(
           }
         }
 
-        // Recompute progress for every existing projection.
+        // Recompute progress for every existing projection. During a long
+        // absence, re-anchor `current` on post-return sessions only so progress
+        // reads honestly (e.g. "behind" while re-establishing) instead of a
+        // stale "ahead/achieved" carried by the pre-gap window. The floor and
+        // stretch (the band) are untouched here.
         for (const [mp, proj] of projById) {
+          const sessionsForProgress = inTransitionFor(mp)
+            ? postReturnSessions(patternE1RMSessions(mp, exercisesForProj))
+            : patternE1RMSessions(mp, exercisesForProj);
           const current = currentCapability(
-            patternE1RMSessions(mp, exercisesForProj),
+            sessionsForProgress,
             cadenceFor(mp),
           );
           if (current === null) continue;

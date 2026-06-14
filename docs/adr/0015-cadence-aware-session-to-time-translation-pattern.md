@@ -54,8 +54,9 @@ The queue-event-windowed programme model (ADR-0002) is the foundational commitme
 
 | Usage | Formula | Where |
 |-------|---------|-------|
-| Transition-mode expiry | `now + max(14d, 3 × cadence)`, nil → `now + 21d` | Q5 / Phase 2 PRD-internal, code comments cite this ADR |
+| Transition-mode expiry (DURATION) | `now + max(14d, 3 × cadence)`, nil → `now + 21d` | Q5 / Phase 2 PRD-internal, code comments cite this ADR |
 | `disruptedPatterns` derivation | `daysSinceLastSession > 2 × sessionsCadenceDays` | ADR-0005 (pre-existing; this ADR documents the pattern that ADR-0005 instantiated) |
+| Long-absence transition **trigger** | `gapDays ≥ 28` (flat calendar days, **not** cadence-aware) | `_shared/long-absence.ts`; deliberate exception — see Amendment 2026-06-14 |
 
 Future rules adopting the shape MUST cite this ADR in their code comments and Considered Options sections.
 
@@ -76,6 +77,15 @@ Future rules adopting the shape MUST cite this ADR in their code comments and Co
 - Code comments at each usage site cite this ADR. The translation rationale (event-coded > calendar-coded; nil-fallback for long-absence-returners; floor for high-cadence pathology) doesn't repeat at each site — future readers land on the ADR for context.
 
 - Tuning a specific instance (e.g., changing Q5's `3 × cadence` to `4 × cadence`) is local — doesn't require ADR amendment. Tuning the *pattern itself* (e.g., changing the nil-cadence fallback rule, or adding a multiplicative ceiling) requires ADR amendment because it affects all current and future instances.
+
+## Amendment (2026-06-14) — long-absence trigger is calendar-flat (a deliberate exception)
+
+The long-absence re-anchor (see [ADR-0005](0005-persistent-structured-trainee-model.md) amendment of the same date) introduces a **TRIGGER** that fires at a flat `gapDays ≥ 28`, which is *not* cadence-aware. This is a knowing exception to this ADR's session-relativity thesis (§"the triggers and windows that gate adaptation logic are session-driven"), made for two reasons:
+
+1. **Cross-surface consistency.** The client already gates a user-facing "return phase" cue on a flat `daysSinceLastSession ≥ 28` (`requiresReturnPhaseOverride`). Making the server's estimate-collapse trigger cadence-aware (e.g. `max(14d, 2 × cadence)`) would fire as early as 15 days for some users, so the coach could receive two contradictory return signals for the same gap. One flat definition keeps the surfaces aligned. (The owner ratified flat-28 over the cadence-aware alternative during design.)
+2. **The cadence-aware part is preserved where it belongs — the WINDOW.** Only the *detection* is calendar-flat. The transition-mode **DURATION** the trigger opens (`now + max(14d, 3 × cadence)`, nil → `now + 21d`) is unchanged and remains cadence-aware per this ADR. So the system still asks "how many sessions of fresh data re-establish capability?" in event time; it just decides "has a real layoff happened?" in calendar time.
+
+The `disruptedPatterns` 2×-cadence derivation (still session-relative) is unchanged and coexists: it cues the coach; the flat-28 trigger drives the heavier estimate collapse.
 
 - Composition with ADR-0008's late-arrival watermark is implicit: `cadence` is computed from the trainee model's `recentSessionDates`, which excludes refused-late-arrival sessions. Translation rules thus reflect the trainee model's view of the user, not the raw `set_logs` view. This is correct — the model's view is the authoritative one.
 

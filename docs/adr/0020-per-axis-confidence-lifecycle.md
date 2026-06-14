@@ -54,3 +54,11 @@ This feature **only advances confidence**. When ≥4 of 6 major patterns reach `
 - **No migration, no Swift change.** The one new field (`PatternProfile.sessionCount`) is an EF-only JSONB accumulator (ADR-0006-allowed, precedent: `weeklyVolumeHistory`); Swift Codable ignores unknown keys, and the confidence fields already decode.
 - **Tuning is deferred.** The gate numbers are conservative-by-design for the alpha cohort; re-tuning from production data is a post-alpha follow-up (e.g. exercise CV switched to detrended residuals if fast-progressers stall at `.calibrating`).
 - Delivered as 5 tracer-bullet slices under #166: foundation (#282), exercise (#283), pattern counter+backfill (#284), pattern advance (#285), muscle aggregation (#286).
+
+## Amendment (2026-06-14) — the estimate-layer recency handler this ADR delegated to was inert until now
+
+§Regression states that recency (staleness, long absence, phase transition) is "handled independently at the *estimate* layer by the EWMA transition-mode collapse (ADR-0005), decoupled from the confidence label." That delegation was sound, but the delegated mechanism was **not actually wired for an unplanned long absence**: the estimate-layer compute call hardcoded `inTransitionMode = false`, and no trigger set `transitionModeUntil` on a layoff. So the recency response this ADR pointed at did not run. It is now wired (see the [ADR-0005](0005-persistent-structured-trainee-model.md) amendment, flat ≥ 28-day trigger + post-return-trimmed re-anchor).
+
+This **changes nothing about this ADR's policy**: confidence remains a strict forward-only ratchet with no downgrade path. A long absence does not downgrade any confidence label — the response lives entirely at the estimate layer, exactly as §Regression intended. The "if real-world staleness ever demands a label response, that is a future forward-only ADR" clause is still open and untouched.
+
+One related consumer note: the calibration-projection re-derivation (ADR-0023) is now gated on the transition flag — during a long absence the floor up-ratchet is skipped and progress re-anchors on post-return sessions, so a stale window can't falsely advance the band. The monotone floor watermark is preserved. See the [ADR-0023](0023-capability-driven-projection-recalibration.md) amendment.

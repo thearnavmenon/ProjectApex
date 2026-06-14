@@ -61,3 +61,12 @@ Re-calibration is **surfaced, not silent** — a silent floor bump would reset a
 - Built as 3 slices: #307 (EF mechanism + watermark), #308 (surface: decode + re-arm + copy + badge + ack), #305-docs (this ADR + CONTEXT/DIARY/BACKLOG).
 - **Deferred (still):** goal-aware margin / option B (#305's original framing) — revisit once cohort data can calibrate a focus bump honestly.
 - **Found en route (separate fix):** the legacy `calibrationReviewAcknowledged` camel/snake key mismatch (#309) — the #269 server ack doesn't survive a sync; #305's new field uses camelCase to avoid the trap.
+
+## Amendment (2026-06-14) — the up-ratchet is paused during a long-absence transition
+
+The long-absence re-anchor (see [ADR-0005](0005-persistent-structured-trainee-model.md) amendment of the same date) makes the projection re-derivation flag-aware. While a pattern is in its long-absence transition window (`transitionModeUntil` in the future):
+
+- **The floor up-ratchet (`rederiveOutgrownProjection`) is skipped.** Just after a layoff the capability window is dominated by *stale pre-gap* sessions; without this guard a stale-high median could "outgrow the band" and ratchet the floor UP on data that no longer reflects current capability. The floor stays put — which is exactly right under this ADR: a break does **not** un-prove demonstrated capability, so the watermark must neither drop (preserved: monotone non-decreasing) nor advance on stale evidence. Ratcheting resumes automatically once the transition window expires, on fresh post-return data.
+- **Progress re-anchors on post-return sessions.** The `progress` indicator's `current` is computed from the post-return suffix only (`postReturnSessions`), so a returner reads honestly (e.g. "behind" while re-establishing) instead of a stale "ahead/achieved" carried by the pre-gap window. The band itself (floor + stretch) is untouched.
+
+This was added because the 2026-06-14 owner decision was to gate the capability *consumers* on the transition flag in the same change, not defer them. No invariant in this ADR is weakened: the floor remains monotone non-decreasing on demonstrated capability; the only new behaviour is *declining to advance it on stale data* during re-establishment.
