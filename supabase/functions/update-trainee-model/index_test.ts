@@ -657,3 +657,105 @@ Deno.test("Slice 4 (g): no-gap TRAINED pattern leaves transitionModeUntil untouc
   assertEquals(result.patterns[SQUAT_PATTERN].transitionModeUntil, null);
   assertEquals(result.rulesFired.has("transition-mode-expiry"), false);
 });
+
+// ─── #369 Slice 5: per-scope coherence (documented, intended disagreement) ────
+//
+// The estimate trigger is PER-EXERCISE (its own baseTopSets gap) and the flag
+// trigger is PER-PATTERN (its own recentSessionDates gap). These two scopes
+// can DISAGREE, and that disagreement is INTENDED, not a bug: an exercise can
+// sit out >= 28d while its pattern was kept warm by a SIBLING exercise.
+//
+// Scenario: the `squat` pattern has two exercises —
+//   • barbell_back_squat: last logged > 28d ago (sat out), trained THIS session
+//   • goblet_squat: trained recently via the sibling, so the pattern's
+//     recentSessionDates last entry is recent (no pattern-level absence).
+// This session re-touches barbell_back_squat after its long personal gap.
+//
+// Expected (per-scope, NOT hoisted):
+//   • barbell_back_squat.e1rmCurrent RE-ANCHORS (trimmed transition-mode mean)
+//     because its OWN pre-append gap is >= 28d.
+//   • The squat pattern's transitionModeUntil stays null (in_transition_mode
+//     false) because the PATTERN's recentSessionDates gap is small.
+Deno.test("Slice 5: per-scope — a sat-out exercise re-anchors its estimate even though its pattern's flag stays false (intended disagreement)", () => {
+  const SAT_OUT = "barbell_back_squat"; // → squat
+  const SIBLING = "goblet_squat"; // → squat (kept the pattern warm)
+
+  // ── Exercise scope: barbell_back_squat sat out >28d, trained this session ──
+  const exercises = {
+    [SAT_OUT]: {
+      exerciseId: SAT_OUT,
+      topSets: [
+        storedTopSet(100, 5, "2026-01-01T10:00:00Z", "x1"),
+        storedTopSet(100, 5, "2026-01-02T10:00:00Z", "x2"),
+        storedTopSet(102.5, 5, "2026-01-03T10:00:00Z", "x3"),
+        storedTopSet(102.5, 5, "2026-01-04T10:00:00Z", "x4"),
+        storedTopSet(105, 5, "2026-01-05T10:00:00Z", "x5"), // last pre-gap
+      ],
+      e1rmCurrent: e1rm(105, 5),
+      sessionCount: 5,
+      confidence: "established",
+    },
+  };
+  const exerciseResult = applyPerExerciseRules(
+    exercises,
+    [{
+      exercise_id: SAT_OUT,
+      intent: "top",
+      weight_kg: 95,
+      reps_completed: 5,
+    }],
+    INCOMING_FEB16, // 42d after 2026-01-05 → exercise-scope absence fires
+    "return-session",
+  );
+  const reAnchored = exerciseResult.exercises[SAT_OUT].e1rmCurrent as number;
+  // The sat-out exercise re-anchors to the trimmed post-return mean (110.83).
+  assertAlmostEquals(reAnchored, e1rm(95, 5)!, 1e-9);
+  assertEquals(
+    exerciseResult.rulesFired.has("long-absence-transition"),
+    true,
+    "per-exercise estimate re-anchors on its OWN gap",
+  );
+
+  // ── Pattern scope: squat kept warm by the sibling → small pattern gap ──
+  // The pattern's recentSessionDates last entry is RECENT (the sibling trained
+  // it 2026-02-14), so the pattern-level absence does NOT fire even though the
+  // back-squat exercise personally sat out.
+  const patterns = squatProfile([
+    "2026-02-12T10:00:00Z",
+    "2026-02-14T10:00:00Z", // sibling kept the pattern warm — small gap
+  ]);
+  const patternResult = applyPerPatternRules(
+    patterns,
+    new Set([SQUAT_PATTERN]),
+    INCOMING_FEB16,
+    10,
+    exerciseResult.exercises,
+    [
+      {
+        exercise_id: SAT_OUT,
+        intent: "top",
+        weight_kg: 95,
+        reps_completed: 5,
+      },
+      {
+        exercise_id: SIBLING,
+        intent: "top",
+        weight_kg: 40,
+        reps_completed: 5,
+      },
+    ],
+  );
+  assertEquals(
+    patternResult.patterns[SQUAT_PATTERN].transitionModeUntil,
+    null,
+    "pattern flag stays false — the pattern's OWN gap is small (sibling kept it warm)",
+  );
+
+  // The two scopes disagree by design: estimate re-anchored, flag did not.
+  assertEquals(
+    exerciseResult.rulesFired.has("long-absence-transition") &&
+      patternResult.patterns[SQUAT_PATTERN].transitionModeUntil === null,
+    true,
+    "per-scope disagreement is INTENDED — not hoisted to a single trigger",
+  );
+});
