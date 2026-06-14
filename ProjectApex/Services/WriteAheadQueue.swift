@@ -132,16 +132,24 @@ actor WriteAheadQueue {
     private let userDefaults: UserDefaults
     private let baseRetryDelay: TimeInterval
 
+    /// Returns the current authenticated user ID, or nil when no session has
+    /// resolved yet. Injected so the actor can check payload ownership at flush
+    /// time without coupling to SupabaseAuth directly (#369 slice 5). Defaults to
+    /// `{ nil }`, which disables the owner check (existing call-sites unchanged).
+    private let currentAuthUid: @Sendable () async -> UUID?
+
     // MARK: - Init
 
     init(
         supabase: SupabaseClient,
         userDefaults: UserDefaults = .standard,
-        baseRetryDelay: TimeInterval = WriteAheadQueue.defaultBaseRetryDelay
+        baseRetryDelay: TimeInterval = WriteAheadQueue.defaultBaseRetryDelay,
+        currentAuthUid: @escaping @Sendable () async -> UUID? = { nil }
     ) {
         self.supabase = supabase
         self.userDefaults = userDefaults
         self.baseRetryDelay = baseRetryDelay
+        self.currentAuthUid = currentAuthUid
         // Restore any persisted queue + dead-letter items from a previous session
         self.queue = Self.loadPersistedQueue(userDefaults: userDefaults)
         self.deadLetter = Self.loadPersistedDeadLetter(userDefaults: userDefaults)
@@ -275,6 +283,21 @@ actor WriteAheadQueue {
     /// Routes a queue item to its registered handler, or falls back to the
     /// default Supabase REST insert path for items without a custom handler.
     private func dispatch(_ item: QueuedWrite) async -> WAQFlushOutcome {
+        // Owner-mismatch guard (#369 slice 5): if the payload carries a top-level
+        // "user_id" that doesn't match the current auth.uid(), dead-letter it
+        // immediately — no retry. This fires when a frozen-owner item (stamped in a
+        // placeholder/prior-uid window) reaches flush after a real session resolved;
+        // retrying 5× would always produce RLS 403. When no session has resolved
+        // (currentAuthUid → nil) or the payload has no user_id (e.g. set_logs), the
+        // check is skipped and the flush proceeds normally.
+        if let uid = await currentAuthUid(),
+           let payloadOwnerId = Self.extractUserId(from: item.payload),
+           payloadOwnerId != uid {
+            let reason = "owner mismatch: payload user_id \(payloadOwnerId) != auth.uid() \(uid)"
+            Self.logger.error("[WriteAheadQueue] \(reason, privacy: .public) — item \(item.id, privacy: .public), table: \(item.table, privacy: .public)")
+            return .permanentFailure(reason)
+        }
+
         if let handler = flushHandlers[item.table] {
             return await handler(item)
         }
@@ -403,6 +426,19 @@ actor WriteAheadQueue {
               let items = try? JSONDecoder().decode([QueuedWrite].self, from: data)
         else { return [] }
         return items
+    }
+
+    // MARK: - Private: Owner extraction
+
+    /// Decodes the top-level `"user_id"` string from a JSON payload, if present.
+    /// Returns nil when the key is absent (e.g. set_logs, session_notes) or the
+    /// value is not a valid UUID — both treated as "no direct owner to check", so
+    /// the flush proceeds normally. (#369 slice 5.)
+    private static func extractUserId(from payload: Data) -> UUID? {
+        guard let json = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+              let raw = json["user_id"] as? String
+        else { return nil }
+        return UUID(uuidString: raw)
     }
 }
 

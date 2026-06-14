@@ -231,7 +231,13 @@ final class AppDependencies {
         // 9. WriteAheadQueue — reliable Supabase write queue (P3-T06)
         // Hoisted above SessionPlanService so the trainee-model stack below
         // can be injected into SessionPlanService (B1 / #86).
-        let waq = WriteAheadQueue(supabase: supabaseClient)
+        let waq = WriteAheadQueue(
+            supabase: supabaseClient,
+            // #369 slice 5: dead-letter owner-mismatched items at flush instead of
+            // burning 5 RLS-403 retries. Reads the already-resolved session (no await
+            // on resolution) — nil during the resolution window safely skips the check.
+            currentAuthUid: { [auth] in await auth.currentSession?.userId }
+        )
         self.writeAheadQueue = waq
 
         // 10. TraineeModelLocalStore + TraineeModelUpdateJob (Phase 1 / Slices 8 + 11)

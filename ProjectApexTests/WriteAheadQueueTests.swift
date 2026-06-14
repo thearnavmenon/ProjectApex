@@ -48,6 +48,15 @@ nonisolated private struct TestSetLogPayload: Encodable, Sendable {
     }
 }
 
+/// Payload that DOES carry a top-level `user_id` (e.g. workout_sessions), used to
+/// exercise the #369 slice-5 owner-mismatch guard. File-scope so its Encodable
+/// conformance is non-isolated.
+nonisolated private struct OwnedWAQPayload: Encodable, Sendable {
+    let userId: String
+    enum CodingKeys: String, CodingKey { case userId = "user_id" }
+    init(userId: UUID) { self.userId = userId.uuidString }
+}
+
 // MARK: - Mock URLProtocol for controlling HTTP responses
 
 private final class WAQMockURLProtocol: URLProtocol, @unchecked Sendable {
@@ -364,6 +373,92 @@ final class WriteAheadQueueTests: XCTestCase {
         XCTAssertEqual(reloadedPending, 0, "persisted queue empty after clearAll")
         let reloadedDead = await reloaded.failedWrites()
         XCTAssertTrue(reloadedDead.isEmpty, "persisted dead-letter empty after clearAll")
+    }
+
+    // MARK: #369 slice 5 — owner-mismatch flush guard
+
+    /// An item whose payload user_id != current auth.uid() is dead-lettered on the
+    /// first dispatch (permanent failure), with no retries — retrying would always
+    /// produce RLS 403.
+    func testFlush_ownerMismatch_deadLettersWithoutRetry() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        let authUid = UUID()
+        let queue = WriteAheadQueue(
+            supabase: makeMockSupabase(), userDefaults: defaults, baseRetryDelay: 0.001,
+            currentAuthUid: { authUid }
+        )
+        try await queue.enqueue(OwnedWAQPayload(userId: UUID()), table: "workout_sessions")
+
+        var dead = await queue.failedWrites()
+        for _ in 0..<100 where dead.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            dead = await queue.failedWrites()
+        }
+        XCTAssertEqual(dead.count, 1, "owner-mismatched item must be dead-lettered")
+        XCTAssertEqual(dead.first?.retryCount, 0, "permanent failure → dead-lettered with no retries")
+        let pending = await queue.pendingCount
+        XCTAssertEqual(pending, 0, "queue drained")
+    }
+
+    /// An item whose payload user_id matches the current auth.uid() flushes normally.
+    func testFlush_ownerMatch_proceedsNormally() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        let authUid = UUID()
+        let queue = WriteAheadQueue(
+            supabase: makeMockSupabase(), userDefaults: defaults,
+            currentAuthUid: { authUid }
+        )
+        await queue.registerFlushHandler(forTable: "workout_sessions") { _ in .success }
+        try await queue.enqueue(OwnedWAQPayload(userId: authUid), table: "workout_sessions")
+
+        var pending = await queue.pendingCount
+        for _ in 0..<100 where pending != 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            pending = await queue.pendingCount
+        }
+        XCTAssertEqual(pending, 0, "matching-owner item flushes")
+        let dead = await queue.failedWrites()
+        XCTAssertTrue(dead.isEmpty, "matching-owner item must not dead-letter")
+    }
+
+    /// With the default `currentAuthUid = { nil }` (no resolved session), the owner
+    /// check is skipped and the item flushes normally.
+    func testFlush_noUidProvider_skipsOwnerCheck() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults)
+        await queue.registerFlushHandler(forTable: "workout_sessions") { _ in .success }
+        try await queue.enqueue(OwnedWAQPayload(userId: UUID()), table: "workout_sessions")
+
+        var pending = await queue.pendingCount
+        for _ in 0..<100 where pending != 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            pending = await queue.pendingCount
+        }
+        XCTAssertEqual(pending, 0, "nil uid provider disables the owner check; item flushes")
+        let dead = await queue.failedWrites()
+        XCTAssertTrue(dead.isEmpty)
+    }
+
+    /// A payload with NO top-level user_id (e.g. set_logs) is never owner-checked,
+    /// even when a real auth.uid() is present — ownership is indirect via the session.
+    func testFlush_payloadWithoutUserIdKey_skipsOwnerCheck() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        let authUid = UUID()
+        let queue = WriteAheadQueue(
+            supabase: makeMockSupabase(), userDefaults: defaults,
+            currentAuthUid: { authUid }
+        )
+        await queue.registerFlushHandler(forTable: "set_logs") { _ in .success }
+        try await queue.enqueue(TestSetLogPayload.mock(), table: "set_logs")
+
+        var pending = await queue.pendingCount
+        for _ in 0..<100 where pending != 0 {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            pending = await queue.pendingCount
+        }
+        XCTAssertEqual(pending, 0, "set_logs (no user_id) flushes — owner check skipped")
+        let dead = await queue.failedWrites()
+        XCTAssertTrue(dead.isEmpty)
     }
 
     // MARK: Test 8 (#184): retry-exhausted items are dead-lettered, not dropped
