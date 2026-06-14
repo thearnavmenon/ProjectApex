@@ -114,10 +114,11 @@ struct AppShell: View {
     // MARK: Routing — code-as-switch
 
     /// "Is this surface built?" is the literal presence of its real view's
-    /// constructor here (ADR-0026 (a)). Progress re-homes its real screen now
-    /// (it needs only `deps`). Today and Train depend on the `ProgramViewModel`
-    /// lifecycle that machinery-last keeps in `ContentView`, so they show an
-    /// honest interim until their per-surface slice lifts that machinery.
+    /// constructor here (ADR-0026 (a)). Progress (#354) and Train (#357) re-home
+    /// their real roots now — each reads its data through `deps`, with the
+    /// `ProgramViewModel` lifecycle still lifted later (#376, machinery-last).
+    /// Today depends on that lifecycle, so it shows an honest interim until the
+    /// Today slice lands.
     @ViewBuilder
     private func surface(for tab: ApexTab) -> some View {
         switch tab {
@@ -127,10 +128,11 @@ struct AppShell: View {
                 note: "The coach/home surface lands in the Today slice."
             )
         case .train:
-            InterimSurface(
-                title: "Train",
-                note: "The program surface re-homes here in the Train slice."
-            )
+            // #357: new Train root — the program day-spine (train.md §3).
+            // ProgramOverviewView is preserved for the live ContentView; only this
+            // dormant AppShell branch changes. The host owns the data boundary; the
+            // ProgramViewModel lifecycle is lifted here in #376 (machinery-last).
+            TrainProgramRootHost()
         case .progress:
             // #354: new Progress root — the capability ledger (progress.md §3).
             // ProgressTabView is preserved for the live ContentView; only this

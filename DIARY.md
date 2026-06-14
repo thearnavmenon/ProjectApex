@@ -7,6 +7,23 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-14 — The Train program root: your plan drawn as a vertical day-spine (Phase 3 UI, Slice 15 #357)
+
+**What it is.** The new Train tab's main screen, drawn as a single vertical spine running down the page — the left edge is the timeline, and each training day hangs off it. This week shows in full: each day a row with a small status mark (a filled dot = done, a hollow dot = scheduled-but-not-done) and a short list of that day's exercises. Days you don't train are first-class "rest" nodes on the spine, not blank gaps. Below this week, the rest of the plan shows compressed and faint — pattern/focus only, no fake numbers — because the coach hasn't worked those days out yet.
+
+**The honest part.** The whole point is the line between *what the coach has placed* and *what it's still going to figure out closer to the day*. Placed days are drawn in ink with real exercises; not-yet-placed days are drawn in pencil as a shape only, inside a faint diagonal hatch zone, with a drawn "PLACED ABOVE · SHAPE BELOW" line between the two. The further out a week is, the more it compresses — but in three clear steps, never a smooth fade. And there are deliberately no streaks, no rings, no "3 of 5 done" counters, no shame mark on a missed day — the calendar is a plan, not a report card. A skipped day just stays a hollow dot, like any other day the plan moved past.
+
+**Derived, not stored (no data changes).** Rest days and skeleton days aren't new saved states — they're worked out from what's already there. A weekday with no training day = a rest node. A day with no generated exercises yet = a skeleton (pencil) day. I added zero new cases to the saved data and changed no model, so nothing about how programs are stored changed. The mapping from a day's status to its dot, and these rest/skeleton rules, all live in the new screen (the dot drawing itself is a dumb shared piece).
+
+**How it gets its data (the seam).** The new shell doesn't yet own the program's live "view model," so this screen takes its data as a plain input that tests can hand it directly, and the live version reads the same saved-program cache the old screen reads first. When no program is cached it shows an honest empty state. The real live wiring (current-week tracking, days re-resolving on screen) is a clearly-marked TODO for a later slice (#376).
+
+**Still dormant.** This is a brand-new screen wired only into the off-by-default new 3-tab shell. The live app still runs the old program screen untouched — nothing users see changed.
+
+**Tests.** New unconditional tests cover the dot mapping for every day status above and below the horizon, rest-and-skeleton-from-gaps, the three discrete compression steps, "Week X of N," and a guard proving the screen carries no streak/counter/adherence field. Image snapshots for light + dim + an accessibility size are wired up but their reference images aren't recorded here — the CI record job on Xcode 26.3 does that.
+
+**Status:** PR open from `feat/357-train-root`. New suites all green (23 tests in the scoped run); whole app + tests compile with no new warnings.
+
+
 ## 2026-06-14 — The drafting-rule system: drawing what the model knows vs. is still guessing (Phase 3 UI, #411)
 
 **What it is.** A shared set of drawing pieces for one idea that shows up on three screens: the line between *what the coach has placed* and *what it hasn't worked out yet*. The rule is simple — if the model has committed to something, draw it in ink with real numbers; if it's still provisional, draw it in pencil as a shape only; and always draw the boundary between the two as an actual line, never leave it to ink-vs-pencil alone (because the muted pencil colour already means "time/metadata," so on its own it reads as "minor detail," not "not figured out yet").
