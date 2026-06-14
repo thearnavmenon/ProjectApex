@@ -8,6 +8,19 @@ Started 2026-06-07.
 ---
 
 
+## 2026-06-14 — Coming back after a long break no longer fools the strength estimate (#418)
+
+**The problem in plain words.** The app tracks how strong you are with a moving average that only looks at your last few *workouts*, not the calendar. That works great while you're training regularly. But if you vanish for six weeks and come back, the math treats your first workout back as if it happened the very next day — so it quietly assumes you're as strong as you were before the break. You're not. Real strength fades during a long layoff, and the old code couldn't see that.
+
+**What changed.** When a gap of 28 days or more is still sitting inside a lift's recent-workout window, the estimate now throws out the stale pre-break workouts and re-anchors on the workouts you've done *since coming back*. So your first session back reads your real current strength (~110.83 kg in our worked example) instead of the stale old number (~116.74 kg). And it *stays* re-anchored across the whole comeback window — it doesn't snap back up on your second workout — then quietly turns itself off once the old pre-break workouts have aged out of the window and normal tracking resumes. The 28-day trigger matches the cue the app already uses to suggest a return-to-training phase.
+
+**Knock-on effects handled.** The strength floor (the number your training band is built on, which is only ever allowed to ratchet *up*) is paused from ratcheting on stale comeback data, so a break can't accidentally lock in an inflated floor — and the "only goes up" rule is preserved. Two screens (the goal-review capability list and the progress ledger) now show a small "Re-establishing after a break" note so you know why a number dipped.
+
+**How it was checked.** Built test-first across the slices; the full Edge-Function suite is green (452 tests, 0 failing) and the type-checker is clean. An independent review caught one real bug along the way — a naive version actually moved the estimate the *wrong* way — which is why trimming the old workouts is mandatory, not optional. The iOS side compiles against the real type definitions but isn't visually QA'd yet (no simulator here); that and snapshot images are owed. Decisions recorded in ADR-0005/0015/0020/0023.
+
+**Status:** MERGED to main (PR #418, squash `b780549`). Does **not** close the #369 audit umbrella. One follow-up noted for later: a fatigue-pairing calculation also reads the strength estimate and may want the same break-aware gating — reported, not yet acted on.
+
+
 ## 2026-06-14 — The Today screen: your next workout, one tap to start, one honest coach line (Phase 3 UI, #348)
 
 **What it is.** The new Today tab's main screen — the "what does my coach want from me right now?" surface. At the top: the date and a small readiness gauge (the Lens). Below that: one short coach line. Then the hero — a single card showing your next session (its title, up to three exercises with their sets and reps drawn as a crisp number lockup, a rough time estimate) and one big full-width **Start** button, the only coloured thing on the screen. Any coach alerts sit as a calm list *below* Start — never a pop-up jumping in front of it.
