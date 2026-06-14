@@ -7,6 +7,23 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-14 — The drafting-rule system: drawing what the model knows vs. is still guessing (Phase 3 UI, #411)
+
+**What it is.** A shared set of drawing pieces for one idea that shows up on three screens: the line between *what the coach has placed* and *what it hasn't worked out yet*. The rule is simple — if the model has committed to something, draw it in ink with real numbers; if it's still provisional, draw it in pencil as a shape only; and always draw the boundary between the two as an actual line, never leave it to ink-vs-pencil alone (because the muted pencil colour already means "time/metadata," so on its own it reads as "minor detail," not "not figured out yet").
+
+**The pieces.** A `DraftingRule` (a thin full-width line with a little 4pt tick at the left margin — Today's drawing signature, solid or dashed). A `DraftingRegister` (a tiny two-tone caption in the margin — the number in ink, the words in pencil — that simply isn't drawn when there's nothing to say, never a fake "0"). A `GenerationHorizonBreak` (the drawn line on Train's plan that says "PLACED ABOVE · SHAPE BELOW"). A `ToBePlacedHatch` (a sparse diagonal pencil hatch filling the not-yet-planned zone). And a `CommitmentTier` — the further-out-is-fuzzier effect drawn as three clear steps (this week in full, next compressed, beyond as one mark per day), deliberately NOT a smooth fade, so it can't be mistaken for a confidence-on-a-chart slope (which the app bans).
+
+**One shared floor line (fixes a real bug, #408).** The Progress screen's "spine" — the single vertical line all the rows' floor ticks are supposed to land on — used to guess its position from a stand-in band, so rows of different widths drifted slightly off it. I pulled the floor position into one shared helper (`BandDatum.floorX`) that the band, the spine, and the new horizon all call, so every floor tick lands on exactly the same line. The Progress screen's spine now uses that helper instead of its own inline guess. Same picture as before for normal widths — just exact now instead of approximate.
+
+**A doc fix.** The design doc said projection dashes are always the accent ink colour, but the shipped band actually draws its dashed edges in the hairline colour. I corrected the doc to match the code: a dashed *chart line* is accent ink, a dashed *band edge* is hairline. I did not touch the band's code.
+
+**Important: still dormant.** None of these new pieces are wired into any screen yet — they're built and tested, waiting for the per-screen slices. The only live-code change is the Progress spine swapping to the shared floor helper, and even that screen is behind the off-by-default new shell.
+
+**Tests.** New unconditional tests cover the new measurements, that "committed vs. provisional" is a total function over every input, that the register vanishes at zero, that the gradient is genuine discrete steps (no in-between), that the hatch uses the pencil colour and the dash uses the 4-2 projection pattern, and a guard proving the band, the spine, and the horizon all compute the *same* floor x (the #408 regression guard). Image snapshots for light + dim + an accessibility size are wired up but their reference images aren't recorded here — the CI record job on Xcode 26.3 does that. Added ADR-0028 recording the whole committed-vs-provisional model.
+
+**Status:** PR open from `feat/411-drafting-rule`. New suites + the Progress regression suite all green (42 tests in the scoped run).
+
+
 ## 2026-06-14 — Built the StatusTick instrument: filled/hollow/undrawn day-status + today marker (Phase 3 UI, Slice 5 #410)
 
 **What it is.** A shared drawn instrument for day/set status on the Train spine — the drawn replacement for the green check that the design bans (train.md §3). Three values: `filled` (done, solid ink dot), `hollow` (committed-not-done, ink stroke with paper interior), `undrawn` (skeleton/below-horizon, renders nothing — the drafting-rule zone, a sibling slice, is the only mark there). A `isToday` flag layers a quiet 2px ink left-margin rule, static, no animation.

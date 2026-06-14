@@ -65,6 +65,7 @@
 		DE56000000000000DE560002 /* LiveLoopCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE56000000000000DE560001 /* LiveLoopCoreTests.swift */; };
 		PR35400000000000PR354002 /* ProgressRootLedgerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = PR35400000000000PR354001 /* ProgressRootLedgerTests.swift */; };
 		ST41000000000000ST410002 /* StatusTickTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ST41000000000000ST410001 /* StatusTickTests.swift */; };
+		DR41100000000000DR411002 /* DraftingRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DR41100000000000DR411001 /* DraftingRuleTests.swift */; };
 		DE54000000000000DE540002 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = DE54000000000000DE540001 /* SnapshotTesting */; };
 		A8C2F77F360EDB0F6608A791 /* TraineeModelLocalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E790918146069F34BF3E4685 /* TraineeModelLocalStoreTests.swift */; };
 		B9BA0DEA986911A47825DA7E /* TraineeModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */; };
@@ -140,6 +141,7 @@
 		DE56000000000000DE560001 /* LiveLoopCoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiveLoopCoreTests.swift; sourceTree = "<group>"; };
 		PR35400000000000PR354001 /* ProgressRootLedgerTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ProgressRootLedgerTests.swift; sourceTree = "<group>"; };
 		ST41000000000000ST410001 /* StatusTickTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = StatusTickTests.swift; sourceTree = "<group>"; };
+		DR41100000000000DR411001 /* DraftingRuleTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DraftingRuleTests.swift; sourceTree = "<group>"; };
 		B2C3D4E5F6A7B8C9D0E1F2A1 /* TopSetSnapshotFactoryTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TopSetSnapshotFactoryTests.swift; sourceTree = "<group>"; };
 		DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SetPrescriptionIntentValidationTests.swift; sourceTree = "<group>"; };
 		DFFF76E0AE157D67D5D2660F /* TraineeModelTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelTests.swift; sourceTree = "<group>"; };
@@ -291,6 +293,7 @@
 				DE56000000000000DE560001 /* LiveLoopCoreTests.swift */,
 				PR35400000000000PR354001 /* ProgressRootLedgerTests.swift */,
 				ST41000000000000ST410001 /* StatusTickTests.swift */,
+				DR41100000000000DR411001 /* DraftingRuleTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -463,6 +466,7 @@
 				DE56000000000000DE560002 /* LiveLoopCoreTests.swift in Sources */,
 				PR35400000000000PR354002 /* ProgressRootLedgerTests.swift in Sources */,
 				ST41000000000000ST410002 /* StatusTickTests.swift in Sources */,
+				DR41100000000000DR411002 /* DraftingRuleTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -140,19 +140,13 @@ struct ProgressRootLedger: View {
         .allowsHitTesting(false)
     }
 
-    /// X-position of the spine, mirroring BandLayout's floor-tick position for a
-    /// representative 100→115 band (20% domain margin → floor at ~16.7% of width).
-    /// This is approximate — the real fusing comes from each row's floor tick being
-    /// at this same coordinate.
+    /// X-position of the spine — the SHARED floor datum (`BandDatum.floorX`), the
+    /// same helper the capability band and Train's horizon compute against. Every
+    /// row's `CapabilityBand(.list)` plots its own floor tick at this coordinate,
+    /// so all the ticks fuse onto one datum instead of drifting under the 48pt
+    /// minimum-band-width expansion (the #408 fix — no more inline re-derivation).
     private func spineX(totalWidth: CGFloat) -> CGFloat {
-        // BandLayout for floor=100, stretch=115: bandWidth=15, margin=3
-        // domainMin=97, domainMax=118, span=21. floor fraction=(100-97)/21≈0.143
-        // In the strip width (which is the full row width here), floor x ≈ 14.3%.
-        // We use the BandLayout constants directly so the spine is data-driven.
-        let representativeLayout = BandLayout(
-            floor: 100, stretch: 115, observedE1RM: nil, width: totalWidth
-        )
-        return representativeLayout.floorX - DesignGeometry.floorTick / 2
+        BandDatum.floorX(width: totalWidth) - DesignGeometry.floorTick / 2
     }
 
     // MARK: Pattern rows
