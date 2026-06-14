@@ -15,7 +15,14 @@ import {
   assertEquals,
   assertStringIncludes,
 } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { gapDays, isLongAbsence, LONG_ABSENCE_DAYS } from "./long-absence.ts";
+import {
+  gapDays,
+  isLongAbsence,
+  LONG_ABSENCE_DAYS,
+  postReturnSessions,
+} from "./long-absence.ts";
+import { currentCapability } from "./calibration-projection.ts";
+import type { E1RMSession } from "./plateau-verdict.ts";
 
 const MS_PER_DAY = 86_400_000;
 const at = (iso: string) => new Date(iso);
@@ -82,6 +89,78 @@ Deno.test("LONG_ABSENCE_DAYS is 28 (matches client requiresReturnPhaseOverride f
 });
 
 // ─── purity: no clock reads ─────────────────────────────────────────────────
+
+// ─── postReturnSessions: re-anchor a session series on the freshest block ─────
+
+const sess = (base: Date, day: number, e1rm: number): E1RMSession => ({
+  loggedAt: daysAfter(base, day),
+  e1rm,
+  avgRPE: null,
+});
+
+Deno.test("postReturnSessions: no qualifying gap → input unchanged", () => {
+  const items = [
+    sess(PRIOR, 0, 100),
+    sess(PRIOR, 3, 101),
+    sess(PRIOR, 6, 102),
+  ];
+  assertEquals(postReturnSessions(items), items);
+});
+
+Deno.test("postReturnSessions: a >= 28d gap → keeps only the post-return suffix", () => {
+  const items = [
+    sess(PRIOR, 0, 120),
+    sess(PRIOR, 3, 121),
+    sess(PRIOR, 45, 110), // 42d gap before this one
+    sess(PRIOR, 48, 112),
+  ];
+  const trimmed = postReturnSessions(items);
+  assertEquals(trimmed.length, 2);
+  assertEquals(trimmed.map((s) => s.e1rm), [110, 112]);
+});
+
+Deno.test("postReturnSessions: gap of exactly 28d cuts; 27d does not", () => {
+  const cuts = postReturnSessions([sess(PRIOR, 0, 120), sess(PRIOR, 28, 110)]);
+  assertEquals(cuts.map((s) => s.e1rm), [110]);
+  const keeps = postReturnSessions([sess(PRIOR, 0, 120), sess(PRIOR, 27, 110)]);
+  assertEquals(keeps.map((s) => s.e1rm), [120, 110]);
+});
+
+Deno.test("postReturnSessions: multiple gaps → cut at the MOST RECENT one", () => {
+  const items = [
+    sess(PRIOR, 0, 100),
+    sess(PRIOR, 40, 105), // older gap
+    sess(PRIOR, 43, 106),
+    sess(PRIOR, 90, 95), // most-recent gap (47d)
+  ];
+  const trimmed = postReturnSessions(items);
+  assertEquals(trimmed.map((s) => s.e1rm), [95]);
+});
+
+Deno.test("postReturnSessions: empty / single-element input is a no-op", () => {
+  assertEquals(postReturnSessions([] as E1RMSession[]), []);
+  const one = [sess(PRIOR, 0, 100)];
+  assertEquals(postReturnSessions(one), one);
+});
+
+// Composition: the calibration-projection consumer's progress capability,
+// re-anchored on post-return sessions, reads the fresh block — not the stale
+// pre-gap median. This is what gates `deriveProgress` during a long absence.
+Deno.test("postReturnSessions + currentCapability: progress capability re-anchors after a layoff", () => {
+  const sessions = [
+    sess(PRIOR, 0, 120),
+    sess(PRIOR, 3, 122),
+    sess(PRIOR, 6, 121),
+    sess(PRIOR, 48, 110), // 42d gap → return session
+  ];
+  // Ungated: median over the (cadence-windowed) series is dominated by the
+  // stale pre-gap block — well above the return session.
+  const stale = currentCapability(sessions, 3)!;
+  // Gated: re-anchored on the post-return suffix → the return session itself.
+  const fresh = currentCapability(postReturnSessions(sessions), 3)!;
+  assertEquals(fresh, 110);
+  assertEquals(stale > fresh, true);
+});
 
 Deno.test("purity: long-absence module reads no clock (no Date.now / new Date())", async () => {
   const src = await Deno.readTextFile(

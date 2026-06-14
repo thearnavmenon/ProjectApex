@@ -39,7 +39,7 @@ import {
   computeE1RM,
   type TopSet as EwmaTopSet,
 } from "../_shared/ewma-engine.ts";
-import { gapDays, isLongAbsence } from "../_shared/long-absence.ts";
+import { gapDays, isLongAbsence, postReturnSessions } from "../_shared/long-absence.ts";
 import {
   type ConfidenceWriteState,
   monotonicAdvance,
@@ -2060,6 +2060,18 @@ export async function applySession(
           sessionsCadenceDays(
             (patternsForProj[mp]?.recentSessionDates as string[] | undefined) ?? [],
           );
+        // A pattern is in long-absence transition when its just-resolved
+        // transitionModeUntil (set by the deload-end / long-absence branches
+        // above) is still in the future as of this session. The projection
+        // consumer gates on this: during re-establishment the stale pre-gap
+        // sessions must not drive the band (ADR-0023 / #305).
+        const inTransitionFor = (mp: string): boolean => {
+          const until = patternsForProj[mp]?.transitionModeUntil as
+            | string
+            | null
+            | undefined;
+          return until != null && new Date(until) > incomingLoggedAt;
+        };
         const projById = new Map<string, PatternProjection>();
         for (const p of priorProjections?.patternProjections ?? []) {
           projById.set(p.pattern, p);
@@ -2097,6 +2109,12 @@ export async function applySession(
         for (const mp of establishedMajors) {
           const existing = projById.get(mp);
           if (existing === undefined) continue;
+          // ADR-0023 floor is a monotone watermark — never ratchet it UP while
+          // the pattern is re-establishing after a long absence: the window is
+          // dominated by stale pre-gap sessions that would falsely "outgrow"
+          // the band. The floor stays put (a break does not un-prove demonstrated
+          // capability); ratcheting resumes once transition expires on fresh data.
+          if (inTransitionFor(mp)) continue;
           const recal = rederiveOutgrownProjection(
             existing,
             patternE1RMSessions(mp, exercisesForProj),
@@ -2110,10 +2128,17 @@ export async function applySession(
           }
         }
 
-        // Recompute progress for every existing projection.
+        // Recompute progress for every existing projection. During a long
+        // absence, re-anchor `current` on post-return sessions only so progress
+        // reads honestly (e.g. "behind" while re-establishing) instead of a
+        // stale "ahead/achieved" carried by the pre-gap window. The floor and
+        // stretch (the band) are untouched here.
         for (const [mp, proj] of projById) {
+          const sessionsForProgress = inTransitionFor(mp)
+            ? postReturnSessions(patternE1RMSessions(mp, exercisesForProj))
+            : patternE1RMSessions(mp, exercisesForProj);
           const current = currentCapability(
-            patternE1RMSessions(mp, exercisesForProj),
+            sessionsForProgress,
             cadenceFor(mp),
           );
           if (current === null) continue;

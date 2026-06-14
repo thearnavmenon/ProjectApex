@@ -50,3 +50,28 @@ export function gapDays(
 export function isLongAbsence(gapDays: number | null): boolean {
   return gapDays !== null && gapDays >= LONG_ABSENCE_DAYS;
 }
+
+/**
+ * Drop everything before the most-recent long-absence gap, returning only the
+ * post-return suffix — the same "re-anchor on the freshest training block"
+ * principle the estimate-layer trim (ewma-engine `preGapCutoff`) uses, applied
+ * to a session series for the calibration-projection consumer.
+ *
+ * `items` MUST be sorted ascending by loggedAt. A gap is an adjacent pair
+ * separated by >= `thresholdDays`; when several exist, the cut is at the MOST
+ * RECENT one. Returns the input unchanged when no qualifying gap exists.
+ *
+ * Pure: no clock reads.
+ */
+export function postReturnSessions<T extends { loggedAt: Date }>(
+  items: T[],
+  thresholdDays: number = LONG_ABSENCE_DAYS,
+): T[] {
+  let cut = 0;
+  for (let i = 1; i < items.length; i++) {
+    const gap = (items[i].loggedAt.getTime() - items[i - 1].loggedAt.getTime()) /
+      MS_PER_DAY;
+    if (gap >= thresholdDays) cut = i;
+  }
+  return items.slice(cut);
+}
