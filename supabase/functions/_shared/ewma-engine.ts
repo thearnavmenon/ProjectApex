@@ -89,11 +89,20 @@ export interface TransitionModeResult {
  * a wider window to measure e1RM stability over more sessions; the variance
  * it reads is the same Bessel-corrected sample variance.
  *
- * @returns null when no valid top sets exist.
+ * `preGapCutoff` (#369 long-absence re-anchor): when supplied, every session
+ * whose representative (heaviest-set) loggedAt is at or before the gap
+ * boundary is dropped BEFORE windowing, so only post-return sessions are
+ * averaged. This re-anchors a returner's estimate off measured post-return
+ * sessions rather than the stale pre-gap inflation. Absent the arg the
+ * behaviour is byte-identical to before (no session is dropped). The cutoff
+ * is an injected Date, not a clock read — purity is preserved.
+ *
+ * @returns null when no valid top sets exist (or all are trimmed away).
  */
 export function transitionModeMean(
   topSets: TopSet[],
   window: number = TRANSITION_MODE_WINDOW_N,
+  preGapCutoff?: Date,
 ): TransitionModeResult | null {
   const valid = topSets.filter(
     (s) => s.reps >= TOP_SET_REP_VALIDITY_MIN &&
@@ -102,16 +111,25 @@ export function transitionModeMean(
   if (valid.length === 0) return null;
   // Group by sessionId in chronological insertion order, retaining the
   // heaviest e1RM per session (per ADR-0005: multi-set sessions in 5×5
-  // programmes contribute their hardest top set, not their first).
-  const sessionValues = new Map<string, number>();
+  // programmes contribute their hardest top set, not their first). The
+  // representative set's loggedAt is recorded alongside so a preGapCutoff
+  // can drop a session by its representative.
+  const sessionValues = new Map<string, { e1rm: number; loggedAt: Date }>();
   for (const s of valid) {
     const e = e1rm(s.weight, s.reps)!;
     const existing = sessionValues.get(s.sessionId);
-    if (existing === undefined || e > existing) {
-      sessionValues.set(s.sessionId, e);
+    if (existing === undefined || e > existing.e1rm) {
+      sessionValues.set(s.sessionId, { e1rm: e, loggedAt: s.loggedAt });
     }
   }
-  const values = Array.from(sessionValues.values()).slice(
+  // #369: trim pre-gap sessions BEFORE windowing. A session whose
+  // representative loggedAt is at or before the cutoff is pre-gap and dropped.
+  const kept = Array.from(sessionValues.values()).filter((sv) =>
+    preGapCutoff === undefined ||
+    sv.loggedAt.getTime() > preGapCutoff.getTime()
+  );
+  if (kept.length === 0) return null;
+  const values = kept.map((sv) => sv.e1rm).slice(
     -window,
   );
   const n = values.length;
@@ -130,13 +148,18 @@ export function transitionModeMean(
  * mean over sessions); false → standard EWMA over the N=5 valid-top-set
  * window. Returns just the central-tendency number — callers needing
  * the variance/sessionCount must call `transitionModeMean` directly.
+ *
+ * `preGapCutoff` (#369 long-absence re-anchor) is forwarded to
+ * `transitionModeMean` so a returner's transition-mode estimate trims
+ * pre-gap sessions. It is inert on the EWMA branch (inTransitionMode=false).
  */
 export function computeE1RM(
   topSets: TopSet[],
   inTransitionMode: boolean,
+  preGapCutoff?: Date,
 ): number | null {
   if (inTransitionMode) {
-    return transitionModeMean(topSets)?.mean ?? null;
+    return transitionModeMean(topSets, undefined, preGapCutoff)?.mean ?? null;
   }
   return ewmaE1RM(topSets);
 }

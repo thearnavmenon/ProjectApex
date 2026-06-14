@@ -221,3 +221,133 @@ Deno.test("ADR-0005: EWMA over 5-set window applies α weighting across full win
     a * e[4];
   assertAlmostEquals(ewmaE1RM(sets)!, expected, 1e-9);
 });
+
+// ─── Slice 2 (#369 long-absence re-anchor): preGapCutoff trimming ────────────
+//
+// When a lifter returns after a long break the transition-mode window must
+// average only POST-RETURN sessions. Without trimming, the last-3 plain mean
+// pulls in pre-gap (stale, inflated) sessions and moves the estimate the WRONG
+// way. `preGapCutoff` drops any session whose representative loggedAt is at or
+// before the gap boundary BEFORE the N=3 windowing.
+
+// 6-week-gap worked scenario (Epley e1RM = weight × (1 + reps/30)):
+//   S1=100×5  (116.67)  day 0
+//   S2=100×5  (116.67)  day 1
+//   S3=102.5×5(119.58)  day 2
+//   S4=102.5×5(119.58)  day 3
+//   S5=105×5  (122.50)  day 4   ← last pre-gap session
+//   ...6-week gap...
+//   S6=95×5   (110.83)  day 46  ← return session (decayed)
+const longAbsenceScenario = (): TopSet[] => [
+  mk(100, 5, 0, "S1"),
+  mk(100, 5, 1, "S2"),
+  mk(102.5, 5, 2, "S3"),
+  mk(102.5, 5, 3, "S4"),
+  mk(105, 5, 4, "S5"),
+  mk(95, 5, 46, "S6"),
+];
+
+Deno.test("Slice 2: preGapCutoff trims pre-gap sessions → only post-return S6 survives (mean ≈ 110.83, n=1, var=0)", () => {
+  const sets = longAbsenceScenario();
+  // Cutoff at the S5 boundary: S5 is logged at day 4 (loggedAt time T5); a
+  // cutoff equal to T5 drops S5 (at-or-before) and every earlier session,
+  // leaving only S6.
+  const s5LoggedAt = sets[4].loggedAt;
+  const result = transitionModeMean(sets, undefined, s5LoggedAt);
+  assertEquals(result?.sessionCount, 1, "only the return session survives");
+  assertAlmostEquals(result!.mean, e1rm(95, 5)!, 1e-9); // 110.833…
+  assertAlmostEquals(result!.mean, 110.833, 1e-3); // pinned numeric form
+  assertEquals(result?.variance, 0, "single surviving session → variance 0");
+});
+
+Deno.test("Slice 2: WITHOUT trim the last-3 plain mean is {S4,S5,S6} ≈ 117.64 — why the trim is MANDATORY", () => {
+  // Contrast assertion: the untrimmed last-3 window pulls in the two stale
+  // pre-gap sessions S4 and S5, dragging the mean UP to ~117.64 — the wrong
+  // direction for a returner whose actual return e1RM is 110.83. This is the
+  // proof that the plain untrimmed mean moves the estimate the wrong way.
+  const sets = longAbsenceScenario();
+  const untrimmed = transitionModeMean(sets); // no preGapCutoff
+  const expected = (e1rm(102.5, 5)! + e1rm(105, 5)! + e1rm(95, 5)!) / 3;
+  assertEquals(untrimmed?.sessionCount, 3);
+  assertAlmostEquals(untrimmed!.mean, expected, 1e-9);
+  assertAlmostEquals(untrimmed!.mean, 117.639, 1e-3);
+});
+
+Deno.test("Slice 2: cutoff is at-or-before (sessions logged exactly AT the boundary are dropped)", () => {
+  // A return session logged exactly AT the cutoff is NOT post-return — it is
+  // pre-gap and must be dropped. Two sessions on the same day, cutoff at that
+  // day's loggedAt → both dropped, only the strictly-later one survives.
+  const sets: TopSet[] = [
+    mk(120, 5, 0, "old"),
+    mk(95, 5, 10, "back"),
+  ];
+  const cutoff = sets[0].loggedAt; // == "old"'s loggedAt
+  const result = transitionModeMean(sets, undefined, cutoff);
+  assertEquals(result?.sessionCount, 1, "the at-boundary session is dropped");
+  assertAlmostEquals(result!.mean, e1rm(95, 5)!, 1e-9);
+});
+
+Deno.test("Slice 2: preGapCutoff uses the heaviest (representative) set's loggedAt per session", () => {
+  // A multi-set session straddling the cutoff: its representative is the
+  // heaviest set. Here both sets share the session's loggedAt (sessions are
+  // logged atomically), so the whole session is kept or dropped together.
+  const sets: TopSet[] = [
+    mk(100, 5, 0, "pre"),
+    mk(80, 5, 20, "back"), // logged first within the return session
+    mk(110, 5, 20, "back"), // heavier, same session
+  ];
+  const cutoff = sets[0].loggedAt;
+  const result = transitionModeMean(sets, undefined, cutoff);
+  assertEquals(result?.sessionCount, 1);
+  // Heaviest-per-session selects 110×5 for the surviving "back" session.
+  assertAlmostEquals(result!.mean, e1rm(110, 5)!, 1e-9);
+});
+
+Deno.test("Slice 2: ABSENT preGapCutoff → byte-identical to today (backward-compat)", () => {
+  // Every pre-Slice-2 transition-mode call passes no cutoff. Assert the result
+  // is identical to the no-arg form across a representative input.
+  const sets = [
+    mk(100, 5, 0, "session-A"),
+    mk(110, 5, 1, "session-B"),
+    mk(120, 5, 2, "session-C"),
+    mk(130, 5, 3, "session-D"),
+  ];
+  const withoutArg = transitionModeMean(sets);
+  const withUndefinedCutoff = transitionModeMean(sets, undefined, undefined);
+  assertEquals(withUndefinedCutoff?.sessionCount, withoutArg?.sessionCount);
+  assertAlmostEquals(withUndefinedCutoff!.mean, withoutArg!.mean, 1e-12);
+  assertAlmostEquals(
+    withUndefinedCutoff!.variance,
+    withoutArg!.variance,
+    1e-12,
+  );
+});
+
+Deno.test("Slice 2: preGapCutoff that drops everything → null (no surviving sessions)", () => {
+  const sets = [mk(100, 5, 0, "only")];
+  // Cutoff strictly after the only session → it is dropped.
+  const cutoff = new Date(sets[0].loggedAt.getTime() + 1);
+  assertEquals(transitionModeMean(sets, undefined, cutoff), null);
+});
+
+Deno.test("Slice 2: computeE1RM passes preGapCutoff through to transitionModeMean (transition branch)", () => {
+  const sets = longAbsenceScenario();
+  const s5LoggedAt = sets[4].loggedAt;
+  // Transition branch with cutoff → trimmed mean (110.83), NOT the EWMA
+  // (~116.74) and NOT the no-trim last-3 mean (~117.64).
+  const trimmed = computeE1RM(sets, true, s5LoggedAt);
+  assertAlmostEquals(trimmed!, e1rm(95, 5)!, 1e-9);
+  assertAlmostEquals(trimmed!, 110.833, 1e-3);
+});
+
+Deno.test("Slice 2: computeE1RM(inTransitionMode=false) ignores preGapCutoff (EWMA branch unaffected)", () => {
+  const sets = longAbsenceScenario();
+  const s5LoggedAt = sets[4].loggedAt;
+  // The standard branch never trims — a cutoff arg passed alongside
+  // inTransitionMode=false is inert.
+  assertAlmostEquals(
+    computeE1RM(sets, false, s5LoggedAt)!,
+    ewmaE1RM(sets)!,
+    1e-12,
+  );
+});
