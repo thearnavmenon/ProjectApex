@@ -34,6 +34,10 @@ struct GoalReviewView: View {
     @State private var statement: String = ""
     @State private var selectedFocusAreas: Set<MuscleGroup> = []
     @State private var capabilities: [ExerciseProfile] = []
+    /// Movement patterns currently re-anchoring after a long absence
+    /// (PatternProfile.inTransitionMode), captured once at load. The transition
+    /// flag is per-PATTERN; an exercise inherits it via ExerciseLibrary mapping.
+    @State private var transitionPatterns: Set<MovementPattern> = []
     @State private var isSaving: Bool = false
     @State private var hasLoaded: Bool = false
 
@@ -119,6 +123,15 @@ struct GoalReviewView: View {
                 statement = model?.goal.statement ?? ""
                 selectedFocusAreas = Set(model?.goal.focusAreas ?? [])
                 capabilities = (model?.exercises.values.sorted { $0.e1rmCurrent > $1.e1rmCurrent } ?? [])
+                // Capture which patterns are re-anchoring after a long absence so each
+                // capability row can flag a provisional number. inTransitionMode defaults
+                // its clock to now, the same "now" save() uses below.
+                let patternProfiles = model.map { Array($0.patterns.values) } ?? []
+                transitionPatterns = Set(
+                    patternProfiles
+                        .filter { $0.inTransitionMode() }
+                        .map(\.pattern)
+                )
             }
         }
         .preferredColorScheme(.dark)
@@ -227,14 +240,27 @@ struct GoalReviewView: View {
     }
 
     private func capabilityRow(_ profile: ExerciseProfile) -> some View {
-        HStack {
-            Text(profile.exerciseId.replacingOccurrences(of: "_", with: " ").capitalized)
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.85))
-            Spacer()
-            Text("\(Int(profile.e1rmCurrent.rounded())) kg")
-                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white)
+        // The transition flag is per-PATTERN; map this exercise to its movement
+        // pattern via the canonical ExerciseLibrary, then check the captured set.
+        let pattern = ExerciseLibrary.lookup(profile.exerciseId)?.movementPattern
+        let inTransition = pattern.map { transitionPatterns.contains($0) } ?? false
+        return VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(profile.exerciseId.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.system(size: 14))
+                    .foregroundStyle(.white.opacity(0.85))
+                Spacer()
+                Text("\(Int(profile.e1rmCurrent.rounded())) kg")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
+                    .foregroundStyle(.white)
+            }
+            // Re-anchoring after a long absence: the number is provisional, so caption
+            // it rather than present the raw estimate without context.
+            if inTransition {
+                Text("Re-establishing after a break")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
         }
         .padding(.vertical, 10)
     }
