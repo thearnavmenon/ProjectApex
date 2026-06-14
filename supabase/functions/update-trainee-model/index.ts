@@ -845,7 +845,7 @@ function readVolumeLoadHistoryAsSessions(
     .filter((v): v is VolumeLoadSession => v !== null);
 }
 
-function applyPerPatternRules(
+export function applyPerPatternRules(
   patterns: Record<string, Record<string, unknown>>,
   trainedPatterns: Set<string>,
   incomingLoggedAt: Date,
@@ -973,6 +973,42 @@ function applyPerPatternRules(
       ).toISOString();
       rulesFired.add("transition-mode-expiry");
       fieldsChanged.push(`patterns.${patternKey}.transitionModeUntil`);
+    }
+
+    // Long-absence pattern-flag trigger (#369). Sibling of the deload-end
+    // block above. Gated on wasTrainedThisSession: an untrained pattern with a
+    // stale recentSessionDates must NOT flip on an apply that does not touch
+    // it. priorLoggedAt is the last entry of the PRE-append recentSessionDates
+    // (gap-EXCLUSIVE — this session's own date is not yet in the gap window),
+    // and a flat >= 28d gap to incomingLoggedAt fires (the flat-28 TRIGGER).
+    //
+    // currentUntil reads the LOCAL just-mutated newTransitionModeUntil so a
+    // same-apply deload-end + absence composes via computeTransitionModeUntil's
+    // max-of-untils (no clobber, no double-extend). cadenceDays stays whatever
+    // the site computes — the transition-mode DURATION is allowed to remain
+    // cadence-aware; only the absence TRIGGER is flat-28.
+    if (wasTrainedThisSession) {
+      const priorLoggedAtIso = baseRecentDates.length > 0
+        ? baseRecentDates[baseRecentDates.length - 1]
+        : null;
+      const priorLoggedAt = priorLoggedAtIso !== null
+        ? new Date(priorLoggedAtIso)
+        : null;
+      if (isLongAbsence(gapDays(priorLoggedAt, incomingLoggedAt))) {
+        const currentUntil = newTransitionModeUntil !== null
+          ? new Date(newTransitionModeUntil)
+          : null;
+        const composed = computeTransitionModeUntil(
+          incomingLoggedAt,
+          cadenceDays,
+          currentUntil,
+        ).toISOString();
+        if (composed !== newTransitionModeUntil) {
+          newTransitionModeUntil = composed;
+          fieldsChanged.push(`patterns.${patternKey}.transitionModeUntil`);
+        }
+        rulesFired.add("transition-mode-expiry");
+      }
     }
 
     if (advanced.fired !== "no-op") {

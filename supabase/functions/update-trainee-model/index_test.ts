@@ -496,3 +496,164 @@ Deno.test("Slice 3 (c): first-ever exercise (empty baseTopSets / null prior) use
   assertEquals(result.rulesFired.has("long-absence-transition"), false);
   assertEquals(result.rulesFired.has("ewma"), true);
 });
+
+// ─── #369 Slice 4: long-absence pattern-flag re-anchor (applyPerPatternRules) ─
+//
+// A sibling branch (gated on wasTrainedThisSession) sets transitionModeUntil
+// when the PRE-append last session-date is a flat >= 28 days before incoming.
+// It composes with a same-apply deload-end via the function's max-of-untils
+// (reads the LOCAL just-mutated newTransitionModeUntil so no clobber).
+
+const SQUAT_PATTERN = "squat";
+
+// A pattern profile in `accumulation` with low sessionsInPhase so phase-advance
+// does NOT fire deload-end — isolating the absence branch. recentSessionDates
+// is the PRE-append history; its last entry drives the gap.
+function squatProfile(
+  recentSessionDates: string[],
+  overrides: Record<string, unknown> = {},
+) {
+  return {
+    [SQUAT_PATTERN]: {
+      pattern: SQUAT_PATTERN,
+      currentPhase: "accumulation",
+      sessionsInPhase: 1,
+      sessionCount: recentSessionDates.length,
+      consecutiveForceDeloadsOnPattern: 0,
+      lastPhaseTransitionAtSessionCount: 0,
+      recentSessionDates,
+      transitionModeUntil: null,
+      trend: "progressing",
+      rpeOffset: 0,
+      confidence: "established",
+      recovery: {
+        lastNeuromuscularStimulusAt: null,
+        lastMetabolicStimulusAt: null,
+        neuromuscularReadiness: 1.0,
+        metabolicReadiness: 1.0,
+      },
+      weeklyVolumeLoadHistory: [],
+      ...overrides,
+    },
+  };
+}
+
+const squatSetLog = () => ({
+  exercise_id: "barbell_back_squat", // → pattern "squat"
+  intent: "top",
+  weight_kg: 100,
+  reps_completed: 5,
+});
+
+const INCOMING_FEB16 = new Date("2026-02-16T10:00:00Z");
+
+Deno.test("Slice 4 (d): TRAINED pattern with pre-append last date >=28d before incoming sets transitionModeUntil", () => {
+  // Last pre-append session 2026-01-05 → 42-day gap to 2026-02-16 → fires.
+  const patterns = squatProfile([
+    "2026-01-03T10:00:00Z",
+    "2026-01-05T10:00:00Z",
+  ]);
+  const result = applyPerPatternRules(
+    patterns,
+    new Set([SQUAT_PATTERN]),
+    INCOMING_FEB16,
+    10,
+    {},
+    [squatSetLog()],
+  );
+  const until = result.patterns[SQUAT_PATTERN].transitionModeUntil;
+  assertEquals(typeof until, "string", "transitionModeUntil must be set");
+  assertEquals(
+    new Date(until as string).getTime() > INCOMING_FEB16.getTime(),
+    true,
+    "until is in the future of the incoming session",
+  );
+  assertEquals(result.rulesFired.has("transition-mode-expiry"), true);
+  assertEquals(
+    result.fieldsChanged.includes(
+      `patterns.${SQUAT_PATTERN}.transitionModeUntil`,
+    ),
+    true,
+  );
+});
+
+Deno.test("Slice 4 (e): UNTRAINED pattern (wasTrainedThisSession=false) with an old recentSessionDates does NOT set transitionModeUntil", () => {
+  // The pattern exists with a stale history but is NOT in trainedPatterns this
+  // apply → the absence branch is gated off.
+  const patterns = squatProfile(["2026-01-05T10:00:00Z"]);
+  const result = applyPerPatternRules(
+    patterns,
+    new Set(), // squat NOT trained this session
+    INCOMING_FEB16,
+    10,
+    {},
+    [], // no squat sets
+  );
+  assertEquals(result.patterns[SQUAT_PATTERN].transitionModeUntil, null);
+});
+
+Deno.test("Slice 4 (f): deload-end + absence in the SAME apply compose via max-of-untils (absence reads the LOCAL until — no clobber)", () => {
+  // currentPhase=deload at/above threshold → phase-advance fires deload-end.
+  // PRE-append last date is also >=28d old → absence fires too.
+  //
+  // Discriminating construction: a pre-existing transitionModeUntil sits FAR
+  // in the future (incoming + 200d). The post-append cadence after a 42-day
+  // gap is ~42d, so the cadence-aware DURATION is 3×42 = 126d (< 200d). The
+  // deload-end branch's max-of-untils therefore preserves the 200d until. The
+  // absence branch must then read the LOCAL just-mutated until (200d) and
+  // again preserve it. A clobber bug (absence passing currentUntil=null
+  // instead of the local until) would recompute the fresh 126d until and
+  // OVERWRITE the 200d — shrinking it. So "result == the 200d pre-existing
+  // until" fails under clobber and passes under correct composition.
+  const farFuture = new Date(INCOMING_FEB16.getTime() + 200 * 86_400_000)
+    .toISOString();
+  const patterns = squatProfile(["2026-01-05T10:00:00Z"], {
+    currentPhase: "deload",
+    sessionsInPhase: 99, // >= threshold → deload-end-cycle fires
+    transitionModeUntil: farFuture,
+  });
+  const result = applyPerPatternRules(
+    patterns,
+    new Set([SQUAT_PATTERN]),
+    INCOMING_FEB16,
+    10,
+    {},
+    [squatSetLog()],
+  );
+  const until = result.patterns[SQUAT_PATTERN].transitionModeUntil as string;
+  assertEquals(
+    until,
+    farFuture,
+    "max-of-untils preserves the far-future until across BOTH branches; a " +
+      "clobber would shrink it to the fresh ~21d computation",
+  );
+  // The field is recorded once (deload-end pushed it; absence's idempotent
+  // no-change must NOT push a duplicate).
+  const pushes = result.fieldsChanged.filter(
+    (f) => f === `patterns.${SQUAT_PATTERN}.transitionModeUntil`,
+  );
+  assertEquals(
+    pushes.length,
+    1,
+    "transitionModeUntil field pushed exactly once",
+  );
+});
+
+Deno.test("Slice 4 (g): no-gap TRAINED pattern leaves transitionModeUntil untouched", () => {
+  // Last pre-append session 2026-02-15 → 1-day gap → absence does not fire,
+  // and accumulation/low sessionsInPhase → deload-end does not fire.
+  const patterns = squatProfile([
+    "2026-02-13T10:00:00Z",
+    "2026-02-15T10:00:00Z",
+  ]);
+  const result = applyPerPatternRules(
+    patterns,
+    new Set([SQUAT_PATTERN]),
+    INCOMING_FEB16,
+    10,
+    {},
+    [squatSetLog()],
+  );
+  assertEquals(result.patterns[SQUAT_PATTERN].transitionModeUntil, null);
+  assertEquals(result.rulesFired.has("transition-mode-expiry"), false);
+});
