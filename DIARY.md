@@ -21,6 +21,19 @@ Started 2026-06-07.
 
 **Status:** PR open from `feat/354-progress-root`. 393 tests (12 new + 381 existing), all green.
 
+---
+
+## 2026-06-14 — The outbox now drops a save it knows will be rejected, instead of hammering it 5 times (5 of 6)
+
+**The problem, in plain words.** The "outbox" of pending saves retries anything that fails — five times, with growing waits — assuming the failure is temporary (bad signal, server hiccup). But a save stamped with the wrong owner is *never* going to succeed; the database will reject it every single time. So the app would waste five rounds of guaranteed-to-fail tries on each one, filling the log with red and slowing real saves.
+
+**What I changed.** The outbox now does a quick check just before sending: "does this save's owner match who I'm signed in as right now?" If it clearly doesn't, it sets the save aside immediately (into the "couldn't send" pile) instead of retrying five times. If there's no owner to check, or the login isn't settled yet, it skips the check and behaves exactly as before — so it can never wrongly drop a good save.
+
+**How it was checked.** Four tests cover the whole grid: wrong owner is set aside on the first try (no retries — proven precisely); right owner sends normally; no-login-yet skips the check; and saves that don't carry an owner (like individual sets, which are tied to the workout instead) are never touched. A review agent did the careful part by hand — it traced that the "who's signed in" value and the "who owns this save" value always come from the same source, so they can't drift apart and cause a good save to be dropped, and it checked every kind of save the app sends to confirm the check targets the right ones and skips the rest.
+
+**Status:** merged as PR #407 (Slice 5 of 6). One slice left: apply the same "confirm the login first" rule to the remaining writes (notes/memory, program edits, profile).
+
+---
 
 ## 2026-06-13 — When the app reopens an old paused workout, it now checks it's really yours first (4 of 6)
 
