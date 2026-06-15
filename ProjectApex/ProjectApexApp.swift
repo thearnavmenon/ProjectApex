@@ -14,11 +14,12 @@ struct ProjectApexApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     /// Strangler entry seam (ADR-0026): the new 3-tab `AppShell` is selected by a
-    /// single compile-time constant. #343 lands it `false` — the shell is built,
-    /// wired, and unit-tested but not yet the live root, so the frozen `ContentView`
-    /// keeps owning onboarding, crash-recovery, and the paused-session resume
-    /// (machinery-last). Flip to `true` once that machinery is lifted (close-out #363).
-    private let useNewShell = false
+    /// single compile-time constant. #343 landed it `false`; #376 commit 1 lifted the
+    /// machinery (onboarding, crash-recovery, paused-resume, ProgramViewModel, the
+    /// launch gate) into `AppShell`, and this commit (#376 commit 2) flips it `true` —
+    /// `AppShell` is now the live root. The frozen `ContentView` becomes dead code,
+    /// removed at close-out (#363). Revert this one line to roll back go-live.
+    private let useNewShell = true
 
     init() {
         // Register the embedded design-system fonts at launch (ADR-0024 — runtime

@@ -7,6 +7,14 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-15 — Turned on the new app: the 3-tab shell is now the live screen (#376 go-live)
+
+For months the whole redesign was built behind an off switch — the old screens stayed live while the new ones were assembled in the dark. This is the one-line flip that turns the new 3-tab app (Today / Train / Progress) on for real. Everything it needs to run safely — onboarding, crash-recovery, resuming a paused workout — was moved over in the previous step and double-checked line-by-line against the old code. The old screen becomes unused and gets deleted later in the close-out.
+
+Checked: full app suite green; and a real-device drill (force-quit mid-set, reopen, make sure the workout comes back) before this goes in. One-line revert if anything's off.
+
+---
+
 ## 2026-06-15 — Made the "needs setup" check actually test the real code (#376 follow-up)
 
 When the app is missing its keys it shows a "needs setup" screen instead of a doomed onboarding. The new shell's review pointed out the test for this was checking a hand-copied version of the rule, not the real one — so if someone broke the real check, the test would still pass. Pulled the rule into one tiny shared function that both the app and the test call, so the test now guards the actual production code. No behaviour change; the new shell still stays off.
