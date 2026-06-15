@@ -59,7 +59,7 @@ struct ProgressRootLedger: View {
         /// (PatternProfile.inTransitionMode). When true the row carries a small
         /// transition marker so the band's floor/stretch isn't read as settled.
         /// Defaulted so existing fixtures stay valid.
-        let inTransition: Bool = false
+        var inTransition: Bool = false
     }
 
     // MARK: Inputs
