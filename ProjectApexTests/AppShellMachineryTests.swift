@@ -324,31 +324,27 @@ struct AppShellMachineryRouteTests {
 
     /// The launch/setup gate, hoisted into ProjectApexApp.body ABOVE the useNewShell
     /// switch (#329 / #369, lifted in #376): the app shows NeedsSetupView when EITHER
-    /// required key is unresolvable, and the real root otherwise. This is the exact
-    /// boolean the App body branches on — pinned here so the gate can't silently regress.
+    /// required key is unresolvable, and the real root otherwise. These tests call the
+    /// PRODUCTION predicate `AppLaunchGate.isSatisfied` directly — not a local
+    /// hand-copy — so a change to the gate condition in ProjectApexApp.body is caught
+    /// here automatically (follow-up to PR #419 review nit).
     @Test("Launch gate: missing AI key → NeedsSetupView (gate is false)")
     func launchGateMissingAIKey() {
-        #expect(launchGatePasses(hasAIKey: false, hasSupabaseKey: true) == false)
+        #expect(AppLaunchGate.isSatisfied(hasAIKey: false, hasSupabaseKey: true) == false)
     }
 
     @Test("Launch gate: missing Supabase key → NeedsSetupView (gate is false)")
     func launchGateMissingSupabaseKey() {
-        #expect(launchGatePasses(hasAIKey: true, hasSupabaseKey: false) == false)
+        #expect(AppLaunchGate.isSatisfied(hasAIKey: true, hasSupabaseKey: false) == false)
     }
 
     @Test("Launch gate: both keys missing → NeedsSetupView (gate is false)")
     func launchGateBothMissing() {
-        #expect(launchGatePasses(hasAIKey: false, hasSupabaseKey: false) == false)
+        #expect(AppLaunchGate.isSatisfied(hasAIKey: false, hasSupabaseKey: false) == false)
     }
 
     @Test("Launch gate: both keys present → the real root (gate is true)")
     func launchGateBothPresent() {
-        #expect(launchGatePasses(hasAIKey: true, hasSupabaseKey: true) == true)
-    }
-
-    /// The launch-gate predicate, byte-identical to ProjectApexApp.body's
-    /// `deps.hasResolvableAIKey && deps.hasResolvableSupabaseKey`.
-    private func launchGatePasses(hasAIKey: Bool, hasSupabaseKey: Bool) -> Bool {
-        hasAIKey && hasSupabaseKey
+        #expect(AppLaunchGate.isSatisfied(hasAIKey: true, hasSupabaseKey: true) == true)
     }
 }

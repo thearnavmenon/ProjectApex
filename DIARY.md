@@ -7,6 +7,14 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-15 — Made the "needs setup" check actually test the real code (#376 follow-up)
+
+When the app is missing its keys it shows a "needs setup" screen instead of a doomed onboarding. The new shell's review pointed out the test for this was checking a hand-copied version of the rule, not the real one — so if someone broke the real check, the test would still pass. Pulled the rule into one tiny shared function that both the app and the test call, so the test now guards the actual production code. No behaviour change; the new shell still stays off.
+
+Checked: full suite green (575 + 506 tests).
+
+---
+
 ## 2026-06-15 — Hotfix: the Progress screen wouldn't compile, so the whole app was broken
 
 **The problem.** A clean rebuild of the app failed to build at all. The recent "long-absence re-anchor" change (#418) added a new `inTransition` flag to a Progress data row, but wrote it as a constant with a built-in default. Swift quietly leaves that kind of field OUT of the automatic initializer — so the code that *set* the flag failed with "extra argument." The app hadn't compiled since that change merged; it slipped in because that work merges past the flaky iOS build check.

@@ -35,7 +35,7 @@ struct ProjectApexApp: App {
                 // show the "needs setup" screen instead of letting onboarding start and
                 // die mid-gym-scan or mid-Supabase call. ContentView keeps its own
                 // internal gate (now redundant, harmless — #363 removes it).
-                if deps.hasResolvableAIKey && deps.hasResolvableSupabaseKey {
+                if AppLaunchGate.isSatisfied(hasAIKey: deps.hasResolvableAIKey, hasSupabaseKey: deps.hasResolvableSupabaseKey) {
                     if useNewShell {
                         AppShell()
                     } else {
