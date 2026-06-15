@@ -7,6 +7,16 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-15 — Hotfix: the Progress screen wouldn't compile, so the whole app was broken
+
+**The problem.** A clean rebuild of the app failed to build at all. The recent "long-absence re-anchor" change (#418) added a new `inTransition` flag to a Progress data row, but wrote it as a constant with a built-in default. Swift quietly leaves that kind of field OUT of the automatic initializer — so the code that *set* the flag failed with "extra argument." The app hadn't compiled since that change merged; it slipped in because that work merges past the flaky iOS build check.
+
+**The fix.** One character: changed the field from a constant to a variable, which puts it back into the initializer (still defaulting to off, so nothing else changes). Caught by the clean full-suite re-verify done as part of the shell go-live prep.
+
+**Checked.** Full suite green again (575 + 506 tests, 0 failures). Fixed in PR — main compiles.
+
+---
+
 
 ## 2026-06-14 — Moving the "brains" of the app into the new shell, without flipping the switch (Phase 3 UI, #376 — commit 1 of 2)
 
