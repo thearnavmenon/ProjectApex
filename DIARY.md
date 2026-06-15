@@ -7,6 +7,16 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-15 — Fresh sign-ups got a workout plan that never reached the server (#423)
+
+**The problem.** When a brand-new person finished setting up the app, we made their training plan and saved it on their phone — but we forgot to also save it to the server. So the moment they tried to log a workout, the server said "I've never heard of this plan" and the save failed. Every fresh account was effectively broken: the plan existed only on the phone, never in the database.
+
+**The fix.** After the plan is built and cached on the phone, we now also write it to the server — but only after we've confirmed the real account it belongs to. If we can't confirm the account (sign-in still pending, or offline), we skip the server write and keep the phone copy, rather than saving it under a fake placeholder owner that the security rules would reject. Same "figure out who owns it before stamping it" rule the rest of the new auth work follows.
+
+**Checked.** Wrote a test that fails before the fix and passes after (proves a real account triggers the server save, and a missing/placeholder account does not). Full suite green (506 tests, 0 failures).
+
+---
+
 ## 2026-06-15 — Made the "needs setup" check actually test the real code (#376 follow-up)
 
 When the app is missing its keys it shows a "needs setup" screen instead of a doomed onboarding. The new shell's review pointed out the test for this was checking a hand-copied version of the rule, not the real one — so if someone broke the real check, the test would still pass. Pulled the rule into one tiny shared function that both the app and the test call, so the test now guards the actual production code. No behaviour change; the new shell still stays off.
