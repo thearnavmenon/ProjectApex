@@ -897,7 +897,14 @@ struct OnboardingView: View {
         }
 
         do {
-            let userId = deps.resolvedUserId
+            // #423 / #369: resolve the real auth uid BEFORE stamping the program's
+            // owner. `resolvedOwnerUserId()` returns nil when auth never resolved or
+            // resolved only to the placeholder — in that case we keep the local cache
+            // but skip the server write (never stamp a row we can't own). When it
+            // resolves we use the SAME uid for the mesocycle owner and the server
+            // persist so they match.
+            let owner = await deps.resolvedOwnerUserId()
+            let userId = owner ?? deps.resolvedUserId
             print("[OnboardingView] runProgramGeneration — training_days_per_week: \(profile.daysPerWeek)")
             let skeleton = try await deps.macroPlanService.generateSkeleton(
                 userId: userId,
@@ -912,6 +919,16 @@ struct OnboardingView: View {
             let mesocycle = MacroPlanService.buildPendingMesocycle(from: skeleton, userId: userId)
             // Cache immediately so ProgramViewModel.loadProgram() finds it on the fast path.
             mesocycle.saveToUserDefaults()
+            // #423: persist to the server `programs` table under the resolved owner.
+            // Best-effort — failure leaves the local cache intact and does NOT block
+            // onboarding (mirrors ProgramViewModel.persistProgram's local-first spirit).
+            // Without this the program lived only in UserDefaults and every later
+            // workout FK-failed on workout_sessions_program_id_fkey.
+            await OnboardingProgramPersist.persistIfOwnerResolved(
+                mesocycle,
+                owner: owner,
+                client: deps.supabaseClient
+            )
             isGenerating = false
             withAnimation(.spring(response: 0.38, dampingFraction: 0.80)) { step = 6 }
         } catch {
@@ -994,6 +1011,41 @@ struct OnboardingView: View {
         // Mark onboarding as completed so subsequent launches skip this view.
         UserDefaults.standard.set(true, forKey: OnboardingConstants.onboardingCompletedKey)
         onCompleted?(gymProfile)
+    }
+}
+
+// MARK: - Onboarding Program Persist (#423)
+
+/// Resolve-before-stamp persist for the onboarding-generated program.
+///
+/// The onboarding path builds the skeleton + mesocycle and caches it in
+/// UserDefaults, but historically never wrote it to the server `programs` table
+/// (the server-persist lived only in `ProgramViewModel`). A fresh user therefore
+/// had a cached program but ZERO server programs, so every workout FK-failed on
+/// `workout_sessions_program_id_fkey` and `set_logs` RLS-failed (#423).
+///
+/// This helper writes the program to the server **only under a resolved real
+/// owner uid** (the #369 owner-stamping rule). A nil owner (auth unresolved /
+/// offline) or the placeholder uid is never persisted — the local cache is the
+/// fallback and the next onboarding run / `loadProgram` retries. Failure is
+/// best-effort: it never throws into the onboarding flow.
+enum OnboardingProgramPersist {
+    /// - Returns: `true` iff the server write succeeded under a real resolved owner.
+    @discardableResult
+    static func persistIfOwnerResolved(
+        _ mesocycle: Mesocycle,
+        owner: UUID?,
+        client: SupabaseClient
+    ) async -> Bool {
+        // resolve-before-stamp: never persist a row we can't own.
+        guard let owner, owner != AppDependencies.placeholderUserId else { return false }
+        do {
+            try await client.deactivateAndInsertProgram(mesocycle, userId: owner)
+            return true
+        } catch {
+            // Best-effort — local cache is preserved; do NOT crash onboarding.
+            return false
+        }
     }
 }
 
