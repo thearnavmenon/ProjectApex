@@ -77,6 +77,12 @@ final class WorkoutViewModel {
     /// True while `startSession()` preflight is running (HealthKit + RAG fetch).
     var isStartingSession: Bool = false
 
+    /// Non-nil when the last start attempt aborted because owner auth never
+    /// resolved (offline / sign-in stall). Surfaced as an inline hint under the
+    /// Start button so the abort is no longer silent (#399). Cleared at the
+    /// start of the next tap.
+    var startError: String? = nil
+
     /// Controls the end-session-early confirmation dialog.
     var showEndSessionEarlyConfirmation: Bool = false
 
@@ -106,20 +112,28 @@ final class WorkoutViewModel {
     // MARK: - Public Actions
 
     /// Starts a new session for the given day. Awaits auth resolution so the
-    /// session is stamped with the real `auth.uid()`; aborts silently (resetting
-    /// `isStartingSession`) when auth has not resolved, so no placeholder-keyed
-    /// row is ever written (the RLS-403 owner-mismatch root cause). The
-    /// `isStartingSession` flag keeps the Start button disabled / spinner visible
-    /// during the brief await.
-    func startSession(trainingDay: TrainingDay, programId: UUID, deps: AppDependencies, weekNumber: Int = 1, startingExerciseIndex: Int = 0) {
+    /// session is stamped with the real `auth.uid()`; aborts when auth has not
+    /// resolved, so no placeholder-keyed row is ever written (the RLS-403
+    /// owner-mismatch root cause). On abort it surfaces `startError` so the user
+    /// is told why nothing happened rather than seeing a silent re-enable (#399).
+    /// The `isStartingSession` flag keeps the Start button disabled / spinner
+    /// visible during the brief await.
+    ///
+    /// `resolveOwner` is the auth-resolution seam — production passes
+    /// `{ await deps.resolvedOwnerUserId() }`; tests inject the abort/happy paths
+    /// directly without constructing the full `AppDependencies` container.
+    func startSession(trainingDay: TrainingDay, programId: UUID, resolveOwner: @escaping () async -> UUID?, weekNumber: Int = 1, startingExerciseIndex: Int = 0) {
         // Re-entrancy guard (mirrors onSetComplete/onSkipSet): the auth await below
         // widens the window between tap and session creation, so a second invocation
         // before SwiftUI re-renders the disabled state could start two sessions.
         guard !isStartingSession else { return }
         isStartingSession = true
+        // Clear any stale message from a previous failed tap.
+        startError = nil
         Task {
-            guard let userId = await deps.resolvedOwnerUserId() else {
+            guard let userId = await resolveOwner() else {
                 // Auth did not resolve — do NOT stamp a placeholder-keyed row.
+                startError = "Couldn't start — check your connection and try again."
                 isStartingSession = false
                 return
             }

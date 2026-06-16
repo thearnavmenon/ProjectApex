@@ -668,8 +668,24 @@ struct PreWorkoutView: View {
     }
 
     private var startWorkoutButton: some View {
+        VStack(spacing: 12) {
+            startWorkoutButtonCore
+            // Inline failure: the auth gate aborts (no placeholder row) when owner
+            // auth never resolves. Surface that honestly rather than failing mute (#399).
+            if let startError = viewModel.startError, !viewModel.isStartingSession {
+                Text(startError)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color(red: 1.0, green: 0.55, blue: 0.45))
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private var startWorkoutButtonCore: some View {
         Button {
-            viewModel.startSession(trainingDay: trainingDay, programId: programId, deps: deps, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
+            viewModel.startSession(trainingDay: trainingDay, programId: programId, resolveOwner: { await deps.resolvedOwnerUserId() }, weekNumber: weekNumber, startingExerciseIndex: startingExerciseIndex)
         } label: {
             HStack(spacing: 10) {
                 if viewModel.isStartingSession {
@@ -698,7 +714,6 @@ struct PreWorkoutView: View {
             .animation(.easeInOut(duration: 0.15), value: viewModel.isStartingSession)
         }
         .disabled(viewModel.isStartingSession)
-        .padding(.top, 8)
     }
 
     // MARK: - Skip Button

@@ -1739,4 +1739,48 @@ final class PrescriptionGuardrailTests: XCTestCase {
         XCTAssertTrue(vm.canUseLastWeights,
             "A last-session history seed makes the manual fallback honest again")
     }
+
+    // MARK: start-session auth-gate abort surfaces a user-facing message (#399)
+
+    /// When owner resolution fails (offline / sign-in stall), startSession must
+    /// abort WITHOUT stamping a placeholder row — but it must no longer fail
+    /// mute: `isStartingSession` resets AND a user-facing `startError` is set so
+    /// PreWorkoutView can tell the user why nothing happened.
+    @MainActor
+    func test_startSession_authGateAbort_setsStartError_andResetsSpinner() async {
+        let vm = WorkoutViewModel(manager: makeManager())
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        vm.startSession(
+            trainingDay: day,
+            programId: UUID(),
+            resolveOwner: { nil } // auth never resolves
+        )
+        // Let the internal Task run to completion.
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertFalse(vm.isStartingSession,
+            "Abort must re-enable the Start button (spinner off)")
+        XCTAssertNotNil(vm.startError,
+            "Abort must surface a user-facing message, not fail silently (#399)")
+    }
+
+    /// Happy path: when owner resolves, startSession must NOT set startError, and
+    /// a stale error from a previous failed tap is cleared at the start of the tap.
+    @MainActor
+    func test_startSession_ownerResolves_clearsStaleStartError() async {
+        let vm = WorkoutViewModel(manager: makeManager())
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+        vm.startError = "stale error from a previous failed tap"
+
+        vm.startSession(
+            trainingDay: day,
+            programId: UUID(),
+            resolveOwner: { UUID() } // auth resolves
+        )
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertNil(vm.startError,
+            "A successful start clears any stale error message")
+    }
 }
