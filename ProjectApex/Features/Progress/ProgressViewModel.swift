@@ -27,6 +27,31 @@ nonisolated struct KeyLiftSummary: Identifiable, Sendable {
     /// Difference vs best e1RM from the 4–6 week window. Nil if no data in that window.
     let deltaVs4WeeksAgo: Double?
     let trend: TrendDirection
+    /// Server-side authoritative EWMA top-set e1RM for this exercise (the number
+    /// the coach reasons from). Nil when the digest has no entry. The presentation
+    /// layer displays `authoritativeE1RM ?? currentE1RM` for the big headline.
+    /// [Tier-1 #1/#2]
+    let authoritativeE1RM: Double?
+
+    // Explicit memberwise init so the existing call sites that omit
+    // `authoritativeE1RM` (e.g. ProgressView's #Preview mocks) keep compiling
+    // unchanged — the synthesized memberwise init would otherwise require the
+    // new parameter at every call site.
+    init(
+        exerciseId: String,
+        name: String,
+        currentE1RM: Double,
+        deltaVs4WeeksAgo: Double?,
+        trend: TrendDirection,
+        authoritativeE1RM: Double? = nil
+    ) {
+        self.exerciseId = exerciseId
+        self.name = name
+        self.currentE1RM = currentE1RM
+        self.deltaVs4WeeksAgo = deltaVs4WeeksAgo
+        self.trend = trend
+        self.authoritativeE1RM = authoritativeE1RM
+    }
 }
 
 nonisolated enum TrendDirection: Sendable {
@@ -148,6 +173,18 @@ final class ProgressViewModel {
     /// (B1 / #86). Replaces the legacy stagnationSignals: [StagnationSignal] field
     /// that consumed StagnationService output from UserDefaults.
     var patternTrends: [PatternSummary] = []
+    /// exerciseId → server-side authoritative summary (EWMA top-set e1RM,
+    /// confidence, learning phase, session count). Empty until the trainee
+    /// model hydrates. [Tier-1 #1/#2]
+    var exerciseSummaries: [String: ExerciseSummary] = [:]
+    /// Per-muscle volume tolerance/deficit from the digest (server already
+    /// excludes non-working intents). Empty until hydrated. [Tier-1 #11]
+    var muscleSummaries: [MuscleSummary] = []
+    /// Total sets logged across the most recent ~7 sessions — the same trailing
+    /// window the digest's deficit read uses, so the volume card states one
+    /// window ("Last ~7 sessions") for both its headline count and the deficits.
+    /// [Tier-1 review]
+    var recentSessionsSetCount: Int = 0
     var isLoading = true
     var errorMessage: String?
 
@@ -256,7 +293,7 @@ final class ProgressViewModel {
                     Filter(column: "session_id", op: .in, value: "(\(sessionIds))"),
                 ],
                 order: "logged_at.asc",
-                select: "id,session_id,exercise_id,set_number,weight_kg,reps_completed,rpe_felt,rir_estimated,logged_at,primary_muscle"
+                select: "id,session_id,exercise_id,set_number,weight_kg,reps_completed,rpe_felt,rir_estimated,logged_at,primary_muscle,intent"
             )
 
             print("[ProgressViewModel] Loaded \(sessionRows.count) sessions, \(setLogs.count) set_logs")
@@ -274,16 +311,32 @@ final class ProgressViewModel {
                                completed: true)
             }
 
-            keyLifts     = computeKeyLifts(setLogs: setLogs, sessionDateMap: sessionDateMap)
+            // Step 3b: fetch the trainee-model digest ONCE and surface its
+            // summaries. Replaces the legacy `StagnationService.load()` call from
+            // UserDefaults — the digest is the canonical source post-B1 (#86).
+            // Must happen BEFORE computeKeyLifts so it can stamp each card's
+            // authoritative (server EWMA) e1RM. Defaults to empty when the local
+            // store hasn't hydrated yet.
+            let digest = await traineeModelService?.digest()
+            patternTrends     = digest?.perPatternSummary ?? []
+            exerciseSummaries = Dictionary(
+                (digest?.perExerciseSummary ?? []).map { ($0.exerciseId, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            muscleSummaries   = digest?.perMuscleSummary ?? []
+
+            keyLifts     = computeKeyLifts(setLogs: setLogs, sessionDateMap: sessionDateMap, exerciseSummaries: exerciseSummaries)
             trendData    = computeTrendData(setLogs: setLogs, sessionDateMap: sessionDateMap)
             weeklyVolume = computeWeeklyVolume(setLogs: setLogs)
             heatmapData  = computeHeatmap(sessions: sessions, setLogs: setLogs, sessionDateMap: sessionDateMap)
 
-            // Step 4: per-pattern trend banners from the trainee model.
-            // Replaces the legacy `StagnationService.load()` call from UserDefaults
-            // — the digest is the canonical source post-B1 (#86). Defaults to empty
-            // when the local store hasn't hydrated yet.
-            patternTrends = await traineeModelService?.digest()?.perPatternSummary ?? []
+            // Total sets across the most recent ~7 sessions — matches the trailing
+            // window the digest deficit read uses, so the volume card speaks one
+            // window. [Tier-1 review]
+            let recentSessionIds = Set(
+                sessions.sorted { $0.sessionDate > $1.sessionDate }.prefix(7).map { $0.id }
+            )
+            recentSessionsSetCount = setLogs.filter { recentSessionIds.contains($0.sessionId) }.count
 
             // Default trend exercise to whichever exercise has the most sessions
             if selectedTrendExercise == nil {
@@ -315,9 +368,11 @@ final class ProgressViewModel {
     /// For each target muscle group, finds the exercise with the highest recent e1RM
     /// and returns a summary card. Works with whatever exercise IDs the AI generates —
     /// no hardcoded exercise ID allowlist.
-    private func computeKeyLifts(
+    // `internal` for test visibility (Tier-1 authoritative-e1RM mapping pinned).
+    func computeKeyLifts(
         setLogs: [SetLog],
-        sessionDateMap: [UUID: Date]
+        sessionDateMap: [UUID: Date],
+        exerciseSummaries: [String: ExerciseSummary]
     ) -> [KeyLiftSummary] {
         let now = Date()
         let twoWeeksAgo  = now.addingTimeInterval(-14 * 86_400)
@@ -340,11 +395,15 @@ final class ProgressViewModel {
             var byExercise: [String: [SetLog]] = [:]
             for log in muscleLogs { byExercise[log.exerciseId, default: []].append(log) }
 
-            // Pick the exercise with the best e1RM in the recent 2-week window
+            // Pick the exercise with the best e1RM in the recent 2-week window.
+            // Only eligible top sets count — an exercise with zero eligible sets
+            // simply won't surface (acceptable/honest). [Tier-1]
             var bestExerciseId: String? = nil
             var bestCurrentE1RM: Double = 0
             for (exId, exLogs) in byExercise {
-                let recent = exLogs.filter { date(of: $0, in: sessionDateMap) >= twoWeeksAgo }
+                let recent = exLogs.filter {
+                    isE1RMEligible($0) && date(of: $0, in: sessionDateMap) >= twoWeeksAgo
+                }
                 let best = recent.map { e1rm($0) }.max() ?? 0
                 if best > bestCurrentE1RM {
                     bestCurrentE1RM = best
@@ -352,10 +411,10 @@ final class ProgressViewModel {
                 }
             }
 
-            // Fall back to all-time best if nothing in last 2 weeks
+            // Fall back to all-time best if nothing in last 2 weeks (eligible only)
             if bestCurrentE1RM == 0 {
                 for (exId, exLogs) in byExercise {
-                    let best = exLogs.map { e1rm($0) }.max() ?? 0
+                    let best = exLogs.filter { isE1RMEligible($0) }.map { e1rm($0) }.max() ?? 0
                     if best > bestCurrentE1RM {
                         bestCurrentE1RM = best
                         bestExerciseId = exId
@@ -365,13 +424,28 @@ final class ProgressViewModel {
 
             guard let exerciseId = bestExerciseId, bestCurrentE1RM > 0 else { return nil }
 
-            // Compute delta vs 4–6 weeks ago for the same exercise
+            // Authoritative (server EWMA) only when it's a real positive value.
+            // A freshly-bootstrapped ExerciseProfile carries e1rmCurrent == 0
+            // until an eligible top set lands, so a 0 must NOT override the
+            // client's computed best (would render "0.0 kg"). Treat non-positive
+            // as absent so the headline falls back honestly. [Tier-1 review]
+            let rawAuthoritative = exerciseSummaries[exerciseId]?.e1rmCurrent
+            let authoritative: Double? = (rawAuthoritative ?? 0) > 0 ? rawAuthoritative : nil
+
+            // The headline displays `authoritative ?? bestCurrentE1RM`. Anchor the
+            // delta to that SAME displayed value so the number and its "vs 4 wks"
+            // delta describe one quantity (headline − delta = the real 4–6-week-ago
+            // best), rather than pairing an EWMA headline with an Epley-only delta.
+            // [Tier-1 review]
+            let displayValue = authoritative ?? bestCurrentE1RM
+
+            // Compute delta vs 4–6 weeks ago for the same exercise (eligible only)
             let referenceLogs = (byExercise[exerciseId] ?? []).filter {
                 let d = date(of: $0, in: sessionDateMap)
-                return d >= sixWeeksAgo && d < fourWeeksAgo
+                return isE1RMEligible($0) && d >= sixWeeksAgo && d < fourWeeksAgo
             }
             let referenceBest = referenceLogs.map { e1rm($0) }.max()
-            let delta = referenceBest.map { bestCurrentE1RM - $0 }
+            let delta = referenceBest.map { displayValue - $0 }
 
             let trend: TrendDirection
             if let d = delta {
@@ -392,14 +466,16 @@ final class ProgressViewModel {
                 name: name,
                 currentE1RM: bestCurrentE1RM,
                 deltaVs4WeeksAgo: delta,
-                trend: trend
+                trend: trend,
+                authoritativeE1RM: authoritative
             )
         }
     }
 
     // MARK: - Trend Data
 
-    private func computeTrendData(
+    // `internal` for test visibility (Tier-1 eligibility filter is pinned here).
+    func computeTrendData(
         setLogs: [SetLog],
         sessionDateMap: [UUID: Date]
     ) -> [String: [TrendPoint]] {
@@ -417,7 +493,10 @@ final class ProgressViewModel {
             var sessionBests: [(date: Date, e1RM: Double)] = []
             for (sessionId, sessionLogs) in sessionGroups {
                 guard let d = sessionDateMap[sessionId] else { continue }
-                let best = sessionLogs.map { e1rm($0) }.max() ?? 0
+                // Only eligible top sets contribute. A session with zero eligible
+                // top sets is OMITTED entirely (no fall-back to non-top sets) so
+                // the trend and PR dots are honest. [Tier-1]
+                let best = sessionLogs.filter { isE1RMEligible($0) }.map { e1rm($0) }.max() ?? 0
                 if best > 0 { sessionBests.append((date: d, e1RM: best)) }
             }
 
@@ -484,10 +563,13 @@ final class ProgressViewModel {
             from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: startOfGrid)
         ) ?? startOfGrid
 
-        // Determine which sessions contain a PR (new all-time best e1RM for any exercise)
+        // Determine which sessions contain a PR (new all-time best e1RM for any
+        // exercise). Only eligible top sets can light the gold PR border, so a
+        // warmup/backoff/out-of-range "PR" can't appear — keeps the heatmap
+        // consistent with the chart. [Tier-1]
         var exerciseBests: [String: Double] = [:]
         var sessionHasPR: Set<UUID> = []
-        for log in setLogs.sorted(by: { $0.loggedAt < $1.loggedAt }) {
+        for log in setLogs.sorted(by: { $0.loggedAt < $1.loggedAt }) where isE1RMEligible(log) {
             let curr = e1rm(log)
             let prev = exerciseBests[log.exerciseId] ?? 0
             if curr > prev {
@@ -530,8 +612,20 @@ final class ProgressViewModel {
 
     // MARK: - Utilities
 
-    private func e1rm(_ log: SetLog) -> Double {
+    // `internal` (not `private`) purely for test visibility — the eligibility
+    // filter and the Epley computation are the correctness-critical seam the
+    // Tier-1 tests pin. Not part of the published API.
+    func e1rm(_ log: SetLog) -> Double {
         log.weightKg * (1.0 + Double(log.repsCompleted) / 30.0)
+    }
+
+    /// A set contributes to e1RM only when it is a genuine top set in the
+    /// canonical strength rep range (ADR-0005). Warmup/backoff/technique/AMRAP
+    /// sets and out-of-range reps are excluded so the trend, PR markers, and
+    /// headline are honest and agree with the server EWMA top-set number.
+    /// `internal` for test visibility (see `e1rm` note).
+    func isE1RMEligible(_ log: SetLog) -> Bool {
+        log.intent == .top && (3...10).contains(log.repsCompleted)
     }
 
     private func date(of log: SetLog, in map: [UUID: Date]) -> Date {

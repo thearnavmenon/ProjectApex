@@ -30,6 +30,15 @@ import UIKit
 
 private typealias DT = ProgressDesignTokens
 
+// MARK: - Authoritative-number presentation helper [Tier-1 #1]
+
+private extension KeyLiftSummary {
+    /// The number the coach reasons from — the server EWMA top-set e1RM —
+    /// falling back to the client-side computed best when the digest lacks
+    /// this exercise.
+    var displayE1RM: Double { authoritativeE1RM ?? currentE1RM }
+}
+
 // MARK: - Entry point (init signature preserved for ContentView)
 
 struct ProgressTabView: View {
@@ -153,11 +162,22 @@ struct ProgressScreenContent: View {
                         Text("kg")
                             .font(DT.heroUnit)
                             .foregroundStyle(DT.neutral)
+                        // The authoritative headline is a smoothed average of recent
+                        // top sets, so it can sit a touch below the latest chart dot.
+                        // Flag it as smoothed — only when we're actually showing the
+                        // EWMA (not the client-best fallback). [Tier-1 review]
+                        if lift.authoritativeE1RM != nil {
+                            Text("· smoothed")
+                                .font(DT.caption)
+                                .foregroundStyle(DT.neutral)
+                        }
                     }
 
                     deltaOrHolding(lift)
                         .opacity(deltaShown ? 1 : 0)
                         .offset(y: deltaShown ? 0 : 8)
+
+                    confidenceChip(lift)
                 }
                 Spacer(minLength: 0)
             }
@@ -199,9 +219,41 @@ struct ProgressScreenContent: View {
                     .foregroundStyle(DT.neutral)
             }
         } else {
-            Text("Holding at \(fmt(lift.currentE1RM)) kg")
+            Text("Holding at \(fmt(lift.displayE1RM)) kg")
                 .font(DT.caption)
                 .foregroundStyle(DT.neutral)
+        }
+    }
+
+    /// Calm credibility note tied to the focused lift's confidence axis.
+    /// Hidden entirely when the digest has no summary for this exercise
+    /// (brand-new user / empty digest) — honesty-when-empty. [Tier-1 #2]
+    @ViewBuilder
+    private func confidenceChip(_ lift: KeyLiftSummary) -> some View {
+        if let summary = vm.exerciseSummaries[lift.exerciseId] {
+            Text(confidenceChipText(summary))
+                .font(DT.caption)
+                .foregroundStyle(DT.neutral)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(DT.surface2, in: Capsule())
+        }
+    }
+
+    private func confidenceChipText(_ summary: ExerciseSummary) -> String {
+        if summary.learningPhase {
+            return "Still learning this lift — the number will firm up"
+        }
+        let sessions = summary.sessionCount == 1 ? "1 session" : "\(summary.sessionCount) sessions"
+        return "\(confidenceLabel(summary.confidence)) · \(sessions)"
+    }
+
+    private func confidenceLabel(_ confidence: AxisConfidence) -> String {
+        switch confidence {
+        case .bootstrapping: "New"
+        case .calibrating:   "Calibrating"
+        case .established:   "Established"
+        case .seasoned:      "Seasoned"
         }
     }
 
@@ -283,10 +335,10 @@ struct ProgressScreenContent: View {
                             .font(DT.caption).tracking(0.6)
                             .foregroundStyle(DT.neutral)
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("\(latestVolumeTotal)")
+                            Text("\(vm.recentSessionsSetCount)")
                                 .font(DT.statNumber)
                                 .foregroundStyle(.white)
-                            Text("sets this week")
+                            Text("sets · last ~7 sessions")
                                 .font(.system(size: 12))
                                 .foregroundStyle(DT.neutral)
                         }
@@ -303,6 +355,20 @@ struct ProgressScreenContent: View {
                 }
             }
             .buttonStyle(.plain)
+
+            // Honest deficit read — muscles below their target over the same
+            // "last ~7 sessions" window stated in the header. Hidden entirely when
+            // nothing is below target (no vanity "all on track" banner). [Tier-1 #11]
+            if !volumeDeficits.isEmpty {
+                VStack(alignment: .leading, spacing: 5) {
+                    ForEach(volumeDeficits, id: \.muscleGroup) { summary in
+                        Text("\(summary.muscleGroup.rawValue.capitalized) · \(summary.volumeDeficit) sets below target")
+                            .font(DT.caption)
+                            .foregroundStyle(DT.amber)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             if volumeExpanded {
                 VStack(alignment: .leading, spacing: 12) {
@@ -441,10 +507,6 @@ struct ProgressScreenContent: View {
         !vm.weeklyVolume.isEmpty && !vm.weeklyVolume.allSatisfy { $0.setsByMuscle.isEmpty }
     }
 
-    private var latestVolumeTotal: Int {
-        sortedVolume.last?.setsByMuscle.values.reduce(0, +) ?? 0
-    }
-
     private var weeklyTotals: [WeekTotal] {
         sortedVolume.enumerated().map { idx, row in
             WeekTotal(id: idx, label: row.weekLabel, value: row.setsByMuscle.values.reduce(0, +))
@@ -453,6 +515,15 @@ struct ProgressScreenContent: View {
 
     private var presentMuscles: [String] {
         Array(Set(vm.weeklyVolume.flatMap { $0.setsByMuscle.keys })).sorted()
+    }
+
+    /// Muscles below their recent-window volume target, worst first. Empty when
+    /// the digest hasn't hydrated or everything is on/above target — the
+    /// deficit section then hides (no congratulatory banner). [Tier-1 #11]
+    private var volumeDeficits: [MuscleSummary] {
+        vm.muscleSummaries
+            .filter { $0.volumeDeficit > 0 }
+            .sorted { $0.volumeDeficit > $1.volumeDeficit }
     }
 
     /// Consecutive most-recent weeks (heatmap col 11 → 0) with any session.
@@ -474,7 +545,7 @@ struct ProgressScreenContent: View {
     // MARK: - Hero motion
 
     private func animateHero(_ lift: KeyLiftSummary) {
-        let target = lift.currentE1RM
+        let target = lift.displayE1RM
         let delta = lift.deltaVs4WeeksAgo ?? 0
         deltaShown = false
 
@@ -608,7 +679,7 @@ private struct KeyLiftCard: View {
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(fmt(lift.currentE1RM))
+                Text(fmt(lift.displayE1RM))
                     .font(DT.statNumber)
                     .foregroundStyle(.white)
                 Text("kg")
@@ -832,17 +903,16 @@ private struct PatternRow: View {
                 Text(summary.currentPhase.rawValue.capitalized)
                     .font(DT.caption)
                     .foregroundStyle(DT.neutral)
+                // Repeated force-deloads → an actionable next move, not just a
+                // tally. Replaces the old "Deload ×N" chip. [Tier-1 #19, ADR-0011 §d]
+                if summary.consecutiveForceDeloadsOnPattern >= 2 {
+                    Text("Keeps stalling — rotate the exercise or rebuild the block")
+                        .font(DT.caption)
+                        .foregroundStyle(DT.amber)
+                }
             }
             Spacer(minLength: 0)
 
-            if summary.consecutiveForceDeloadsOnPattern >= 2 {
-                Text("Deload ×\(summary.consecutiveForceDeloadsOnPattern)")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(DT.amber)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(DT.amber.opacity(0.14), in: Capsule())
-            }
             if summary.inTransitionMode {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 12))
@@ -1036,13 +1106,43 @@ extension ProgressViewModel {
         vm.isLoading = loading
         if loading { return vm }
 
+        // Authoritative (server EWMA) e1RMs — nil for a brand-new user (empty
+        // digest) so the headline falls back to the client-side computed best;
+        // slightly offset from currentE1RM otherwise so the authoritative source
+        // is visibly distinct. [Tier-1 #1]
         vm.keyLifts = [
-            KeyLiftSummary(exerciseId: "barbell_bench_press", name: "Bench Press",   currentE1RM: 100.0, deltaVs4WeeksAgo: newUser ? nil : 4.5,  trend: newUser ? .flat : .up),
-            KeyLiftSummary(exerciseId: "barbell_back_squat",  name: "Back Squat",    currentE1RM: 142.5, deltaVs4WeeksAgo: newUser ? nil : 7.5,  trend: newUser ? .flat : .up),
-            KeyLiftSummary(exerciseId: "barbell_deadlift",    name: "Deadlift",      currentE1RM: 180.0, deltaVs4WeeksAgo: newUser ? nil : 0.0,  trend: .flat),
-            KeyLiftSummary(exerciseId: "overhead_press",      name: "Overhead Press",currentE1RM: 60.0,  deltaVs4WeeksAgo: newUser ? nil : -2.5, trend: newUser ? .flat : .down),
-            KeyLiftSummary(exerciseId: "romanian_deadlift",   name: "Romanian DL",   currentE1RM: 120.0, deltaVs4WeeksAgo: newUser ? nil : 5.0,  trend: newUser ? .flat : .up),
+            KeyLiftSummary(exerciseId: "barbell_bench_press", name: "Bench Press",   currentE1RM: 100.0, deltaVs4WeeksAgo: newUser ? nil : 4.5,  trend: newUser ? .flat : .up,   authoritativeE1RM: newUser ? nil : 98.5),
+            KeyLiftSummary(exerciseId: "barbell_back_squat",  name: "Back Squat",    currentE1RM: 142.5, deltaVs4WeeksAgo: newUser ? nil : 7.5,  trend: newUser ? .flat : .up,   authoritativeE1RM: newUser ? nil : 140.0),
+            KeyLiftSummary(exerciseId: "barbell_deadlift",    name: "Deadlift",      currentE1RM: 180.0, deltaVs4WeeksAgo: newUser ? nil : 0.0,  trend: .flat,                  authoritativeE1RM: newUser ? nil : 178.5),
+            KeyLiftSummary(exerciseId: "overhead_press",      name: "Overhead Press",currentE1RM: 60.0,  deltaVs4WeeksAgo: newUser ? nil : -2.5, trend: newUser ? .flat : .down, authoritativeE1RM: newUser ? nil : 59.0),
+            KeyLiftSummary(exerciseId: "romanian_deadlift",   name: "Romanian DL",   currentE1RM: 120.0, deltaVs4WeeksAgo: newUser ? nil : 5.0,  trend: newUser ? .flat : .up,   authoritativeE1RM: newUser ? nil : 118.5),
         ]
+
+        // Per-exercise confidence summaries spanning the states [Tier-1 #2]:
+        // one learning-phase lift (sessionCount < 10), and established/seasoned
+        // lifts with realistic session counts. Empty for a brand-new user so the
+        // chip hides entirely (honesty-when-empty).
+        if !newUser {
+            let summaries = [
+                ExerciseSummary(profile: ExerciseProfile(exerciseId: "barbell_bench_press", e1rmCurrent: 98.5,  sessionCount: 24, confidence: .seasoned)),
+                ExerciseSummary(profile: ExerciseProfile(exerciseId: "barbell_back_squat",  e1rmCurrent: 140.0, sessionCount: 18, confidence: .established)),
+                ExerciseSummary(profile: ExerciseProfile(exerciseId: "barbell_deadlift",    e1rmCurrent: 178.5, sessionCount: 12, confidence: .established)),
+                ExerciseSummary(profile: ExerciseProfile(exerciseId: "overhead_press",      e1rmCurrent: 59.0,  sessionCount: 4,  confidence: .calibrating)),
+                ExerciseSummary(profile: ExerciseProfile(exerciseId: "romanian_deadlift",   e1rmCurrent: 118.5, sessionCount: 9,  confidence: .calibrating)),
+            ]
+            vm.exerciseSummaries = Dictionary(uniqueKeysWithValues: summaries.map { ($0.exerciseId, $0) })
+
+            // Per-muscle deficits [Tier-1 #11]: a few muscles below target with
+            // varied deficits (so the worst-first sort is visible) and one on
+            // target (volumeDeficit 0) to prove it's filtered out. Empty for a
+            // brand-new user so the deficit section hides entirely.
+            vm.muscleSummaries = [
+                MuscleSummary(profile: MuscleProfile(muscleGroup: .chest,     volumeDeficit: 4,  confidence: .established)),
+                MuscleSummary(profile: MuscleProfile(muscleGroup: .back,      volumeDeficit: 2,  confidence: .established)),
+                MuscleSummary(profile: MuscleProfile(muscleGroup: .shoulders, volumeDeficit: 6,  confidence: .calibrating)),
+                MuscleSummary(profile: MuscleProfile(muscleGroup: .legs,      volumeDeficit: 0,  confidence: .seasoned)),
+            ]
+        }
 
         vm.trendData = [
             "barbell_back_squat":  Self.mockTrend(from: 120, to: 142.5, weeks: 12, lastIsPR: true),
@@ -1063,6 +1163,7 @@ extension ProgressViewModel {
             }
             return WeeklyVolumeRow(weekLabel: "W\(8 - i)", weekStart: start, setsByMuscle: sets)
         }
+        vm.recentSessionsSetCount = 47
 
         var heat: [HeatmapCell] = []
         let prCells: Set<[Int]> = [[7, 2], [9, 4], [11, 1], [6, 0]]
