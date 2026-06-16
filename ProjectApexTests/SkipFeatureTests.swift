@@ -45,7 +45,8 @@ private func makeViewModel() -> ProgramViewModel {
             memoryService: memory,
             supabaseClient: supabase
         ),
-        userId: UUID()
+        userId: UUID(),
+        resolveOwner: { UUID() }
     )
 }
 

@@ -928,7 +928,8 @@ private extension String {
                     memoryService: MemoryService(supabase: supabase, embeddingAPIKey: ""),
                     supabaseClient: supabase
                 ),
-                userId: AppDependencies.placeholderUserId
+                userId: AppDependencies.placeholderUserId,
+                resolveOwner: { nil }
             ),
             gymProfile: nil
         )

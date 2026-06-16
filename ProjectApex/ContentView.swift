@@ -154,6 +154,7 @@ struct ContentView: View {
                     macroPlanService: deps.macroPlanService,
                     sessionPlanService: deps.sessionPlanService,
                     userId: deps.resolvedUserId,
+                    resolveOwner: { await deps.resolvedOwnerUserId() },
                     traineeModelService: deps.traineeModelService
                 )
                 Task {
@@ -180,6 +181,7 @@ struct ContentView: View {
                     macroPlanService: deps.macroPlanService,
                     sessionPlanService: deps.sessionPlanService,
                     userId: deps.resolvedUserId,
+                    resolveOwner: { await deps.resolvedOwnerUserId() },
                     traineeModelService: deps.traineeModelService
                 )
             }

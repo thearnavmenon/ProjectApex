@@ -144,7 +144,17 @@ final class ProgramViewModel {
     private let traineeModelService: TraineeModelService?
 
     /// User ID sourced from AppDependencies.resolvedUserId at construction time.
+    /// Best-effort id for NON-owned-write uses only (generation LLM payloads +
+    /// history-read filters). The single owned write re-resolves the owner async at
+    /// write time via `resolveOwner` (#409) so a `programs` row is never stamped
+    /// under the pre-auth placeholder uid.
     private let userId: UUID
+
+    /// Async owner re-resolution for the single owned write (`persistProgram`).
+    /// Returns nil / the placeholder when auth has not resolved; the owned write
+    /// aborts in that case rather than stamping a uid the user can't own (#409,
+    /// mirrors `AppDependencies.resolvedOwnerUserId()`).
+    private let resolveOwner: () async -> UUID?
 
     /// Per-pattern phase state for the PATTERN PROGRESS section in ProgramOverviewView
     /// — sourced from TraineeModelDigest.perPatternSummary (B3 / #88). Empty until
@@ -159,6 +169,7 @@ final class ProgramViewModel {
         macroPlanService: MacroPlanService,
         sessionPlanService: SessionPlanService,
         userId: UUID,
+        resolveOwner: @escaping () async -> UUID?,
         traineeModelService: TraineeModelService? = nil
     ) {
         self.supabaseClient = supabaseClient
@@ -167,6 +178,7 @@ final class ProgramViewModel {
         self.sessionPlanService = sessionPlanService
         self.traineeModelService = traineeModelService
         self.userId = userId
+        self.resolveOwner = resolveOwner
     }
 
     nonisolated deinit {}
@@ -188,6 +200,8 @@ final class ProgramViewModel {
         }
 
         // 2. Network fetch
+        // #425 will add resolve-before-stamp backfill here (re-persist a locally-cached
+        // program once the owner resolves). Read semantics unchanged for PR-A.
         do {
             if let row = try await supabaseClient.fetchActiveProgram(userId: userId) {
                 let mesocycle = row.toMesocycle()
@@ -277,16 +291,34 @@ final class ProgramViewModel {
     /// - Parameters:
     ///   - mesocycle: The mesocycle to persist.
     ///   - context: A short label for the logger (e.g. "regenerateProgram").
-    private func persistProgram(_ mesocycle: Mesocycle, context: String) async {
+    ///
+    /// Internal (not private) so test targets can drive the owned write directly —
+    /// same convention as `currentMesocycle` above. The public generate paths fire
+    /// this on a detached Task that a unit test cannot deterministically await.
+    func persistProgram(_ mesocycle: Mesocycle, context: String) async {
+        // Re-resolve the owner at write time (#409). On a fresh launch the captured
+        // `userId` can still be the pre-auth placeholder; stamping the `programs` row
+        // under it produced the #369 owner-mismatch. resolveOwner mirrors
+        // AppDependencies.resolvedOwnerUserId(): nil / placeholder means auth has not
+        // resolved, so abort silently — the local cache is already saved by callers,
+        // and #425 is the dedicated resolve-before-stamp backfill safety-net. This is
+        // NOT the persistError "sync failed, tap to retry" state (retrying would just
+        // re-abort), so clear both and log a notice instead of arming a banner.
+        guard let owner = await resolveOwner(), owner != AppDependencies.placeholderUserId else {
+            persistError = nil
+            persistRetryAction = nil
+            programPersistLogger.notice("persistProgram: owner unresolved/placeholder; skipping server stamp (local cache intact)")
+            return
+        }
+
         let capturedClient = supabaseClient
-        let capturedUserId = userId
         let capturedMesocycle = mesocycle
         do {
             // Atomic server-side deactivate-old + upsert-new in one transaction
             // (#189): replaces the non-transactional PATCH-then-POST whose partial
             // failure could leave the user with zero active programs. Idempotent
             // on retry (upsert on the client-generated program id).
-            try await capturedClient.deactivateAndInsertProgram(capturedMesocycle, userId: capturedUserId)
+            try await capturedClient.deactivateAndInsertProgram(capturedMesocycle, userId: owner)
             // Success: clear any prior sync error.
             persistError = nil
             persistRetryAction = nil
@@ -295,12 +327,14 @@ final class ProgramViewModel {
                 """
                 program insert failed (\(context)): \
                 \(error.localizedDescription, privacy: .public) — \
-                user_id=\(capturedUserId.uuidString, privacy: .public), \
+                user_id=\(owner.uuidString, privacy: .public), \
                 program_id=\(capturedMesocycle.id.uuidString, privacy: .public). \
                 Local cache preserved; row will not exist server-side until a successful retry.
                 """
             )
             persistError = "Couldn't sync your program. Tap to retry."
+            // Retry re-invokes persistProgram, which RE-RESOLVES the owner on each
+            // attempt (#409) — so a retry never replays a captured/placeholder uid.
             persistRetryAction = { [weak self] in
                 await self?.persistProgram(capturedMesocycle, context: context)
             }
