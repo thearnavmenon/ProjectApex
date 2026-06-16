@@ -589,6 +589,19 @@ struct ContentView: View {
             } message: {
                 Text("Generates a fresh 12-week programme. Your history is preserved.")
             }
+            // #439 (Q3 = refuse-and-prompt): regeneration refuses while a paused
+            // session sentinel exists; surface the prompt to finish/abandon first.
+            .alert(
+                "Finish Your Session First",
+                isPresented: Binding(
+                    get: { regenerateErrorMessage != nil },
+                    set: { if !$0 { regenerateErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { regenerateErrorMessage = nil }
+            } message: {
+                Text(regenerateErrorMessage ?? "")
+            }
         }
     }
 
@@ -672,6 +685,14 @@ struct ContentView: View {
         guard let vm = programViewModel else { return }
         regenerateErrorMessage = nil
         await vm.regenerateProgram(gymProfile: gymProfile)
+
+        // #439 (Q3 = refuse-and-prompt): regeneration was refused because a paused
+        // session sentinel still exists. Surface the prompt and stop — the mesocycle
+        // was NOT mutated, so don't switch tabs or reload.
+        if vm.regenerationBlockedBySession {
+            regenerateErrorMessage = "Finish or abandon your paused session before starting a new programme."
+            return
+        }
 
         // Detect error state after generation completes
         if case .error(let message) = vm.viewState {
