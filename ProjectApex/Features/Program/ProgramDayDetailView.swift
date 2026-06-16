@@ -79,25 +79,16 @@ struct ProgramDayDetailView: View {
     /// FB-008: local state tracking whether session generation is in progress for this view.
     @State private var isGeneratingSession: Bool = false
     @State private var sessionGenerationError: String? = nil
-    /// The current day — may be replaced in-place after session generation.
-    @State private var currentDay: TrainingDay
     /// Controls the manual session logging sheet.
     @State private var showManualLogSheet: Bool = false
     /// Controls the set-log backfill sheet (completed days with no set logs).
     @State private var showBackfillSheet: Bool = false
-    /// Drives the NavigationLink to WorkoutView (replaces the old fullScreenCover so the
-    /// tab bar and back button remain visible during workouts).
-    @State private var navigateToWorkout: Bool = false
     /// Controls the alert shown when the user tries to start a new session while another is paused.
     @State private var showExistingPausedSessionAlert: Bool = false
     /// Controls the confirmation alert for skipping a past unlogged session from the detail view.
     @State private var showSkipDayConfirmation: Bool = false
-    /// Controls the confirmation alert for restarting an incomplete completed session.
-    @State private var showRestartConfirmation: Bool = false
     /// Controls the confirmation alert for regenerating a generated-but-unlogged session (#318 U4).
     @State private var showRegenerateConfirmation: Bool = false
-    /// 0-based exercise index passed to WorkoutView when starting/continuing a session.
-    @State private var workoutStartingExerciseIndex: Int = 0
 
     // MARK: - Live session state (active session for this day)
 
@@ -133,6 +124,27 @@ struct ProgramDayDetailView: View {
     private var startAnyDayModeActive: Bool { devOverride }
     #endif
 
+    /// #437 (Q1 = CUT non-next starts): the id of the current programme pointer day —
+    /// the only day a fresh session may be started from. nil when the programme is
+    /// complete (no incomplete day remains).
+    private var nextIncompleteDayId: UUID? {
+        guard let meso = viewModel?.currentMesocycle else { return nil }
+        return viewModel?.nextIncompleteDay(in: meso)?.day.id
+    }
+
+    /// #437 (Q1): pure start-gate predicate. A fresh session may only be started from
+    /// the current pointer day (`dayId == nextIncompleteDayId`); the DEBUG-only
+    /// startAnyDayMode override re-enables any day for developer testing. The paused /
+    /// live-resume branches are this-day-scoped and handled separately, so they are
+    /// unaffected by this gate. Static + parameterised so it is unit-testable.
+    static func isStartableDay(
+        dayId: UUID,
+        nextIncompleteDayId: UUID?,
+        startAnyDayModeActive: Bool
+    ) -> Bool {
+        startAnyDayModeActive || dayId == nextIncompleteDayId
+    }
+
     init(
         day: TrainingDay,
         week: TrainingWeek,
@@ -149,7 +161,19 @@ struct ProgramDayDetailView: View {
         self.devOverride = devOverride
         self.viewModel = viewModel
         self.gymProfile = gymProfile
-        _currentDay = State(initialValue: day)
+    }
+
+    /// #438: the day read live from `viewModel.currentMesocycle` by id on every render.
+    /// The @Observable view model invalidates this reader on every status mutation
+    /// (markDayCompleted / markDayPaused / markDaySkipped / generateDaySession), so the
+    /// detail view never holds a stale snapshot. Falls back to the injected `day` when no
+    /// matching mesocycle is loaded (e.g. SwiftUI previews with viewModel == nil).
+    private var currentDay: TrainingDay {
+        if let meso = viewModel?.currentMesocycle,
+           let found = viewModel?.findTrainingDay(byId: day.id, in: meso) {
+            return found.day
+        }
+        return day
     }
 
     private var dayStatus: DayStatus {
@@ -158,22 +182,6 @@ struct ProgramDayDetailView: View {
             weekNumber: week.weekNumber,
             dayOfWeek: currentDay.dayOfWeek
         )
-    }
-
-    /// True when this completed session was exited early — at least one planned exercise
-    /// has no set logs. Drives the continue/restart buttons in the bottom action area.
-    private var isCompletedIncomplete: Bool {
-        guard currentDay.status == .completed,
-              !isLoadingSetLogs,
-              completedSessionId != nil,
-              !historicalSetLogs.isEmpty
-        else { return false }
-        return currentDay.exercises.contains { historicalSetLogs[$0.exerciseId]?.isEmpty ?? true }
-    }
-
-    /// 0-based index of the first exercise that has no set logs (the resume point).
-    private var firstIncompleteExerciseIndex: Int {
-        currentDay.exercises.firstIndex(where: { historicalSetLogs[$0.exerciseId]?.isEmpty ?? true }) ?? 0
     }
 
     var body: some View {
@@ -290,12 +298,6 @@ struct ProgramDayDetailView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .onChange(of: day.status) { _, newStatus in
-            // Sync if parent mutates the day (e.g. viewModel generates it)
-            if newStatus == .generated && currentDay.status == .pending {
-                currentDay = day
-            }
-        }
         .onAppear {
             if currentDay.status == .completed {
                 Task { await loadHistoricalSetLogs() }
@@ -314,44 +316,8 @@ struct ProgramDayDetailView: View {
             )
             .presentationDetents([.medium])
         }
-        // NavigationLink destination for the workout — replaces the old fullScreenCover so
-        // the tab bar and standard back button remain visible throughout the session.
-        .navigationDestination(isPresented: $navigateToWorkout) {
-            let resumeState = (currentDay.status == .paused) ? PausedSessionState.load() : nil
-            let allDays = viewModel?.currentMesocycle?.weeks.flatMap(\.trainingDays) ?? []
-            WorkoutView(
-                trainingDay: currentDay,
-                programId: programId,
-                weekNumber: week.weekNumber,
-                completedDayCount: allDays.filter { $0.status == .completed || $0.status == .skipped }.count,
-                totalDayCount: allDays.count,
-                onSessionCompleted: {
-                    currentDay.status = .completed
-                    viewModel?.markDayCompleted(dayId: currentDay.id, weekId: week.id)
-                },
-                onSessionPaused: {
-                    currentDay.status = .paused
-                    viewModel?.markDayPaused(dayId: currentDay.id, weekId: week.id)
-                },
-                onSessionDismissed: {
-                    navigateToWorkout = false
-                    viewModel?.scrollToCurrentWeekTrigger += 1
-                    if currentDay.status == .completed {
-                        Task { await loadHistoricalSetLogs() }
-                    }
-                },
-                resumeState: resumeState,
-                startingExerciseIndex: workoutStartingExerciseIndex,
-                onSkipSession: {
-                    currentDay.status = .skipped
-                    viewModel?.markDaySkipped(dayId: currentDay.id, weekId: week.id)
-                },
-                onBack: {
-                    navigateToWorkout = false
-                }
-            )
-            .environment(deps)
-        }
+        // #437: this view no longer hosts its own WorkoutView. Start/Resume routes to the
+        // single Workout-tab host via switchToTab(1); there is exactly one live WorkoutView.
     }
 
     // MARK: - FB-008: Preparing Session Loading View
@@ -487,13 +453,15 @@ struct ProgramDayDetailView: View {
         case .future:
             statusBadge(
                 icon: "calendar.badge.clock",
-                label: "Scheduled — tap Start Workout to train this day early",
+                // #437 (Q1): non-next days are not startable — drop the "train this day early" Start promise.
+                label: "Scheduled — unlocks when it becomes your next workout",
                 color: Color(red: 0.54, green: 0.60, blue: 0.69)
             )
         case .past:
             statusBadge(
                 icon: "calendar.badge.checkmark",
-                label: "Past session — tap Start Workout to re-run or Log Past Session to backdate",
+                // #437 (Q1): no re-run Start for past days; backdating via Log Past Session is kept.
+                label: "Past session — Log Past Session to backdate",
                 color: Color(red: 0.78, green: 0.82, blue: 0.88)
             )
         case .today:
@@ -524,13 +492,13 @@ struct ProgramDayDetailView: View {
     }
 
     /// Grey "Session Skipped" banner shown at the top of skipped days.
-    /// Skipped days can be re-run — the start button remains available.
+    /// #437 (Q1): a skipped day is never the programme pointer, so it is read-only here.
     private var skippedBannerView: some View {
         let grey = Color(red: 0.55, green: 0.58, blue: 0.63)
         return HStack(spacing: 8) {
             Image(systemName: "xmark.circle.fill")
                 .font(.caption.bold())
-            Text("SESSION SKIPPED — TAP START WORKOUT TO RE-RUN")
+            Text("SESSION SKIPPED")
                 .font(.system(size: 11, weight: .semibold))
                 .kerning(0.8)
         }
@@ -605,8 +573,7 @@ struct ProgramDayDetailView: View {
                 mesocycleCreatedAt: mesocycleCreatedAt,
                 programId: programId,
                 onSessionLogged: {
-                    // Mark the day as completed in the local calendar cache
-                    currentDay.status = .completed
+                    // #438: markDay* is the single status writer — no local dual-write.
                     viewModel?.markDayCompleted(dayId: currentDay.id, weekId: week.id)
                 }
             )
@@ -614,23 +581,11 @@ struct ProgramDayDetailView: View {
         .alert("Existing Paused Session", isPresented: $showExistingPausedSessionAlert) {
             Button("Discard Paused Session", role: .destructive) {
                 PausedSessionState.clear()
-                navigateToWorkout = true
+                switchToTab(1)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("You have a paused session in progress. Discard it and start a new workout?")
-        }
-        .alert("Restart Session?", isPresented: $showRestartConfirmation) {
-            Button("Restart", role: .destructive) {
-                Task {
-                    workoutStartingExerciseIndex = 0
-                    await deps.workoutSessionManager.resetToIdle()
-                    navigateToWorkout = true
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will start a new session from the first exercise. Your previous session data is preserved in history.")
         }
     }
 
@@ -645,7 +600,7 @@ struct ProgramDayDetailView: View {
         let accentColor = Color(red: 0.23, green: 0.56, blue: 1.00)
         let greenColor  = Color(red: 0.24, green: 0.82, blue: 0.46)
         let amberColor  = Color(red: 1.00, green: 0.70, blue: 0.10)
-        // Skipped days fall through to the normal start/log buttons so the user can re-run them.
+        // Skipped days fall through to the non-pointer branch (read-only note + Log Past Session).
         let _ = isSkipped
 
         if isSessionActiveForThisDay && !isCompleted {
@@ -682,47 +637,9 @@ struct ProgramDayDetailView: View {
                         .stroke(greenColor.opacity(0.35), lineWidth: 1)
                 )
                 .foregroundStyle(greenColor)
-
-                // Continue + Restart — only when session was exited early (some exercises have no logs).
-                if isCompletedIncomplete {
-                    // Primary: continue from the first incomplete exercise
-                    Button(action: {
-                        workoutStartingExerciseIndex = firstIncompleteExerciseIndex
-                        Task {
-                            await deps.workoutSessionManager.resetToIdle()
-                            navigateToWorkout = true
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 15, weight: .semibold))
-                            Text("Continue Session")
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .foregroundStyle(.white)
-                    }
-
-                    // Secondary: restart from exercise 1
-                    Button(action: { showRestartConfirmation = true }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 15, weight: .semibold))
-                            Text("Restart Session")
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                        )
-                        .foregroundStyle(.white.opacity(0.70))
-                    }
-                }
+                // #437 (Q1 = CUT non-next starts): a completed day is never the programme
+                // pointer, so the Continue/Restart re-run affordances are removed — a
+                // completed day is a read-only historical record here.
             }
 
         } else if isPaused {
@@ -744,7 +661,10 @@ struct ProgramDayDetailView: View {
                 )
                 .foregroundStyle(amberColor)
 
-                Button(action: { navigateToWorkout = true }) {
+                // #437: resume routes to the single Workout-tab host. A paused day is the
+                // programme pointer (status .paused ≠ completed/skipped), so Tab 1 renders
+                // it and its PausedSessionState sentinel drives the resume.
+                Button(action: { switchToTab(1) }) {
                     HStack(spacing: 10) {
                         Image(systemName: "play.circle.fill")
                             .font(.system(size: 17, weight: .semibold))
@@ -759,39 +679,57 @@ struct ProgramDayDetailView: View {
             }
 
         } else {
-            let isEnabled = isPending || hasExercises
+            // #437 (Q1 = CUT non-next starts): a fresh session may only be started/generated
+            // from the current programme pointer day. The DEBUG-only startAnyDayMode override
+            // keeps any day startable for developer testing.
+            let isStartable = Self.isStartableDay(
+                dayId: currentDay.id,
+                nextIncompleteDayId: nextIncompleteDayId,
+                startAnyDayModeActive: startAnyDayModeActive
+            )
+            let isEnabled = isStartable && (isPending || hasExercises)
             let buttonLabel = isPending ? "Generate Session" : "Start Workout"
 
-            // Primary: Start Workout / Generate Session
-            Button(action: {
-                if isPending {
-                    // FB-008: trigger on-demand session generation
-                    Task { await generateSessionOnDemand() }
-                } else {
-                    // Phase 4E: Guard against starting while another session is paused
-                    if let paused = PausedSessionState.load(),
-                       paused.trainingDayId != currentDay.id {
-                        showExistingPausedSessionAlert = true
+            // Primary: Start Workout / Generate Session — only shown for the pointer day.
+            if isStartable {
+                Button(action: {
+                    if isPending {
+                        // FB-008: trigger on-demand session generation
+                        Task { await generateSessionOnDemand() }
                     } else {
-                        navigateToWorkout = true
+                        // Phase 4E: Guard against starting while another session is paused
+                        if let paused = PausedSessionState.load(),
+                           paused.trainingDayId != currentDay.id {
+                            showExistingPausedSessionAlert = true
+                        } else {
+                            // #437: route to the single Workout-tab host (no second WorkoutView).
+                            switchToTab(1)
+                        }
                     }
+                }) {
+                    HStack(spacing: 10) {
+                        Image(systemName: isPending ? "wand.and.stars" : "figure.strengthtraining.traditional")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(buttonLabel)
+                            .font(.system(size: 17, weight: .semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(
+                        isEnabled ? accentColor : Color.white.opacity(0.07),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    )
+                    .foregroundStyle(isEnabled ? .white : .white.opacity(0.30))
                 }
-            }) {
-                HStack(spacing: 10) {
-                    Image(systemName: isPending ? "wand.and.stars" : "figure.strengthtraining.traditional")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(buttonLabel)
-                        .font(.system(size: 17, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(
-                    isEnabled ? accentColor : Color.white.opacity(0.07),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
-                .foregroundStyle(isEnabled ? .white : .white.opacity(0.30))
+                .disabled(!isEnabled)
+            } else {
+                // Non-pointer day — not startable (Q1). Informational note only.
+                Text("This session unlocks when it becomes your next workout.")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.40))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
             }
-            .disabled(!isEnabled)
 
             // Secondary: Log Past Session — only for generated days with exercises
             if !isPending && hasExercises {
@@ -822,8 +760,8 @@ struct ProgramDayDetailView: View {
                 }
                 .alert("Skip this session?", isPresented: $showSkipDayConfirmation) {
                     Button("Skip Session", role: .destructive) {
+                        // #438: markDay* is the single status writer — no local dual-write.
                         viewModel?.markDaySkipped(dayId: currentDay.id, weekId: week.id)
-                        currentDay.status = .skipped
                     }
                     Button("Cancel", role: .cancel) { }
                 } message: {
@@ -848,10 +786,11 @@ struct ProgramDayDetailView: View {
                         vm.resetDayToPending(dayId: currentDay.id, weekId: week.id)
                         // Only proceed when the reset actually took — the view
                         // model refuses ineligible days (completed/paused/sentinel).
+                        // #438: the live currentDay read picks up the reset-to-pending status
+                        // from currentMesocycle — no local snapshot to assign.
                         if let meso = vm.currentMesocycle,
                            let found = vm.findTrainingDay(byId: currentDay.id, in: meso),
                            found.day.status == .pending {
-                            currentDay = found.day
                             Task { await generateSessionOnDemand() }
                         }
                     }
@@ -1253,13 +1192,13 @@ struct ProgramDayDetailView: View {
         isGeneratingSession = true
         defer { isGeneratingSession = false }
 
-        if let generated = await vm.generateDaySession(
+        // #438: generateDaySession writes the generated day back into currentMesocycle
+        // (same id), so the live currentDay read reflects it — no local snapshot assignment.
+        if await vm.generateDaySession(
             day: currentDay,
             week: week,
             gymProfile: profile
-        ) {
-            currentDay = generated
-        } else {
+        ) == nil {
             sessionGenerationError = "Couldn't generate the session. Check your connection and try again."
         }
     }
