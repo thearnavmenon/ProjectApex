@@ -47,6 +47,12 @@ final class WorkoutViewModel {
     /// All sets logged so far in this session.
     var completedSets: [SetLog] = []
 
+    /// The training day the actor is currently running (nil when idle). Survives
+    /// the .sessionComplete transition (the actor clears it only on resetToIdle).
+    /// WorkoutView compares this against the day it was handed so a completion can
+    /// only ever mark the day the actor actually ran (#436 day-identity guard).
+    var liveSessionDayId: UUID? = nil
+
     /// Last-session set logs for the live exercise (#318 U7 / G-F6). Pulled
     /// from the manager's cachedLastPerformance; nil when no history exists.
     var lastPerformanceSets: [SetLog]? = nil
@@ -274,6 +280,7 @@ final class WorkoutViewModel {
 
         let fallbackReason = snapshot.currentFallbackReason
         sessionState = snapshot.sessionState
+        liveSessionDayId = snapshot.currentTrainingDayId
         currentPrescription = snapshot.currentPrescription
         restSecondsRemaining = snapshot.restSecondsRemaining
         restExpiresAt = snapshot.restExpiresAt
@@ -503,6 +510,15 @@ final class WorkoutViewModel {
         case .idle, .sessionComplete, .error: return false
         default: return true
         }
+    }
+
+    /// Day-aware variant of `sessionIsLive()` (#436 day-identity guard). Two
+    /// WorkoutView hosts can be bound to this one actor; a session that is live
+    /// for some OTHER day must not be adopted by a view handed `dayId`. Returns
+    /// true only when a session is live AND the actor is running exactly `dayId`.
+    func sessionIsLive(forDay dayId: UUID) async -> Bool {
+        guard await sessionIsLive() else { return false }
+        return await manager.currentTrainingDayId == dayId
     }
 
     // MARK: - Derived Helpers

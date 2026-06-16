@@ -1784,3 +1784,70 @@ final class PrescriptionGuardrailTests: XCTestCase {
             "A successful start clears any stale error message")
     }
 }
+
+// MARK: - Day-identity guard (#436)
+
+/// Two WorkoutView hosts share one WorkoutSessionManager actor. When a session is
+/// live for day B, a WorkoutView handed day A must NOT (a) adopt B's session as its
+/// own, nor (b) let a completion mark day A complete. The day-aware guards on
+/// WorkoutViewModel are the testable surface for that behaviour.
+final class WorkoutDayIdentityGuardTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        PausedSessionState.clear()
+    }
+
+    override func tearDown() {
+        PausedSessionState.clear()
+        super.tearDown()
+    }
+
+    /// A session is live for day B. A view configured for a DIFFERENT day A must
+    /// not treat that session as its own: `sessionIsLive(forDay: A)` is false even
+    /// though a day-agnostic `sessionIsLive()` is true.
+    func testSessionIsLiveForDay_otherDayLive_doesNotAdopt() async throws {
+        let manager = makeManager()
+        let vm = await WorkoutViewModel(manager: manager)
+
+        let dayB = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+        let dayAId = UUID() // a different view's day — never started
+
+        await manager.startSession(trainingDay: dayB, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000) // settle to .active
+
+        let liveAtAll = await vm.sessionIsLive()
+        XCTAssertTrue(liveAtAll, "a session is live in the actor")
+
+        let liveForA = await vm.sessionIsLive(forDay: dayAId)
+        XCTAssertFalse(liveForA,
+            "view for day A must NOT adopt a session that is live for day B")
+
+        let liveForB = await vm.sessionIsLive(forDay: dayB.id)
+        XCTAssertTrue(liveForB,
+            "the view for the day the actor actually ran DOES adopt the session")
+    }
+
+    /// The completion guard reads the actor's live day id. With a session running
+    /// for day B, `pullState()` publishes `liveSessionDayId == B`, so a WorkoutView
+    /// for day A (A != B) refuses to fire its completion callback. The id survives
+    /// the .sessionComplete transition (it's only cleared on resetToIdle).
+    func testLiveSessionDayId_reflectsRunningDay_notAMismatchedDay() async throws {
+        let manager = makeManager()
+        let vm = await WorkoutViewModel(manager: manager)
+
+        let dayB = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+        let dayAId = UUID()
+
+        await manager.startSession(trainingDay: dayB, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        await vm.pullState()
+
+        let liveDayId = await MainActor.run { vm.liveSessionDayId }
+        XCTAssertEqual(liveDayId, dayB.id,
+            "live day id is the day the actor actually ran (B)")
+        XCTAssertNotEqual(liveDayId, dayAId,
+            "a WorkoutView for day A sees a mismatch and must refuse to mark A complete")
+    }
+}
