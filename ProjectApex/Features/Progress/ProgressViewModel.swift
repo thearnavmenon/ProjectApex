@@ -180,6 +180,11 @@ final class ProgressViewModel {
     /// Per-muscle volume tolerance/deficit from the digest (server already
     /// excludes non-working intents). Empty until hydrated. [Tier-1 #11]
     var muscleSummaries: [MuscleSummary] = []
+    /// Total sets logged across the most recent ~7 sessions — the same trailing
+    /// window the digest's deficit read uses, so the volume card states one
+    /// window ("Last ~7 sessions") for both its headline count and the deficits.
+    /// [Tier-1 review]
+    var recentSessionsSetCount: Int = 0
     var isLoading = true
     var errorMessage: String?
 
@@ -324,6 +329,14 @@ final class ProgressViewModel {
             trendData    = computeTrendData(setLogs: setLogs, sessionDateMap: sessionDateMap)
             weeklyVolume = computeWeeklyVolume(setLogs: setLogs)
             heatmapData  = computeHeatmap(sessions: sessions, setLogs: setLogs, sessionDateMap: sessionDateMap)
+
+            // Total sets across the most recent ~7 sessions — matches the trailing
+            // window the digest deficit read uses, so the volume card speaks one
+            // window. [Tier-1 review]
+            let recentSessionIds = Set(
+                sessions.sorted { $0.sessionDate > $1.sessionDate }.prefix(7).map { $0.id }
+            )
+            recentSessionsSetCount = setLogs.filter { recentSessionIds.contains($0.sessionId) }.count
 
             // Default trend exercise to whichever exercise has the most sessions
             if selectedTrendExercise == nil {
