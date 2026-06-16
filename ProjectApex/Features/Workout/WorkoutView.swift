@@ -186,10 +186,16 @@ struct WorkoutView: View {
             // This handles the case where the user navigated away and back — the session
             // is still live in the actor but the viewModel may have stale/nil state.
             await vm.pullState()
-            let isLive = await vm.sessionIsLive()
+            // Day-identity guard (#436): only adopt a live session if the actor is
+            // running THIS view's day. Two WorkoutView hosts share one actor; without
+            // this comparison a view for day A would begin polling — and later
+            // complete — a session the actor is actually running for day B. Mirrors
+            // the day-aware gate the pause path uses below.
+            let isLive = await vm.sessionIsLive(forDay: trainingDay.id)
             if isLive {
-                // Session already running (e.g. user returned via back button or tab switch).
-                // Restart polling so the view stays up to date, then return early.
+                // Session already running for THIS day (e.g. user returned via back
+                // button or tab switch). Restart polling so the view stays up to date,
+                // then return early.
                 vm.beginStatePolling()
                 return
             }
@@ -230,6 +236,13 @@ struct WorkoutView: View {
         }
         .onChange(of: viewModel?.sessionState) { _, newState in
             if case .sessionComplete = newState {
+                // Day-identity guard (#436): only mark THIS day complete if the actor
+                // actually ran it. With two WorkoutView hosts on one actor, a view for
+                // day A could otherwise observe day B's .sessionComplete and advance the
+                // calendar past an untrained day. liveSessionDayId survives the
+                // .sessionComplete transition (cleared only on resetToIdle), so it still
+                // names the day the actor ran here.
+                guard viewModel?.liveSessionDayId == trainingDay.id else { return }
                 onSessionCompleted?()
                 // Re-fetch streak after session completion so PostWorkoutSummaryView
                 // and the next PreWorkoutView both show the updated value.

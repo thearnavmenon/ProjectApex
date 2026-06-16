@@ -71,6 +71,10 @@ nonisolated enum SessionState: Sendable, Equatable {
 /// same consistent snapshot.
 nonisolated struct WorkoutUISnapshot: Sendable {
     let sessionState: SessionState
+    /// The training day the actor is currently running (nil when idle). Persists
+    /// through .sessionComplete (cleared only on resetToIdle) so the view can
+    /// verify a completion belongs to the day it was handed (#436 day-identity guard).
+    let currentTrainingDayId: UUID?
     let currentPrescription: SetPrescription?
     let currentFallbackReason: FallbackReason?
     let restSecondsRemaining: Int
@@ -1626,6 +1630,7 @@ actor WorkoutSessionManager {
 
         return WorkoutUISnapshot(
             sessionState: sessionState,
+            currentTrainingDayId: currentTrainingDayId,
             currentPrescription: currentPrescription,
             currentFallbackReason: currentFallbackReason,
             restSecondsRemaining: restSecondsRemaining,
