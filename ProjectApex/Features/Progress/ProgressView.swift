@@ -162,6 +162,15 @@ struct ProgressScreenContent: View {
                         Text("kg")
                             .font(DT.heroUnit)
                             .foregroundStyle(DT.neutral)
+                        // The authoritative headline is a smoothed average of recent
+                        // top sets, so it can sit a touch below the latest chart dot.
+                        // Flag it as smoothed — only when we're actually showing the
+                        // EWMA (not the client-best fallback). [Tier-1 review]
+                        if lift.authoritativeE1RM != nil {
+                            Text("· smoothed")
+                                .font(DT.caption)
+                                .foregroundStyle(DT.neutral)
+                        }
                     }
 
                     deltaOrHolding(lift)
@@ -326,10 +335,10 @@ struct ProgressScreenContent: View {
                             .font(DT.caption).tracking(0.6)
                             .foregroundStyle(DT.neutral)
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("\(latestVolumeTotal)")
+                            Text("\(vm.recentSessionsSetCount)")
                                 .font(DT.statNumber)
                                 .foregroundStyle(.white)
-                            Text("sets this week")
+                            Text("sets · last ~7 sessions")
                                 .font(.system(size: 12))
                                 .foregroundStyle(DT.neutral)
                         }
@@ -347,14 +356,11 @@ struct ProgressScreenContent: View {
             }
             .buttonStyle(.plain)
 
-            // Honest deficit read — muscles below their recent-window target,
-            // sourced from the trailing-window digest. Hidden entirely when
+            // Honest deficit read — muscles below their target over the same
+            // "last ~7 sessions" window stated in the header. Hidden entirely when
             // nothing is below target (no vanity "all on track" banner). [Tier-1 #11]
             if !volumeDeficits.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Last ~7 sessions")
-                        .font(DT.caption)
-                        .foregroundStyle(DT.neutral)
                     ForEach(volumeDeficits, id: \.muscleGroup) { summary in
                         Text("\(summary.muscleGroup.rawValue.capitalized) · \(summary.volumeDeficit) sets below target")
                             .font(DT.caption)
@@ -499,10 +505,6 @@ struct ProgressScreenContent: View {
 
     private var hasVolume: Bool {
         !vm.weeklyVolume.isEmpty && !vm.weeklyVolume.allSatisfy { $0.setsByMuscle.isEmpty }
-    }
-
-    private var latestVolumeTotal: Int {
-        sortedVolume.last?.setsByMuscle.values.reduce(0, +) ?? 0
     }
 
     private var weeklyTotals: [WeekTotal] {
@@ -1161,6 +1163,7 @@ extension ProgressViewModel {
             }
             return WeeklyVolumeRow(weekLabel: "W\(8 - i)", weekStart: start, setsByMuscle: sets)
         }
+        vm.recentSessionsSetCount = 47
 
         var heat: [HeatmapCell] = []
         let prCells: Set<[Int]> = [[7, 2], [9, 4], [11, 1], [6, 0]]
