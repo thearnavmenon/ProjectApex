@@ -102,7 +102,6 @@ struct DeveloperSettingsView: View {
             openAISection
             supabaseSection
             saveSection
-            designSystemSection
             developerToolsSection
         }
         .navigationTitle("Developer Settings")
@@ -324,29 +323,6 @@ struct DeveloperSettingsView: View {
         } footer: {
             Text("Only non-empty fields are saved. Existing keys are not overwritten by blank input.")
                 .font(.caption)
-        }
-    }
-
-    /// Visual gallery of the Phase 3 design tokens — palette + type + data-viz in
-    /// light and dim, for visual QA of the foundation. DEBUG only.
-    private var designSystemSection: some View {
-        Section {
-            NavigationLink {
-                TokenGallery(theme: .light)
-                    .navigationTitle("Tokens — Light")
-                    .navigationBarTitleDisplayMode(.inline)
-            } label: {
-                Label("Token Gallery — Light", systemImage: "paintpalette")
-            }
-            NavigationLink {
-                TokenGallery(theme: .dim)
-                    .navigationTitle("Tokens — Dim")
-                    .navigationBarTitleDisplayMode(.inline)
-            } label: {
-                Label("Token Gallery — Dim", systemImage: "paintpalette.fill")
-            }
-        } header: {
-            Text("Design System")
         }
     }
 

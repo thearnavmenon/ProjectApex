@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-05-01
 
+**Superseded by**: [ADR-0029](0029-abandon-phase-3-ui-overhaul-revert-to-contentview.md) — the Phase 3 UI overhaul was abandoned (2026-06-15); the app reverted to the 4-tab `ContentView` and all Phase-3 UI code was removed.
+
 ## Context
 
 The shipped MVP used four tabs (Program / Workout / Progress / Settings). The Workout tab was a state-machine router with no content when idle — it was a "place" the user only visited to start a session, not a real surface. Settings had become a kitchen sink (API keys + scanner launcher + regenerate + training profile + dev tools). The daily flow on a cold launch took four taps before the user saw a prescription.

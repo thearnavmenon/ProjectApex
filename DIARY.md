@@ -7,6 +7,32 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-15 — Removed the new UI and went back to the old one
+
+**What happened.** A while back we started building a brand-new look for the app — a
+clean 3-tab design with a fresh "Today" home screen. It was never switched on for real;
+it sat behind an off-switch while we built it. When we finally looked at it running, it
+didn't look good: the Progress screen was basically empty, the Train screen showed
+leftover placeholder text and a scratchy diagonal pattern that looked broken instead of
+like a calendar, and workout names were cut off. It just didn't feel finished, or as nice
+as the old app.
+
+**What I changed.** I removed all of the new-UI work — the new shell, the new Today,
+Train, and Progress screens, the new "look" system (colours, fonts, custom drawings), the
+embedded fonts, and all their tests. About 9,000 lines gone. The app now always shows the
+old, familiar 4-tab screen. I kept the behind-the-scenes "smart coach" features (the ones
+that set your targets and show the review banners) because the old app uses those too —
+they're not part of the look.
+
+**How I made sure it works.** I rebuilt the whole app and the tests on a clean simulator —
+everything compiled with no errors. I also kept one small test that checks the app's
+start-up safety gate and confirmed it still passes.
+
+**Status:** Done on a branch, opening a pull request for review. The design write-ups were
+moved into an archive folder (not deleted) in case any idea is worth revisiting.
+
+---
+
 ## 2026-06-15 — Fresh sign-ups got a workout plan that never reached the server (#423)
 
 **The problem.** When a brand-new person finished setting up the app, we made their training plan and saved it on their phone — but we forgot to also save it to the server. So the moment they tried to log a workout, the server said "I've never heard of this plan" and the save failed. Every fresh account was effectively broken: the plan existed only on the phone, never in the database.

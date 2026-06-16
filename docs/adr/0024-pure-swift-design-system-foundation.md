@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-06-11
 
+**Superseded by**: [ADR-0029](0029-abandon-phase-3-ui-overhaul-revert-to-contentview.md) — the Phase 3 UI overhaul was abandoned (2026-06-15); the app reverted to the 4-tab `ContentView` and all Phase-3 UI code (including this design-system foundation) was removed.
+
 **Relates to**: `DESIGN.md` (the locked token spec this turns into code) and `docs/design/ui-overhaul-spec.md` §10 (the implementation phase). Decided for [#341](https://github.com/thearnavmenon/ProjectApex/issues/341) via a three-advisor panel (iOS-platform-idioms / design-tokens / testability) + an independent reviewer + a capstone coherence review. Gates [#342](https://github.com/thearnavmenon/ProjectApex/issues/342) (snapshot harness) and [#343](https://github.com/thearnavmenon/ProjectApex/issues/343) (shell chrome).
 
 ## Context

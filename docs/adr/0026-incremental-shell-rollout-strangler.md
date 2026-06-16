@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-06-11
 
+**Superseded by**: [ADR-0029](0029-abandon-phase-3-ui-overhaul-revert-to-contentview.md) — the Phase 3 UI overhaul was abandoned (2026-06-15); the `AppShell` strangler and the `useNewShell` seam were removed and the app renders the 4-tab `ContentView` unconditionally.
+
 **Relates to**: `docs/design/ui-overhaul-spec.md` §2 (3-tab nav) and [ADR-0024](0024-pure-swift-design-system-foundation.md) (the chrome tokens the shell consumes). Decided for [#343](https://github.com/thearnavmenon/ProjectApex/issues/343) via a three-advisor panel (navigation-architecture / strangler-migration / app-state-DI) + an independent reviewer + a capstone coherence review.
 
 ## Context
