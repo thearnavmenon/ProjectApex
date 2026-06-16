@@ -196,12 +196,21 @@ final class ProgramViewModel {
         if let cached = Mesocycle.loadFromUserDefaults() {
             currentMesocycle = cached
             viewState = .loaded(cached)
+            // #425: resolve-before-stamp backfill safety-net. #424 persists the
+            // onboarding program ONLY when the owner resolves at onboard time; when
+            // auth is unresolved then (offline / a QUIC sign-in stall like #392/#394)
+            // the program lives only in UserDefaults and the server `programs` table
+            // stays empty, so every later workout FK-fails on
+            // `workout_sessions_program_id_fkey`. Re-attempt the server write here,
+            // off the fast path, once a real session resolves. Best-effort and
+            // non-blocking: the cached program is already displayed above; this never
+            // throws out of loadProgram and never slows the UI.
+            Task { await self.backfillCachedProgramIfNeeded(cached) }
             return
         }
 
         // 2. Network fetch
-        // #425 will add resolve-before-stamp backfill here (re-persist a locally-cached
-        // program once the owner resolves). Read semantics unchanged for PR-A.
+        // Read semantics unchanged for PR-A.
         do {
             if let row = try await supabaseClient.fetchActiveProgram(userId: userId) {
                 let mesocycle = row.toMesocycle()
@@ -214,6 +223,53 @@ final class ProgramViewModel {
         } catch {
             // If fetch fails but no cache → show empty so user can generate
             viewState = .empty
+        }
+    }
+
+    /// #425 safety-net: re-persist a locally-cached program to the server once a
+    /// real owner resolves, but ONLY when the server genuinely has no active program.
+    ///
+    /// Best-effort and non-blocking — fired from `loadProgram`'s cache-hit fast path
+    /// on a detached Task so the cached program displays immediately. Never throws,
+    /// never touches `viewState`; UserDefaults remains the source of truth.
+    ///
+    /// Critically distinguishes "server says empty" from "couldn't reach server":
+    /// only a fetch that SUCCEEDS and returns no active program triggers the
+    /// backfill. A fetch that throws (offline / transient) bails — a later load
+    /// retries — so a transient error is never mistaken for "empty" (which would
+    /// spuriously re-insert and could shadow a real server program).
+    ///
+    /// Reuses `OnboardingProgramPersist.persistIfOwnerResolved` so the
+    /// placeholder-guard + resolve-before-stamp + best-effort-catch live in exactly
+    /// one place (the same path #424 added).
+    private func backfillCachedProgramIfNeeded(_ cached: Mesocycle) async {
+        // Resolve the real owner. nil / placeholder → do nothing; the next resolved
+        // load catches it. persistIfOwnerResolved also guards the placeholder, but we
+        // bail early to avoid the server fetch when there's no owner to stamp under.
+        guard let owner = await resolveOwner(), owner != AppDependencies.placeholderUserId else {
+            return
+        }
+
+        // Only backfill when the fetch SUCCEEDS and finds NO active program. A thrown
+        // error means we couldn't reach the server — bail, do NOT conclude "empty".
+        let serverActiveProgram: ProgramRow?
+        do {
+            serverActiveProgram = try await supabaseClient.fetchActiveProgram(userId: owner)
+        } catch {
+            programPersistLogger.notice("backfill: server fetch failed; bailing (not 'empty') — a later load retries")
+            return
+        }
+        guard serverActiveProgram == nil else { return }
+
+        // Server is genuinely empty under a real owner → backfill the cached program
+        // via the shared resolve-before-stamp helper (#424). Idempotent, best-effort.
+        let didPersist = await OnboardingProgramPersist.persistIfOwnerResolved(
+            cached,
+            owner: owner,
+            client: supabaseClient
+        )
+        if didPersist {
+            programPersistLogger.notice("backfill: re-persisted local-only program to server under resolved owner")
         }
     }
 
