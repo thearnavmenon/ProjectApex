@@ -623,21 +623,20 @@ struct ContentView: View {
                 // and leave a duplicate active row.
                 gymProfileSyncTask?.cancel()
 
-                let userId = deps.resolvedUserId
                 let client = deps.supabaseClient
                 gymProfileSyncTask = Task {
                     guard !Task.isCancelled else { return }
-                    do {
-                        // Deactivate old row, then insert updated one (scanner pattern).
-                        // These are sequential awaits within a single Task — no race window.
-                        try await client.deactivateGymProfiles(userId: userId)
-                        guard !Task.isCancelled else { return }
-                        let row = GymProfileRow.forInsert(from: updatedProfile, userId: userId)
-                        try await client.insert(row, table: "gym_profiles")
+                    // #409 PR-B: resolve-before-stamp — gate the owned write on the
+                    // resolved owner so a pre-auth placeholder edit never reaches the
+                    // server. nil / placeholder owner skips the write (UserDefaults wins).
+                    let owner = await deps.resolvedOwnerUserId()
+                    guard !Task.isCancelled else { return }
+                    let didSync = await GymProfileSync.syncIfOwnerResolved(updatedProfile, owner: owner, client: client)
+                    if didSync {
                         print("[ContentView] GymProfile synced to Supabase — \(updatedProfile.equipment.count) items")
-                    } catch {
+                    } else {
                         // Non-fatal — UserDefaults is the local source of truth.
-                        print("[ContentView] GymProfile Supabase sync failed: \(error.localizedDescription)")
+                        print("[ContentView] GymProfile Supabase sync skipped/failed (owner unresolved or write failed)")
                     }
                 }
             },
@@ -682,6 +681,40 @@ struct ContentView: View {
         } else {
             // Success — switch to Program tab so user sees the new program
             selectedTab = 0
+        }
+    }
+}
+
+// MARK: - GymProfile Sync (#409 PR-B / #369 owner-stamping workstream)
+
+/// Resolve-before-stamp sync for the equipment-edit `gym_profiles` write.
+///
+/// `onEquipmentChanged` historically captured the SYNC `deps.resolvedUserId`,
+/// which can still be the pre-auth placeholder on a fresh launch — so an
+/// equipment edit made before auth resolved would deactivate + insert a row the
+/// user could not own (the #369 owner-mismatch failure mode). This helper gates
+/// the write on the resolved owner: a nil owner (auth unresolved / offline) or
+/// the placeholder uid is never written. UserDefaults remains the local source
+/// of truth in that case (matches the existing non-fatal behavior).
+enum GymProfileSync {
+    /// - Returns: `true` iff the server insert succeeded under a real resolved owner.
+    @discardableResult
+    static func syncIfOwnerResolved(
+        _ profile: GymProfile,
+        owner: UUID?,
+        client: SupabaseClient
+    ) async -> Bool {
+        // resolve-before-stamp: never sync a row we can't own.
+        guard let owner, owner != AppDependencies.placeholderUserId else { return false }
+        // Deactivate is best-effort: zero existing active rows (patchNoMatch) is
+        // VALID for a first edit, not an error, so it must not block the insert.
+        try? await client.deactivateGymProfiles(userId: owner)
+        do {
+            try await client.insert(GymProfileRow.forInsert(from: profile, userId: owner), table: "gym_profiles")
+            return true
+        } catch {
+            // Non-fatal: UserDefaults remains the source of truth (matches current behavior).
+            return false
         }
     }
 }

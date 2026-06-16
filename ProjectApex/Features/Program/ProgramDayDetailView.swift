@@ -1062,7 +1062,10 @@ struct ProgramDayDetailView: View {
         // Include "originally logged as X" so the AI understands this is a correction,
         // not a separate performance event.
         let memoryService = deps.memoryService
-        let userId = deps.resolvedUserId.uuidString
+        // #409 PR-B: best-effort RAG embed; skip under an unresolved/placeholder owner
+        // so a pre-auth placeholder uid never stamps correction embeddings.
+        guard let owner = await deps.resolvedOwnerUserId() else { return }
+        let userId = owner.uuidString
         let sessionIdStr = completedSessionId?.uuidString ?? ""
         let exerciseName = currentDay.exercises
             .first(where: { $0.exerciseId == updated.exerciseId })?.name ?? updated.exerciseId
@@ -1178,7 +1181,10 @@ struct ProgramDayDetailView: View {
 
         // Embed into RAG memory
         let memoryService = deps.memoryService
-        let userId = deps.resolvedUserId.uuidString
+        // #409 PR-B: best-effort RAG embed; skip under an unresolved/placeholder owner
+        // so a pre-auth placeholder uid never stamps the manual-log embedding.
+        guard let owner = await deps.resolvedOwnerUserId() else { return }
+        let userId = owner.uuidString
         let sessionIdStr = sessionId.uuidString
         let exerciseName = currentDay.exercises
             .first(where: { $0.exerciseId == newLog.exerciseId })?.name ?? newLog.exerciseId
