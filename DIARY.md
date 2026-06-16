@@ -7,6 +7,35 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-16 — Made the UI removal official and tidied the task list
+
+**What happened.** Yesterday we decided to throw away the half-built new look and keep
+the old four-tab app. Today that change actually went live on the main copy of the
+code, and I cleaned up all the leftover paperwork that the decision created.
+
+**What changed.**
+- Merged the big delete (about 9,400 lines of the abandoned new UI) into main, so the
+  app now only has the old, working four-tab screens. Nothing the old app needs was
+  removed — I checked the build still works and the start-up tests pass before merging.
+- Removed a leftover scratch copy of the project (a stale "worktree") that still held a
+  piece of the old new-UI code.
+- Closed 17 old to-do tickets that were all about building the new UI — they're dead
+  now, so I marked them "won't fix" and pointed each at the decision record (ADR-0029).
+  Also closed a draft write-up tied to one of them.
+- Closed one ticket (#391) that was actually already done — the database safety-trigger
+  it asked for had shipped earlier and is live; the ticket just never got closed.
+- Kept one ticket open on purpose: the app-icon / wordmark artwork (#344), since the old
+  app could still use a proper icon.
+
+**How I checked it.** The new code built cleanly and the launch tests passed before the
+merge; the merge into main was a clean fast-forward. The closed tickets were verified
+against the actual code and the merged removal first.
+
+**Status:** Done. PR #426 merged (commit a779dc4). Issues #342, #343, #348–363, #376,
+#391 closed; draft PR #383 closed. #344 kept open for re-scoping.
+
+---
+
 ## 2026-06-15 — Removed the new UI and went back to the old one
 
 **What happened.** A while back we started building a brand-new look for the app — a
