@@ -576,14 +576,19 @@ struct DeveloperSettingsView: View {
         // 2. Clear GymFactStore weight corrections (belt-and-suspenders after UserDefaults wipe)
         await deps.gymFactStore.clearAll()
 
-        // 2b. Drain the LIVE write-ahead queue actor (queue + dead-letter) and clear
-        // any paused session. removePersistentDomain wiped their on-disk UserDefaults,
-        // but the in-memory WAQ actor would re-persist its stale items on the next
-        // enqueue — so a reset without this leaves old-owner/placeholder writes that
-        // replay RLS-403s after re-onboarding (#369 owner-mismatch campaign, slice 3).
-        // PausedSessionState.clear() also resets the in-memory repairPending flag.
-        await deps.writeAheadQueue.clearAll()
-        PausedSessionState.clear()
+        // 2b. Reset the LIVE in-memory state that survives the UserDefaults wipe:
+        // the write-ahead queue actor (queue + dead-letter), any paused session, and
+        // an ACTIVE (non-paused) WorkoutSessionManager session. removePersistentDomain
+        // wiped their on-disk UserDefaults, but the in-memory WAQ actor would re-persist
+        // its stale items on the next enqueue, and an active manager session still holds
+        // the OLD auth.uid() and could enqueue owner-mismatched writes within this
+        // process lifetime — both replay RLS-403s after re-onboarding (#369 owner-mismatch
+        // campaign, slices 3 & #403). PausedSessionState.clear() also resets the in-memory
+        // repairPending flag. resetToIdle() nils the active session.
+        await performLocalStateReset(
+            writeAheadQueue: deps.writeAheadQueue,
+            workoutSessionManager: deps.workoutSessionManager
+        )
 
         // 3. Remove the persisted userId so onboarding creates a fresh identity
         try? keychain.delete(.userId)
@@ -645,6 +650,22 @@ struct DeveloperSettingsView: View {
         await vm.loadProgram()
         showBanner("Programme reloaded from Supabase.", isError: false)
     }
+}
+
+// MARK: - Local in-memory reset (#403)
+
+/// Resets the in-memory state that survives a `UserDefaults` wipe during Reset All.
+/// `removePersistentDomain` clears the on-disk copies, but these live actors hold
+/// their own in-memory state that would otherwise re-persist (WAQ) or keep enqueuing
+/// writes under the old `auth.uid()` (an ACTIVE — not paused — session). Extracted so
+/// it is unit-testable (#403, #369 owner-mismatch campaign).
+func performLocalStateReset(
+    writeAheadQueue: WriteAheadQueue,
+    workoutSessionManager: WorkoutSessionManager
+) async {
+    await writeAheadQueue.clearAll()
+    PausedSessionState.clear()
+    await workoutSessionManager.resetToIdle()
 }
 
 // MARK: - Preview

@@ -369,6 +369,33 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertNil(PausedSessionState.load(), "paused state cleared after discard")
     }
 
+    // MARK: #403 — Reset All clears an ACTIVE in-memory workout session
+
+    /// performLocalStateReset must drain the write-ahead queue, clear any paused
+    /// snapshot, AND reset the live WorkoutSessionManager to .idle — even when the
+    /// session is ACTIVE (not paused) at reset time. Pre-fix the manager kept the
+    /// old-owner session in memory, so it could enqueue owner-mismatched writes
+    /// within the same process lifetime (#403, #369 owner-mismatch campaign).
+    func testPerformLocalStateReset_clearsActiveSession() async throws {
+        let (manager, waq) = makeManagerWithWAQ()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000) // let startSession settle to .active
+
+        let before = await manager.sessionState
+        guard case .active = before else {
+            XCTFail("precondition: expected .active before reset, got \(before)")
+            return
+        }
+
+        await performLocalStateReset(writeAheadQueue: waq, workoutSessionManager: manager)
+
+        let after = await manager.sessionState
+        XCTAssertEqual(after, .idle, "active in-memory session must be reset to .idle by Reset All (#403)")
+        XCTAssertNil(PausedSessionState.load(), "paused state cleared by reset")
+    }
+
     /// When the paused session's owner != the current auth uid, resumeSession must
     /// discard it (not replay/re-insert under the old owner → RLS 403), leave the
     /// manager idle, clear the paused snapshot, and surface a repair notice.
