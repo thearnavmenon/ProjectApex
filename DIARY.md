@@ -7,6 +7,43 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-16 — Fixed four sign-in / data-saving bugs
+
+**The problem (in plain words).** A batch of leftover bugs from the sign-in security
+work could lose or mis-save data right after the app starts, before it has finished
+quietly signing in:
+- "Reset All" wiped saved data but didn't stop a workout that was already running, so
+  that live workout could still try to save under the old identity.
+- If the app couldn't start a workout because sign-in hadn't finished, it just silently
+  re-enabled the Start button and told you nothing.
+- A few save paths (your program, your gym equipment, set-correction notes) grabbed the
+  user identity too early — while it could still be a temporary placeholder — so the
+  save could be rejected by the server's ownership rules.
+- If you set up your program while offline (or sign-in stalled), the program was saved
+  on the phone but never to the server, and nothing ever retried — so later workouts had
+  nothing to attach to and failed.
+
+**What changed.**
+- Reset All now also clears a running workout (#403).
+- Failing to start a workout now shows "Couldn't start — check your connection and try
+  again" instead of silently doing nothing (#399).
+- The program/gym/notes save paths now wait for the real signed-in identity before
+  saving, and skip the save entirely (rather than save wrong) if it isn't ready yet
+  (#409, done in two parts).
+- The app now quietly backfills a phone-only program to the server the next time it
+  loads with a real identity — and is careful to tell "server has nothing" apart from
+  "couldn't reach the server" so it never double-saves or hides a real program (#425).
+
+**How I checked it.** Each fix was built test-first (a failing test that proved the bug,
+then made green), reviewed by a separate independent check, and the full nearby test
+groups were re-run green before merging. Each one was its own small, single-purpose
+change on its own branch and pull request.
+
+**Status:** All merged. PRs #427 (#403), #428 (#399), #429 + #430 (#409), #431 (#425) —
+issues #403, #399, #409, #425 all closed.
+
+---
+
 ## 2026-06-16 — Made the UI removal official and tidied the task list
 
 **What happened.** Yesterday we decided to throw away the half-built new look and keep
