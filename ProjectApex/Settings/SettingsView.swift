@@ -61,10 +61,6 @@ struct SettingsView: View {
     @State private var ageText: String = ""
     @State private var trainingAge: TrainingAge = .beginner
 
-    // Design-system appearance override (System / Light / Dim). Drives the new
-    // \.apexTheme; legacy screens that don't read it are unaffected.
-    @AppStorage(AppearanceSetting.storageKey) private var appearanceSetting: AppearanceSetting = .system
-
     /// True when the user skipped the gym scan during onboarding — drives the setup prompt.
     private var gymScanSkipped: Bool {
         UserDefaults.standard.bool(forKey: OnboardingConstants.scanSkippedKey)
@@ -81,7 +77,6 @@ struct SettingsView: View {
             if confirmedProfile != nil {
                 programSection
             }
-            appearanceSection
             developerSection
             aboutSection
         }
@@ -464,22 +459,6 @@ struct SettingsView: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
-    }
-
-    /// Design-system appearance override. "Dim" is the new system's dark variant;
-    /// "System" follows the device's light/dark setting.
-    private var appearanceSection: some View {
-        Section {
-            Picker("Appearance", selection: $appearanceSetting) {
-                ForEach(AppearanceSetting.allCases) { setting in
-                    Text(setting.label).tag(setting)
-                }
-            }
-        } header: {
-            Text("Appearance")
-        } footer: {
-            Text("Controls the new Apex design system. “System” matches your device’s light/dark setting; “Dim” is the dark variant.")
-        }
     }
 
     @ViewBuilder

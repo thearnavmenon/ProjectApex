@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-06-14
 
+**Superseded by**: [ADR-0029](0029-abandon-phase-3-ui-overhaul-revert-to-contentview.md) — the Phase 3 UI overhaul was abandoned (2026-06-15); the drafting-rule and status-tick instruments were removed with the rest of the Phase-3 UI.
+
 **Relates to**: `docs/design/splash-today.md` §The drawing (Today's full-bleed hairlines + margin ticks + evidence lockup), `docs/design/train.md` §3 (the program-root day-spine, the generation-horizon datum, the to-be-placed hatch, the discrete commitment gradient) and §14.3, `docs/design/progress.md` §3 (the drafting register / spine), and `DESIGN.md` §Data visualization (the `projection` dash + `hairline` + ink/pencil families). Builds on [ADR-0024](0024-pure-swift-design-system-foundation.md) (the token foundation + shared geometry home), [ADR-0025](0025-snapshot-visual-regression-harness.md) (the gated image harness these instruments register against), and the shipped capability band ([#345](https://github.com/thearnavmenon/ProjectApex/issues/345)) — the reference axis. Decided for [#411](https://github.com/thearnavmenon/ProjectApex/issues/411). **Does not supersede** ADR-0024/0025/0026 — it extends the instrument vocabulary they established.
 
 ## Context

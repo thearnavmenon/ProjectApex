@@ -403,7 +403,21 @@ Carried forward into v2.x — **none of it blocks**; the feature is complete:
 
 Sweep (CLAUDE.md cadence, milestone boundary): re-read CONTEXT.md end-to-end — already current through #305 (floor "monotonic non-decreasing"; the "Re-calibration" concept; "immovable floor" explicitly marked retired), **nothing to prune**; `v2.x-watch-items.md` reconciled, no edit needed.
 
-## Phase 6 — UI Overhaul ("Phase 3" design system) — design locked + implementation sliced (2026-06-11)
+## Phase 6 — UI Overhaul ("Phase 3" design system) — ABANDONED 2026-06-15
+
+> **ABANDONED (2026-06-15).** The built new UI was reviewed and rejected: it looked
+> unfinished and unpolished (Progress was an almost-empty screen with a stray spine tick;
+> the Train "calendar" shipped placeholder copy and a diagonal hatch that read as a
+> rendering glitch; Today truncated exercise names), and it never matched the finish of
+> the live 4-tab app. The whole Phase-3 UI was removed — `AppShell`, the new
+> Today/Train/Progress/live-loop screens, the pure-Swift `DesignSystem` module
+> (tokens/typography/instruments), embedded fonts, the snapshot harness + its
+> `swift-snapshot-testing` dependency, and all related tests (~9k lines). The app renders
+> the 4-tab `ContentView` unconditionally; the `useNewShell` flag is gone. Redesign-era
+> **backend** features (confidence lifecycle, calibration projections, goal renegotiation,
+> capability recalibration) are KEPT — the live UI uses them. See **ADR-0029**; the specs
+> are archived under `docs/archive/`. The section below is retained as the historical
+> record of what was built.
 
 A full UI rebuild from scratch, design language **"a single ink (ultramarine) on cream, drawn precisely"**, guiding principle *"quietly right in the moment, visibly smart around it."* Driven via grill-me + Mobbin MCP in background sessions; each screen locked by a four-agent panel (UI-craft / UX-product / visual-art-direction / motion-animation).
 

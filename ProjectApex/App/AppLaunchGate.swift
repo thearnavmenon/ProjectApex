@@ -2,8 +2,8 @@
 //  AppLaunchGate.swift
 //  ProjectApex
 //
-//  Shared pure predicate for the launch/setup gate (#376 follow-up, #329 / #369).
-//  Both `ProjectApexApp.body` and `AppShellMachineryTests` call this so the test
+//  Shared pure predicate for the launch/setup gate (#329 / #369 / #421).
+//  Both `ProjectApexApp.body` and `AppLaunchGateTests` call this so the test
 //  pins the PRODUCTION condition, not a hand-copied re-implementation.
 //
 

@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-06-11
 
+**Superseded by**: [ADR-0029](0029-abandon-phase-3-ui-overhaul-revert-to-contentview.md) — the Phase 3 UI overhaul was abandoned (2026-06-15); the snapshot harness and the `swift-snapshot-testing` dependency were removed along with the instruments they tested.
+
 **Relates to**: [ADR-0024](0024-pure-swift-design-system-foundation.md) (the token + font foundation this depends on) and `DESIGN.md` (Data visualization / Motion). Decided for [#342](https://github.com/thearnavmenon/ProjectApex/issues/342) via a three-advisor panel (test-infra / CI-determinism / SwiftUI-rendering) + an independent reviewer + a capstone coherence review.
 
 ## Context
