@@ -25,6 +25,7 @@
 		47BB8E712F6273F30082C53F /* OnboardingProgramPersistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */; };
 		47BB8E712F6273F30082C5F1 /* GymProfileSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */; };
 		47BB8E8B2F6273F30082C53F /* ProgramOwnerGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E8A2F6273F30082C53F /* ProgramOwnerGateTests.swift */; };
+		47BB8E712F6273F30082C625 /* ProgramBackfillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C625 /* ProgramBackfillTests.swift */; };
 		47BB8E752F6294B00082C53F /* WorkoutSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E742F6294B00082C53F /* WorkoutSessionManagerTests.swift */; };
 		47C5C1AF2F62A64E0005F99E /* WriteAheadQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47C5C1AE2F62A64E0005F99E /* WriteAheadQueueTests.swift */; };
 		47C5C1B82F62BB3D0005F99E /* GymStreakServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47C5C1B72F62BB3D0005F99E /* GymStreakServiceTests.swift */; };
@@ -98,6 +99,7 @@
 		47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingProgramPersistTests.swift; sourceTree = "<group>"; };
 		47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymProfileSyncTests.swift; sourceTree = "<group>"; };
 		47BB8E8A2F6273F30082C53F /* ProgramOwnerGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramOwnerGateTests.swift; sourceTree = "<group>"; };
+		47BB8E702F6273F30082C625 /* ProgramBackfillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramBackfillTests.swift; sourceTree = "<group>"; };
 		47BB8E742F6294B00082C53F /* WorkoutSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSessionManagerTests.swift; sourceTree = "<group>"; };
 		47C5C1AE2F62A64E0005F99E /* WriteAheadQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WriteAheadQueueTests.swift; sourceTree = "<group>"; };
 		47C5C1B72F62BB3D0005F99E /* GymStreakServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymStreakServiceTests.swift; sourceTree = "<group>"; };
@@ -235,6 +237,7 @@
 				47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */,
 				47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */,
 				47BB8E8A2F6273F30082C53F /* ProgramOwnerGateTests.swift */,
+				47BB8E702F6273F30082C625 /* ProgramBackfillTests.swift */,
 				47BB8E742F6294B00082C53F /* WorkoutSessionManagerTests.swift */,
 				47C5C1AE2F62A64E0005F99E /* WriteAheadQueueTests.swift */,
 				47C5C1B72F62BB3D0005F99E /* GymStreakServiceTests.swift */,
@@ -398,6 +401,7 @@
 				47BB8E712F6273F30082C53F /* OnboardingProgramPersistTests.swift in Sources */,
 				47BB8E712F6273F30082C5F1 /* GymProfileSyncTests.swift in Sources */,
 				47BB8E8B2F6273F30082C53F /* ProgramOwnerGateTests.swift in Sources */,
+				47BB8E712F6273F30082C625 /* ProgramBackfillTests.swift in Sources */,
 				478DD9F12F9928C6001D3636 /* SkipFeatureTests.swift in Sources */,
 				32736E74E3F688020744DE5E /* EquipmentRounderTests.swift in Sources */,
 				47C5C1AF2F62A64E0005F99E /* WriteAheadQueueTests.swift in Sources */,
