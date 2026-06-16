@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-16 — Rebuilt the Progress tab and made its numbers trustworthy
+
+**The problem (in plain words).** The Progress screen got a fresh, premium look, but
+the numbers behind it weren't honest yet. The strength estimate counted *every* set —
+warmups, lighter back-off sets, all-out final sets — so it could look like you'd hit a
+personal record when you really hadn't, and the big number on screen didn't match the
+one the AI coach uses. The volume section just counted sets without saying whether you
+were behind on anything, and there was no sign of how confident the app was in a lift.
+
+**What changed.**
+- **Strength number you can trust.** It now counts only real "top sets" in a sensible
+  rep range, so fake records disappear, and the headline shows the same smoothed number
+  the coach reasons from (with a small "smoothed" note so it's clear why it can differ a
+  touch from your latest session).
+- **Volume vs. target.** The volume card now quietly says which muscles are *behind*
+  their target over your last ~7 sessions, worst first — and stays silent when you're on
+  track (no empty praise).
+- **Confidence note.** Each key lift can show "still learning this lift" or how many
+  sessions it's based on — and hides itself when there's nothing solid to say.
+- **Plateau help.** When a movement keeps stalling, it now tells you what to *do*
+  ("rotate the exercise or rebuild the block") instead of just counting the stalls.
+
+**How it was built and checked.** Built by several focused helpers in stages — one for
+the data, two for the screen, and two independent reviewers whose job was to attack it.
+The reviewers caught two real problems (a freshly-tracked lift could show "0.0 kg", and
+the little up/down number didn't line up with the headline); both were fixed and pinned
+with tests. Everything hides gracefully when there's no data. App builds clean and the
+6 new tests pass.
+
+**Status.** Shipped to `main`. The look-and-feel landed first (PR #432), then the
+trustworthy numbers on top (PR #434, which replaced #433 after a stacked-branch hiccup).
+
+---
+
 ## 2026-06-16 — Fixed four sign-in / data-saving bugs
 
 **The problem (in plain words).** A batch of leftover bugs from the sign-in security
