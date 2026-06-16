@@ -171,4 +171,79 @@ struct ProgressE1RMEligibilityTests {
         #expect(benchWithout?.authoritativeE1RM == nil)
         #expect(abs((benchWithout?.currentE1RM ?? 0) - expectedFiltered) < 0.001)
     }
+
+    // MARK: - Test 4: a bootstrapped summary with e1rmCurrent == 0 is treated as absent
+
+    @Test("A digest summary with e1rmCurrent == 0 does NOT override the client number (no 0.0 headline)")
+    func zeroAuthoritativeFallsBackToClientBest() {
+        let vm = makeVM()
+        let sessionId = UUID()
+        let date = Date()
+
+        // Eligible top set ⇒ client computes a real currentE1RM (≈116.67).
+        let logs = [
+            makeSetLog(sessionId: sessionId, setNumber: 1, weightKg: 100, reps: 5, intent: .top, loggedAt: date),
+        ]
+
+        // A freshly-bootstrapped profile: tracked (sessionCount >= 1) but no
+        // eligible top set has produced an EWMA yet ⇒ e1rmCurrent == 0.
+        let zeroSummary = ExerciseSummary(profile: ExerciseProfile(
+            exerciseId: "barbell_bench_press",
+            e1rmCurrent: 0,
+            sessionCount: 3,
+            confidence: .calibrating
+        ))
+
+        let lifts = vm.computeKeyLifts(
+            setLogs: logs,
+            sessionDateMap: [sessionId: date],
+            exerciseSummaries: ["barbell_bench_press": zeroSummary]
+        )
+        let bench = lifts.first { $0.exerciseId == "barbell_bench_press" }
+        #expect(bench != nil)
+        // Non-positive authoritative is treated as absent → nil, so the view's
+        // `authoritativeE1RM ?? currentE1RM` falls back to the real client best.
+        #expect(bench?.authoritativeE1RM == nil)
+        let expectedFiltered = 100.0 * (1.0 + 5.0 / 30.0)
+        #expect(abs((bench?.currentE1RM ?? 0) - expectedFiltered) < 0.001)
+    }
+
+    // MARK: - Test 5: the 4-week delta is anchored to the displayed (authoritative) value
+
+    @Test("deltaVs4WeeksAgo is computed from the displayed authoritative value, not the Epley best")
+    func deltaAnchoredToDisplayedValue() {
+        let vm = makeVM()
+        let recentSession = UUID()
+        let referenceSession = UUID()
+        let now = Date()
+        let fiveWeeksAgo = now.addingTimeInterval(-35 * 86_400)  // inside [4wk, 6wk)
+
+        let logs = [
+            // recent eligible top set: Epley(100,5) ≈ 116.67 → currentE1RM
+            makeSetLog(sessionId: recentSession, setNumber: 1, weightKg: 100, reps: 5, intent: .top, loggedAt: now),
+            // 5-weeks-ago eligible top set: Epley(90,5) = 105.0 → referenceBest
+            makeSetLog(sessionId: referenceSession, setNumber: 1, weightKg: 90, reps: 5, intent: .top, loggedAt: fiveWeeksAgo),
+        ]
+
+        // Authoritative EWMA (110) differs from BOTH the recent Epley best (116.67)
+        // and the reference best (105) — so we can tell which "now" the delta uses.
+        let summary = ExerciseSummary(profile: ExerciseProfile(
+            exerciseId: "barbell_bench_press",
+            e1rmCurrent: 110.0,
+            sessionCount: 15,
+            confidence: .established
+        ))
+
+        let lifts = vm.computeKeyLifts(
+            setLogs: logs,
+            sessionDateMap: [recentSession: now, referenceSession: fiveWeeksAgo],
+            exerciseSummaries: ["barbell_bench_press": summary]
+        )
+        let bench = lifts.first { $0.exerciseId == "barbell_bench_press" }
+        #expect(bench != nil)
+        #expect(bench?.authoritativeE1RM == 110.0)
+        // Delta must be displayValue(110) − referenceBest(105) = 5.0,
+        // NOT the Epley recent best(116.67) − 105 = 11.67.
+        #expect(abs((bench?.deltaVs4WeeksAgo ?? 0) - 5.0) < 0.001)
+    }
 }
