@@ -411,13 +411,28 @@ final class ProgressViewModel {
 
             guard let exerciseId = bestExerciseId, bestCurrentE1RM > 0 else { return nil }
 
+            // Authoritative (server EWMA) only when it's a real positive value.
+            // A freshly-bootstrapped ExerciseProfile carries e1rmCurrent == 0
+            // until an eligible top set lands, so a 0 must NOT override the
+            // client's computed best (would render "0.0 kg"). Treat non-positive
+            // as absent so the headline falls back honestly. [Tier-1 review]
+            let rawAuthoritative = exerciseSummaries[exerciseId]?.e1rmCurrent
+            let authoritative: Double? = (rawAuthoritative ?? 0) > 0 ? rawAuthoritative : nil
+
+            // The headline displays `authoritative ?? bestCurrentE1RM`. Anchor the
+            // delta to that SAME displayed value so the number and its "vs 4 wks"
+            // delta describe one quantity (headline − delta = the real 4–6-week-ago
+            // best), rather than pairing an EWMA headline with an Epley-only delta.
+            // [Tier-1 review]
+            let displayValue = authoritative ?? bestCurrentE1RM
+
             // Compute delta vs 4–6 weeks ago for the same exercise (eligible only)
             let referenceLogs = (byExercise[exerciseId] ?? []).filter {
                 let d = date(of: $0, in: sessionDateMap)
                 return isE1RMEligible($0) && d >= sixWeeksAgo && d < fourWeeksAgo
             }
             let referenceBest = referenceLogs.map { e1rm($0) }.max()
-            let delta = referenceBest.map { bestCurrentE1RM - $0 }
+            let delta = referenceBest.map { displayValue - $0 }
 
             let trend: TrendDirection
             if let d = delta {
@@ -439,7 +454,7 @@ final class ProgressViewModel {
                 currentE1RM: bestCurrentE1RM,
                 deltaVs4WeeksAgo: delta,
                 trend: trend,
-                authoritativeE1RM: exerciseSummaries[exerciseId]?.e1rmCurrent
+                authoritativeE1RM: authoritative
             )
         }
     }
