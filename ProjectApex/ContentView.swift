@@ -335,6 +335,30 @@ struct ContentView: View {
         }
     }
 
+    /// Pure render-target resolver for the Workout tab (#441). Sources the hosted
+    /// day from the RUN day the coordinator reports (live or paused), never from
+    /// sticky view state — so leaving a resumed session without reaching Done can no
+    /// longer pin a stale day (the STATE-4 bug). Returns the coordinator's active day
+    /// when it is non-nil, differs from `nextIncomplete`, and resolves in the
+    /// mesocycle; otherwise falls back to `nextIncomplete`. Self-healing: when the
+    /// session ends the coordinator goes `.idle` → `coordinatorActiveDayId` is nil →
+    /// this returns `nextIncomplete` again automatically.
+    static func hostDay(
+        nextIncomplete: TrainingDay,
+        coordinatorActiveDayId: UUID?,
+        mesocycle: Mesocycle
+    ) -> TrainingDay {
+        guard let activeId = coordinatorActiveDayId, activeId != nextIncomplete.id else {
+            return nextIncomplete
+        }
+        for week in mesocycle.weeks {
+            if let day = week.trainingDays.first(where: { $0.id == activeId }) {
+                return day
+            }
+        }
+        return nextIncomplete
+    }
+
     /// The Workout tab. Routes to `WorkoutView` with the first non-completed day
     /// in the mesocycle. Shows a programme-complete state when all days are done,
     /// or a no-program state when no mesocycle is loaded.
