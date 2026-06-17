@@ -7,6 +7,35 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — Removed the old crash-recovery workaround that could mark the wrong day
+
+**The problem (in plain words).** There was a leftover sticky note inside the app called
+"crash resume day." When you came back to a workout that lived on a different day than the
+next one due, the app stuck a note saying "you're really on day B." That note was only torn
+up once you tapped Done. So if you started day B, then wandered off without finishing —
+paused it, switched tabs — the note stayed stuck, and the next thing you finished got marked
+against day B instead of the day you actually did. Wrong day, silently.
+
+**What changed.** The sticky note is gone entirely. Now the app asks the one "live or paused"
+brain (built yesterday, #440) which day you're really on — both for which workout to show AND
+for which day to tick off when you finish. Because the same single source answers both
+questions, they can't drift apart, so marking the wrong day is no longer even possible (not
+just patched — structurally impossible). The two tangled "resume a workout" code paths were
+also merged into one. The crash-recovery pop-up on reopening still works exactly as before.
+(#441)
+
+**How it was built and checked.** Built test-first in an isolated copy, then independently
+and adversarially reviewed by a second agent whose job was to break it — it manually
+re-played the exact wrong-day scenario against the new code and confirmed it can't happen
+anymore, with no blockers. Verified a third time here: full app builds clean, 46 tests pass
+(8 new). One tiny cosmetic edge in the paused banner (pre-existing, not caused by this) was
+noted for later.
+
+**Status.** Merged to `main` (PR #459; issue #441 closed). **This was the last piece — the
+whole "Workout and Programme jumble/mismatch/wrong-day" problem (umbrella #435) is now fully
+fixed end to end.** One small internal robustness follow-up remains (#458, making the new
+brain read its values in one atomic step).
+
 ## 2026-06-17 — One brain now decides whether a workout is live or paused
 
 **The problem (in plain words).** Different parts of the app each figured out on their own
