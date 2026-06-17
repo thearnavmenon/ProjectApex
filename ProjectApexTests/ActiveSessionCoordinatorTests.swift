@@ -367,4 +367,51 @@ final class ActiveSessionCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isLive, "the session goes live only after the explicit resume")
         XCTAssertFalse(coordinator.pausedSessionExists)
     }
+
+    // 10. #462 — the NowTrainingBar state is a pure function of the coordinator flags.
+    //     Live wins over a (stale) paused sentinel, mirroring coordinator precedence.
+    func testNowTrainingBarState_pureResolve_allPermutations() {
+        XCTAssertEqual(NowTrainingBar.BarState.resolve(isLive: true,  pausedExists: false), .live)
+        XCTAssertEqual(NowTrainingBar.BarState.resolve(isLive: false, pausedExists: true),  .paused)
+        XCTAssertEqual(NowTrainingBar.BarState.resolve(isLive: false, pausedExists: false), .idle)
+        // Defined-but-impossible: a live actor must win over a stale paused sentinel.
+        XCTAssertEqual(NowTrainingBar.BarState.resolve(isLive: true,  pausedExists: true),  .live)
+    }
+
+    // 11. #462 — driven off the real coordinator: the bar state agrees with the
+    //     single ActiveSession enum at idle / paused / live, with no disagreement.
+    func testNowTrainingBarState_matchesCoordinator_idlePausedLive() async throws {
+        // Idle.
+        let idleManager = makeManager()
+        let idleCoordinator = ActiveSessionCoordinator(manager: idleManager)
+        await idleCoordinator.refresh()
+        XCTAssertEqual(
+            NowTrainingBar.BarState.resolve(isLive: idleCoordinator.isLive, pausedExists: idleCoordinator.pausedSessionExists),
+            .idle
+        )
+
+        // Paused (sentinel + idle actor).
+        let pausedManager = makeManager()
+        let pausedDay = makeTrainingDay()
+        savePausedSentinel(for: pausedDay)
+        let pausedCoordinator = ActiveSessionCoordinator(manager: pausedManager)
+        await pausedCoordinator.refresh()
+        XCTAssertEqual(
+            NowTrainingBar.BarState.resolve(isLive: pausedCoordinator.isLive, pausedExists: pausedCoordinator.pausedSessionExists),
+            .paused
+        )
+        PausedSessionState.clear()
+
+        // Live.
+        let liveManager = makeManager()
+        let liveDay = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+        await liveManager.startSession(trainingDay: liveDay, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let liveCoordinator = ActiveSessionCoordinator(manager: liveManager)
+        await liveCoordinator.refresh()
+        XCTAssertEqual(
+            NowTrainingBar.BarState.resolve(isLive: liveCoordinator.isLive, pausedExists: liveCoordinator.pausedSessionExists),
+            .live
+        )
+    }
 }
