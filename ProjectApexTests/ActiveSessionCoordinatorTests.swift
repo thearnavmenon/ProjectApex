@@ -325,4 +325,46 @@ final class ActiveSessionCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isLive, "A rejected resume must not make the coordinator go live")
         XCTAssertNotNil(PausedSessionState.load(), "A rejected resume must preserve the sentinel")
     }
+
+    // 9. #461 — polling/refresh (a tab open or the 500ms tick) must NEVER auto-revive a
+    //    paused session. The actor stays .idle across repeated refreshes; only an explicit
+    //    resumeSession transitions to live. Locks the invariant behind the on-appear fix
+    //    that moved resume from view-appearance to a deliberate tap.
+    func testRefresh_neverAutoResumesPausedSession_onlyExplicitResumeGoesLive() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 2)
+        let coordinator = ActiveSessionCoordinator(manager: manager)
+
+        let paused = PausedSessionState(
+            sessionId: UUID(),
+            trainingDayId: day.id,
+            weekId: UUID(),
+            weekNumber: 1,
+            exerciseIndex: 0,
+            currentSetNumber: 1,
+            dayType: day.dayLabel,
+            programId: UUID(),
+            userId: UUID(),
+            pausedAt: Date(),
+            exerciseSignature: PausedSessionState.exerciseSignature(for: day)
+        )
+        paused.save()
+
+        // Repeated refreshes simulate tab opens / the 500ms poll. None may revive the actor.
+        for _ in 0..<3 {
+            await coordinator.refresh()
+            let state = await manager.sessionState
+            XCTAssertEqual(state, .idle, "refresh()/poll must not auto-resume — the actor stays idle")
+            XCTAssertTrue(coordinator.pausedSessionExists, "the sentinel remains until a deliberate resume")
+            XCTAssertFalse(coordinator.isLive)
+        }
+
+        // Only an explicit resume — the deliberate tap path — transitions to live.
+        let resumed = await manager.resumeSession(pausedState: paused, trainingDay: day, completedSetLogs: [])
+        XCTAssertTrue(resumed)
+        try await Task.sleep(nanoseconds: 200_000_000)
+        await coordinator.refresh()
+        XCTAssertTrue(coordinator.isLive, "the session goes live only after the explicit resume")
+        XCTAssertFalse(coordinator.pausedSessionExists)
+    }
 }

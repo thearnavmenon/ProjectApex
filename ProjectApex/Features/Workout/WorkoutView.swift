@@ -68,6 +68,11 @@ struct WorkoutView: View {
     /// Shows a recovery dialog so the user can choose how to proceed.
     @State private var showMismatchRecoveryAlert = false
     @State private var mismatchSavedState: PausedSessionState? = nil
+    /// #461: a paused sentinel matching THIS day, resolved once on appearance.
+    /// Non-nil drives the deliberate "Workout paused" screen instead of auto-resuming.
+    /// Cleared the moment the user taps Resume or Discard (so the live/preflight render
+    /// takes over and a re-fire of `.task` does not re-surface the screen mid-resume).
+    @State private var pausedForThisDay: PausedSessionState? = nil
     /// True when the user has never completed a session (session_count == 0 in UserDefaults).
     /// Drives the first-session calibration banner in PreWorkoutView (FB-005).
     private var isFirstSession: Bool {
@@ -199,12 +204,12 @@ struct WorkoutView: View {
                 return
             }
 
-            // #441: single resume path. The coordinator-driven host guarantees this
-            // view's `trainingDay` already equals the coordinator's paused/live day, so
-            // the former explicit-resumeState (Path A) vs PausedSessionState.load()
-            // (Path B) distinction is moot. The mismatch alert is the single failure
-            // surface; the isIdle gate prevents double-resumption when the actor was
-            // already revived by an earlier path (e.g. the .task re-firing post-navigation).
+            // #461: viewing the Workout tab no longer auto-resumes a paused session.
+            // We resolve a matching paused sentinel once and surface the deliberate
+            // "Workout paused" screen; resume is a button tap that calls the SAME
+            // `performResume` (#441's single resume FUNCTION — one function, now
+            // triggered by a tap, not by appearance). The day-mismatch guard still
+            // fires the recovery alert here, exactly as before (#436).
             if let saved = PausedSessionState.load() {
                 guard saved.trainingDayId == trainingDay.id else {
                     mismatchSavedState = saved
@@ -213,7 +218,7 @@ struct WorkoutView: View {
                 }
                 let isIdle = await deps.workoutSessionManager.sessionState == .idle
                 if isIdle {
-                    performResume(saved, vm: vm)
+                    pausedForThisDay = saved
                 }
             }
         }
@@ -352,6 +357,28 @@ struct WorkoutView: View {
         switch vm.sessionState {
 
         case .idle, .preflight:
+            if let saved = pausedForThisDay {
+                // #461: a paused session for this day exists — show the deliberate
+                // paused screen. Resume / Discard both clear `pausedForThisDay` first
+                // so the live/preflight render takes over cleanly.
+                WorkoutPausedView(
+                    pausedState: saved,
+                    trainingDay: trainingDay,
+                    onResume: {
+                        pausedForThisDay = nil
+                        performResume(saved, vm: vm)
+                    },
+                    onDiscard: {
+                        pausedForThisDay = nil
+                        Task {
+                            await deps.workoutSessionManager.abandonSession(sessionId: saved.sessionId)
+                        }
+                    },
+                    onViewPlan: {
+                        vm.showSessionPlanSheet = true
+                    }
+                )
+            } else {
             PreWorkoutView(
                 viewModel: vm,
                 trainingDay: trainingDay,
@@ -381,6 +408,7 @@ struct WorkoutView: View {
                 isGeneratingSession: isGeneratingSession,
                 onGenerateSession: onGenerateSession
             )
+            }
 
         case .active(let exercise, let setNumber):
             ActiveSetView(
