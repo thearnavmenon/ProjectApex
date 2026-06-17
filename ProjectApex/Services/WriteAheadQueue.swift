@@ -65,11 +65,18 @@ enum WAQFlushOutcome: Sendable, Equatable {
     case transientFailure
     /// Remote end rejected the item permanently — log and remove without retry.
     case permanentFailure(String)
+    /// Postgres foreign_key_violation (SQLSTATE 23503) — e.g. a `workout_sessions`
+    /// insert whose `program_id` has no `programs` row yet (#442). Distinct from a
+    /// generic transient: it must NOT be retried-to-exhaustion-then-silently-
+    /// dead-lettered. The item is retained (retry-until-the-parent-row-exists) AND
+    /// surfaced via `foreignKeyBlockedWrites()` so the condition has a reader.
+    case foreignKeyViolation(table: String)
 
     static func == (lhs: WAQFlushOutcome, rhs: WAQFlushOutcome) -> Bool {
         switch (lhs, rhs) {
         case (.success, .success), (.transientFailure, .transientFailure): return true
         case (.permanentFailure(let l), .permanentFailure(let r)): return l == r
+        case (.foreignKeyViolation(let l), .foreignKeyViolation(let r)): return l == r
         default: return false
         }
     }
@@ -118,6 +125,14 @@ actor WriteAheadQueue {
     /// permanently rejected. Persisted separately so they survive launches and
     /// can be recovered (e.g. by session resume) instead of being silently lost.
     private(set) var deadLetter: [QueuedWrite] = []
+
+    /// Foreign-key-blocked writes (#442): items whose remote insert hit a Postgres
+    /// 23503 (e.g. `workout_sessions.program_id` referencing a not-yet-persisted
+    /// `programs` row). Surfaced — NOT dead-lettered — so the condition has a reader
+    /// and the item keeps retrying until the parent row exists. In-memory only:
+    /// the queued item itself is already persisted, so this is a transient signal
+    /// that need not survive a relaunch.
+    private(set) var foreignKeyBlocked: [QueuedWrite] = []
 
     /// Per-table flush handlers. When a table has a registered handler, the WAQ
     /// calls it instead of the default Supabase REST insert path. Registered at
@@ -231,7 +246,7 @@ actor WriteAheadQueue {
             persistQueue()
         }
 
-        while !queue.isEmpty {
+        flushLoop: while !queue.isEmpty {
             var item = queue[0]
 
             let outcome = await dispatch(item)
@@ -244,6 +259,9 @@ actor WriteAheadQueue {
             switch outcome {
             case .success:
                 queue.removeFirst()
+                // Clear any prior FK-blocked surfacing for this item — the parent
+                // row now exists and the write landed (#442).
+                foreignKeyBlocked.removeAll { $0.id == item.id }
                 // No per-item persistQueue() — deferred to end of flush. [#369 perf-27]
 
             case .permanentFailure(let reason):
@@ -251,6 +269,20 @@ actor WriteAheadQueue {
                 recordFailedWrite(item)   // persists dead-letter immediately for crash-safety
                 // No per-item persistQueue() — deferred to end of flush. [#369 perf-27]
                 Self.logger.error("[WriteAheadQueue] permanent failure (dead-lettered), item \(item.id, privacy: .public), table: \(item.table, privacy: .public) — \(reason, privacy: .public)")
+
+            case .foreignKeyViolation(let table):
+                // #442 (Q4): a 23503 means the parent row (e.g. `programs` for a
+                // `workout_sessions` insert) is not present YET — typically a fast
+                // self-correcting race once the program-persist completes. Treat it
+                // as DISTINCT from a generic transient: surface it (so the condition
+                // has a reader) and retain the item for retry WITHOUT counting
+                // against the retry-exhaustion budget, so it is never silently
+                // dead-lettered. Break out of the FIFO loop after recording — a
+                // later flush (triggered by the next enqueue / foreground / network
+                // event, once the parent row exists) retries from the head.
+                recordForeignKeyBlocked(item)
+                Self.logger.error("[WriteAheadQueue] foreign-key violation (23503) — surfaced, retained for retry: item \(item.id, privacy: .public), table: \(table, privacy: .public)")
+                break flushLoop
 
             case .transientFailure:
                 item.retryCount += 1
@@ -301,8 +333,7 @@ actor WriteAheadQueue {
         if let handler = flushHandlers[item.table] {
             return await handler(item)
         }
-        let success = await sendToSupabase(item)
-        return success ? .success : .transientFailure
+        return await sendToSupabase(item)
     }
 
     /// Returns the number of items currently in the queue.
@@ -330,6 +361,12 @@ actor WriteAheadQueue {
     /// #190) can recover them instead of suffering silent data loss.
     func failedWrites() -> [QueuedWrite] { deadLetter }
 
+    /// Returns the foreign-key-blocked writes (#442): items currently failing a
+    /// Postgres 23503 (missing parent row). Surfaced so the condition is observable
+    /// instead of silently retried-then-dead-lettered. The item also remains in the
+    /// live queue and keeps retrying until the parent row exists.
+    func foreignKeyBlockedWrites() -> [QueuedWrite] { foreignKeyBlocked }
+
     /// Removes a recovered/handled item from the dead-letter store.
     func removeFailedWrite(id: UUID) {
         deadLetter.removeAll { $0.id == id }
@@ -351,6 +388,7 @@ actor WriteAheadQueue {
         userDefaults.removeObject(forKey: Self.persistenceKey)
         deadLetter.removeAll()
         userDefaults.removeObject(forKey: Self.deadLetterKey)
+        foreignKeyBlocked.removeAll()   // #442 — surfaced store is in-memory only
     }
 
     // MARK: - Blocking Write (for session summary)
@@ -379,17 +417,32 @@ actor WriteAheadQueue {
     // MARK: - Private: Supabase Interaction
 
     /// Attempts to POST the queued item's payload to Supabase.
-    /// Returns true on success (HTTP 2xx), false on failure.
-    private func sendToSupabase(_ item: QueuedWrite) async -> Bool {
+    /// Returns `.success` on HTTP 2xx, `.foreignKeyViolation` when the failure is a
+    /// Postgres 23503 (#442 — distinct, surfaced), and `.transientFailure` for every
+    /// other failure (the existing retry-with-backoff path).
+    private func sendToSupabase(_ item: QueuedWrite) async -> WAQFlushOutcome {
         do {
             // Build a raw insert using the pre-encoded JSON data
             try await supabase.insertRawJSON(item.payload, table: item.table)
             print("[WriteAheadQueue] Flushed item \(item.id) → table: \(item.table)")
-            return true
+            return .success
         } catch {
+            if Self.isForeignKeyViolation(error) {
+                print("[WriteAheadQueue] Flush hit foreign-key violation (23503) for item \(item.id), table: \(item.table) — surfaced, retained for retry")
+                return .foreignKeyViolation(table: item.table)
+            }
             print("[WriteAheadQueue] Flush failed for item \(item.id), table: \(item.table), retry \(item.retryCount)/\(Self.maxRetries): \(error.localizedDescription)")
-            return false
+            return .transientFailure
         }
+    }
+
+    /// Detects a Postgres `foreign_key_violation` (SQLSTATE 23503) in a thrown
+    /// `SupabaseError`. PostgREST surfaces it as an HTTP error (typically 409)
+    /// whose JSON body carries `"code":"23503"`. We match on the SQLSTATE in the
+    /// body (the stable contract) rather than the HTTP status alone (#442).
+    private static func isForeignKeyViolation(_ error: Error) -> Bool {
+        guard case let SupabaseError.httpError(_, body) = error else { return false }
+        return body.contains("23503") || body.contains("foreign_key_violation")
     }
 
     // MARK: - Private: Persistence
@@ -412,6 +465,15 @@ actor WriteAheadQueue {
     private func recordFailedWrite(_ item: QueuedWrite) {
         deadLetter.append(item)
         persistDeadLetter()
+    }
+
+    /// Records a foreign-key-blocked item in the surfaced store (#442), deduped by
+    /// id so repeated 23503 retries of the same write don't grow the list unbounded.
+    /// In-memory only — the queued item is already persisted, so this is a transient
+    /// signal that need not survive a relaunch.
+    private func recordForeignKeyBlocked(_ item: QueuedWrite) {
+        guard !foreignKeyBlocked.contains(where: { $0.id == item.id }) else { return }
+        foreignKeyBlocked.append(item)
     }
 
     /// Persists the current dead-letter store to UserDefaults.

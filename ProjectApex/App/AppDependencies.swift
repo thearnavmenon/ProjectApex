@@ -276,6 +276,41 @@ final class AppDependencies {
         )
 
         // 11. WorkoutSessionManager — needs AI inference, HealthKit, Memory, Supabase, GymFactStore, WAQ, streak, trainee model
+        //
+        // #442 (Q4) — ensure-persist-first seam. Before the manager enqueues the
+        // `workout_sessions` row, this guarantees the `programs` parent row exists on
+        // the server (the missing-parent case is the 23503 FK-fail → silent
+        // dead-letter that loses the workout). Mirrors `backfillCachedProgramIfNeeded`:
+        // persist the locally-cached program ONLY when the server genuinely has none
+        // under the resolved owner; a server program already present → no write
+        // needed; a fetch that throws (offline) → return false so `startSession`
+        // surfaces rather than enqueuing a doomed row. Idempotent + best-effort, via
+        // the shared resolve-before-stamp helper (`OnboardingProgramPersist`).
+        let supabaseForPersist = supabaseClient
+        let placeholderId = Self.placeholderUserId
+        let ensureProgramPersisted: @Sendable (UUID, UUID) async -> Bool = { _, ownerUserId in
+            guard ownerUserId != placeholderId else { return false }
+            let serverActiveProgram: ProgramRow?
+            do {
+                serverActiveProgram = try await supabaseForPersist.fetchActiveProgram(userId: ownerUserId)
+            } catch {
+                // Couldn't reach the server — surface (do NOT conclude "empty" and
+                // do NOT enqueue a session that would FK-fail).
+                return false
+            }
+            // A program already exists server-side → parent row present, no FK risk.
+            guard serverActiveProgram == nil else { return true }
+            // Server genuinely empty → backfill the locally-cached program (the
+            // local cache + persist helper are MainActor-isolated). With no local
+            // cache there is nothing this seam can persist; allow the start to
+            // proceed (the legacy path) rather than hard-blocking.
+            guard let cached = await MainActor.run(body: { Mesocycle.loadFromUserDefaults() }) else { return true }
+            return await OnboardingProgramPersist.persistIfOwnerResolved(
+                cached,
+                owner: ownerUserId,
+                client: supabaseForPersist
+            )
+        }
         let manager = WorkoutSessionManager(
             aiInference: inferenceService,
             healthKit: healthKitService,
@@ -284,7 +319,8 @@ final class AppDependencies {
             gymFactStore: gymFactStore,
             writeAheadQueue: waq,
             gymStreakService: gymStreakService,
-            traineeModelService: tmService
+            traineeModelService: tmService,
+            ensureProgramPersisted: ensureProgramPersisted
         )
         self.workoutSessionManager = manager
 

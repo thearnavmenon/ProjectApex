@@ -203,6 +203,17 @@ actor WorkoutSessionManager {
     private let gymStreakService: GymStreakService
     private let traineeModelService: TraineeModelService?
 
+    /// Ensure-persist-first seam (#442, Q4). Given `(programId, ownerUserId)`, this
+    /// idempotently guarantees the `programs` row is present on the server BEFORE
+    /// `startSession` enqueues the `workout_sessions` row — otherwise a missing
+    /// parent row makes the insert FK-fail (23503), retry ~31s, and silently
+    /// dead-letter. Returns `true` iff the program is guaranteed persisted; `false`
+    /// when it cannot complete (offline / owner unresolved), in which case
+    /// `startSession` surfaces the failure rather than enqueuing a doomed session.
+    /// Defaults to `nil` (skip the gate, preserve legacy behavior) so existing
+    /// call-sites/tests are unchanged; production wires the real persist.
+    private let ensureProgramPersisted: (@Sendable (UUID, UUID) async -> Bool)?
+
     // MARK: - Init
 
     init(
@@ -213,7 +224,8 @@ actor WorkoutSessionManager {
         gymFactStore: GymFactStore,
         writeAheadQueue: WriteAheadQueue? = nil,
         gymStreakService: GymStreakService? = nil,
-        traineeModelService: TraineeModelService? = nil
+        traineeModelService: TraineeModelService? = nil,
+        ensureProgramPersisted: (@Sendable (UUID, UUID) async -> Bool)? = nil
     ) {
         self.aiInference = aiInference
         self.healthKit = healthKit
@@ -224,6 +236,7 @@ actor WorkoutSessionManager {
         self.writeAheadQueue = waq
         self.gymStreakService = gymStreakService ?? GymStreakService(supabase: supabase)
         self.traineeModelService = traineeModelService
+        self.ensureProgramPersisted = ensureProgramPersisted
     }
 
     // MARK: - Public API
@@ -244,6 +257,21 @@ actor WorkoutSessionManager {
         // this guard runs BEFORE any mutation so a failed start leaves zero durable traces.
         guard !trainingDay.exercises.isEmpty else {
             sessionState = .error("Training day has no exercises.")
+            return
+        }
+
+        // #442 (Q4) — ensure-persist-first. Guarantee the `programs` row exists on
+        // the server BEFORE we enqueue the `workout_sessions` row. Without this, a
+        // fresh user whose program was only ever cached locally has ZERO server
+        // programs, so every session insert FK-fails (Postgres 23503,
+        // workout_sessions_program_id_fkey), retries ~31s in the WAQ, then silently
+        // dead-letters — the workout is lost with no reader. The persist is
+        // idempotent and runs under the resolved owner (placeholder/offline → no
+        // write). If it cannot complete, do NOT proceed-and-drop: surface it (mirror
+        // the empty-exercises guard — mutate nothing, no sentinel, no doomed session
+        // row) so the user is told to reconnect rather than losing the session.
+        if let ensureProgramPersisted, await ensureProgramPersisted(programId, userId) == false {
+            sessionState = .error("Couldn't sync your program — check your connection and try again.")
             return
         }
 

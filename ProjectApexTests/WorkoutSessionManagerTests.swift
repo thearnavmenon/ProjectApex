@@ -849,6 +849,81 @@ final class WorkoutSessionManagerTests: XCTestCase {
         )
     }
 
+    // MARK: #442 (Q4) — ensure-persist-first on session start
+
+    /// The idempotent program-persist must be AWAITED before the workout_sessions row
+    /// is enqueued. Otherwise a missing `programs` row makes the insert FK-fail (23503),
+    /// retry ~31s, and silently dead-letter. The seam records whether persist completed
+    /// at the moment the session insert is dispatched.
+    func testStartSession_awaitsProgramPersist_beforeEnqueuingSessionRow() async throws {
+        WSMBodyCaptureURLProtocol.reset()
+        let persistRan = WSMFlag()
+        let persistWasDoneAtSessionInsert = WSMFlag()
+
+        let manager = makeBodyCaptureManager(
+            ensureProgramPersisted: { _, _ in
+                persistRan.value = true
+                return true
+            },
+            onWorkoutSessionInsert: {
+                // Captured the instant the session POST is dispatched.
+                persistWasDoneAtSessionInsert.value = persistRan.value
+            }
+        )
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        XCTAssertTrue(persistRan.value, "program-persist must run during startSession")
+        XCTAssertTrue(
+            persistWasDoneAtSessionInsert.value,
+            "program-persist must complete BEFORE the workout_sessions row is enqueued/inserted"
+        )
+
+        let state = await manager.sessionState
+        guard case .active = state else {
+            XCTFail("Expected .active after a successful start, got \(state)")
+            return
+        }
+    }
+
+    /// When persistence cannot complete (offline / owner unresolved), startSession must
+    /// NOT proceed-and-drop: it surfaces the failure (.error) and enqueues NO
+    /// workout_sessions row that would FK-fail.
+    func testStartSession_persistFails_surfacesAndDoesNotEnqueueSession() async throws {
+        WSMBodyCaptureURLProtocol.reset()
+        let manager = makeBodyCaptureManager(
+            ensureProgramPersisted: { _, _ in false }   // offline / owner unresolved
+        )
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        // 1. Surfaced, not silently dropped.
+        let state = await manager.sessionState
+        guard case .error = state else {
+            XCTFail("Expected .error when program-persist cannot complete, got \(state)")
+            return
+        }
+
+        // 2. No workout_sessions row enqueued/POSTed (would FK-fail with 23503).
+        let sessionRowPosts = WSMBodyCaptureURLProtocol.captured.filter {
+            $0.path.contains("workout_sessions") && $0.method == "POST"
+        }
+        XCTAssertTrue(
+            sessionRowPosts.isEmpty,
+            "A persist-blocked start must not enqueue a workout_sessions row; captured: \(sessionRowPosts.map(\.path))"
+        )
+
+        // 3. No crash sentinel written (nothing to recover).
+        XCTAssertNil(
+            PausedSessionState.load(),
+            "A persist-blocked start must not write a PausedSessionState crash sentinel"
+        )
+    }
+
     // MARK: #318 / J-F2 — resuming an empty/exhausted day aborts without completion
 
     /// Regression pinning the CORRECTED J-F2 mechanism: resuming a day with no
@@ -1159,11 +1234,24 @@ final class WorkoutSessionManagerTests: XCTestCase {
 
 // MARK: - Body-capturing URLProtocol (#171 — inspect the PATCH payload)
 
+/// Minimal reference-type flag for cross-Task observation in tests (#442).
+private final class WSMFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = false
+    var value: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _value }
+        set { lock.lock(); _value = newValue; lock.unlock() }
+    }
+}
+
 private final class WSMBodyCaptureURLProtocol: URLProtocol, @unchecked Sendable {
     static let lock = NSLock()
     nonisolated(unsafe) static var captured: [(path: String, method: String, body: Data)] = []
+    /// Fired when a workout_sessions POST is dispatched, so a test can sample state
+    /// at the exact moment the session row insert reaches the network (#442).
+    nonisolated(unsafe) static var onWorkoutSessionInsert: (() -> Void)?
     static func reset() {
-        lock.lock(); captured = []; lock.unlock()
+        lock.lock(); captured = []; onWorkoutSessionInsert = nil; lock.unlock()
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -1184,6 +1272,9 @@ private final class WSMBodyCaptureURLProtocol: URLProtocol, @unchecked Sendable 
             }
         }
         Self.lock.lock(); Self.captured.append((path, method, body)); Self.lock.unlock()
+        if path.contains("workout_sessions") && method == "POST" {
+            Self.onWorkoutSessionInsert?()
+        }
 
         // Return one row for workout_sessions so the PATCH's performExpectingRow
         // (return=representation) sees a match; empty array otherwise.
@@ -1198,9 +1289,15 @@ private final class WSMBodyCaptureURLProtocol: URLProtocol, @unchecked Sendable 
     override func stopLoading() {}
 }
 
-private func makeBodyCaptureManager() -> WorkoutSessionManager {
+private func makeBodyCaptureManager(
+    ensureProgramPersisted: (@Sendable (UUID, UUID) async -> Bool)? = nil,
+    onWorkoutSessionInsert: (() -> Void)? = nil
+) -> WorkoutSessionManager {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [WSMBodyCaptureURLProtocol.self]
+    if let onWorkoutSessionInsert {
+        WSMBodyCaptureURLProtocol.onWorkoutSessionInsert = onWorkoutSessionInsert
+    }
     let supabase = SupabaseClient(
         supabaseURL: URL(string: "https://test.supabase.co")!,
         anonKey: "test-key",
@@ -1221,7 +1318,8 @@ private func makeBodyCaptureManager() -> WorkoutSessionManager {
         memoryService: memoryService,
         supabase: supabase,
         gymFactStore: gymFactStore,
-        writeAheadQueue: waq
+        writeAheadQueue: waq,
+        ensureProgramPersisted: ensureProgramPersisted
     )
 }
 
