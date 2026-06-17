@@ -7,6 +7,27 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — Made the "live or paused" brain read its answer in one clean step
+
+**The problem (in plain words).** The single "live or paused" brain we built (#440) asked
+the workout engine three separate questions in a row — what state are you in, which day,
+which session — to figure out its answer. Because they were three separate questions, the
+engine could change its mind in between, so in theory the answers could come from slightly
+different moments and not line up. It was safe in practice (a built-in check caught it), but
+fragile — exactly the kind of thing that was already fixed everywhere else in the app by
+asking for everything in one snapshot.
+
+**What changed.** The brain now grabs the whole answer — state, day, and session together —
+in a single snapshot, so the pieces always come from the same instant and can't drift apart.
+Nothing about how it behaves changed; it's just sturdier under the hood. (#458)
+
+**How it was checked.** Test-first: added a test that the snapshot now includes the session
+id and matches the engine. Built clean, all 39 tests pass (the 8 brain tests unchanged and
+still green, confirming behaviour didn't move).
+
+**Status.** Merged to `main` (PR #460; issue #458 closed). This was the last loose end from
+the Workout/Programme cure — that whole effort is now fully wrapped, follow-ups and all.
+
 ## 2026-06-17 — Removed the old crash-recovery workaround that could mark the wrong day
 
 **The problem (in plain words).** There was a leftover sticky note inside the app called
