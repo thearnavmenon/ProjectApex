@@ -972,6 +972,155 @@ final class WorkoutSessionManagerTests: XCTestCase {
         )
     }
 
+    // MARK: #447 — resume validates the day's exercise-set signature
+
+    /// Defense-in-depth: a paused session whose stored exercise signature does NOT
+    /// match the current day's exercise list must NOT be silently replayed. The day's
+    /// exercises changed since the pause, so the stored exerciseIndex / set_logs
+    /// mapping is no longer trustworthy — resume is rejected and surfaces an error
+    /// (routing to the existing mismatch-recovery UI) rather than mis-replaying.
+    func testResumeSession_signatureMismatch_isRejectedNotReplayed() async throws {
+        let manager = makeManager()
+
+        // The day the user paused on (signature captured from THIS list).
+        let pausedDay = makeTrainingDay(exerciseCount: 2, setsPerExercise: 2)
+        // The CURRENT day — same id (UUID still matches) but a DIFFERENT exercise
+        // list (e.g. the program was edited between pause and resume).
+        let editedDay = TrainingDay(
+            id: pausedDay.id,
+            dayOfWeek: pausedDay.dayOfWeek,
+            dayLabel: pausedDay.dayLabel,
+            exercises: makeTrainingDay(exerciseCount: 3, setsPerExercise: 2).exercises,
+            sessionNotes: nil
+        )
+
+        let paused = PausedSessionState(
+            sessionId: UUID(),
+            trainingDayId: pausedDay.id,
+            weekId: UUID(),
+            weekNumber: 1,
+            exerciseIndex: 1,
+            currentSetNumber: 1,
+            dayType: pausedDay.dayLabel,
+            programId: UUID(),
+            userId: UUID(),
+            pausedAt: Date(),
+            exerciseSignature: PausedSessionState.exerciseSignature(for: pausedDay)
+        )
+
+        // Precondition: the sentinel is persisted, as it is in production at pause
+        // time — only then is "a rejected resume preserves it" a meaningful assertion.
+        paused.save()
+        XCTAssertNotNil(PausedSessionState.load(), "precondition: paused session saved")
+
+        let resumed = await manager.resumeSession(
+            pausedState: paused,
+            trainingDay: editedDay,
+            completedSetLogs: []
+        )
+
+        XCTAssertFalse(resumed, "A signature mismatch must reject the resume")
+        let state = await manager.sessionState
+        guard case .error = state else {
+            XCTFail("Signature mismatch must surface .error (mismatch recovery), got \(state)")
+            return
+        }
+        // The sentinel is preserved so the user can still Abandon/Save via the recovery UI.
+        XCTAssertNotNil(
+            PausedSessionState.load(),
+            "A rejected resume must NOT clear the sentinel — the recovery UI still needs it"
+        )
+    }
+
+    /// Happy path: a stored signature that matches the current day's exercise list
+    /// lets resume proceed normally.
+    func testResumeSession_signatureMatch_proceeds() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 2)
+
+        let paused = PausedSessionState(
+            sessionId: UUID(),
+            trainingDayId: day.id,
+            weekId: UUID(),
+            weekNumber: 1,
+            exerciseIndex: 0,
+            currentSetNumber: 1,
+            dayType: day.dayLabel,
+            programId: UUID(),
+            userId: UUID(),
+            pausedAt: Date(),
+            exerciseSignature: PausedSessionState.exerciseSignature(for: day)
+        )
+
+        let resumed = await manager.resumeSession(
+            pausedState: paused,
+            trainingDay: day,
+            completedSetLogs: []
+        )
+
+        XCTAssertTrue(resumed, "A matching signature must allow resume to proceed")
+        let state = await manager.sessionState
+        if case .error = state {
+            XCTFail("A matching signature must not error; got \(state)")
+        }
+    }
+
+    /// Back-compat: a legacy sentinel written before the signature field existed
+    /// decodes with a nil signature. A nil stored signature must NOT spuriously
+    /// reject a legitimate resume.
+    func testResumeSession_nilStoredSignature_doesNotReject() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 2)
+
+        let paused = PausedSessionState(
+            sessionId: UUID(),
+            trainingDayId: day.id,
+            weekId: UUID(),
+            weekNumber: 1,
+            exerciseIndex: 0,
+            currentSetNumber: 1,
+            dayType: day.dayLabel,
+            programId: UUID(),
+            userId: UUID(),
+            pausedAt: Date(),
+            exerciseSignature: nil   // legacy sentinel
+        )
+
+        let resumed = await manager.resumeSession(
+            pausedState: paused,
+            trainingDay: day,
+            completedSetLogs: []
+        )
+
+        XCTAssertTrue(resumed, "A nil stored signature must not reject a legitimate resume")
+    }
+
+    /// The signature is deterministic and order-sensitive: same ordered ids → same
+    /// signature; reordered or changed ids → different signature. No Date/random.
+    func testExerciseSignature_isDeterministicAndOrderSensitive() {
+        let dayA = makeTrainingDay(exerciseCount: 3, setsPerExercise: 2)
+        let sig1 = PausedSessionState.exerciseSignature(for: dayA)
+        let sig2 = PausedSessionState.exerciseSignature(for: dayA)
+        XCTAssertEqual(sig1, sig2, "Signature must be deterministic for the same list")
+
+        // A day with the same exercises but reversed order → different signature.
+        let reversed = TrainingDay(
+            id: dayA.id, dayOfWeek: dayA.dayOfWeek, dayLabel: dayA.dayLabel,
+            exercises: dayA.exercises.reversed(), sessionNotes: nil
+        )
+        XCTAssertNotEqual(
+            sig1, PausedSessionState.exerciseSignature(for: reversed),
+            "Reordering the exercise list must change the signature"
+        )
+
+        // A day with an added exercise → different signature.
+        let dayBigger = makeTrainingDay(exerciseCount: 4, setsPerExercise: 2)
+        XCTAssertNotEqual(
+            sig1, PausedSessionState.exerciseSignature(for: dayBigger),
+            "Changing the exercise count must change the signature"
+        )
+    }
+
     // MARK: #318 / U5 — skip set (G-F7): advancement must be set-number-based
 
     /// The bug-catcher (critic amendment): a SKIPPED set writes no SetLog, so

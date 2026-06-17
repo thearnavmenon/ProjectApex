@@ -385,6 +385,14 @@ nonisolated struct PausedSessionState: Codable, Sendable {
     let programId: UUID
     let userId: UUID
     let pausedAt: Date
+    /// #447: a deterministic signature of the day's ordered exercise list at session
+    /// start. On resume the live day's signature is recomputed and compared; a mismatch
+    /// means the exercise list changed since the pause (e.g. a program edit), so the
+    /// stored exerciseIndex / set_logs mapping can no longer be trusted and resume is
+    /// rejected rather than mis-replayed. Optional for Codable back-compat: a legacy
+    /// sentinel written before this field existed decodes to nil ("unknown"), which is
+    /// treated as "do not reject" so a legitimate resume is never spuriously blocked.
+    let exerciseSignature: String?
 
     // Custom decoder: weekNumber was added after initial release, so old UserDefaults
     // snapshots won't have it. Fall back to 1 rather than failing to decode entirely.
@@ -400,6 +408,8 @@ nonisolated struct PausedSessionState: Codable, Sendable {
         programId      = try c.decode(UUID.self,   forKey: .programId)
         userId         = try c.decode(UUID.self,   forKey: .userId)
         pausedAt       = try c.decode(Date.self,   forKey: .pausedAt)
+        // #447: legacy sentinels have no signature key → nil ("unknown").
+        exerciseSignature = try c.decodeIfPresent(String.self, forKey: .exerciseSignature)
     }
 
     nonisolated init(
@@ -412,7 +422,8 @@ nonisolated struct PausedSessionState: Codable, Sendable {
         dayType: String,
         programId: UUID,
         userId: UUID,
-        pausedAt: Date
+        pausedAt: Date,
+        exerciseSignature: String? = nil
     ) {
         self.sessionId       = sessionId
         self.trainingDayId   = trainingDayId
@@ -424,6 +435,17 @@ nonisolated struct PausedSessionState: Codable, Sendable {
         self.programId       = programId
         self.userId          = userId
         self.pausedAt        = pausedAt
+        self.exerciseSignature = exerciseSignature
+    }
+
+    /// #447: a deterministic, process-stable signature of a day's ordered exercise
+    /// list — the count followed by the ordered exerciseIds. Used to detect that the
+    /// day's exercises changed between pause and resume. Deterministic (no Date/random,
+    /// no Swift `Hasher` which is per-process seeded) so the stored value compares
+    /// equal across app launches.
+    nonisolated static func exerciseSignature(for day: TrainingDay) -> String {
+        let ids = day.exercises.map(\.exerciseId)
+        return "\(ids.count):" + ids.joined(separator: "|")
     }
 
     static let legacyPersistenceKey = "com.projectapex.pausedSessionState"
