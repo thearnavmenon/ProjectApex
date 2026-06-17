@@ -7,6 +7,35 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — A clearer "you've got a workout going" badge above the tab bar
+
+**The problem (in plain words).** The little dot on the Workout tab was meant to glow blue
+when a workout was live and amber when it was paused. But the iPhone refuses to colour that
+kind of dot — it just paints its own red dot for both. So the dot could only tell you "a
+workout exists," never which: live or paused. (That's why it "stayed red" after pausing.) The
+dot also couldn't be tapped to get back to the workout.
+
+**What changed.** The dot is gone. In its place, a small floating pill sits just above the
+tab bar, visible from the Program, Progress, and Settings tabs. When a workout is **live** it
+shows a gently pulsing dot and the word "Training" in blue; when **paused** it shows a still
+pause icon and "Paused — tap to resume" in amber; when nothing's going on, it's not there.
+The movement is the main "this is alive" signal, with colour, the icon, and the words all
+backing it up — so it still reads clearly for colourblind users and for anyone who turns off
+animations. Tapping the pill jumps you to the Workout tab (it doesn't restart anything — the
+paused screen from earlier today handles that). It's hidden while you're already on the
+Workout tab, since you can see the workout right there (same way Apple Music hides its mini
+bar on the now-playing screen).
+
+**How it was checked.** Added tests for the bit that decides live-vs-paused-vs-nothing,
+including that "live" always wins if both signals are set. Built clean on the iPhone 17
+simulator; full suite of 633 tests passed, 0 failures. An independent reviewer dug into the
+two scariest risks — could the floating pill block taps on the tab bar, and does it update
+when the workout state changes — and both came back fine. The exact spacing above the tab bar
+still needs a real eyes-on check on a device.
+
+**Status.** Merged to `main` (PR #464; issue #462 closed). This finishes the two-part
+workout-status fix — Part 1 was the no-auto-resume paused screen (#461) earlier today.
+
 ## 2026-06-17 — Opening the Workout tab no longer secretly restarts a paused workout
 
 **The problem (in plain words).** If you paused a workout and later just tapped back onto the
