@@ -126,6 +126,16 @@ final class ProgramViewModel {
     /// Incremented by ContentView to tell ProgramOverviewView to scroll to the current week.
     var scrollToCurrentWeekTrigger: Int = 0
 
+    /// #439 (Q3 = refuse-and-prompt): set true when `regenerateProgram` was asked to
+    /// run while a live/paused session sentinel (`PausedSessionState`) still exists.
+    /// Regenerating then would mint a fresh mesocycle with new day UUIDs and orphan
+    /// the sentinel — its `trainingDayId` would point at a deleted TrainingDay
+    /// ("Session Not Found" / "Session Mismatch", STATE-5/STATE-6). The guard
+    /// REFUSES (no mutation, no new UUIDs) and sets this flag so the UI can prompt
+    /// the user to finish or abandon the paused session first. Cleared on the next
+    /// regenerate attempt that is allowed to proceed.
+    var regenerationBlockedBySession: Bool = false
+
     // MARK: Sync-error state (#188)
     /// Non-nil when a background Supabase persist failed. The view renders a
     /// non-blocking banner so the user is aware the sync failed. Local-first
@@ -290,6 +300,19 @@ final class ProgramViewModel {
     ///
     /// Called from Settings → "Regenerate Program".
     func regenerateProgram(gymProfile: GymProfile) async {
+        // #439 (Q3 = refuse-and-prompt): a live/paused session sentinel pins the
+        // current mesocycle's day UUIDs. Regenerating would mint a fresh mesocycle
+        // with new UUIDs and orphan the sentinel (its trainingDayId would point at a
+        // deleted TrainingDay — "Session Not Found" / "Session Mismatch",
+        // STATE-5/STATE-6). REFUSE: do not snapshot, clear the cache, or generate.
+        // Surface the refusal so the call site can prompt the user to finish or
+        // abandon the paused session first.
+        guard PausedSessionState.load() == nil else {
+            regenerationBlockedBySession = true
+            return
+        }
+        regenerationBlockedBySession = false
+
         // 1. Snapshot completed days (flat ordered list) before clearing cache.
         let completedDaySnapshots = snapshotCompletedDays()
 
