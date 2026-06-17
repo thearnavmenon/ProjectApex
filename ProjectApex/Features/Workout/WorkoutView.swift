@@ -210,6 +210,9 @@ struct WorkoutView: View {
             // `performResume` (#441's single resume FUNCTION — one function, now
             // triggered by a tap, not by appearance). The day-mismatch guard still
             // fires the recovery alert here, exactly as before (#436).
+            // Re-derive from scratch each appearance so a stale value never survives a
+            // hosted-day change or a sentinel that no longer matches this day.
+            pausedForThisDay = nil
             if let saved = PausedSessionState.load() {
                 guard saved.trainingDayId == trainingDay.id else {
                     mismatchSavedState = saved
@@ -370,6 +373,11 @@ struct WorkoutView: View {
                     },
                     onDiscard: {
                         pausedForThisDay = nil
+                        // Clear the sentinel synchronously so a fast tab-switch back
+                        // cannot re-surface the just-discarded screen before the
+                        // network-gated abandonSession flush clears it (idempotent —
+                        // abandonSession clears it again after the flush).
+                        PausedSessionState.clear()
                         Task {
                             await deps.workoutSessionManager.abandonSession(sessionId: saved.sessionId)
                         }
