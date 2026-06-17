@@ -482,6 +482,65 @@ final class WriteAheadQueueTests: XCTestCase {
         XCTAssertEqual(dead.count, 1, "exhausted item must be dead-lettered, not silently dropped")
     }
 
+    // MARK: #442 (Q4): FK-23503 is classified distinctly, NOT silently dead-lettered
+
+    /// A Postgres foreign_key_violation (SQLSTATE 23503 — the missing-`programs`-row
+    /// case that makes every `workout_sessions` insert FK-fail) must be classified as
+    /// a DISTINCT, surfaced outcome. It must NOT be treated as a generic transient
+    /// that exhausts retries and silently dead-letters with no reader: the item stays
+    /// recoverable (retry-until-program-exists) and is surfaced via
+    /// `foreignKeyBlockedWrites()` rather than dropped into the dead-letter sink.
+    func testFlush_foreignKeyViolation_isSurfacedNotDeadLettered() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        // Tiny base delay so the retry loop spins fast without a 31s wait.
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults, baseRetryDelay: 0.001)
+
+        await queue.registerFlushHandler(forTable: "workout_sessions") { _ in
+            .foreignKeyViolation(table: "workout_sessions")
+        }
+        try await queue.enqueue(TestSetLogPayload.mock(), table: "workout_sessions")
+
+        // Poll until the FK-blocked item is surfaced (1s ceiling).
+        var blocked = await queue.foreignKeyBlockedWrites()
+        for _ in 0..<100 where blocked.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            blocked = await queue.foreignKeyBlockedWrites()
+        }
+        XCTAssertEqual(blocked.count, 1, "FK-23503 item must be surfaced via foreignKeyBlockedWrites()")
+
+        let dead = await queue.failedWrites()
+        XCTAssertTrue(dead.isEmpty, "FK-23503 must NOT be silently dead-lettered as a generic transient")
+    }
+
+    /// Drives a real 23503 through the HTTP path: PostgREST returns HTTP 409 with a
+    /// body carrying `"code":"23503"`. The default (handler-less) flush path must
+    /// recognise that body and classify it as a foreign-key violation — surfaced, not
+    /// retried-to-exhaustion-then-dead-lettered.
+    func testFlush_postgrest23503Body_classifiedAsForeignKeyViolation() async throws {
+        let defaults = UserDefaults(suiteName: "waq.test.\(UUID().uuidString)")!
+        WAQMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(
+                url: request.url!, statusCode: 409,
+                httpVersion: nil, headerFields: nil
+            )!
+            let body = #"{"code":"23503","details":"Key (program_id)=(...) is not present in table \"programs\".","message":"insert or update on table \"workout_sessions\" violates foreign key constraint \"workout_sessions_program_id_fkey\""}"#
+            return (response, Data(body.utf8))
+        }
+
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), userDefaults: defaults, baseRetryDelay: 0.001)
+        try await queue.enqueue(TestSetLogPayload.mock(), table: "workout_sessions")
+
+        var blocked = await queue.foreignKeyBlockedWrites()
+        for _ in 0..<100 where blocked.isEmpty {
+            try await Task.sleep(nanoseconds: 10_000_000)
+            blocked = await queue.foreignKeyBlockedWrites()
+        }
+        XCTAssertEqual(blocked.count, 1, "23503 HTTP body must be classified as a foreign-key violation and surfaced")
+
+        let dead = await queue.failedWrites()
+        XCTAssertTrue(dead.isEmpty, "23503 must NOT land in the dead-letter sink")
+    }
+
     // MARK: Test 9 (#369 perf-27): batch flush emits correct end-state + all items sent
 
     /// Verifies that flushing N items in a batch results in an empty queue and that
