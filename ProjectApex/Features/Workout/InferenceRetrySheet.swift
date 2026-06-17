@@ -104,7 +104,7 @@ struct InferenceRetrySheet: View {
                         HStack(spacing: 8) {
                             Image(systemName: "pause.circle")
                                 .font(.system(size: 16, weight: .medium))
-                            Text("Pause Session")
+                            Text("Pause workout")
                                 .font(.system(size: 17, weight: .medium))
                         }
                         .frame(maxWidth: .infinity)
