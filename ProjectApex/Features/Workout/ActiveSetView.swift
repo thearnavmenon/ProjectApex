@@ -242,7 +242,7 @@ struct ActiveSetView: View {
                     Button {
                         viewModel.onPauseSession()
                     } label: {
-                        Label("Pause Session", systemImage: "pause.circle")
+                        Label("Pause workout", systemImage: "pause.circle")
                     }
                     Button(role: .destructive) {
                         viewModel.requestEndSessionEarly()

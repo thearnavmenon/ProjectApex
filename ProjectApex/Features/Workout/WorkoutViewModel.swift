@@ -18,7 +18,7 @@ import SwiftUI
 
 @Observable
 @MainActor
-final class WorkoutViewModel {
+class WorkoutViewModel {
 
     // MARK: - Observed state (all updated via pullState())
 
@@ -355,15 +355,17 @@ final class WorkoutViewModel {
         }
     }
 
-    /// Called when the user taps "Pause Session" on InferenceRetrySheet.
+    /// Called when the user taps "Pause workout" on InferenceRetrySheet. Thin shim
+    /// over the single `onPauseSession()` pause path — it only dismisses the retry
+    /// sheet first so the sheet does not briefly overlay the paused screen (#466).
     func onPauseFromRetrySheet() {
         showInferenceRetrySheet = false
-        Task { await manager.pauseSession(); await pullState() }
+        onPauseSession()
     }
 
     // MARK: - Pause action
 
-    /// Called when user taps "Pause Session" from the ellipsis menu during active/resting state.
+    /// Called when user taps "Pause workout" from the ellipsis menu during active/resting state.
     func onPauseSession() {
         Task { await manager.pauseSession(); await pullState() }
     }
