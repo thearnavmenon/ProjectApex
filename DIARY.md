@@ -7,6 +7,33 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — Opening the Workout tab no longer secretly restarts a paused workout
+
+**The problem (in plain words).** If you paused a workout and later just tapped back onto the
+Workout tab, the app quietly started the workout again — no button, no question. Merely
+*looking* at the tab resumed it. That felt jarring: you couldn't peek at where you were, or
+sit on a paused workout, without it springing back to life. The same thing happened after the
+app was force-closed mid-workout.
+
+**What changed.** Now, opening the tab on a paused workout shows a calm "Workout paused"
+screen instead of restarting. It tells you where you left off (which exercise, which set, and
+the time you paused), and gives you three clear choices: **Resume**, **View today's plan**
+(just look, don't resume), or **Discard**. The workout only starts again when *you* tap
+Resume — which runs the exact same resume machinery as before, just triggered by your finger
+instead of by the screen appearing. All the existing safety checks (right day, exercises
+unchanged, right account) still run, now on the tap. Returning to a workout that's genuinely
+still running re-attaches automatically as before — that was never the annoying part.
+
+**How it was checked.** Added a test locking in "a poll or a tab open never auto-resumes —
+only a deliberate resume goes live." Built clean on the iPhone 17 simulator; full suite of
+631 tests passed, 0 failures. An independent reviewer went through it and flagged two small
+edges (a stale screen if the day changed underneath you, and a brief window where a
+just-discarded workout could pop back) — both fixed before merge. The look of the new screen
+still needs a real eyes-on check on a device.
+
+**Status.** Merged to `main` (PR #463; issue #461 closed). Part 1 of a two-part workout-UX
+fix; Part 2 (a "Now Training" bar replacing the broken tab dot, #462) is next.
+
 ## 2026-06-17 — Made the "live or paused" brain read its answer in one clean step
 
 **The problem (in plain words).** The single "live or paused" brain we built (#440) asked
