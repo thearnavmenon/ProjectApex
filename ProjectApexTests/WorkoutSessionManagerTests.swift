@@ -1309,6 +1309,35 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertNil(afterReset, "currentSessionId must be cleared on resetToIdle")
     }
 
+    // MARK: #458 — uiSnapshot carries the session identity for one atomic coordinator read
+
+    /// ActiveSessionCoordinator derives .live(dayId:sessionId:) every poll. Reading
+    /// state + dayId + sessionId as three separate actor awaits could tear (the actor
+    /// can advance between hops). uiSnapshot() already returns state + dayId atomically;
+    /// it must also carry currentSessionId so the coordinator reads the whole live
+    /// identity in ONE hop. This pins the new snapshot field.
+    func testUISnapshot_carriesCurrentSessionId_consistentWithState() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        let idleSnap = await manager.uiSnapshot()
+        XCTAssertNil(idleSnap.currentSessionId, "currentSessionId must be nil in an idle snapshot")
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let liveSnap = await manager.uiSnapshot()
+        let actorSessionId = await manager.currentSessionId
+        XCTAssertNotNil(liveSnap.currentSessionId, "currentSessionId must be present in a live snapshot")
+        XCTAssertEqual(liveSnap.currentSessionId, actorSessionId, "snapshot sessionId must match the actor's isolated value")
+        XCTAssertEqual(liveSnap.currentTrainingDayId, day.id, "snapshot dayId must reference the started day")
+        XCTAssertNotEqual(liveSnap.currentSessionId, liveSnap.currentTrainingDayId, "session and day UUIDs must not be conflated")
+
+        await manager.resetToIdle()
+        let resetSnap = await manager.uiSnapshot()
+        XCTAssertNil(resetSnap.currentSessionId, "currentSessionId must be nil after resetToIdle")
+    }
+
     // MARK: #369 [19] — retryInference participates in the generation guard
 
     /// A retry result that resolves AFTER the session has advanced (generation bumped

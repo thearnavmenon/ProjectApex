@@ -75,6 +75,10 @@ nonisolated struct WorkoutUISnapshot: Sendable {
     /// through .sessionComplete (cleared only on resetToIdle) so the view can
     /// verify a completion belongs to the day it was handed (#436 day-identity guard).
     let currentTrainingDayId: UUID?
+    /// The session UUID for the currently active session (nil when idle/complete).
+    /// Carried so ActiveSessionCoordinator reads the whole live identity (state +
+    /// dayId + sessionId) in ONE atomic hop rather than three separate awaits (#458).
+    let currentSessionId: UUID?
     let currentPrescription: SetPrescription?
     let currentFallbackReason: FallbackReason?
     let restSecondsRemaining: Int
@@ -1691,6 +1695,7 @@ actor WorkoutSessionManager {
         return WorkoutUISnapshot(
             sessionState: sessionState,
             currentTrainingDayId: currentTrainingDayId,
+            currentSessionId: currentSessionId,
             currentPrescription: currentPrescription,
             currentFallbackReason: currentFallbackReason,
             restSecondsRemaining: restSecondsRemaining,
