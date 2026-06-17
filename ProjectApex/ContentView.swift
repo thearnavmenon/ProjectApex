@@ -351,8 +351,8 @@ struct ContentView: View {
             }()
             if let (day, week) = vm.nextIncompleteDay(in: mesocycle) {
                 let allDays = mesocycle.weeks.flatMap { $0.trainingDays }
-                // Skipped sessions advance the programme pointer and count toward progress.
-                let completedCount = allDays.filter { $0.status == .completed || $0.status == .skipped }.count
+                // Skipped sessions advance the programme pointer and count toward progress (#445).
+                let completedCount = mesocycle.completedDayCount
                 // NavigationStack is required so WorkoutView (and its children) can render
                 // their toolbar items and so WorkoutView pushed from ProgramDayDetailView
                 // has a consistent navigation context. WorkoutView no longer owns an

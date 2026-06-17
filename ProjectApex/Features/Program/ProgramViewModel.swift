@@ -357,7 +357,7 @@ final class ProgramViewModel {
     private func snapshotCompletedDays() -> [TrainingDay] {
         guard let mesocycle = currentMesocycle else { return [] }
         return mesocycle.weeks.flatMap { week in
-            week.trainingDays.filter { $0.status == .completed || $0.status == .skipped }
+            week.trainingDays.filter(\.isTerminal)
         }
     }
 
@@ -899,7 +899,7 @@ final class ProgramViewModel {
     func currentWeekIndex(in mesocycle: Mesocycle) -> Int {
         for (wIdx, week) in mesocycle.weeks.enumerated() {
             for day in week.trainingDays {
-                if day.status != .completed && day.status != .skipped {
+                if !day.isTerminal {
                     return wIdx
                 }
             }
@@ -928,7 +928,7 @@ final class ProgramViewModel {
         for week in mesocycle.weeks {
             for day in week.trainingDays {
                 // Skip permanently-skipped and completed days; also skip soft-deferred days.
-                if day.status != .completed && day.status != .skipped && !skippedDayIds.contains(day.id) {
+                if !day.isTerminal && !skippedDayIds.contains(day.id) {
                     return (day, week)
                 }
             }

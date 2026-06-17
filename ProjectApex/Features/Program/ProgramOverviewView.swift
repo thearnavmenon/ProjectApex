@@ -422,9 +422,9 @@ struct ProgramOverviewView: View {
         ]
 
         // Count completed+skipped sessions across all days for the progress label.
-        // Skipped sessions advance the programme pointer, so they count toward progress.
+        // Skipped sessions advance the programme pointer, so they count toward progress (#445).
         let allDays = mesocycle.weeks.flatMap { $0.trainingDays }
-        let completedCount = allDays.filter { $0.status == .completed || $0.status == .skipped }.count
+        let completedCount = mesocycle.completedDayCount
         let totalDays = allDays.count
         // Session-based completion fraction — updates immediately when a day is marked done.
         let sessionProgress = totalDays > 0 ? Double(completedCount) / Double(totalDays) : 0.0

@@ -181,6 +181,12 @@ nonisolated struct TrainingDay: Codable, Identifiable, Sendable {
         status       = (try? c.decode(TrainingDayStatus.self, forKey: .status)) ?? .generated
         skippedAt    = try c.decodeIfPresent(Date.self, forKey: .skippedAt)
     }
+
+    /// #445: canonical "this day counts as done" predicate.
+    /// `.completed` and `.skipped` are the two terminal statuses — both advance the
+    /// programme pointer and count toward progress. This is the single source of truth;
+    /// progress UI, snapshot grafting, and next-incomplete-day search all route through it.
+    var isTerminal: Bool { status == .completed || status == .skipped }
 }
 
 // MARK: - TrainingWeek
@@ -254,6 +260,12 @@ nonisolated struct Mesocycle: Codable, Identifiable, Sendable {
         case weeks
         case totalWeeks        = "total_weeks"
         case periodizationModel = "periodization_model"
+    }
+
+    /// #445: count of terminal (`.completed` / `.skipped`) days across all weeks.
+    /// Drives the progress label/fraction in the calendar, overview, and pre-workout screens.
+    var completedDayCount: Int {
+        weeks.reduce(0) { $0 + $1.trainingDays.filter(\.isTerminal).count }
     }
 }
 
