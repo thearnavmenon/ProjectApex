@@ -7,6 +7,32 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — Resuming a workout now refuses to replay if its exercises changed
+
+**The problem (in plain words).** When you pause a workout and come back later, the app
+restores where you left off — which exercise, which set. But if the day's exercise list had
+*changed* in the meantime (say the programme was edited), the app still trusted its old
+place-markers and quietly logged your sets against the *wrong* exercises. It only checked
+that the day was the same day, not that the day's exercises were still the same.
+
+**What changed.** When you pause, the app now saves a small fingerprint of that day's
+exercise list. When you resume, it re-checks the fingerprint against the day as it is now.
+If they don't match, it stops instead of guessing — it shows the "this workout changed,
+start it fresh" recovery screen and keeps your paused session safe so you can still save or
+abandon it. Paused sessions from before this change have no fingerprint, and those resume
+normally as before, so nothing old breaks. (#447)
+
+**How it was built and checked.** This was finished test-first: built the app clean and ran
+the full workout-session test set — 29 tests, all green — covering the changed-list case,
+the normal case, the old-no-fingerprint case, and that the fingerprint is stable across app
+restarts. (Side note: this fix had been written in an earlier run that was wiped by the
+laptop running out of disk; the work was recovered from disk, the one half-finished test was
+completed, and then verified.)
+
+**Status.** Merged to `main` (PR #456; issue #447 closed). That clears the last small
+safety-check under umbrella #435. What's left there is the big one — the single shared
+"who's training what" brain (keystone #440/#441) and retiring the old workaround.
+
 ## 2026-06-17 — Gave each workout a stable ID and saved day-status to the server
 
 **The problem (in plain words).** Two deeper data problems from the same audit. First, a
