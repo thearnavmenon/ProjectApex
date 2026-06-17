@@ -61,12 +61,6 @@ struct ContentView: View {
     /// True when crash recovery's paused day cannot be found anywhere in the mesocycle.
     @State private var showOrphanedRecoveryAlert: Bool = false
 
-    // MARK: - Paused-session banner navigation
-
-    /// True when the user taps "Resume" on PausedSessionBannerView — pushes
-    /// ProgramDayDetailView for the paused day within the workout tab's NavigationStack.
-    @State private var navigateToPausedDayDetail: Bool = false
-
     var body: some View {
         // Honest launch gate (#329 / O-F1, #369 slice 2): when either required key is
         // missing — neither in the Keychain nor bundled into the build — show the
@@ -343,6 +337,14 @@ struct ContentView: View {
         return nextIncomplete
     }
 
+    /// Routes the paused-session banner's "Resume" straight at the Resume owner
+    /// (#467): land on the Workout tab (index 1), where `WorkoutPausedView` renders
+    /// after #465. One hop, pointing at the owner — no detour through a pushed
+    /// `ProgramDayDetailView`. Pure seam so the routing intent stays testable.
+    static func applyBannerResume(selectedTab: inout Int) {
+        selectedTab = 1
+    }
+
     /// The Workout tab. Routes to `WorkoutView` with the first non-completed day
     /// in the mesocycle. Shows a programme-complete state when all days are done,
     /// or a no-program state when no mesocycle is loaded.
@@ -450,26 +452,11 @@ struct ContentView: View {
                             PausedSessionBannerView(
                                 dayLabel: found.day.dayLabel,
                                 weekNumber: found.week.weekNumber,
-                                onResume: { navigateToPausedDayDetail = true }
+                                onResume: { ContentView.applyBannerResume(selectedTab: &selectedTab) }
                             )
                             .padding(.horizontal, 16)
                             .padding(.top, 8)
                             .padding(.bottom, 4)
-                        }
-                    }
-                    // Navigation destination for the paused day's detail view
-                    .navigationDestination(isPresented: $navigateToPausedDayDetail) {
-                        if let saved = PausedSessionState.load(),
-                           let found = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {
-                            ProgramDayDetailView(
-                                day: found.day,
-                                week: found.week,
-                                mesocycleCreatedAt: mesocycle.createdAt,
-                                programId: mesocycle.id,
-                                viewModel: vm,
-                                gymProfile: confirmedProfile
-                            )
-                            .environment(deps)
                         }
                     }
                 }
