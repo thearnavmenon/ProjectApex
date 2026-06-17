@@ -312,6 +312,7 @@ actor WorkoutSessionManager {
             dayType: trainingDay.dayLabel,
             completed: false,
             status: "active",
+            trainingDayId: trainingDay.id,   // #443 (Q2): durable day identity for resume/repair re-match
             setLogs: [],
             sessionNotes: [],
             summary: nil
@@ -2269,16 +2270,18 @@ nonisolated private struct WorkoutSessionPayload: Encodable {
     let sessionDate: String
     let weekNumber: Int
     let dayType: String
+    let trainingDayId: String?
     let completed: Bool
     let status: String?
 
     enum CodingKeys: String, CodingKey {
         case id
-        case userId      = "user_id"
-        case programId   = "program_id"
-        case sessionDate = "session_date"
-        case weekNumber  = "week_number"
-        case dayType     = "day_type"
+        case userId        = "user_id"
+        case programId     = "program_id"
+        case sessionDate   = "session_date"
+        case weekNumber    = "week_number"
+        case dayType       = "day_type"
+        case trainingDayId = "training_day_id"
         case completed
         case status
     }
@@ -2291,6 +2294,7 @@ nonisolated private struct WorkoutSessionPayload: Encodable {
         self.sessionDate = formatter.string(from: session.sessionDate)
         self.weekNumber = session.weekNumber
         self.dayType = session.dayType
+        self.trainingDayId = session.trainingDayId?.uuidString
         self.completed = session.completed
         self.status = session.status
     }

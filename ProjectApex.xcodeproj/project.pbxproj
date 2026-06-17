@@ -56,6 +56,7 @@
 		7D8C4E6ADC8DEDCA31B72B1D /* ManualLogIntentGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED8AB93C545B445971A78F14 /* ManualLogIntentGateTests.swift */; };
 		81F0AA99C2173497F907DCF2 /* TraineeModelInteractionsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85715B1D4A477BA1FA8963B2 /* TraineeModelInteractionsTests.swift */; };
 		89DC096233064C035B6D3809 /* MovementPatternTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */; };
+		DDDD443100000000000443B2 /* DurableTrainingDayIdTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDD443100000000000443F1 /* DurableTrainingDayIdTests.swift */; };
 		8A28FF4A9DE063DFA4183B29 /* SetPrescriptionIntentValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAD27873E38E45BE2FB26D63 /* SetPrescriptionIntentValidationTests.swift */; };
 		A11FA719C0DE0001CAFE0001 /* FatigueInteractionCrossValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11FA719C0DE0002CAFE0002 /* FatigueInteractionCrossValidationTests.swift */; };
 		A12FA719C0DE0001CAFE0001 /* TraineeModelSnapshotsCrossValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A12FA719C0DE0002CAFE0002 /* TraineeModelSnapshotsCrossValidationTests.swift */; };
@@ -153,6 +154,7 @@
 		EEE172F80DF77608B9C048CA /* TraineeModelEnumsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TraineeModelEnumsTests.swift; sourceTree = "<group>"; };
 		EFB324F8EA1B317B0F90575B /* ProjectApexTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProjectApexTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FD87C13195A0D0C4C63D2120 /* MovementPatternTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MovementPatternTests.swift; sourceTree = "<group>"; };
+		DDDD443100000000000443F1 /* DurableTrainingDayIdTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DurableTrainingDayIdTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -286,6 +288,7 @@
 				A1540154CAFE0154CAFE0022 /* CalibrationReviewStretchPayloadTests.swift */,
 				22000000000000000000F012 /* PromptLoaderTests.swift */,
 				A1C0F19329000000APIKEY03 /* BundledKeyResolutionTests.swift */,
+				DDDD443100000000000443F1 /* DurableTrainingDayIdTests.swift */,
 			);
 			path = ProjectApexTests;
 			sourceTree = "<group>";
@@ -455,6 +458,7 @@
 				A1540154CAFE0154CAFE0021 /* CalibrationReviewStretchPayloadTests.swift in Sources */,
 				22000000000000000000F011 /* PromptLoaderTests.swift in Sources */,
 				A1C0F19329000000APIKEY04 /* BundledKeyResolutionTests.swift in Sources */,
+				DDDD443100000000000443B2 /* DurableTrainingDayIdTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

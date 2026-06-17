@@ -25,6 +25,11 @@ nonisolated struct WorkoutSession: Codable, Identifiable, Sendable {
     let weekNumber: Int
     /// E.g. "Push A", "Pull B" — maps to TrainingDay.label.
     let dayType: String
+    /// Durable, server-visible TrainingDay.id stamped at session start (#443 / Q2).
+    /// (program_id, week_number, day_type) is NOT unique, so resume/repair re-match
+    /// on this column instead. Nil for rows created before this field existed
+    /// (backward-compatible / legacy).
+    let trainingDayId: UUID?
     var completed: Bool
     /// Lifecycle status string: "active", "paused", or "completed".
     /// Nil for rows created before this field was added (backward-compatible).
@@ -40,6 +45,7 @@ nonisolated struct WorkoutSession: Codable, Identifiable, Sendable {
         case sessionDate     = "session_date"
         case weekNumber      = "week_number"
         case dayType         = "day_type"
+        case trainingDayId   = "training_day_id"
         case completed
         case status
         case setLogs         = "set_logs"
@@ -58,6 +64,7 @@ nonisolated struct WorkoutSession: Codable, Identifiable, Sendable {
         dayType: String,
         completed: Bool,
         status: String? = nil,
+        trainingDayId: UUID? = nil,
         setLogs: [SetLog] = [],
         sessionNotes: [SessionNote] = [],
         summary: SessionSummary? = nil
@@ -68,6 +75,7 @@ nonisolated struct WorkoutSession: Codable, Identifiable, Sendable {
         self.sessionDate  = sessionDate
         self.weekNumber   = weekNumber
         self.dayType      = dayType
+        self.trainingDayId = trainingDayId
         self.completed    = completed
         self.status       = status
         self.setLogs      = setLogs
@@ -86,6 +94,7 @@ nonisolated struct WorkoutSession: Codable, Identifiable, Sendable {
         sessionDate  = try c.decode(Date.self,    forKey: .sessionDate)
         weekNumber   = try c.decode(Int.self,     forKey: .weekNumber)
         dayType      = try c.decode(String.self,  forKey: .dayType)
+        trainingDayId = try c.decodeIfPresent(UUID.self, forKey: .trainingDayId)
         completed    = try c.decode(Bool.self,    forKey: .completed)
         status       = try c.decodeIfPresent(String.self,         forKey: .status)
         setLogs      = try c.decodeIfPresent([SetLog].self,       forKey: .setLogs)       ?? []
@@ -483,11 +492,15 @@ nonisolated struct PausedSessionState: Codable, Sendable {
             let programId: UUID
             let weekNumber: Int
             let dayType: String
+            /// #443 (Q2): the durable TrainingDay.id stamped at session start.
+            /// Nil for legacy rows written before the column existed.
+            let trainingDayId: UUID?
             enum CodingKeys: String, CodingKey {
                 case id
-                case programId  = "program_id"
-                case weekNumber = "week_number"
-                case dayType    = "day_type"
+                case programId    = "program_id"
+                case weekNumber   = "week_number"
+                case dayType      = "day_type"
+                case trainingDayId = "training_day_id"
             }
         }
 
@@ -502,11 +515,14 @@ nonisolated struct PausedSessionState: Codable, Sendable {
             limit: 1
         ).first else { return }
 
-        // Use a random trainingDayId so the ContentView mismatch path fires,
-        // giving the user the option to Abandon the orphaned session cleanly.
+        // #443 (Q2): reuse the row's durable training_day_id so ContentView can
+        // re-match it to the live TrainingDay and offer a real Resume. Legacy rows
+        // (column null) have no recoverable identity — keep the prior behaviour
+        // there: a fresh UUID forces the ContentView mismatch path so the user can
+        // Abandon the unmatchable orphaned session cleanly.
         let state = PausedSessionState(
             sessionId:        row.id,
-            trainingDayId:    UUID(),
+            trainingDayId:    row.trainingDayId ?? UUID(),
             weekId:           UUID(),
             weekNumber:       row.weekNumber,
             exerciseIndex:    0,
