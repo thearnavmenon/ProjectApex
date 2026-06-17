@@ -215,7 +215,13 @@ final class ProgramViewModel {
             // off the fast path, once a real session resolves. Best-effort and
             // non-blocking: the cached program is already displayed above; this never
             // throws out of loadProgram and never slows the UI.
-            Task { await self.backfillCachedProgramIfNeeded(cached) }
+            //
+            // #444 (Q5): the same background pass also RECONCILES per-day statuses
+            // against the server (the durable record) when a server program exists,
+            // so a fresh install whose cache says pending shows completed/skipped
+            // days correctly. Backfill (server empty) and reconcile (server present)
+            // are the two mutually-exclusive outcomes of the one server fetch.
+            Task { await self.backfillOrReconcileCachedProgram(cached) }
             return
         }
 
@@ -252,7 +258,11 @@ final class ProgramViewModel {
     /// Reuses `OnboardingProgramPersist.persistIfOwnerResolved` so the
     /// placeholder-guard + resolve-before-stamp + best-effort-catch live in exactly
     /// one place (the same path #424 added).
-    private func backfillCachedProgramIfNeeded(_ cached: Mesocycle) async {
+    ///
+    /// #444 (Q5): when the fetch instead finds an active server program, this
+    /// RECONCILES per-day statuses onto the displayed cache rather than backfilling
+    /// — see `reconcileServerStatuses`.
+    private func backfillOrReconcileCachedProgram(_ cached: Mesocycle) async {
         // Resolve the real owner. nil / placeholder → do nothing; the next resolved
         // load catches it. persistIfOwnerResolved also guards the placeholder, but we
         // bail early to avoid the server fetch when there's no owner to stamp under.
@@ -260,26 +270,114 @@ final class ProgramViewModel {
             return
         }
 
-        // Only backfill when the fetch SUCCEEDS and finds NO active program. A thrown
-        // error means we couldn't reach the server — bail, do NOT conclude "empty".
+        // A thrown error means we couldn't reach the server — bail, do NOT conclude
+        // "empty" (that would spuriously re-insert) and do NOT reconcile against a
+        // record we never read.
         let serverActiveProgram: ProgramRow?
         do {
             serverActiveProgram = try await supabaseClient.fetchActiveProgram(userId: owner)
         } catch {
-            programPersistLogger.notice("backfill: server fetch failed; bailing (not 'empty') — a later load retries")
+            programPersistLogger.notice("backfill/reconcile: server fetch failed; bailing — a later load retries")
             return
         }
-        guard serverActiveProgram == nil else { return }
 
-        // Server is genuinely empty under a real owner → backfill the cached program
-        // via the shared resolve-before-stamp helper (#424). Idempotent, best-effort.
+        guard let serverProgram = serverActiveProgram else {
+            // Server is genuinely empty under a real owner → backfill the cached
+            // program via the shared resolve-before-stamp helper (#424). Idempotent.
+            let didPersist = await OnboardingProgramPersist.persistIfOwnerResolved(
+                cached,
+                owner: owner,
+                client: supabaseClient
+            )
+            if didPersist {
+                programPersistLogger.notice("backfill: re-persisted local-only program to server under resolved owner")
+            }
+            return
+        }
+
+        // Server HAS an active program → reconcile its per-day statuses onto the
+        // displayed cache (#444, Q5).
+        reconcileServerStatuses(from: serverProgram.toMesocycle(), into: cached)
+    }
+
+    /// #444 (Q5): merge the server's per-day `TrainingDayStatus` onto the cached
+    /// mesocycle, preferring the MORE-ADVANCED status per day so neither a stale
+    /// server nor a stale cache regresses real progress (terminal `.completed` /
+    /// `.skipped` and `.paused` beat `.pending` / `.generated`).
+    ///
+    /// Only the SAME mesocycle is reconciled: the server program must share the
+    /// cache's mesocycle id (the same client-generated program persisted via the
+    /// shared path), and days are matched by their stable `TrainingDay.id`. If the
+    /// server is a different program entirely, the cache is left untouched — that
+    /// is a #423/#425 backfill/regeneration concern, not a per-day status merge.
+    ///
+    /// Best-effort and non-fatal: a no-op when nothing is more advanced. Updates
+    /// the in-memory state, view state, and UserDefaults so the reconciled
+    /// progress survives the next launch.
+    private func reconcileServerStatuses(from server: Mesocycle, into cached: Mesocycle) {
+        guard server.id == cached.id else { return }
+
+        // Build a day-id → server status lookup.
+        var serverStatusByDay: [UUID: TrainingDayStatus] = [:]
+        for week in server.weeks {
+            for day in week.trainingDays {
+                serverStatusByDay[day.id] = day.status
+            }
+        }
+
+        var merged = cached
+        var changed = false
+        for wIdx in merged.weeks.indices {
+            for dIdx in merged.weeks[wIdx].trainingDays.indices {
+                let day = merged.weeks[wIdx].trainingDays[dIdx]
+                guard let serverStatus = serverStatusByDay[day.id] else { continue }
+                if Self.statusRank(serverStatus) > Self.statusRank(day.status) {
+                    merged.weeks[wIdx].trainingDays[dIdx].status = serverStatus
+                    changed = true
+                }
+            }
+        }
+
+        guard changed else { return }
+        merged.saveToUserDefaults()
+        currentMesocycle = merged
+        viewState = .loaded(merged)
+        programPersistLogger.notice("reconcile: honored more-advanced server statuses on \(merged.id.uuidString, privacy: .public)")
+    }
+
+    /// Advancement rank for `TrainingDayStatus` (higher = more advanced). Terminal
+    /// statuses outrank in-flight ones; `.completed` and `.skipped` tie (both
+    /// terminal). Used by `reconcileServerStatuses` to pick the winner per day.
+    private static func statusRank(_ status: TrainingDayStatus) -> Int {
+        switch status {
+        case .pending:   return 0
+        case .generated: return 1
+        case .paused:    return 2
+        case .completed: return 3
+        case .skipped:   return 3
+        }
+    }
+
+    /// #444 (Q5): re-persist the updated mesocycle to the server after a
+    /// `markDay*` status change so the durable server record matches local
+    /// progress (a reinstall / cache-clear otherwise reverts completed days to
+    /// pending and feeds wrong-day routing).
+    ///
+    /// Owner-gated (resolve-before-stamp; never under the placeholder/unresolved
+    /// owner — the #369 pattern) and best-effort: the in-memory + UserDefaults
+    /// update by the caller is already the local source of truth, so a failed
+    /// server write is non-fatal and arms no banner. Reuses the shared
+    /// `OnboardingProgramPersist.persistIfOwnerResolved` helper (idempotent
+    /// upsert on the client-generated program id) — the same path #424/#425 use.
+    private func persistDayStatusUpdate(_ mesocycle: Mesocycle) async {
+        let owner = await resolveOwner()
         let didPersist = await OnboardingProgramPersist.persistIfOwnerResolved(
-            cached,
+            mesocycle,
             owner: owner,
             client: supabaseClient
         )
-        if didPersist {
-            programPersistLogger.notice("backfill: re-persisted local-only program to server under resolved owner")
+        if !didPersist {
+            programPersistLogger.notice("markDay: status persist skipped (owner unresolved/placeholder) or failed; local cache intact")
         }
     }
 
@@ -806,6 +904,11 @@ final class ProgramViewModel {
         currentMesocycle = mesocycle
         viewState = .loaded(mesocycle)
         print("[ProgramViewModel] markDayCompleted ✓ — dayId: \(dayId), week \(mesocycle.weeks[wIdx].weekNumber)")
+        // #444 (Q5): persist the updated per-day status to the server so a
+        // reinstall / cache-clear can't revert it to pending. Owner-gated +
+        // best-effort; UserDefaults above remains the local source of truth.
+        let updated = mesocycle
+        Task { await self.persistDayStatusUpdate(updated) }
     }
 
     // MARK: - Pause support
@@ -822,6 +925,10 @@ final class ProgramViewModel {
         currentMesocycle = mesocycle
         viewState = .loaded(mesocycle)
         print("[ProgramViewModel] markDayPaused ✓ — dayId: \(dayId), week \(mesocycle.weeks[wIdx].weekNumber)")
+        // #444 (Q5): persist the updated per-day status to the server. Owner-gated
+        // + best-effort; UserDefaults above remains the local source of truth.
+        let updated = mesocycle
+        Task { await self.persistDayStatusUpdate(updated) }
     }
 
     // MARK: - Mark Day Skipped (Phase-1-Skip)
@@ -851,6 +958,10 @@ final class ProgramViewModel {
         currentMesocycle = mesocycle
         viewState = .loaded(mesocycle)
         print("[ProgramViewModel] markDaySkipped ✓ — dayId: \(dayId), week \(mesocycle.weeks[wIdx].weekNumber)")
+        // #444 (Q5): persist the updated per-day status to the server. Owner-gated
+        // + best-effort; UserDefaults above remains the local source of truth.
+        let updated = mesocycle
+        Task { await self.persistDayStatusUpdate(updated) }
     }
 
     // MARK: - Regenerate session (#318 U4 / J-F10)
