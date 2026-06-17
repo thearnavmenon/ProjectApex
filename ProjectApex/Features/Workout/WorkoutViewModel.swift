@@ -493,13 +493,18 @@ final class WorkoutViewModel {
 
             print("[WorkoutViewModel] resumeSession — remote:\(remoteLogs.count) waq:\(waqLogs.count) merged:\(setLogs.count) for session \(pausedState.sessionId)")
 
-            await manager.resumeSession(
+            // #447: resumeSession rejects (returns false) when the day's exercise list
+            // changed since the pause — the stored index / set_logs mapping is stale, so
+            // it must not be silently replayed. It leaves sessionState in .error, which
+            // pullState() surfaces to the UI; there is no live session to poll afterward.
+            let resumed = await manager.resumeSession(
                 pausedState: pausedState,
                 trainingDay: trainingDay,
                 completedSetLogs: setLogs
             )
             await pullState()
             isStartingSession = false
+            guard resumed else { return }
             beginStatePolling()
         }
     }

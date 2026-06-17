@@ -331,7 +331,8 @@ actor WorkoutSessionManager {
             dayType: trainingDay.dayLabel,
             programId: programId,
             userId: userId,
-            pausedAt: Date()
+            pausedAt: Date(),
+            exerciseSignature: PausedSessionState.exerciseSignature(for: trainingDay)   // #447
         ).save()
 
         // Write session row via WAQ so it is recoverable if the app crashes mid-workout.
@@ -596,7 +597,8 @@ actor WorkoutSessionManager {
                 dayType: session.dayType,
                 programId: session.programId,
                 userId: session.userId,
-                pausedAt: Date()
+                pausedAt: Date(),
+                exerciseSignature: PausedSessionState.exerciseSignature(for: day)   // #447
             ).save()
         }
 
@@ -785,7 +787,8 @@ actor WorkoutSessionManager {
             dayType: sess.dayType,
             programId: sess.programId,
             userId: sess.userId,
-            pausedAt: Date()
+            pausedAt: Date(),
+            exerciseSignature: PausedSessionState.exerciseSignature(for: day)   // #447
         ).save()
 
         // 3. Sync to the server WITHOUT blocking the UI (#190): pauseSession
@@ -939,12 +942,31 @@ actor WorkoutSessionManager {
     /// Resumes a previously paused session.
     /// Restores all relevant in-memory state, PATCHes the session back to "active",
     /// and fires inference for the exercise/set where the user left off.
+    /// Returns `true` when the session was resumed, `false` when resume was rejected
+    /// (e.g. the day's exercise list changed since the pause — #447). On rejection the
+    /// in-memory state is left untouched, `sessionState` is set to `.error` so the UI
+    /// routes to mismatch recovery, and the persisted sentinel is preserved so the user
+    /// can still Abandon/Save the orphaned session.
+    @discardableResult
     func resumeSession(
         pausedState: PausedSessionState,
         trainingDay: TrainingDay,
         completedSetLogs: [SetLog]
-    ) async {
-        guard case .idle = sessionState else { return }
+    ) async -> Bool {
+        guard case .idle = sessionState else { return false }
+
+        // #447 (defense-in-depth): the paused sentinel carries a signature of the day's
+        // exercise list frozen at session start. If the CURRENT day's list no longer
+        // matches, the stored exerciseIndex / set_logs→exercise mapping is stale and
+        // replaying it would mis-place sets against the wrong exercises. Reject instead
+        // of silently replaying. A nil stored signature is a legacy sentinel ("unknown")
+        // and must NOT reject — only a present-and-different signature does.
+        if let stored = pausedState.exerciseSignature,
+           stored != PausedSessionState.exerciseSignature(for: trainingDay) {
+            print("[WorkoutSessionManager] resumeSession — exercise signature mismatch (stored \(stored)); rejecting replay")
+            sessionState = .error("This workout's exercises changed since you paused. Start it fresh.")
+            return false
+        }
 
         // Restore session state
         self.trainingDay = trainingDay
@@ -1023,7 +1045,7 @@ actor WorkoutSessionManager {
         guard exerciseIndex < trainingDay.exercises.count else {
             // Edge case: all exercises were already completed before pause
             await finishSession(earlyExitReason: nil)
-            return
+            return true
         }
         let currentExercise = trainingDay.exercises[exerciseIndex]
         async let streakFetch       = gymStreakService.computeStreak(userId: pausedState.userId)
@@ -1045,6 +1067,7 @@ actor WorkoutSessionManager {
 
         // Fire inference for the current exercise/set
         await triggerInference(for: currentExercise, setNumber: currentSetNumber)
+        return true
     }
 
     /// Rebuilds the sessionHistoryToday array from set logs for exercises before `upToExerciseIndex`.
