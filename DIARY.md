@@ -7,6 +7,34 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — Gave each workout a stable ID and saved day-status to the server
+
+**The problem (in plain words).** Two deeper data problems from the same audit. First, a
+workout's "which day was this" was only a private ID the phone made up — the server never
+stored it — so when the app tried to recover an interrupted session it had to *invent* a
+new ID, which never matched and produced "Session Not Found." Second, when you finished or
+skipped a day, that status was only saved on the phone; the server's copy of your
+programme never learned about it, so reinstalling the app could make finished days look
+unstarted again.
+
+**What changed.**
+- **A real, server-saved day ID.** Each saved workout now carries a durable `training_day_id`
+  (a small, safe database change — a new optional column; old rows simply leave it empty).
+  Recovery now matches on the real ID instead of guessing. (#443)
+- **Day status now lives on the server too.** Finishing, pausing, or skipping a day now
+  also saves that status to your programme on the server (only when we're sure it's really
+  you), and when the app loads it merges the two, always keeping the more-advanced status
+  so real progress is never lost. (#444)
+
+**How it was built and checked.** Two helpers built each piece test-first; #443 got an
+extra reviewer whose only job was to audit the database change (it confirmed the column is
+optional, reversible, and safe). Both built clean with new tests passing. The database
+change is written but applied to the live database by the deploy step, not by hand.
+
+**Status.** Both merged to `main` (PRs #455, #454; issues #443/#444 closed). Remaining
+under umbrella #435: a small safety check when resuming a changed session, then the
+keystone — one shared "who's training what" brain — and retiring the old workaround.
+
 ## 2026-06-17 — Three more cleanups toward the Workout/Programme fix
 
 **The problem (in plain words).** After the first batch of fixes, three smaller-but-real
