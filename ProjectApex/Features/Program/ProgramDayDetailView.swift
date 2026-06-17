@@ -145,6 +145,19 @@ struct ProgramDayDetailView: View {
         startAnyDayModeActive || dayId == nextIncompleteDayId
     }
 
+    /// #446 (Q6 = calendar-time DayStatus is informational only): the Skip-Session
+    /// affordance keys off the day's training-time status — NOT the wall-clock
+    /// `DayStatus`. A day with a real, unlogged session (`.generated`, has exercises)
+    /// is skippable regardless of where it falls on the calendar. Completed / paused /
+    /// pending / already-skipped days have nothing to skip. Pure + parameterised so it
+    /// is unit-testable and provably free of any calendar-time dependency.
+    static func isSkippableDay(
+        status: TrainingDayStatus,
+        hasExercises: Bool
+    ) -> Bool {
+        status == .generated && hasExercises
+    }
+
     init(
         day: TrainingDay,
         week: TrainingWeek,
@@ -751,8 +764,10 @@ struct ProgramDayDetailView: View {
                 }
             }
 
-            // Tertiary: Skip Session — for past unlogged days (not already skipped)
-            if !isPending && hasExercises && dayStatus == .past && currentDay.status != .skipped {
+            // Tertiary: Skip Session — for a generated, unlogged session. #446 (Q6): the
+            // gate is the day's training-time status, NOT wall-clock DayStatus, so the
+            // current pointer day is skippable regardless of its calendar position.
+            if Self.isSkippableDay(status: currentDay.status, hasExercises: hasExercises) {
                 Button(action: { showSkipDayConfirmation = true }) {
                     Text("Skip this session")
                         .font(.system(size: 14, weight: .medium))

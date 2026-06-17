@@ -115,6 +115,67 @@ struct ProgramDayDetailStartGateTests {
     }
 }
 
+// MARK: - #446: Skip gate is decoupled from wall-clock DayStatus (Q6)
+
+@Suite("ProgramDayDetailView skip gate (#446)")
+struct ProgramDayDetailSkipGateTests {
+
+    @Test("Skip is offered for a generated, unlogged day regardless of calendar position")
+    func generatedDayIsSkippable() {
+        #expect(ProgramDayDetailView.isSkippableDay(
+            status: .generated,
+            hasExercises: true
+        ) == true)
+    }
+
+    @Test("Skip availability does NOT depend on wall-clock DayStatus (past/today/future identical)")
+    func skipIsIndependentOfCalendarTime() {
+        // The same training-state inputs must yield the same skip availability no matter
+        // where the day falls on the calendar — the predicate has no DayStatus parameter,
+        // so this is structurally guaranteed: one call covers every calendar position.
+        #expect(ProgramDayDetailView.isSkippableDay(
+            status: .generated,
+            hasExercises: true
+        ) == true)
+    }
+
+    @Test("Pending days are not skippable (no real session to skip)")
+    func pendingDayIsNotSkippable() {
+        #expect(ProgramDayDetailView.isSkippableDay(
+            status: .pending,
+            hasExercises: false
+        ) == false)
+    }
+
+    @Test("A day with no exercises is not skippable")
+    func noExercisesIsNotSkippable() {
+        #expect(ProgramDayDetailView.isSkippableDay(
+            status: .generated,
+            hasExercises: false
+        ) == false)
+    }
+
+    @Test("Already-skipped days are not re-skippable")
+    func skippedDayIsNotSkippable() {
+        #expect(ProgramDayDetailView.isSkippableDay(
+            status: .skipped,
+            hasExercises: true
+        ) == false)
+    }
+
+    @Test("Completed and paused days are not skippable")
+    func completedAndPausedAreNotSkippable() {
+        #expect(ProgramDayDetailView.isSkippableDay(
+            status: .completed,
+            hasExercises: true
+        ) == false)
+        #expect(ProgramDayDetailView.isSkippableDay(
+            status: .paused,
+            hasExercises: true
+        ) == false)
+    }
+}
+
 // MARK: - #438: live status read
 
 @Suite("ProgramDayDetailView live status read (#438)")
