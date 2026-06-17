@@ -7,6 +7,37 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — Three more cleanups toward the Workout/Programme fix
+
+**The problem (in plain words).** After the first batch of fixes, three smaller-but-real
+issues were still open from the same audit: (1) the app counted "how many days you've
+finished" in four different places with copy-pasted logic that could drift apart; (2) the
+day screen used the wall-clock calendar to decide whether you could *skip* a day, so your
+actual next day could be wrongly un-skippable because of its date; and (3) when your
+training programme hadn't saved to the server yet, starting a workout would quietly fail a
+database check, retry for half a minute, then lose the logged sets with no warning.
+
+**What changed.**
+- **One way to count done days.** Replaced the four copies with a single shared helper, so
+  the progress bar and "Day X of Y" can't disagree. (#445)
+- **The calendar no longer blocks actions.** Skipping a day now depends only on where you
+  are in the programme, not on today's date. The date text stays as a hint, but it can't
+  gate anything anymore. (#446)
+- **No more silent lost workouts.** Starting a session now makes sure your programme is
+  saved on the server first; if it can't (e.g. you're offline), it tells you instead of
+  pretending and dropping your sets. And the background "save" queue now treats a
+  missing-programme database error as something to keep and surface, not bury. (#442)
+
+**How it was built and checked.** Three helpers built each piece test-first in its own
+sandbox; an independent reviewer checked each diff against the plan and re-ran the tests.
+All built clean (one ran 42 of the data-layer tests green). The three changes touch
+completely separate files, so they merged with no conflicts.
+
+**Status.** All three merged to `main` (PRs #451, #452, #453; issues #445/#446/#442
+closed). Next up under umbrella #435: giving each saved workout a stable server-side day
+id (with a small database change), saving day status to the server, and then the big one —
+a single shared "who's training what" brain.
+
 ## 2026-06-17 — Stopped the Workout and Programme screens from crossing wires
 
 **The problem (in plain words).** If you opened a session from the Programme screen and
