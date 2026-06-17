@@ -69,7 +69,7 @@ struct ProgramOverviewView: View {
             await viewModel.loadProgram()
         }
         // Live-session highlight + set-progress now come from
-        // deps.liveSessionWatcher (a single 500ms poll owned by AppDependencies)
+        // deps.activeSessionCoordinator (a single 500ms poll owned by AppDependencies)
         // so this view no longer runs its own loop against the manager actor.
         // #188: Non-blocking sync-error banner — shown while program remains usable.
         .overlay(alignment: .top) {
@@ -301,8 +301,8 @@ struct ProgramOverviewView: View {
                             gymProfile: gymProfile,
                             phaseWeekNumber: phaseWeekNum,
                             phaseWeekTotal: phaseWeekTot,
-                            liveTrainingDayId: deps.liveSessionWatcher.currentTrainingDayId,
-                            liveSetSummary: deps.liveSessionWatcher.liveSetSummary
+                            liveTrainingDayId: deps.activeSessionCoordinator.liveTrainingDayId,
+                            liveSetSummary: deps.activeSessionCoordinator.liveSetSummary
                         )
                         .padding(.horizontal, 12)
                         .padding(.vertical, 4)

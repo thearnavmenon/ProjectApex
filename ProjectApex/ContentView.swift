@@ -310,9 +310,9 @@ struct ContentView: View {
     /// Returns nil (no badge) when idle. SwiftUI renders foregroundStyle on Text badges
     /// on iOS 16+; if the tint does not render the badge defaults to the system colour.
     private var workoutTabBadge: Text? {
-        if deps.liveSessionWatcher.isLive {
+        if deps.activeSessionCoordinator.isLive {
             return Text("●").foregroundStyle(Color(red: 0.25, green: 0.72, blue: 1.0))
-        } else if deps.liveSessionWatcher.pausedSessionExists {
+        } else if deps.activeSessionCoordinator.pausedSessionExists {
             return Text("●").foregroundStyle(Color(red: 1.0, green: 0.65, blue: 0.0))
         }
         return nil
@@ -445,10 +445,13 @@ struct ContentView: View {
                     // Paused-session banner — shown when a different day is paused and no
                     // session is currently live (i.e. user is on the PreWorkoutView screen).
                     .safeAreaInset(edge: .top) {
-                        if !deps.liveSessionWatcher.isLive,
-                           let saved = PausedSessionState.load(),
-                           saved.trainingDayId != day.id,
-                           let found = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {
+                        // #440: paused/live identity comes from the coordinator. Its
+                        // pausedTrainingDayId is non-nil only when a sentinel exists AND no
+                        // live session overrides it (live wins), so the former !isLive guard
+                        // is subsumed. Self-suppress when the paused day is the one on screen.
+                        if let pausedDayId = deps.activeSessionCoordinator.pausedTrainingDayId,
+                           pausedDayId != day.id,
+                           let found = vm.findTrainingDay(byId: pausedDayId, in: mesocycle) {
                             PausedSessionBannerView(
                                 dayLabel: found.day.dayLabel,
                                 weekNumber: found.week.weekNumber,

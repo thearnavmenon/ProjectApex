@@ -52,9 +52,11 @@ final class AppDependencies {
     let lateArrivalNotificationQueue: LateArrivalNotificationQueue
     /// Orchestrates the full set-by-set AI coaching loop during active workout sessions.
     let workoutSessionManager: WorkoutSessionManager
-    /// Single polling source for "is a session live" + summary. Views read from
-    /// this instead of running their own .task loops against the manager actor.
-    let liveSessionWatcher: LiveSessionWatcher
+    /// #440 — single @Observable owner of live/paused day identity. Views read this
+    /// one value (badge / banner / day-detail / calendar) so they cannot disagree.
+    /// Polls the session actor at 500ms (live/paused) / 5s (idle). Replaced the former
+    /// LiveSessionWatcher, which split the same signal across separate booleans.
+    let activeSessionCoordinator: ActiveSessionCoordinator
 
     // MARK: - Auth (MVP)
 
@@ -324,9 +326,10 @@ final class AppDependencies {
         )
         self.workoutSessionManager = manager
 
-        // 12. LiveSessionWatcher — single polling source for live-session UI signals
-        // (tab badge, calendar day highlight, set summary). Starts polling on init.
-        self.liveSessionWatcher = LiveSessionWatcher(manager: manager)
+        // 12. ActiveSessionCoordinator (#440) — single @Observable owner of live/paused
+        // day identity (tab badge, paused banner, day-detail live-state, calendar
+        // highlight). Starts polling on init for the lifetime of the process.
+        self.activeSessionCoordinator = ActiveSessionCoordinator(manager: manager)
     }
 
     // MARK: - Re-initialisation
