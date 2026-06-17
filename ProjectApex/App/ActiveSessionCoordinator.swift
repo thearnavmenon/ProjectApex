@@ -70,19 +70,21 @@ final class ActiveSessionCoordinator {
     /// precedence, and republishes `session` + `liveSetSummary`. Exposed (and
     /// async) so tests can drive it deterministically without waiting on the timer.
     func refresh() async {
-        let state    = await manager.sessionState
-        let activeId = await manager.currentTrainingDayId
-        let sessionId = await manager.currentSessionId
+        // One atomic actor hop for the whole live identity (state + dayId + sessionId
+        // + set progress). Reading these as separate awaits could tear — the actor can
+        // advance between hops — so a future change might publish a day from one instant
+        // and a session id from another. uiSnapshot() captures them together (#458).
+        let snapshot = await manager.uiSnapshot()
         let live: Bool
-        switch state {
+        switch snapshot.sessionState {
         case .idle, .sessionComplete, .error: live = false
         default: live = true
         }
 
-        if live, let activeId, let sessionId {
+        if live, let activeId = snapshot.currentTrainingDayId, let sessionId = snapshot.currentSessionId {
             // Live wins over any stale paused sentinel.
             session = .live(dayId: activeId, sessionId: sessionId)
-            let sets = await manager.completedSets
+            let sets = snapshot.completedSets
             let last = sets.max(by: { $0.loggedAt < $1.loggedAt })
             liveSetSummary = LiveSetSummary(
                 setsCompleted: sets.count,
