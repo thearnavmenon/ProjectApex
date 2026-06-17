@@ -377,33 +377,38 @@ struct ContentView: View {
                 let allDays = mesocycle.weeks.flatMap { $0.trainingDays }
                 // Skipped sessions advance the programme pointer and count toward progress (#445).
                 let completedCount = mesocycle.completedDayCount
+                // #441: the hosted day comes from the coordinator's RUN day (live or
+                // paused), never sticky view state. Self-heals to nextIncompleteDay when
+                // the session ends (coordinator → .idle → both ids nil).
+                let coordinatorActiveDayId = deps.activeSessionCoordinator.liveTrainingDayId
+                    ?? deps.activeSessionCoordinator.pausedTrainingDayId
+                let hostedDay = ContentView.hostDay(
+                    nextIncomplete: day,
+                    coordinatorActiveDayId: coordinatorActiveDayId,
+                    mesocycle: mesocycle
+                )
                 // NavigationStack is required so WorkoutView (and its children) can render
                 // their toolbar items and so WorkoutView pushed from ProgramDayDetailView
                 // has a consistent navigation context. WorkoutView no longer owns an
                 // inner NavigationStack.
                 NavigationStack {
                     WorkoutView(
-                        trainingDay: crashResumeDay ?? day,
+                        trainingDay: hostedDay,
                         programId: mesocycle.id,
                         weekNumber: week.weekNumber,
                         completedDayCount: completedCount,
                         totalDayCount: allDays.count,
-                        onSessionCompleted: {
-                            // Crash-resume path: the resumed day may differ from `day` —
-                            // find its week via the mesocycle rather than assuming `week`.
-                            if let resumeDay = crashResumeDay,
-                               let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                        onSessionCompleted: { runDayId in
+                            // #441: route the mark by the RUN day's id — WorkoutView's
+                            // #436 guard proves runDayId is the day the actor ran. Resolve
+                            // its week via the mesocycle rather than assuming `week`.
+                            if let found = vm.findTrainingDay(byId: runDayId, in: mesocycle) {
                                 programViewModel?.markDayCompleted(dayId: found.day.id, weekId: found.week.id)
-                            } else {
-                                programViewModel?.markDayCompleted(dayId: day.id, weekId: week.id)
                             }
                         },
-                        onSessionPaused: {
-                            if let resumeDay = crashResumeDay,
-                               let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                        onSessionPaused: { runDayId in
+                            if let found = vm.findTrainingDay(byId: runDayId, in: mesocycle) {
                                 programViewModel?.markDayPaused(dayId: found.day.id, weekId: found.week.id)
-                            } else {
-                                programViewModel?.markDayPaused(dayId: day.id, weekId: week.id)
                             }
                         },
                         onSessionDismissed: {
@@ -413,34 +418,24 @@ struct ContentView: View {
                             Task { @MainActor in
                                 await programViewModel?.loadProgram()
                                 selectedTab = 0
-                                crashResumeToPass = nil
-                                crashResumeDay = nil
                                 programViewModel?.scrollToCurrentWeekTrigger += 1
                             }
                         },
-                        resumeState: crashResumeToPass,
-                        onSkipSession: {
+                        onSkipSession: { runDayId in
                             // Persistent skip — advances programme_day_index, records skippedAt.
-                            // Resolve via crashResumeDay like the completed/paused siblings above
-                            // so a crash-resumed day skips THAT day, not nextIncompleteDay's.
-                            if let resumeDay = crashResumeDay,
-                               let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                            // Routes to the hosted day's id (skip fires pre-live).
+                            if let found = vm.findTrainingDay(byId: runDayId, in: mesocycle) {
                                 programViewModel?.markDaySkipped(dayId: found.day.id, weekId: found.week.id)
-                            } else {
-                                programViewModel?.markDaySkipped(dayId: day.id, weekId: week.id)
                             }
                         },
                         isGeneratingSession: isGeneratingSession,
-                        onGenerateSession: ((crashResumeDay ?? day).status == .pending && confirmedProfile != nil)
+                        onGenerateSession: (hostedDay.status == .pending && confirmedProfile != nil)
                             ? {
                                 // Generate this not-yet-generated day's session in place.
-                                // Resolve day+week like the completed/paused/skip siblings:
-                                // crashResumeDay takes precedence (matching the render target),
-                                // falling back to nextIncompleteDay's (day, week) pair.
+                                // Resolve the hosted day's week pair from the mesocycle.
                                 let targetDay: TrainingDay
                                 let targetWeek: TrainingWeek
-                                if let resumeDay = crashResumeDay,
-                                   let found = vm.findTrainingDay(byId: resumeDay.id, in: mesocycle) {
+                                if let found = vm.findTrainingDay(byId: hostedDay.id, in: mesocycle) {
                                     targetDay = found.day
                                     targetWeek = found.week
                                 } else {
@@ -456,15 +451,7 @@ struct ContentView: View {
                                 }
                             }
                             : nil,
-                        onCloseToTab0: { selectedTab = 0 },
-                        onResumeStateConsumed: {
-                            // One-shot — clear so subsequent tab swaps into Tab 1 don't re-apply
-                            // the same paused state on top of the now-live (or post-error)
-                            // session. crashResumeDay stays valid until the session ends
-                            // (cleared in onSessionDismissed above) because workoutTab still
-                            // needs it to select the correct trainingDay parameter.
-                            crashResumeToPass = nil
-                        }
+                        onCloseToTab0: { selectedTab = 0 }
                     )
                     // Paused-session banner — shown when a different day is paused and no
                     // session is currently live (i.e. user is on the PreWorkoutView screen).

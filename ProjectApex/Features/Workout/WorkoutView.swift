@@ -86,10 +86,14 @@ struct WorkoutView: View {
     var totalDayCount: Int = 0
     /// Called when the session transitions to .sessionComplete (not early exit).
     /// Used by ProgramDayDetailView to mark the day as completed in the calendar.
-    var onSessionCompleted: (() -> Void)? = nil
+    /// The argument is the RUN day's id (`trainingDay.id` — proven to be the day the
+    /// actor ran by the #436 guard at the completion instant) so the host routes the
+    /// mark by id instead of a sticky pointer (#441).
+    var onSessionCompleted: ((UUID) -> Void)? = nil
     /// Called when the session is paused mid-workout.
     /// Used by ProgramDayDetailView to mark the day as paused in the calendar.
-    var onSessionPaused: (() -> Void)? = nil
+    /// Argument is the RUN day's id (#441).
+    var onSessionPaused: ((UUID) -> Void)? = nil
     /// Called after the user dismisses the PostWorkoutSummaryView (taps "Done").
     /// Fires after the reset animation completes so the tab switch is not jarring.
     var onSessionDismissed: (() -> Void)? = nil
@@ -98,7 +102,9 @@ struct WorkoutView: View {
     /// 0-based exercise index to start from when beginning a new session (0 = first exercise).
     var startingExerciseIndex: Int = 0
     /// Called when the user taps "Skip this session" on the pre-workout screen.
-    var onSkipSession: (() -> Void)? = nil
+    /// Argument is the hosted day's id (#441 — skip fires pre-live, so the hosted
+    /// `trainingDay.id` is the day to skip).
+    var onSkipSession: ((UUID) -> Void)? = nil
     /// True while a not-yet-generated day's session is being generated in place
     /// (ProgramViewModel.viewState == .generatingSession). Drives the spinner on
     /// the "Generate Session" CTA in PreWorkoutView.
@@ -243,7 +249,7 @@ struct WorkoutView: View {
                 // .sessionComplete transition (cleared only on resetToIdle), so it still
                 // names the day the actor ran here.
                 guard viewModel?.liveSessionDayId == trainingDay.id else { return }
-                onSessionCompleted?()
+                onSessionCompleted?(trainingDay.id)
                 // Re-fetch streak after session completion so PostWorkoutSummaryView
                 // and the next PreWorkoutView both show the updated value.
                 Task {
@@ -258,7 +264,7 @@ struct WorkoutView: View {
             // currently-rendered day as paused (amendment 2.1).
             if case .idle = newState {
                 if PausedSessionState.load()?.trainingDayId == trainingDay.id {
-                    onSessionPaused?()
+                    onSessionPaused?(trainingDay.id)
                 }
             }
         }
@@ -391,7 +397,8 @@ struct WorkoutView: View {
                 },
                 calibrationWatermarkFiredAt: calibrationWatermarkFiredAt,
                 calibrationWatermarkRecalibratedAtSessionCount: calibrationWatermarkRecalibratedAtSessionCount,
-                onSkipSession: onSkipSession,
+                // #441: skip fires pre-live — route to the hosted day's id.
+                onSkipSession: onSkipSession.map { skip in { skip(trainingDay.id) } },
                 onBack: onBack,
                 onCloseToTab0: onCloseToTab0,
                 isGeneratingSession: isGeneratingSession,
