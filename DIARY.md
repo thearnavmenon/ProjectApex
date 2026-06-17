@@ -7,6 +7,41 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — Stopped the Workout and Programme screens from crossing wires
+
+**The problem (in plain words).** If you opened a session from the Programme screen and
+started lifting, the Workout tab and the Programme screen could end up showing *different*
+days while secretly sharing one live workout underneath. The worst part: finishing could
+mark the **wrong** day as done, so your plan quietly jumped past a day you never trained.
+There were knock-on errors too — a "Session Not Found" message after starting a new
+programme, and stale buttons offering to "Start" days that were already finished.
+
+**How we made sure what was broken.** We ran a big audit first — a panel of helper agents
+read the code, then a second set tried to *disprove* each finding so only real ones
+survived. It pointed at one root cause: nothing owned "the workout you're doing right
+now," so two screens each guessed the day on their own. We turned that into tracked
+tickets, made seven product decisions, and shipped the cheap, high-value fixes first.
+
+**What changed (this first batch).**
+- The Workout screen now refuses to "adopt" a live session that isn't for the day it's
+  showing, and can only mark *that* day complete — so the plan can't skip ahead silently. (#436)
+- There's now only **one** workout screen. The Programme day view no longer spins up its
+  own copy; tapping Start just takes you to the Workout tab, and only your current day is
+  startable (training a random future/past day is no longer offered). The day view also
+  reads its status live, so it stops offering "Start" on a day that's already done. (#437/#438)
+- Starting a brand-new programme while a session is paused now politely refuses and asks
+  you to finish or drop the paused session first, instead of breaking the saved one. (#439)
+
+**How it was built and checked.** Three focused helpers each built one piece test-first in
+its own sandbox, and an independent reviewer checked each against the plan. Each built
+clean and its new tests pass (one ran the full 875-test suite). The shared CI "Build &
+Test" is red, but it's been red on the main line for many commits on an unrelated test
+crash — not caused by this work — so we didn't block on it.
+
+**Status.** All three merged to `main` (PRs #449, #450, #448; issues #436–#439 closed).
+The bigger rework — one shared "who's training what" brain, plus the data/sync fixes — is
+written up and waiting under umbrella #435, on purpose, for a later, more careful change.
+
 ## 2026-06-16 — Rebuilt the Progress tab and made its numbers trustworthy
 
 **The problem (in plain words).** The Progress screen got a fresh, premium look, but
