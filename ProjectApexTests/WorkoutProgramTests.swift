@@ -261,4 +261,51 @@ final class WorkoutProgramTests: XCTestCase {
         XCTAssertTrue(lastWeek.isDeload,
                       "isDeload must be re-derived as true after decoding a deload week")
     }
+
+    // MARK: ─── #445: canonical "day is done" predicate ──────────────────────
+
+    /// `.completed` and `.skipped` are the two terminal statuses (both advance the
+    /// programme pointer). `.pending`, `.generated`, `.active`, `.paused` are not.
+    func test_trainingDay_isTerminal_onlyForCompletedOrSkipped() {
+        let cases: [(TrainingDayStatus, Bool)] = [
+            (.completed, true),
+            (.skipped,   true),
+            (.pending,   false),
+            (.generated, false),
+            (.paused,    false)
+        ]
+        for (status, expected) in cases {
+            let day = TrainingDay(
+                id: UUID(),
+                dayOfWeek: 1,
+                dayLabel: "Test",
+                exercises: [],
+                sessionNotes: nil,
+                status: status
+            )
+            XCTAssertEqual(day.isTerminal, expected,
+                           "isTerminal must be \(expected) for status .\(status.rawValue)")
+        }
+    }
+
+    /// `completedDayCount` counts only terminal (.completed / .skipped) days across all
+    /// weeks — pending and paused days do not count. This is the single source of truth
+    /// the progress UI and snapshot logic share.
+    func test_mesocycle_completedDayCount_countsOnlyTerminalDays() {
+        let day = { (status: TrainingDayStatus) in
+            TrainingDay(id: UUID(), dayOfWeek: 1, dayLabel: "D",
+                        exercises: [], sessionNotes: nil, status: status)
+        }
+        let week = TrainingWeek(
+            id: UUID(),
+            weekNumber: 1,
+            phase: .accumulation,
+            trainingDays: [day(.completed), day(.skipped), day(.pending), day(.paused)]
+        )
+        var mock = Mesocycle.mockMesocycle()
+        mock.weeks = [week]
+
+        XCTAssertEqual(mock.completedDayCount, 2,
+                       "completedDayCount must count .completed + .skipped only (1 + 1)")
+    }
 }
