@@ -1170,14 +1170,11 @@ struct ProgramDayDetailView: View {
     /// Called on every view appear so returning from WorkoutView reflects the latest sets.
     @MainActor
     private func refreshLiveSessionState() async {
-        let activeId = await deps.workoutSessionManager.currentTrainingDayId
-        let state = await deps.workoutSessionManager.sessionState
-        let isLive: Bool
-        switch state {
-        case .idle, .sessionComplete, .error: isLive = false
-        default: isLive = true
-        }
-        isSessionActiveForThisDay = (activeId == currentDay.id) && isLive
+        // #440: live/paused day identity comes from the single coordinator value, so
+        // this view cannot disagree with the badge/banner from poll lag. The completed
+        // set logs are genuinely not in the coordinator, so we still read them from the
+        // actor when this day is the live one.
+        isSessionActiveForThisDay = deps.activeSessionCoordinator.isLive(forDay: currentDay.id)
 
         if isSessionActiveForThisDay {
             // Read completed sets from the actor, grouped by exerciseId
