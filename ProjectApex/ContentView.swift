@@ -58,13 +58,6 @@ struct ContentView: View {
     @State private var crashRecoveryState: PausedSessionState? = nil
     /// Controls the crash-recovery alert shown once at app launch when a sentinel exists.
     @State private var showCrashRecoveryAlert: Bool = false
-    /// When non-nil, WorkoutView should use this as an explicit resumeState (Path A),
-    /// bypassing the brittle trainingDayId == trainingDay.id guard in Path B.
-    @State private var crashResumeToPass: PausedSessionState? = nil
-    /// When the paused session's trainingDayId resolves to a mesocycle day that is NOT
-    /// nextIncompleteDay, this holds the correct matching day so WorkoutView uses the
-    /// right exercise list for the resume rather than nextIncompleteDay's list.
-    @State private var crashResumeDay: TrainingDay? = nil
     /// True when crash recovery's paused day cannot be found anywhere in the mesocycle.
     @State private var showOrphanedRecoveryAlert: Bool = false
 
@@ -228,27 +221,22 @@ struct ContentView: View {
         }
         .alert("Unfinished Workout", isPresented: $showCrashRecoveryAlert) {
             Button("Resume") {
+                // #441: Resume no longer seeds sticky overrides. It only adjudicates
+                // which alert to show: if the paused sentinel resolves to a real day
+                // anywhere in the mesocycle, switch to the Workout tab — which
+                // self-resumes via the coordinator-driven host. If it resolves nowhere,
+                // show the orphaned-recovery dialog instead.
                 guard let saved = crashRecoveryState,
                       let vm = programViewModel,
                       case .loaded(let mesocycle) = vm.viewState else {
-                    // Programme not loaded yet — fall back to Path B in WorkoutView
+                    // Programme not loaded yet — the Workout tab still self-resumes on appear.
                     selectedTab = 1
                     return
                 }
-                let nextDay = vm.nextIncompleteDay(in: mesocycle)?.day
-                if nextDay?.id == saved.trainingDayId {
-                    // Normal case: pass as explicit resumeState so Path A fires reliably
-                    crashResumeToPass = saved
-                    selectedTab = 1
-                } else if let foundResult = vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) {
-                    // Paused day found elsewhere in the mesocycle — pass both the correct
-                    // training day and the resume state so WorkoutView uses the right exercise list.
-                    crashResumeToPass = saved
-                    crashResumeDay = foundResult.day
+                if vm.findTrainingDay(byId: saved.trainingDayId, in: mesocycle) != nil {
                     selectedTab = 1
                 } else {
                     // Paused day not found anywhere — can't properly resume.
-                    // Show the orphaned recovery dialog instead of switching tabs.
                     showOrphanedRecoveryAlert = true
                 }
             }
@@ -259,8 +247,6 @@ struct ContentView: View {
                     }
                 }
                 crashRecoveryState = nil
-                crashResumeToPass = nil
-                crashResumeDay = nil
             }
         } message: {
             Text(crashRecoveryMessage)
@@ -274,7 +260,6 @@ struct ContentView: View {
                     _ = saved  // acknowledged
                 }
                 crashRecoveryState = nil
-                crashResumeToPass = nil
                 PausedSessionState.clear()
             }
             Button("Discard", role: .destructive) {
@@ -284,7 +269,6 @@ struct ContentView: View {
                     }
                 }
                 crashRecoveryState = nil
-                crashResumeToPass = nil
             }
         } message: {
             Text("Your previous workout couldn't be matched to the current programme. You can preserve the sets that were logged, or discard the session entirely.")
