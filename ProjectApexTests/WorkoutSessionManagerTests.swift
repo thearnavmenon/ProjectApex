@@ -1281,6 +1281,34 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertEqual(after - before, 2, "Two distinct sessions must each count once (latch resets per session)")
     }
 
+    // MARK: #440 (F1) — currentSessionId tracks the live session identity
+
+    /// The actor must expose the live session's UUID alongside its training-day UUID so
+    /// ActiveSessionCoordinator can publish .live(dayId:sessionId:) from a single actor
+    /// read. currentSessionId is set on start and cleared on resetToIdle; it is distinct
+    /// from currentTrainingDayId (the two UUIDs must not be conflated).
+    func testCurrentSessionId_setOnStart_clearedOnReset() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 1)
+
+        // Idle before start.
+        let beforeStart = await manager.currentSessionId
+        XCTAssertNil(beforeStart, "currentSessionId must be nil before any session starts")
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let liveSessionId = await manager.currentSessionId
+        let liveDayId = await manager.currentTrainingDayId
+        XCTAssertNotNil(liveSessionId, "currentSessionId must be set once a session starts")
+        XCTAssertEqual(liveDayId, day.id, "currentTrainingDayId must reference the started day")
+        XCTAssertNotEqual(liveSessionId, liveDayId, "session UUID and day UUID must not be conflated")
+
+        await manager.resetToIdle()
+        let afterReset = await manager.currentSessionId
+        XCTAssertNil(afterReset, "currentSessionId must be cleared on resetToIdle")
+    }
+
     // MARK: #369 [19] — retryInference participates in the generation guard
 
     /// A retry result that resolves AFTER the session has advanced (generation bumped

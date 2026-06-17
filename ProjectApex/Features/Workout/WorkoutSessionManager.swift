@@ -103,6 +103,11 @@ actor WorkoutSessionManager {
     /// Exposed so ProgramDayDetailView can detect and display live session state
     /// without having to cross actor boundaries repeatedly.
     private(set) var currentTrainingDayId: UUID? = nil
+    /// The session UUID for the currently active session (nil when idle/complete).
+    /// Set wherever currentTrainingDayId is set (start + resume), cleared on resetToIdle.
+    /// #440 (F1): ActiveSessionCoordinator reads this so a .live state carries both the
+    /// day and the session identity from one consistent actor snapshot.
+    private(set) var currentSessionId: UUID? = nil
     private(set) var currentPrescription: SetPrescription?
     private(set) var currentFallbackReason: FallbackReason?
     private(set) var restSecondsRemaining: Int = 0
@@ -318,6 +323,7 @@ actor WorkoutSessionManager {
             summary: nil
         )
         self.session = newSession
+        self.currentSessionId = newSession.id   // #440 (F1): publish session identity alongside the day
 
         // Write crash sentinel — if the app is killed mid-session, relaunch detects this
         // and offers a recovery prompt that reuses the existing resumeSession() flow.
@@ -971,6 +977,7 @@ actor WorkoutSessionManager {
         // Restore session state
         self.trainingDay = trainingDay
         self.currentTrainingDayId = trainingDay.id
+        self.currentSessionId = pausedState.sessionId   // #440 (F1): resumed session keeps its original id
         self.weekId = pausedState.weekId
         self.exerciseIndex = min(pausedState.exerciseIndex, max(0, trainingDay.exercises.count - 1))
         self.currentSetNumber = pausedState.currentSetNumber
@@ -1091,6 +1098,7 @@ actor WorkoutSessionManager {
         session = nil
         trainingDay = nil
         currentTrainingDayId = nil
+        currentSessionId = nil   // #440 (F1)
         weekId = UUID()
         exerciseIndex = 0
         currentSetNumber = 1
