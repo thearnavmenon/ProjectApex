@@ -7,6 +7,35 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-17 — One brain now decides whether a workout is live or paused
+
+**The problem (in plain words).** Different parts of the app each figured out on their own
+whether you had a workout in progress or paused — the little dot on the Workout tab, the
+"you have a paused workout" banner, the calendar's highlight of today, and the day screen
+each asked a different place and checked at a different moment. So they could disagree: the
+tab dot still said "live" for a few seconds after you'd paused, while the banner already
+said "paused." Confusing, and the root of a lot of the jumble.
+
+**What changed.** There's now a single source of truth — one small "coordinator" that holds
+exactly one answer: are you idle, live on day X, or paused on day X. Every part of the
+app — the tab dot, the banner, the calendar highlight, the day screen — now reads that one
+answer, so they can't disagree anymore. The old separate watcher that each part used to
+poll was folded into this and deleted. A live workout always wins over a leftover "paused"
+note, and the earlier safety check (#447) still blocks resuming a workout whose exercises
+changed. (#440)
+
+**How it was built and checked.** Built test-first by one agent in an isolated copy, then a
+second agent reviewed it independently and adversarially (its only job was to find what's
+wrong) — it confirmed every rule held and found no blockers. Verified a third time here:
+full app builds clean, 38 tests pass (8 new ones for the coordinator). One small fragility
+the reviewer spotted (the coordinator reads three values from the workout engine in three
+steps instead of one) is harmless today but logged as a follow-up (#458) so it can be made
+rock-solid.
+
+**Status.** Merged to `main` (PR #457; issue #440 closed; follow-up #458 filed). One last
+piece of the Workout/Programme cure remains: retiring the old crash-recovery workaround and
+collapsing the two resume paths into one (#441).
+
 ## 2026-06-17 — Resuming a workout now refuses to replay if its exercises changed
 
 **The problem (in plain words).** When you pause a workout and come back later, the app
