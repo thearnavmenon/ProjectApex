@@ -106,7 +106,6 @@ struct ContentView: View {
                 Label("Workout", systemImage: "figure.strengthtraining.traditional")
             }
             .tag(1)
-            .badge(workoutTabBadge)
 
             // ── Tab 2: Progress ────────────────────────────────────────────
             ProgressTabView(
@@ -127,6 +126,22 @@ struct ContentView: View {
                 Label("Settings", systemImage: "gearshape.fill")
             }
             .tag(3)
+        }
+        .overlay(alignment: .bottom) {
+            // #462: "Now Training" pill above the tab bar — replaces the colour-coded
+            // tab badge (iOS strips a Text badge's tint). Hidden on the Workout tab
+            // itself (tab 1), which already shows the full session / paused screen.
+            // .padding(.bottom) clears the tab bar; the exact value needs device QA.
+            if selectedTab != 1 {
+                NowTrainingBar(
+                    state: .resolve(
+                        isLive: deps.activeSessionCoordinator.isLive,
+                        pausedExists: deps.activeSessionCoordinator.pausedSessionExists
+                    ),
+                    onTap: { selectedTab = 1 }
+                )
+                .padding(.bottom, 56)
+            }
         }
         .environment(\.switchToTab, { selectedTab = $0 })
         .preferredColorScheme(.dark)
@@ -285,21 +300,6 @@ struct ContentView: View {
     private var loadingPlaceholder: some View {
         Color(red: 0.04, green: 0.04, blue: 0.06)
             .ignoresSafeArea()
-    }
-
-    // MARK: - Tab Badge
-
-    /// Returns a coloured dot badge for Tab 1 when a session is live or paused.
-    /// Live sessions use the phase-accent blue; paused-only sessions use amber.
-    /// Returns nil (no badge) when idle. SwiftUI renders foregroundStyle on Text badges
-    /// on iOS 16+; if the tint does not render the badge defaults to the system colour.
-    private var workoutTabBadge: Text? {
-        if deps.activeSessionCoordinator.isLive {
-            return Text("●").foregroundStyle(Color(red: 0.25, green: 0.72, blue: 1.0))
-        } else if deps.activeSessionCoordinator.pausedSessionExists {
-            return Text("●").foregroundStyle(Color(red: 1.0, green: 0.65, blue: 0.0))
-        }
-        return nil
     }
 
     // MARK: - Workout Tab
