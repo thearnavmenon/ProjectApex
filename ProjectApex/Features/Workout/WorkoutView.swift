@@ -220,9 +220,13 @@ struct WorkoutView: View {
                     return
                 }
                 let isIdle = await deps.workoutSessionManager.sessionState == .idle
-                if isIdle {
-                    pausedForThisDay = saved
-                }
+                // #465: same resolution the in-place `.onChange(.idle)` path uses,
+                // so both converge on one render decision.
+                pausedForThisDay = WorkoutView.resolvePausedSentinel(
+                    saved: saved,
+                    actorIsIdle: isIdle,
+                    trainingDayId: trainingDay.id
+                )
             }
         }
         .onChange(of: viewModel?.sessionState) { _, newState in
@@ -248,7 +252,20 @@ struct WorkoutView: View {
             // sentinel (e.g. an errored start, or a different paused day) from mis-marking the
             // currently-rendered day as paused (amendment 2.1).
             if case .idle = newState {
-                if PausedSessionState.load()?.trainingDayId == trainingDay.id {
+                // #465: resolve the sentinel ONCE (load() has a repairPending
+                // side-effect) and, when it names this day, surface the deliberate
+                // WorkoutPausedView in place — same @State the navigate-away path
+                // assigns — instead of letting contentForState(.idle) fall through
+                // to PreWorkoutView. The actor is idle here by construction of the
+                // .idle transition, so the live `.idle` edge always satisfies the
+                // helper's idleness requirement.
+                let saved = PausedSessionState.load()
+                if let resolved = WorkoutView.resolvePausedSentinel(
+                    saved: saved,
+                    actorIsIdle: true,
+                    trainingDayId: trainingDay.id
+                ) {
+                    pausedForThisDay = resolved
                     onSessionPaused?(trainingDay.id)
                 }
             }
@@ -544,6 +561,25 @@ struct WorkoutView: View {
 
     private var setCompleteTransition: AnyTransition {
         reduceMotion ? .opacity : .apexSetComplete
+    }
+
+    // MARK: - Paused-sentinel resolution
+
+    /// Pure decision shared by the `.task` (navigate-away-and-back) and the
+    /// `.onChange(.idle)` (in-place pause) paths (#465): a saved sentinel becomes
+    /// this view's paused screen iff the actor is idle AND the sentinel names THIS
+    /// view's day. Both call sites read `PausedSessionState.load()` exactly once
+    /// (load() has a `repairPending` side-effect, so it must not be called twice)
+    /// and feed the result here so they converge on one render decision.
+    static func resolvePausedSentinel(
+        saved: PausedSessionState?,
+        actorIsIdle: Bool,
+        trainingDayId: UUID
+    ) -> PausedSessionState? {
+        guard let saved, saved.trainingDayId == trainingDayId, actorIsIdle else {
+            return nil
+        }
+        return saved
     }
 
     // MARK: - Resume helper
