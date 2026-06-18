@@ -7,6 +7,46 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-18 — Tidying up what happens when you pause a workout
+
+**The problem (in plain words):**
+Pausing a workout mid-set felt messy. Three things were wrong. First, when you
+hit "Pause" right there on the screen, the app dropped you back on the "Start
+Workout" page — so it looked like your workout had vanished. The proper "Workout
+paused" screen only showed up if you left the tab and came back. Second, there
+were two separate bits of code that both did "pause," which is the kind of thing
+that quietly drifts apart over time. Third, the paused state was announced in six
+different places using five different sets of words ("Paused Session", "Session
+Paused", "Unfinished Workout", and so on), and several of them had their own
+"Resume" button — so being paused felt like it was coming at you from everywhere
+at once.
+
+**What I changed:**
+Four small, separate changes. (1) Pausing in place now lands you on the same
+single "Workout paused" screen every time, whether you stayed put or wandered off
+and came back. (2) The two pause code-paths are now one. (3) The little amber
+"paused" banner now takes you straight to that one paused screen instead of
+detouring through another page (and I deleted the now-unused detour code). (4)
+Every place that mentions being paused now uses the exact same words — "Workout
+paused", "Resume workout", "Discard workout" — with the word "Resume" kept only
+on the one screen that actually resumes. Two pop-ups that mean genuinely different
+things ("we couldn't match your session", "session not found") were left alone on
+purpose, because making them say "paused" would be a lie.
+
+**How I made sure it works:**
+This was designed by a panel of agents (four designs, judged, then merged into one
+surgical plan), then built as four bite-sized pieces, each with its own test and an
+independent review before it went in. The whole app's test suite passes (TEST
+SUCCEEDED on iPhone 17 Pro). A note for next time: the automated build runner kept
+stalling on the simulator and one run silently used a simulator version this Mac
+doesn't have, so I re-ran the tests by hand against a real one to be sure they
+actually passed.
+
+**Status:** Done and merged. Filed as issues #465, #466, #467, #468; shipped in
+pull requests #469, #470, #471, #472; all four issues closed.
+
+---
+
 ## 2026-06-17 — A clearer "you've got a workout going" badge above the tab bar
 
 **The problem (in plain words).** The little dot on the Workout tab was meant to glow blue
