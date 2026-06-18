@@ -655,7 +655,7 @@ private struct DayCardView: View {
                     Image(systemName: "pause.circle.fill")
                         .font(.system(size: 14))
                         .foregroundStyle(pausedAmber)
-                        .accessibilityLabel("Session paused")
+                        .accessibilityLabel("Workout paused")
                 } else if isSkipped {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 14))

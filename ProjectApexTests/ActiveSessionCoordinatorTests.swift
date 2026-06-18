@@ -378,6 +378,14 @@ final class ActiveSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(NowTrainingBar.BarState.resolve(isLive: true,  pausedExists: true),  .live)
     }
 
+    // 10b. #468 — one vocabulary: the paused pill reads the canonical "Workout paused"
+    //      (no "tap to resume"; the verb "Resume" is reserved for the surface that
+    //      actually resumes). The live state still reads "Training".
+    func testNowTrainingBarLabel_isCanonicalVocabulary() {
+        XCTAssertEqual(NowTrainingBar.label(for: .paused), "Workout paused")
+        XCTAssertEqual(NowTrainingBar.label(for: .live), "Training")
+    }
+
     // 11. #462 — driven off the real coordinator: the bar state agrees with the
     //     single ActiveSession enum at idle / paused / live, with no disagreement.
     func testNowTrainingBarState_matchesCoordinator_idlePausedLive() async throws {
