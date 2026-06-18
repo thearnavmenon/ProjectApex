@@ -82,24 +82,35 @@ struct BulkEquipmentPickerSheet: View {
                             showingCustomAdd = true
                         } label: {
                             Label("Can't find it? Add custom", systemImage: "plus.circle")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .font(.system(size: 15, weight: .medium))
+                                .foregroundStyle(Apex.textDim)
                         }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparatorTint(Apex.hairline)
                     }
                 }
                 .listStyle(.insetGrouped)
+                .scrollContentBackground(.hidden)
+                .background(Apex.bg)
 
                 // Confirm button pinned at the bottom
                 confirmButton
             }
+            .background(Apex.bg)
             .navigationTitle("Add Equipment")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(Apex.bg, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Apex.textDim)
                 }
             }
         }
+        .preferredColorScheme(.dark)
         .sheet(isPresented: $showingCustomAdd) {
             EquipmentEditSheet(
                 existingItem: nil,
@@ -115,28 +126,36 @@ struct BulkEquipmentPickerSheet: View {
     // MARK: - Subviews
 
     private var searchBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 9) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Search equipment…", text: $searchText)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Apex.textFaint)
+            TextField("", text: $searchText, prompt:
+                Text("Search equipment…")
+                    .foregroundColor(Apex.textFaint)
+            )
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(Apex.text)
+            .tint(Apex.accent)
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 15))
+                        .foregroundStyle(Apex.textFaint)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .apexCard()
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color(.systemGroupedBackground))
+        .padding(.vertical, 12)
+        .background(Apex.bg)
     }
 
     @ViewBuilder
@@ -148,6 +167,8 @@ struct BulkEquipmentPickerSheet: View {
             if !isCollapsed {
                 ForEach(items, id: \.self) { type in
                     equipmentRow(type: type)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparatorTint(Apex.hairline)
                 }
             }
         } header: {
@@ -175,17 +196,15 @@ struct BulkEquipmentPickerSheet: View {
                     }
                 }
             } label: {
-                HStack(spacing: 6) {
+                HStack(spacing: 7) {
                     Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                        .font(.caption.bold())
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Apex.textFaint)
                         .frame(width: 14)
                     Image(systemName: category.systemImage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(category.rawValue.uppercased())
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Apex.textDim)
+                    ApexSectionLabel(text: category.rawValue, color: Apex.textDim)
                         .textCase(nil)
                 }
             }
@@ -193,7 +212,9 @@ struct BulkEquipmentPickerSheet: View {
 
             Spacer()
 
-            // Select All / Deselect All toggle — only when section is expanded
+            // Select All / Deselect All toggle — only when section is expanded.
+            // Demoted off-accent (textDim) so the bottom confirm bar is the sole
+            // lime CTA.
             if !isCollapsed && hasSelectable {
                 Button {
                     if sectionAllSelected {
@@ -203,14 +224,16 @@ struct BulkEquipmentPickerSheet: View {
                     }
                 } label: {
                     Text(sectionAllSelected ? "Deselect All" : "Select All")
-                        .font(.caption.weight(.medium))
-                        .textCase(nil)
-                        .foregroundStyle(.blue)
+                        .font(.system(size: 12, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+                        .foregroundStyle(Apex.textDim)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
     }
 
     private func equipmentRow(type: EquipmentType) -> some View {
@@ -227,22 +250,29 @@ struct BulkEquipmentPickerSheet: View {
         } label: {
             HStack(spacing: 12) {
                 Text(type.displayName)
-                    .foregroundStyle(isAlreadyAdded ? .tertiary : .primary)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(isAlreadyAdded ? Apex.textFaint : Apex.text)
 
                 Spacer()
 
                 if isAlreadyAdded {
                     Text("Added")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 12, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+                        .foregroundStyle(Apex.textFaint)
                 } else if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.blue)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Apex.accent)
                 } else {
                     Image(systemName: "circle")
-                        .foregroundStyle(.quaternary)
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Apex.textFaint)
                 }
             }
+            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -250,7 +280,8 @@ struct BulkEquipmentPickerSheet: View {
     }
 
     private var confirmButton: some View {
-        Button {
+        let isEmpty = selectedTypes.isEmpty
+        return Button {
             let items = selectedTypes.map { type in
                 EquipmentItem(
                     equipmentType: type,
@@ -261,16 +292,15 @@ struct BulkEquipmentPickerSheet: View {
             }
             onConfirm(items)
         } label: {
-            Text(confirmButtonTitle)
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+            ApexButton(title: confirmButtonTitle, icon: "plus")
+                .opacity(isEmpty ? 0.4 : 1)
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(selectedTypes.isEmpty)
+        .buttonStyle(.plain)
+        .disabled(isEmpty)
         .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(.systemGroupedBackground))
+        .padding(.top, 16)
+        .padding(.bottom, 12)
+        .background(Apex.bg)
     }
 }
 
