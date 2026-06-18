@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-18 — Settings tab redesign (part 2): new features
+
+**The problem (in plain words):**
+With Settings now looking right, it was missing things people actually need —
+and a couple of useful screens were buried. A design panel of agents reviewed the
+page and suggested the additions; this delivers the ones we picked.
+
+**What I changed:**
+- Training days and your goal can now be changed right from Settings. Before,
+  the only way was to redo onboarding. Your change is used the next time you
+  regenerate your program (it doesn't regenerate on its own).
+- A "Review targets" row reopens the targets screen any time — it used to only
+  show up as a one-time banner you couldn't get back to.
+- A new "Sex" field (male/female) that the AI coach actually uses, so a first
+  workout isn't accidentally weighted for the average man. Leaving it blank keeps
+  today's behaviour, so nobody is forced to answer.
+- A real "Reset all data" button (red, with an "are you sure?") to start fresh —
+  this used to be hidden in the developer-only screen. It runs the exact same
+  wipe code as the developer version (one shared function), so the important part
+  — clearing your signed-in session — can't drift out of sync.
+
+**How I made sure it works:**
+Each feature was built by its own agent in an isolated copy, one pull request
+each, and I built every one here before merging — the reset was also built in
+Release mode to prove it works outside developer builds. Then I built the whole
+app together (BUILD SUCCEEDED, iPhone 17 Pro / iOS 26.5) and took a real
+screenshot of the live Settings screen.
+
+**Status:** Merged to main — #498 (program controls), #499 (sex field), #500
+(release-safe reset), all part of #494. The umbrella stays open until final
+visual sign-off.
+
+---
+
 ## 2026-06-18 — Settings tab redesign (part 1): the look
 
 **The problem (in plain words):**
