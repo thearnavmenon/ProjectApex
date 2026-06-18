@@ -45,6 +45,10 @@ Default canonical vocabulary — `needs-triage`, `needs-info`, `ready-for-agent`
 
 Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+### Screen redesign (orchestrated UI)
+
+The repeatable flow for redesigning any screen(s) to a cohesive identity: Mobbin inspiration → isolated prototype harness + render gallery → user picks a direction → foundation-first design system → per-screen agent fan-out (worktrees, one PR each) → orchestrator build-verifies/merges. Reuses `ProjectApex/DesignSystem/` and the `UIPrototypes/` harness. Established 2026-06-18 (Brutalist workout redesign, #473). See `docs/agents/screen-redesign.md`.
+
 ### Edge Function secrets
 
 Authoritative for Edge Function secret storage, service-role access list, and key rotation policy. Read before any Slice 9b+ Edge Function work — do not redo the analysis from scratch. See `docs/agents/edge-functions.md`.
