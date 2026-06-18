@@ -1036,6 +1036,13 @@ struct RepRPEIntentConfirmationSheet: View {
 
     @State private var formState: SetCompletionFormState
 
+    /// Visual-layer only: whether the collapsible "Add detail" section
+    /// (RPE + intent + flags) is expanded. Seeded open for freestyle sets
+    /// so the intent picker — the only path to a submittable freestyle
+    /// form — is reachable on first appearance. AI-prescribed sets start
+    /// collapsed (one-tap Log Set is the happy path).
+    @State private var detailExpanded: Bool
+
     init(
         initialState: SetCompletionFormState,
         tintColor: Color,
@@ -1045,102 +1052,53 @@ struct RepRPEIntentConfirmationSheet: View {
         self.tintColor = tintColor
         self.onCommit = onCommit
         self._formState = State(initialValue: initialState)
+        // Freestyle (no prescribed intent) must pick an intent before Log
+        // Set enables, and that picker lives under "Add detail" — open it
+        // up front so the gate is satisfiable without a hidden tap.
+        self._detailExpanded = State(initialValue: initialState.prescribedIntent == nil)
     }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // Header — no auto-dismiss countdown.
-                HStack {
-                    Text("How did that feel?")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Spacer()
+            VStack(spacing: 22) {
+                // Header — grabber + title, no auto-dismiss countdown.
+                VStack(spacing: 16) {
+                    Capsule()
+                        .fill(Color.white.opacity(0.22))
+                        .frame(width: 38, height: 5)
+                    HStack {
+                        Text("HOW DID THAT SET FEEL?")
+                            .font(.system(size: 19, weight: .heavy))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.text)
+                        Spacer()
+                    }
                 }
-                .padding(.top, 4)
+                .padding(.top, 10)
 
-                // Actual reps stepper
+                // Actual reps — big tabular numeral with large circular ± steppers.
+                repsStepper
+
+                // RPE felt — three full-width feeling pills (Too Easy / On
+                // Target / Too Hard). Optional with NO preselected value
+                // (#318 / U5, G-F2): rpeFelt is Int? starting nil, so no pill
+                // is filled until the user picks one.
                 VStack(spacing: 10) {
-                    Text("Actual Reps")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
-                        .tracking(0.5)
-
-                    HStack(spacing: 24) {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            // Floor is 0 (#318 / U5): a failed/zero rep is honest data.
-                            if formState.actualReps > 0 { formState.actualReps -= 1 }
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .font(.system(size: 36))
-                                .foregroundStyle(.white.opacity(0.55))
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-
-                        Text("\(formState.actualReps)")
-                            .font(.system(size: 48, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white)
-                            .contentTransition(.numericText())
-                            .frame(minWidth: 72)
-
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            if formState.actualReps < 30 { formState.actualReps += 1 }
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.system(size: 36))
-                                .foregroundStyle(tintColor.opacity(0.90))
-                        }
-                        .frame(minWidth: 44, minHeight: 44)
-                    }
+                    feelPill("Too Easy", index: 0)
+                    feelPill("On Target", index: 1)
+                    feelPill("Too Hard", index: 2)
                 }
 
-                // RPE/RIR felt — 3-option segmented picker.
-                // Optional with NO preselected value (#318 / U5, G-F2): the
-                // selection is Int? starting nil, so no segment is highlighted
-                // until the user actively picks one.
-                VStack(spacing: 10) {
-                    HStack(spacing: 6) {
-                        Text("How hard was it?")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.50))
-                            .tracking(0.5)
-                        Text("· Optional")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.30))
-                    }
+                // Collapsible "Add detail" — intent picker + flags. Seeded
+                // open for freestyle (intent gate lives inside).
+                detailSection
 
-                    Picker("RPE felt (optional)", selection: $formState.rpeFelt) {
-                        Text("Too Easy").tag(Int?.some(0))
-                        Text("On Target").tag(Int?.some(1))
-                        Text("Too Hard").tag(Int?.some(2))
-                    }
-                    .pickerStyle(.segmented)
-                }
-
-                // Intent picker (deviation affordance for AI-prescribed,
-                // visible-by-default for freestyle).
-                intentSection
-
-                // Pain / form-breakdown flags. Always visible; both flags
-                // independently togglable.
-                flagsSection
-
-                // Log button. AI-prescribed: always enabled. Freestyle:
-                // enabled once an intent is picked.
+                // Log button — lime ApexButton. AI-prescribed: always enabled.
+                // Freestyle: enabled once an intent is picked (gate intact).
                 Button {
                     onCommit(formState)
                 } label: {
-                    Text("Log Set")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(
-                            tintColor,
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        )
+                    ApexButton(title: "Log set", kind: formState.canSubmit ? .filled : .ghost, icon: "checkmark")
                         .opacity(formState.canSubmit ? 1.0 : 0.35)
                 }
                 .disabled(!formState.canSubmit)
@@ -1149,10 +1107,152 @@ struct RepRPEIntentConfirmationSheet: View {
                                    : "Pick an intent to enable logging")
                 .animation(.easeInOut(duration: 0.18), value: formState.canSubmit)
             }
-            .padding(24)
+            .padding(.horizontal, Apex.pad)
+            .padding(.bottom, 30)
         }
-        .background(Color(red: 0.07, green: 0.08, blue: 0.10))
+        .background(Apex.bg)
         .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Reps stepper (Brutalist)
+
+    /// Big tabular reps numeral flanked by large circular ± steppers.
+    private var repsStepper: some View {
+        HStack {
+            stepButton(icon: "minus", tint: Apex.text) {
+                // Floor is 0 (#318 / U5): a failed/zero rep is honest data.
+                if formState.actualReps > 0 { formState.actualReps -= 1 }
+            }
+            .accessibilityLabel("Decrease reps")
+
+            Spacer()
+
+            VStack(spacing: 4) {
+                ApexNumeral(text: "\(formState.actualReps)", size: 60)
+                    .contentTransition(.numericText())
+                    .animation(.spring(response: 0.25, dampingFraction: 0.85), value: formState.actualReps)
+                ApexSectionLabel(text: "Reps completed", color: Apex.textFaint)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(formState.actualReps) reps completed")
+
+            Spacer()
+
+            stepButton(icon: "plus", tint: Apex.accent) {
+                if formState.actualReps < 30 { formState.actualReps += 1 }
+            }
+            .accessibilityLabel("Increase reps")
+        }
+        .padding(.vertical, 6)
+    }
+
+    /// Large circular step button (60×60), glass fill + hairline stroke.
+    private func stepButton(icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            action()
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 20, weight: .black))
+                .foregroundStyle(tint)
+                .frame(width: 60, height: 60)
+                .background(Circle().fill(Color.white.opacity(0.06)))
+                .overlay(Circle().stroke(Apex.hairline, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Feeling pill (RPE 3-option, Brutalist)
+
+    /// Full-width feeling pill. Maps to `formState.rpeFelt` 0/1/2. Lime fill +
+    /// black label + checkmark when selected; glass + hairline otherwise. No
+    /// pill is filled while `rpeFelt` is nil (optional, no default).
+    @ViewBuilder
+    private func feelPill(_ label: String, index: Int) -> some View {
+        let isSel = formState.rpeFelt == index
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            formState.rpeFelt = index
+        } label: {
+            HStack {
+                Text(label)
+                    .textCase(.uppercase)
+                    .tracking(1.0)
+                    .fontWidth(.condensed)
+                    .font(.system(size: 16, weight: .bold))
+                Spacer()
+                if isSel {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 14, weight: .black))
+                }
+            }
+            .foregroundStyle(isSel ? Apex.onAccent : Apex.text)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 16)
+            .background {
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .fill(isSel ? Apex.accent : Color.white.opacity(0.04))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .stroke(isSel ? Color.clear : Apex.hairline, lineWidth: 1)
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityAddTraits(isSel ? .isSelected : [])
+        .animation(.easeInOut(duration: 0.18), value: formState.rpeFelt)
+    }
+
+    // MARK: - Add detail (collapsible: intent + flags)
+
+    /// Collapsible "Add detail" container holding the intent picker and the
+    /// pain / form-breakdown flags. The disclosure row uses `apexCard`; the
+    /// expanded body lives in a matching card below it.
+    @ViewBuilder
+    private var detailSection: some View {
+        VStack(spacing: 10) {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                withAnimation(.easeInOut(duration: 0.22)) { detailExpanded.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Add detail · intent, pain, form breakdown")
+                        .font(.system(size: 14, weight: .semibold))
+                    Spacer()
+                    Image(systemName: detailExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .bold))
+                }
+                .foregroundStyle(Apex.textDim)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity)
+                .apexCard()
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Add detail")
+            .accessibilityHint(detailExpanded
+                               ? "Collapses intent and flag options"
+                               : "Reveals intent picker and pain or form-breakdown flags")
+
+            if detailExpanded {
+                VStack(spacing: 20) {
+                    // Intent picker (deviation affordance for AI-prescribed,
+                    // visible-by-default for freestyle).
+                    intentSection
+
+                    // Pain / form-breakdown flags. Always available; both
+                    // flags independently togglable.
+                    flagsSection
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .apexCard()
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     // MARK: - Intent section (Slice 6 redesign)
@@ -1177,12 +1277,9 @@ struct RepRPEIntentConfirmationSheet: View {
                 // AI-prescribed after the user revealed it. Header text
                 // adapts to the path.
                 HStack {
-                    Text(formState.prescribedIntent == nil
-                         ? "What kind of set?"
-                         : "What did you actually do?")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
-                        .tracking(0.5)
+                    ApexSectionLabel(text: formState.prescribedIntent == nil
+                                     ? "What kind of set?"
+                                     : "What did you actually do?")
                     Spacer()
                 }
                 intentChipRow
@@ -1212,10 +1309,10 @@ struct RepRPEIntentConfirmationSheet: View {
             HStack(spacing: 6) {
                 Text(isExpanded ? "Never mind" : "Did something different?")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(Apex.textDim)
                 Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Apex.textFaint)
                 Spacer()
             }
         }
@@ -1268,19 +1365,18 @@ struct RepRPEIntentConfirmationSheet: View {
         } label: {
             Text(Self.label(for: intent))
                 .font(.system(size: 13, weight: isSelected ? .bold : .semibold))
-                .tracking(0.3)
-                .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.65))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .tracking(0.8)
+                .foregroundStyle(isSelected ? Apex.onAccent : Apex.text.opacity(0.65))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .background(
                     ZStack {
-                        Capsule()
-                            .fill(isSelected ? tintColor : Color.white.opacity(0.06))
-                        Capsule()
-                            .stroke(
-                                isSelected ? tintColor : Color.white.opacity(0.18),
-                                lineWidth: 0.5
-                            )
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .fill(isSelected ? Apex.accent : Color.white.opacity(0.06))
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .stroke(isSelected ? Color.clear : Apex.hairline, lineWidth: 1)
                     }
                 )
         }
@@ -1296,10 +1392,7 @@ struct RepRPEIntentConfirmationSheet: View {
     private var flagsSection: some View {
         VStack(spacing: 10) {
             HStack {
-                Text("Anything to flag?")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.50))
-                    .tracking(0.5)
+                ApexSectionLabel(text: "Anything to flag?")
                 Spacer()
             }
             HStack(spacing: 8) {
@@ -1333,18 +1426,15 @@ struct RepRPEIntentConfirmationSheet: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.85)
             }
-            .foregroundStyle(isOn ? Color.white : Color.white.opacity(0.55))
+            .foregroundStyle(isOn ? Color.white : Apex.text.opacity(0.55))
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
             .background(
                 ZStack {
-                    Capsule()
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
                         .fill(isOn ? onColor.opacity(0.85) : Color.white.opacity(0.06))
-                    Capsule()
-                        .stroke(
-                            isOn ? onColor : Color.white.opacity(0.18),
-                            lineWidth: 0.5
-                        )
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        .stroke(isOn ? onColor : Apex.hairline, lineWidth: 1)
                 }
             )
         }
