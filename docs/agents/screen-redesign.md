@@ -2,7 +2,7 @@
 
 The repeatable flow for redesigning **any** screen or group of screens (Progress, Today, onboarding, settings, future features) to a single cohesive identity. This is the method used for the 2026‑06‑18 workout‑screen redesign (umbrella #473); reuse it wholesale.
 
-**Shape:** inspiration → prototype in an isolated harness → user picks a direction → foundation‑first design system → per‑screen agent fan‑out → build‑verify → merge. The orchestrator (you, the main session) never lets unreviewed/unbuilt code reach `main`.
+**Shape:** inspiration → prototype in an isolated harness → user picks a direction → *(optional)* UX‑improvement panel → foundation‑first design system → per‑screen agent fan‑out → build‑verify → merge. The orchestrator (you, the main session) never lets unreviewed/unbuilt code reach `main`.
 
 Trigger phrases: "redesign the X screen(s)", "make X match our design", "use our redesign flow on X", `/screen-redesign`.
 
@@ -38,6 +38,21 @@ Trigger phrases: "redesign the X screen(s)", "make X match our design", "use our
 2. Build: `xcodebuild build -project UIPrototypes/ApexUIProto.xcodeproj -scheme ApexUIProto -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' CODE_SIGNING_ALLOWED=NO` — run as a **background Bash job**, poll the log. (**OS=26.5** — CI's 26.2 is not installed locally; xcodebuild exits 70 otherwise.)
 3. Render each screen: `SIMCTL_CHILD_PROTO_SCREEN=<key> xcrun simctl launch booted <bundleid>` then `xcrun simctl io booted screenshot out.png`. A cold start can capture a blank first frame — re‑shoot if blank.
 4. Update `UIPrototypes/renders/index.html` and present the gallery. **Get the user to pick a direction before writing any production code.** This is the gate the prior (abandoned) redesign skipped.
+
+---
+
+## Phase 2.5 — UX‑improvement panel (optional)
+
+A redesign isn't only a restyle — it's the moment to ask **what about this screen should change**: what's missing, what to add, how it looks and feels. Run this when the user asks ("what can be improved on X", "look at the UX", "what's missing / what could we add") or offer it once a direction is picked. It is **advisory**: it produces a *scoped menu* of improvements, the user chooses, and the chosen ones become real work — net‑new features get their own PRs in the Phase 3 fan‑out. (Established 2026‑06‑18 on the Settings redesign, #494.)
+
+1. **Convene a panel of distinct lenses — parallel, read‑only agents** (Agent tool; *not* worktrees — they don't edit). One agent per perspective so the critiques genuinely diverge. The four that worked (adapt per screen):
+   - **Product / information‑architecture** — what's missing vs the app's real capabilities and category norms; section order; what's mis‑placed or buried.
+   - **Visual / interaction designer** — look & feel within the design system; *owns* redesigning any control the user dislikes (give 2–3 concrete options + a recommendation).
+   - **Domain / power‑user** — what a real user of *this* app wants; tie each idea to whether it improves the product's core value (for Apex: coaching quality).
+   - **Pragmatist / scope‑skeptic** — the counterweight. Argues which additions to *reject* and what to *remove/simplify*, armed with `CONTEXT.md` constraints (e.g. the alpha‑cohort reality) and `CLAUDE.md` "Simplicity First". **Always include this one** — it stops the panel becoming a feature pile‑on.
+2. **Brief each agent identically:** read the real screen, the approved prototype (ABSOLUTE path — it's git‑ignored), `ProjectApex/DesignSystem/`, and `CONTEXT.md`; cover the three dimensions (missing / add / look‑and‑feel); address the specific pain point the user named; and return a **tight, prioritized** report where every item is labelled `[visual‑only | net‑new]` + effort `S/M/L` + cohort‑fit. **Hard rule: advisory only — agents do NOT modify files.** (Fan‑out keeps their reading out of the orchestrator's context; you keep only the synthesis.)
+3. **Synthesize, don't dump.** Collapse the reports into consensus + disagreements + one recommendation. Surface the genuine forks (where domain says "yes" and the skeptic says "no") instead of hiding them. Then let the user choose with `AskUserQuestion` — use option `preview`s for control redesigns (ASCII mockups compare well).
+4. **Fold the chosen improvements back through the flow:** extend the prototype with them (new rows/controls + the picked fix), re‑render, update the gallery, and **re‑show the user — the Phase 2 gate still applies.** Then build (Phase 3). Net‑new features are *behaviour*, so each is its **own PR labelled `net‑new`** (not folded into the visual restyle); pure‑visual polish folds into the restyle PR. Features that touch the **same production file must be sequenced**, not run as parallel worktrees (they'd conflict) — restyle first, then layer each feature PR on the updated `main`.
 
 ---
 
