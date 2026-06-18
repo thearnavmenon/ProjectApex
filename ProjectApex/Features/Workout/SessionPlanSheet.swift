@@ -4,6 +4,10 @@
 // In-workout "today's plan" sheet. Surfaces the prescription for every exercise
 // in the live session alongside the sets the user has logged so far, so the
 // user gets session context without leaving the Workout tab.
+//
+// Restyled to the Brutalist Athletic identity (#473): pure-black surface,
+// `apexCard` exercise cards, tabular `ApexNumeral` counts, and a single
+// volt-lime "NOW" chip on the current exercise.
 
 import SwiftUI
 
@@ -25,9 +29,9 @@ struct SessionPlanSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+                Apex.bg.ignoresSafeArea()
 
-                ScrollView {
+                ScrollView(showsIndicators: false) {
                     LazyVStack(spacing: 12) {
                         ForEach(Array(trainingDay.exercises.enumerated()), id: \.element.id) { index, exercise in
                             exerciseRow(
@@ -41,14 +45,22 @@ struct SessionPlanSheet: View {
                     .padding(.vertical, 16)
                 }
             }
-            .navigationTitle("Today's Plan")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
+            .toolbarBackground(Apex.bg, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("TODAY'S PLAN")
+                        .font(.system(size: 12, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .textCase(.uppercase)
+                        .tracking(1.5)
+                        .foregroundStyle(Apex.textDim)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(.white)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Apex.textDim)
                 }
             }
         }
@@ -62,41 +74,58 @@ struct SessionPlanSheet: View {
         let isCurrent = exercise.exerciseId == currentExerciseId
         let plannedSets = exercise.sets
         let loggedCount = logs.count
-        let accent = Color(red: 0.23, green: 0.56, blue: 1.00)
 
         VStack(alignment: .leading, spacing: 12) {
             // Header
-            HStack(alignment: .center, spacing: 12) {
-                Text("\(index)")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .frame(width: 26, height: 26)
-                    .background(Color.white.opacity(0.08), in: Circle())
+            HStack(alignment: .top, spacing: 12) {
+                ApexNumeral(text: String(format: "%02d", index), size: 15, color: Apex.textFaint)
+                    .padding(.top, 2)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(exercise.name)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 16, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
 
-                    Text("\(plannedSets) sets · \(exercise.repRange.min)–\(exercise.repRange.max) reps · RIR \(exercise.rirTarget)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.50))
+                    HStack(spacing: 8) {
+                        ApexSectionLabel(text: humanizedMuscle(exercise.primaryMuscle), color: Apex.textFaint)
+                        Text("·")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Apex.textFaint)
+                        ApexSectionLabel(
+                            text: "\(exercise.repRange.min)–\(exercise.repRange.max) reps · RIR \(exercise.rirTarget)",
+                            color: Apex.textFaint
+                        )
+                    }
                 }
 
                 Spacer()
 
                 if isCurrent {
-                    Text("CURRENT")
-                        .font(.system(size: 10, weight: .bold))
-                        .kerning(0.6)
-                        .foregroundStyle(accent)
-                        .padding(.horizontal, 8)
+                    Text("Now")
+                        .font(.system(size: 11, weight: .black))
+                        .textCase(.uppercase)
+                        .tracking(1.0)
+                        .foregroundStyle(Apex.onAccent)
+                        .padding(.horizontal, 9)
                         .padding(.vertical, 4)
-                        .background(accent.opacity(0.15), in: Capsule())
+                        .background(Capsule().fill(Apex.accent))
+                } else {
+                    // Logged / planned set count — tabular so it never reflows.
+                    // (The current exercise conveys this via its expanded grid.)
+                    HStack(spacing: 0) {
+                        ApexNumeral(
+                            text: "\(loggedCount)",
+                            size: 15,
+                            color: loggedCount >= plannedSets ? Apex.accent : Apex.text
+                        )
+                        ApexNumeral(text: " / \(plannedSets)", size: 15, color: Apex.textDim)
+                    }
                 }
             }
 
-            // Set grid — one row per planned set, filled if logged
+            // Set grid — one row per planned set, filled if logged.
+            Rectangle().fill(Apex.hairline).frame(height: 1)
             VStack(spacing: 6) {
                 ForEach(1...max(plannedSets, max(loggedCount, 1)), id: \.self) { setN in
                     setRow(
@@ -106,66 +135,68 @@ struct SessionPlanSheet: View {
                 }
             }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color.white.opacity(isCurrent ? 0.08 : 0.05))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isCurrent ? accent.opacity(0.35) : Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .padding(16)
+        .apexCard(emphasized: isCurrent)
     }
 
     @ViewBuilder
     private func setRow(setNumber: Int, log: SetLog?) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Text("Set \(setNumber)")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(log == nil ? 0.30 : 0.50))
-                .frame(width: 48, alignment: .leading)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(log == nil ? Apex.textFaint : Apex.textDim)
+                .frame(width: 46, alignment: .leading)
 
             if let log {
-                Text(formatWeight(log.weightKg))
-                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
-
-                Text("×")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.35))
-
-                Text("\(log.repsCompleted) reps")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-
-                if let rpe = log.rpeFelt {
-                    Text("· RPE \(rpe)")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                HStack(spacing: 6) {
+                    ApexNumeral(text: formatWeight(log.weightKg), size: 17)
+                    Text("kg")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Apex.textFaint)
+                    Text("×")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(Apex.textFaint)
+                    ApexNumeral(text: "\(log.repsCompleted)", size: 17)
                 }
 
                 Spacer()
 
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(Color(red: 0.24, green: 0.82, blue: 0.46))
+                if let rpe = log.rpeFelt {
+                    Text("RPE \(rpe)")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Apex.accent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(Apex.accent.opacity(0.15)))
+                }
             } else {
-                Text("pending")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.30))
+                Text("Pending")
+                    .font(.system(size: 12, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .tracking(1.0)
+                    .foregroundStyle(Apex.textFaint)
                 Spacer()
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 
+    // MARK: - Formatting
+
+    /// "142.5" → "142.5", "80.0" → "80". Tabular numerals keep the slot stable.
     private func formatWeight(_ kg: Double) -> String {
         let rounded = (kg * 10).rounded() / 10
         if rounded == rounded.rounded() {
-            return "\(Int(rounded))kg"
+            return "\(Int(rounded))"
         }
-        return String(format: "%.1fkg", rounded)
+        return String(format: "%.1f", rounded)
+    }
+
+    /// snake_case muscle id (e.g. "pectoralis_major") → "Pectoralis Major".
+    private func humanizedMuscle(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
     }
 }
