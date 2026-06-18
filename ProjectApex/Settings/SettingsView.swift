@@ -7,6 +7,10 @@
 //   • Equipment section → edit/delete items, add new, re-scan gym
 //   • Program section → "Regenerate Program" (P2-T08)
 //   • Developer row → DeveloperSettingsView (API key management)
+//
+// Visual identity: Brutalist Athletic (#494). Pure-black surfaces, condensed
+// tabular numerals, volt-lime accent reserved for additive/commit actions only.
+// The screen stays a `List` so swipe-to-delete on equipment keeps working.
 
 import SwiftUI
 
@@ -67,7 +71,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        Form {
+        List {
             // Persistent "Complete your setup" prompt — visible only if gym scan was skipped.
             if gymScanSkipped && !hasExistingProfile {
                 setupPromptSection
@@ -80,6 +84,11 @@ struct SettingsView: View {
             developerSection
             aboutSection
         }
+        .listStyle(.plain)
+        .listSectionSpacing(20)
+        .scrollContentBackground(.hidden)
+        .background(Apex.bg.ignoresSafeArea())
+        .tint(Apex.accent)
         .onAppear {
             loadBiometricsFromDefaults()
             if let profile = confirmedProfile {
@@ -93,6 +102,8 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .toolbarBackground(Apex.bg, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
         .overlay {
             if isRegenerating {
                 generatingOverlay
@@ -146,21 +157,23 @@ struct SettingsView: View {
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Apex.amber)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Complete your setup")
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+                            .font(.system(size: 16, weight: .bold))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.text)
                         Text("Scan your gym so the AI coach can tailor your program to available equipment.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Apex.textDim)
                     }
                 }
                 .padding(.vertical, 4)
             }
+            .settingsCardRow(.single)
         } header: {
-            Text("Action Required")
-                .foregroundStyle(.orange)
+            ApexSectionLabel(text: "Action Required", color: Apex.amber)
         }
     }
 
@@ -172,65 +185,70 @@ struct SettingsView: View {
         if hasExistingProfile {
             Section {
                 ForEach($equipmentItems) { $item in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Image(systemName: item.equipmentType.category.systemImage)
-                                .foregroundStyle(.secondary)
-                                .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 13) {
+                            boxedIcon(item.equipmentType.category.systemImage)
                             Text(item.equipmentType.displayName)
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(Apex.text)
                             Spacer()
                             if !item.detectedByVision {
                                 Text("Manual")
-                                    .font(.caption2)
-                                    .foregroundStyle(.tertiary)
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .textCase(.uppercase)
+                                    .tracking(0.8)
+                                    .foregroundStyle(Apex.textFaint)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().stroke(Apex.hairline, lineWidth: 1))
                             }
                         }
-                        // Bodyweight-only toggle for pull-up bars, dip stations, etc.
+                        // Loadable / Bodyweight mode control for pull-up bars, dip stations, etc.
                         if item.equipmentType.isNaturallyBodyweightOnly {
-                            Toggle(isOn: $item.bodyweightOnly) {
-                                Text("Bodyweight Only")
-                                    .font(.caption)
-                                    .foregroundStyle(item.bodyweightOnly ? .orange : .secondary)
-                            }
-                            .tint(.orange)
-                            .onChange(of: item.bodyweightOnly) { _, _ in
-                                commitEquipmentChanges()
-                            }
+                            BodyweightModeControl(bodyweightOnly: $item.bodyweightOnly)
+                                .padding(.leading, 43)
+                                .onChange(of: item.bodyweightOnly) { _, _ in
+                                    commitEquipmentChanges()
+                                }
                         }
                     }
+                    .padding(.vertical, 4)
+                    .settingsCardRow(equipmentItems.first?.id == item.id ? .first : .middle)
                 }
                 .onDelete { indexSet in
                     deleteEquipment(at: indexSet)
                 }
 
-                // Add Equipment
+                // Add Equipment — lime accent (additive action).
                 Button {
                     showingBulkPicker = true
                 } label: {
-                    Label("Add Equipment", systemImage: "plus.circle")
-                        .foregroundStyle(.blue)
+                    actionRowLabel(icon: "plus.circle", title: "Add Equipment", tint: Apex.accent)
                 }
+                .settingsCardRow(.middle)
 
-                // Re-scan
+                // Re-scan — neutral / off-accent (opens a destructive confirm).
                 Button {
                     showingRescanAlert = true
                 } label: {
-                    Label("Re-scan Gym", systemImage: "camera.viewfinder")
-                        .foregroundStyle(.primary)
+                    actionRowLabel(icon: "camera.viewfinder", title: "Re-scan Gym", tint: Apex.text)
                 }
+                .settingsCardRow(.last)
             } header: {
-                Text("Equipment")
+                ApexSectionLabel(text: "Equipment · \(equipmentItems.count)")
             } footer: {
-                Text("Swipe left on any item to remove it. Changes are saved immediately.")
+                footerText("Swipe left on any item to remove it. Changes are saved immediately.")
             }
         } else {
-            Section("Equipment") {
+            Section {
                 Button {
                     onScanFirst?()
                 } label: {
-                    Label("Scan Your Gym", systemImage: "camera.viewfinder")
-                        .foregroundStyle(.primary)
+                    actionRowLabel(icon: "camera.viewfinder", title: "Scan Your Gym", tint: Apex.text)
                 }
+                .settingsCardRow(.single)
+            } header: {
+                ApexSectionLabel(text: "Equipment")
             }
         }
     }
@@ -281,64 +299,78 @@ struct SettingsView: View {
     private var profileSection: some View {
         Section {
             // Bodyweight
-            HStack {
-                Label("Bodyweight", systemImage: "scalemass")
-                Spacer()
-                TextField("e.g. 80", text: $bodyweightText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 72)
-                    .onChange(of: bodyweightText) { _, v in
-                        let kg = Double(v.replacingOccurrences(of: ",", with: "."))
-                        UserDefaults.standard.set(kg, forKey: UserProfileConstants.bodyweightKgKey)
-                    }
-                Text("kg").foregroundStyle(.secondary)
+            biometricRow(icon: "scalemass", title: "Bodyweight", pos: .first,
+                         text: $bodyweightText, unit: "kg", keyboard: .decimalPad) { v in
+                let kg = Double(v.replacingOccurrences(of: ",", with: "."))
+                UserDefaults.standard.set(kg, forKey: UserProfileConstants.bodyweightKgKey)
             }
 
             // Height
-            HStack {
-                Label("Height", systemImage: "ruler")
-                Spacer()
-                TextField("e.g. 178", text: $heightText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 72)
-                    .onChange(of: heightText) { _, v in
-                        let cm = Double(v.replacingOccurrences(of: ",", with: "."))
-                        UserDefaults.standard.set(cm, forKey: UserProfileConstants.heightCmKey)
-                    }
-                Text("cm").foregroundStyle(.secondary)
+            biometricRow(icon: "ruler", title: "Height", pos: .middle,
+                         text: $heightText, unit: "cm", keyboard: .decimalPad) { v in
+                let cm = Double(v.replacingOccurrences(of: ",", with: "."))
+                UserDefaults.standard.set(cm, forKey: UserProfileConstants.heightCmKey)
             }
 
             // Age
-            HStack {
-                Label("Age", systemImage: "person.fill")
-                Spacer()
-                TextField("e.g. 28", text: $ageText)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 72)
-                    .onChange(of: ageText) { _, v in
-                        let age = Int(v)
-                        UserDefaults.standard.set(age, forKey: UserProfileConstants.ageKey)
-                    }
-                Text("yrs").foregroundStyle(.secondary)
+            biometricRow(icon: "person.fill", title: "Age", pos: .middle,
+                         text: $ageText, unit: "yrs", keyboard: .numberPad) { v in
+                let age = Int(v)
+                UserDefaults.standard.set(age, forKey: UserProfileConstants.ageKey)
             }
 
             // Training age
-            Picker("Experience", selection: $trainingAge) {
-                ForEach(TrainingAge.allCases, id: \.self) { age in
-                    Text(age.rawValue).tag(age)
+            HStack(spacing: 13) {
+                boxedIcon("chart.bar.fill")
+                Picker("Experience", selection: $trainingAge) {
+                    ForEach(TrainingAge.allCases, id: \.self) { age in
+                        Text(age.rawValue).tag(age)
+                    }
                 }
+                .font(.system(size: 16, weight: .medium))
+                .tint(Apex.textDim)
             }
             .onChange(of: trainingAge) { _, v in
                 UserDefaults.standard.set(v.rawValue, forKey: UserProfileConstants.trainingAgeKey)
             }
+            .settingsCardRow(.last)
         } header: {
-            Text("Training Profile")
+            ApexSectionLabel(text: "Training Profile")
         } footer: {
-            Text("Used by the AI coach to calibrate weight prescriptions for your first session and beyond.")
+            footerText("Used by the AI coach to calibrate weight prescriptions for your first session and beyond.")
         }
+    }
+
+    /// A single editable biometric row: leading icon + title, big condensed
+    /// right-aligned tabular numeral input, dim unit suffix.
+    private func biometricRow(
+        icon: String,
+        title: String,
+        pos: SettingsCardPos,
+        text: Binding<String>,
+        unit: String,
+        keyboard: UIKeyboardType,
+        onChange: @escaping (String) -> Void
+    ) -> some View {
+        HStack(spacing: 13) {
+            boxedIcon(icon)
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Apex.text)
+            Spacer()
+            TextField("", text: text)
+                .keyboardType(keyboard)
+                .multilineTextAlignment(.trailing)
+                .font(Apex.numeral(24, weight: .black))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
+                .frame(width: 84)
+                .onChange(of: text.wrappedValue) { _, v in onChange(v) }
+            Text(unit)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Apex.textFaint)
+        }
+        .settingsCardRow(pos)
     }
 
     private func loadBiometricsFromDefaults() {
@@ -364,14 +396,20 @@ struct SettingsView: View {
 
     /// Program management section — only shown when a gym profile exists.
     private var programSection: some View {
-        Section("Program") {
+        Section {
             Button {
                 showingRegenerateSheet = true
             } label: {
-                Label("Regenerate Program", systemImage: "arrow.clockwise.circle")
-                    .foregroundStyle(isRegenerating ? .secondary : .primary)
+                actionRowLabel(
+                    icon: "arrow.clockwise.circle",
+                    title: "Regenerate Program",
+                    tint: isRegenerating ? Apex.textDim : Apex.text
+                )
             }
             .disabled(isRegenerating)
+            .settingsCardRow(.single)
+        } header: {
+            ApexSectionLabel(text: "Program")
         }
     }
 
@@ -383,55 +421,53 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             // Drag handle
             Capsule()
-                .fill(Color.secondary.opacity(0.4))
+                .fill(Apex.textFaint)
                 .frame(width: 36, height: 5)
                 .padding(.top, 12)
-                .padding(.bottom, 20)
+                .padding(.bottom, 22)
 
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.clockwise.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.blue)
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(Apex.accent)
                     Text("Regenerate Program?")
-                        .font(.title3.bold())
+                        .font(.system(size: 24, weight: .black))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
                 }
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
                     // Always-present preservation guarantee
-                    Label {
-                        Text("Your completed workouts will be preserved. Your programme will continue from your next scheduled session.")
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    } icon: {
-                        Image(systemName: "checkmark.seal.fill")
-                            .foregroundStyle(.green)
-                    }
+                    guaranteeRow(
+                        icon: "checkmark.seal.fill",
+                        iconTint: Apex.accent,
+                        text: "Your completed workouts will be preserved. Your programme will continue from your next scheduled session.",
+                        textColor: Apex.text
+                    )
 
-                    Label {
-                        Text("Your workout history, lift progression, and AI memory are never deleted.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } icon: {
-                        Image(systemName: "brain.head.profile")
-                            .foregroundStyle(.secondary)
-                    }
+                    guaranteeRow(
+                        icon: "brain.head.profile",
+                        iconTint: Apex.textDim,
+                        text: "Your workout history, lift progression, and AI memory are never deleted.",
+                        textColor: Apex.textDim
+                    )
 
                     // Conditional: only shown when equipment was edited
                     if equipmentChangedSinceLastRegenerate {
-                        Label {
-                            Text("Your programme will be updated to reflect your current equipment list.")
-                                .font(.subheadline)
-                                .foregroundStyle(.orange)
-                        } icon: {
-                            Image(systemName: "dumbbell.fill")
-                                .foregroundStyle(.orange)
-                        }
+                        guaranteeRow(
+                            icon: "dumbbell.fill",
+                            iconTint: Apex.amber,
+                            text: "Your programme will be updated to reflect your current equipment list.",
+                            textColor: Apex.amber
+                        )
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 2)
 
-                Divider()
+                Rectangle()
+                    .fill(Apex.hairline)
+                    .frame(height: 1)
 
                 // Action buttons
                 VStack(spacing: 12) {
@@ -440,46 +476,69 @@ struct SettingsView: View {
                         equipmentChangedSinceLastRegenerate = false
                         onRegenerateProgram?()
                     } label: {
-                        Text("Regenerate")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
+                        ApexButton(title: "Regenerate", icon: "arrow.clockwise")
                     }
-                    .buttonStyle(.borderedProminent)
 
-                    Button("Cancel", role: .cancel) {
+                    Button {
                         showingRegenerateSheet = false
+                    } label: {
+                        ApexButton(title: "Cancel", kind: .ghost, tint: Apex.textDim)
                     }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Apex.pad)
             .padding(.bottom, 32)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(Apex.bg)
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
+        .preferredColorScheme(.dark)
+    }
+
+    /// One preservation/guarantee line in the regenerate sheet.
+    private func guaranteeRow(icon: String, iconTint: Color, text: String, textColor: Color) -> some View {
+        HStack(alignment: .top, spacing: 13) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(iconTint)
+                .frame(width: 24)
+            Text(text)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(textColor)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder
     private var developerSection: some View {
         #if DEBUG
-        Section("Developer") {
+        Section {
             NavigationLink(destination: DeveloperSettingsView(onResetAll: onResetAll, programViewModel: programViewModel)) {
-                Label("Developer Settings", systemImage: "key.fill")
+                actionRowLabel(icon: "key.fill", title: "Developer Settings", tint: Apex.text)
             }
+            .settingsCardRow(.single)
+        } header: {
+            ApexSectionLabel(text: "Developer")
         }
         #endif
     }
 
     private var aboutSection: some View {
-        Section("About") {
+        Section {
             HStack {
                 Text("Version")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Apex.text)
                 Spacer()
                 Text(appVersion)
-                    .foregroundStyle(.secondary)
+                    .font(Apex.numeral(15, weight: .bold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textDim)
             }
+            .settingsCardRow(.single)
+        } header: {
+            ApexSectionLabel(text: "About")
         }
     }
 
@@ -487,28 +546,63 @@ struct SettingsView: View {
 
     private var generatingOverlay: some View {
         ZStack {
-            Color.black.opacity(0.55)
+            Color.black.opacity(0.78)
                 .ignoresSafeArea()
 
             VStack(spacing: 20) {
                 ProgressView()
                     .progressViewStyle(.circular)
-                    .tint(.white)
+                    .tint(Apex.accent)
                     .scaleEffect(1.4)
 
                 Text("Regenerating Program…")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 18, weight: .black))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
 
                 Text("The AI coach is building your new 12-week program.\nThis may take up to a minute.")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.70))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Apex.textDim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
             }
             .padding(32)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .apexCard()
         }
+    }
+
+    // MARK: - Row Atoms
+
+    /// Attribute-row leading icon in a sharp-cornered chip — echoes the 4pt signature.
+    private func boxedIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(Apex.textDim)
+            .frame(width: 30, height: 30)
+            .background(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .fill(Color.white.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(Apex.hairline, lineWidth: 1))
+    }
+
+    /// Standard tappable action row: plain icon + title, tinted together.
+    private func actionRowLabel(icon: String, title: String, tint: Color) -> some View {
+        HStack(spacing: 13) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 30)
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(tint)
+        }
+    }
+
+    /// Section footer styling — faint condensed caption.
+    private func footerText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(Apex.textFaint)
     }
 
     // MARK: - Helpers
@@ -517,6 +611,84 @@ struct SettingsView: View {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
         let build   = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "—"
         return "\(version) (\(build))"
+    }
+}
+
+// MARK: - Bodyweight mode control
+//
+// Two-cell segmented control replacing the old amber "Bodyweight Only" toggle.
+// BODYWEIGHT selected == `bodyweightOnly == true`. Ported from the prototype's
+// `SegmentedTwo`, baked to the Brutalist identity (no Direction parameter).
+// Kept local to Settings — it is not a shared design-system atom.
+private struct BodyweightModeControl: View {
+    @Binding var bodyweightOnly: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            cell("Loadable", selected: !bodyweightOnly) { bodyweightOnly = false }
+            Rectangle().fill(Apex.hairline).frame(width: 1)
+            cell("Bodyweight", selected: bodyweightOnly) { bodyweightOnly = true }
+        }
+        .background(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .fill(Color.white.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .stroke(Apex.hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
+    }
+
+    private func cell(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12.5, weight: .bold))
+                .textCase(.uppercase)
+                .tracking(0.9)
+                .fontWidth(.condensed)
+                .foregroundStyle(selected ? Apex.onAccent : Apex.textDim)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(selected ? Apex.accent : Color.clear)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Sharp-corner grouped-card rows
+//
+// A `List` gives swipe-to-delete, but `.insetGrouped` forces ~10pt rounded
+// corners. To match the rest of the Brutalist app (sharp ~4pt corners) we use
+// `.plain` and draw each row's grouped-card background ourselves — sharp corners
+// on the first/last row of a section, with an internal hairline between rows.
+private enum SettingsCardPos {
+    case single, first, middle, last
+    var radii: RectangleCornerRadii {
+        let r = Apex.corner
+        switch self {
+        case .single: return .init(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: r)
+        case .first:  return .init(topLeading: r, bottomLeading: 0, bottomTrailing: 0, topTrailing: r)
+        case .middle: return .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 0, topTrailing: 0)
+        case .last:   return .init(topLeading: 0, bottomLeading: r, bottomTrailing: r, topTrailing: 0)
+        }
+    }
+    var hairline: Bool { self == .first || self == .middle }
+}
+
+private extension View {
+    /// Inset + hidden-separator + sharp grouped-card background for one List row.
+    func settingsCardRow(_ pos: SettingsCardPos) -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 13, leading: Apex.pad + 14, bottom: 13, trailing: Apex.pad + 14))
+            .listRowSeparator(.hidden)
+            .listRowBackground(
+                UnevenRoundedRectangle(cornerRadii: pos.radii, style: .continuous)
+                    .fill(Apex.surface)
+                    .overlay(alignment: .bottom) {
+                        if pos.hairline {
+                            Rectangle().fill(Apex.hairline).frame(height: 1).padding(.leading, 14)
+                        }
+                    }
+                    .padding(.horizontal, Apex.pad)
+            )
     }
 }
 
