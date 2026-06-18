@@ -13,6 +13,11 @@
 //
 // Copy is neutral ("Workout paused") because the single sentinel cannot distinguish a
 // user pause from an app-kill mid-session — both funnel here and both require a tap.
+//
+// Visual layer restyled to the Brutalist Athletic identity (#473): pure-black surface,
+// an amber "Workout paused" hero (amber is the paused token), an `apexCard` context card
+// with position/day/time, a dominant lime Resume, an amber-tinted ghost Discard, and a
+// quiet "View today's plan" action. Behaviour, bindings, and accessibility are unchanged.
 
 import SwiftUI
 
@@ -26,9 +31,6 @@ struct WorkoutPausedView: View {
     let onDiscard: () -> Void
     /// Open the read-only plan sheet for today's day.
     let onViewPlan: () -> Void
-
-    private static let amber = Color(red: 1.0, green: 0.65, blue: 0.0)
-    private static let accent = Color(red: 0.25, green: 0.72, blue: 1.0)
 
     /// Short time-of-day ("4:15 PM"), no date — mirrors ContentView.crashRecoveryMessage.
     private static let timeFormatter: DateFormatter = {
@@ -50,115 +52,111 @@ struct WorkoutPausedView: View {
 
     var body: some View {
         ZStack {
-            // Base background with a subtle amber wash to read as "paused".
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
-            RadialGradient(
-                colors: [Self.amber.opacity(0.14), Color.clear],
-                center: UnitPoint(x: 0.5, y: 0.12),
-                startRadius: 0,
-                endRadius: 380
-            )
-            .ignoresSafeArea()
-            .blendMode(.plusLighter)
+            // Pure-black Brutalist backdrop.
+            Apex.bg.ignoresSafeArea()
 
             VStack(spacing: 28) {
                 Spacer()
 
-                VStack(spacing: 16) {
-                    Image(systemName: "pause.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(Self.amber)
+                pausedHero
 
-                    Text("Workout paused")
-                        .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(.white)
-
-                    Text(dayName)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                }
-
-                // Where you left off — position only (honest from the sentinel).
-                VStack(spacing: 10) {
-                    progressRow(icon: "figure.strengthtraining.traditional", text: exerciseProgress)
-                    progressRow(icon: "number", text: "Set \(pausedState.currentSetNumber)")
-                    progressRow(
-                        icon: "clock",
-                        text: "Paused at \(Self.timeFormatter.string(from: pausedState.pausedAt))"
-                    )
-                }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 18)
-                .frame(maxWidth: .infinity)
-                .background(
-                    .white.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.10), lineWidth: 0.5)
-                )
-                .padding(.horizontal, 32)
+                contextCard
+                    .padding(.horizontal, Apex.pad)
 
                 Spacer()
 
-                VStack(spacing: 14) {
-                    // Primary — Resume.
-                    Button(action: onResume) {
-                        Text("Resume workout")
-                            .font(.system(size: 17, weight: .bold))
-                            .foregroundStyle(Color(red: 0.04, green: 0.04, blue: 0.06))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 60)
-                            .background(Self.accent, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    }
-                    .accessibilityLabel("Resume workout")
-                    .accessibilityHint("Picks up your paused session where you left off")
-
-                    // Secondary — View today's plan.
-                    Button(action: onViewPlan) {
-                        Text("View today's plan")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 52)
-                            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(.white.opacity(0.18), lineWidth: 0.5)
-                            )
-                    }
-                    .accessibilityLabel("View today's plan")
-                    .accessibilityHint("Opens the exercise plan without resuming")
-
-                    // Tertiary — Discard, destructive.
-                    Button(role: .destructive, action: onDiscard) {
-                        Text("Discard workout")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(Color(red: 1.0, green: 0.42, blue: 0.38))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                    }
-                    .accessibilityLabel("Discard workout")
-                    .accessibilityHint("Ends the paused session without saving its remaining sets")
-                }
-                .padding(.horizontal, 32)
-                .padding(.bottom, 24)
+                actions
+                    .padding(.horizontal, Apex.pad)
+                    .padding(.bottom, 24)
             }
         }
     }
 
-    private func progressRow(icon: String, text: String) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.55))
-                .frame(width: 22)
-            Text(text)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(.white.opacity(0.90))
+    // MARK: - Hero
+
+    private var pausedHero: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Apex.amber.opacity(0.14))
+                    .frame(width: 96, height: 96)
+                Image(systemName: "pause.fill")
+                    .font(.system(size: 38, weight: .black))
+                    .foregroundStyle(Apex.amber)
+            }
+
+            Text("Workout paused")
+                .font(.system(size: 30, weight: .heavy))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .foregroundStyle(Apex.amber)
+
+            Text(dayName)
+                .font(.system(size: 15, weight: .medium))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textDim)
+        }
+    }
+
+    // MARK: - Context card (position / day / time — honest from the sentinel)
+
+    private var contextCard: some View {
+        VStack(spacing: 14) {
+            contextRow(label: "Position", value: exerciseProgress)
+            Rectangle().fill(Apex.hairline).frame(height: 1)
+            contextRow(label: "Set", value: "\(pausedState.currentSetNumber)")
+            Rectangle().fill(Apex.hairline).frame(height: 1)
+            contextRow(
+                label: "Paused at",
+                value: Self.timeFormatter.string(from: pausedState.pausedAt)
+            )
+        }
+        .padding(18)
+        .apexCard()
+    }
+
+    private func contextRow(label: String, value: String) -> some View {
+        HStack {
+            ApexSectionLabel(text: label, color: Apex.textFaint)
             Spacer()
+            Text(value)
+                .font(.system(size: 15, weight: .semibold))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
         }
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Actions
+
+    private var actions: some View {
+        VStack(spacing: 14) {
+            // Primary — Resume. Dominant volt-lime action.
+            Button(action: onResume) {
+                ApexButton(title: "Resume workout", icon: "play.fill")
+            }
+            .accessibilityLabel("Resume workout")
+            .accessibilityHint("Picks up your paused session where you left off")
+
+            // Secondary — Discard, destructive. Amber-tinted ghost — recessive.
+            Button(role: .destructive, action: onDiscard) {
+                ApexButton(title: "Discard workout", kind: .ghost, tint: Apex.amber)
+            }
+            .accessibilityLabel("Discard workout")
+            .accessibilityHint("Ends the paused session without saving its remaining sets")
+
+            // Tertiary — View today's plan. Quiet, recessive text action.
+            Button(action: onViewPlan) {
+                Text("View today's plan")
+                    .font(.system(size: 13, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .tracking(1.0)
+                    .foregroundStyle(Apex.textDim)
+                    .padding(.vertical, 6)
+            }
+            .accessibilityLabel("View today's plan")
+            .accessibilityHint("Opens the exercise plan without resuming")
+        }
     }
 }
