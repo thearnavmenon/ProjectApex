@@ -556,50 +556,15 @@ struct DeveloperSettingsView: View {
 
     /// Wipes all persisted app state except API keys in the Keychain, then returns to onboarding.
     ///
-    /// Clears in order:
-    ///   1. All UserDefaults for this app's bundle domain (onboarding flags, scan-skipped flag, etc.)
-    ///   2. GymFactStore weight-correction facts (UserDefaults-backed)
-    ///   3. The userId Keychain entry so onboarding generates a fresh identity
-    ///   4. The Supabase anonymous-auth session (#369) — access/refresh tokens, expiry,
-    ///      and the persisted `auth.uid()`. Without this, `restoreFromKeychain()` re-pins
-    ///      the OLD identity on the next launch, so "reset" would not mint a fresh user and
-    ///      the freshly-onboarded `users` row would not match a brand-new `auth.uid()`.
-    ///      A new anonymous session (and uid) is minted on the next launch.
-    ///   (API keys — anthropicAPIKey, openAIAPIKey, supabaseAnonKey — are intentionally preserved)
+    /// The data-clearing itself lives in the shared `performFullDataReset(deps:)` free
+    /// function (single source of truth — also used by the user-facing "Reset all data" in
+    /// Settings); this method delegates to it, then runs the developer-path UI tail
+    /// (`onResetAll?()` + banner).
     @MainActor
     private func performResetAll() async {
-        // 1. Wipe all UserDefaults for this bundle (onboarding flags, scan-skipped, gym facts, etc.)
-        if let bundleID = Bundle.main.bundleIdentifier {
-            UserDefaults.standard.removePersistentDomain(forName: bundleID)
-        }
-
-        // 2. Clear GymFactStore weight corrections (belt-and-suspenders after UserDefaults wipe)
-        await deps.gymFactStore.clearAll()
-
-        // 2b. Reset the LIVE in-memory state that survives the UserDefaults wipe:
-        // the write-ahead queue actor (queue + dead-letter), any paused session, and
-        // an ACTIVE (non-paused) WorkoutSessionManager session. removePersistentDomain
-        // wiped their on-disk UserDefaults, but the in-memory WAQ actor would re-persist
-        // its stale items on the next enqueue, and an active manager session still holds
-        // the OLD auth.uid() and could enqueue owner-mismatched writes within this
-        // process lifetime — both replay RLS-403s after re-onboarding (#369 owner-mismatch
-        // campaign, slices 3 & #403). PausedSessionState.clear() also resets the in-memory
-        // repairPending flag. resetToIdle() nils the active session.
-        await performLocalStateReset(
-            writeAheadQueue: deps.writeAheadQueue,
-            workoutSessionManager: deps.workoutSessionManager
-        )
-
-        // 3. Remove the persisted userId so onboarding creates a fresh identity
-        try? keychain.delete(.userId)
-
-        // 4. Clear the persisted Supabase anonymous-auth session (#369) so the next launch
-        //    signs in fresh and mints a new auth.uid(). Otherwise the restored session
-        //    re-pins the old identity and the reset is not a true zero.
-        try? keychain.delete(.supabaseAccessToken)
-        try? keychain.delete(.supabaseRefreshToken)
-        try? keychain.delete(.supabaseSessionExpiry)
-        try? keychain.delete(.supabaseAuthUserId)
+        // Wipe all on-device data + the anonymous Supabase session via the single
+        // source of truth shared with the user-facing "Reset all data" in Settings.
+        await performFullDataReset(deps: deps)
 
         // Navigate to onboarding immediately; the fresh anon identity is established on the
         // next launch (the in-memory auth session is only re-resolved at startup), so the
@@ -651,6 +616,61 @@ struct DeveloperSettingsView: View {
         showBanner("Programme reloaded from Supabase.", isError: false)
     }
 }
+#endif
+
+// MARK: - Full data reset (shared source of truth)
+
+/// Wipes all on-device app data + the anonymous Supabase session (#369), so the
+/// next launch mints a fresh `auth.uid()`. Shared by the developer reset and the
+/// user-facing "Reset all data" in Settings — keep this the single source of truth.
+///
+/// Clears in order:
+///   1. All UserDefaults for this app's bundle domain (onboarding flags, scan-skipped flag, etc.)
+///   2. GymFactStore weight-correction facts (UserDefaults-backed)
+///   2b. The LIVE in-memory state that survives the UserDefaults wipe (WAQ queue +
+///       dead-letter, any paused session, an ACTIVE WorkoutSessionManager session) via
+///       `performLocalStateReset` — otherwise the WAQ actor re-persists stale items and an
+///       active manager session keeps enqueuing owner-mismatched writes under the OLD
+///       auth.uid() (#369 owner-mismatch campaign, slices 3 & #403).
+///   3. The userId Keychain entry so onboarding generates a fresh identity
+///   4. The Supabase anonymous-auth session (#369) — access/refresh tokens, expiry,
+///      and the persisted `auth.uid()`. Without this, `restoreFromKeychain()` re-pins
+///      the OLD identity on the next launch, so "reset" would not mint a fresh user and
+///      the freshly-onboarded `users` row would not match a brand-new `auth.uid()`.
+///      A new anonymous session (and uid) is minted on the next launch.
+///   (API keys — anthropicAPIKey, openAIAPIKey, supabaseAnonKey — are intentionally preserved)
+///
+/// This is the data-clearing only; the caller runs its own UI tail (return-to-onboarding,
+/// banner).
+@MainActor
+func performFullDataReset(deps: AppDependencies) async {
+    let keychain = KeychainService.shared
+
+    // 1. Wipe all UserDefaults for this bundle (onboarding flags, scan-skipped, gym facts, etc.)
+    if let bundleID = Bundle.main.bundleIdentifier {
+        UserDefaults.standard.removePersistentDomain(forName: bundleID)
+    }
+
+    // 2. Clear GymFactStore weight corrections (belt-and-suspenders after UserDefaults wipe)
+    await deps.gymFactStore.clearAll()
+
+    // 2b. Reset the LIVE in-memory state that survives the UserDefaults wipe.
+    await performLocalStateReset(
+        writeAheadQueue: deps.writeAheadQueue,
+        workoutSessionManager: deps.workoutSessionManager
+    )
+
+    // 3. Remove the persisted userId so onboarding creates a fresh identity
+    try? keychain.delete(.userId)
+
+    // 4. Clear the persisted Supabase anonymous-auth session (#369) so the next launch
+    //    signs in fresh and mints a new auth.uid(). Otherwise the restored session
+    //    re-pins the old identity and the reset is not a true zero.
+    try? keychain.delete(.supabaseAccessToken)
+    try? keychain.delete(.supabaseRefreshToken)
+    try? keychain.delete(.supabaseSessionExpiry)
+    try? keychain.delete(.supabaseAuthUserId)
+}
 
 // MARK: - Local in-memory reset (#403)
 
@@ -670,6 +690,7 @@ func performLocalStateReset(
 
 // MARK: - Preview
 
+#if DEBUG
 #Preview {
     NavigationStack {
         DeveloperSettingsView()
