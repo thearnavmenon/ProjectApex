@@ -53,6 +53,12 @@ struct ActiveSetView: View {
     /// the unit-testable state struct (`SetCompletionFormState`).
     @State private var showRepConfirmation: Bool = false
 
+    /// Measured height of the rep/RPE confirmation sheet's content, used to size
+    /// the sheet to its content so the "Log set" button is always on screen
+    /// without a scroll (it grows when "Add detail" expands). Seeded with a
+    /// sensible default for the first frame before the real height reports back.
+    @State private var repConfirmationHeight: CGFloat = 420
+
     /// Controls the collapsible reasoning section
     @State private var reasoningExpanded: Bool = false
 
@@ -135,7 +141,14 @@ struct ActiveSetView: View {
                     commitSetComplete(state)
                 }
             )
-            .presentationDetents([.medium, .large])
+            // Size the sheet to its content so "Log set" is always visible
+            // without an extra swipe up. The sheet reports its content height
+            // via SetFeelSheetHeightKey; `.large` stays as a drag-up fallback
+            // for very tall content / small devices.
+            .onPreferenceChange(SetFeelSheetHeightKey.self) { height in
+                if height > 0 { repConfirmationHeight = height }
+            }
+            .presentationDetents([.height(repConfirmationHeight), .large])
             .presentationCornerRadius(24)
         }
         .sheet(isPresented: $showVoiceNoteModal) {
@@ -1028,6 +1041,15 @@ struct ActiveSetView: View {
 /// `@State formState` — the parent supplies `initialState` once at
 /// construction and gets the final value back via `onCommit` when the
 /// user taps "Log Set".
+/// Carries the rep/RPE confirmation sheet's natural content height up to the
+/// presenting view so the sheet can size itself to its content.
+struct SetFeelSheetHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct RepRPEIntentConfirmationSheet: View {
 
     let initialState: SetCompletionFormState
@@ -1109,7 +1131,16 @@ struct RepRPEIntentConfirmationSheet: View {
             }
             .padding(.horizontal, Apex.pad)
             .padding(.bottom, 30)
+            // Report the content's natural height so the presenting sheet can
+            // fit itself to the content (keeps "Log set" on screen, no scroll).
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: SetFeelSheetHeightKey.self,
+                                           value: proxy.size.height)
+                }
+            )
         }
+        .scrollBounceBehavior(.basedOnSize)
         .background(Apex.bg)
         .preferredColorScheme(.dark)
     }
