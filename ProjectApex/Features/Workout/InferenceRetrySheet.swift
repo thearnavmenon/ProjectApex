@@ -5,6 +5,13 @@
 // Forces the user to choose between retrying or pausing — no silent fallback.
 //
 // Presented by WorkoutView as a .sheet overlay on .resting and .preflight states.
+//
+// Visual layer restyled to the Brutalist Athletic identity (#473): pure-black
+// surface, an amber "Coach is offline" hero (amber is the offline/paused token),
+// the no-silent-guess subtitle, a dominant volt-lime "Try again" (keeping its
+// in-flight spinner), a ghost "Use last session's weights" gated on a real seed,
+// and a quiet "Pause workout" text action. Behaviour, bindings, state, the
+// seed-gated condition, and the no-silent-fallback contract are unchanged.
 
 import SwiftUI
 
@@ -16,116 +23,114 @@ struct InferenceRetrySheet: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.06, green: 0.06, blue: 0.09).ignoresSafeArea()
+            // Pure-black Brutalist backdrop.
+            Apex.bg.ignoresSafeArea()
 
             VStack(spacing: 28) {
                 Spacer(minLength: 8)
 
-                // Brain icon
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 48, weight: .medium))
-                    .foregroundStyle(Color(red: 1.00, green: 0.80, blue: 0.20))
-                    .symbolEffect(.pulse, isActive: viewModel.isRetrying)
-
-                // Title + subtitle
-                VStack(spacing: 10) {
-                    Text("Your AI coach is unavailable right now.")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .multilineTextAlignment(.center)
-
-                    if let reason = viewModel.retryFailureDescription {
-                        Text(reason)
-                            .font(.system(size: 14))
-                            .foregroundStyle(.white.opacity(0.55))
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 8)
-                    }
-                }
+                hero
 
                 Spacer()
 
-                // Action buttons
-                VStack(spacing: 12) {
-                    // Retry button
-                    Button(action: { viewModel.onRetryInference() }) {
-                        ZStack {
-                            if viewModel.isRetrying {
-                                ProgressView()
-                                    .tint(.white)
-                                    .scaleEffect(1.1)
-                            } else {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "arrow.clockwise")
-                                        .font(.system(size: 16, weight: .semibold))
-                                    Text("Retry")
-                                        .font(.system(size: 17, weight: .semibold))
-                                }
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .background(
-                            Color(red: 0.23, green: 0.56, blue: 1.00),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        )
-                        .foregroundStyle(.white)
-                    }
-                    .disabled(viewModel.isRetrying)
-
-                    // Continue with last weights — only when a real seed exists
-                    // (#318 U7 / G-F1): an in-session set, last-session history,
-                    // or a genuinely bodyweight movement. Offered during rest
-                    // and (critic amendment 7.6) during preflight, so first-set
-                    // / post-swap / resume failures get a manual path too.
-                    if (viewModel.isResting || viewModel.isPreflight) && viewModel.canUseLastWeights {
-                        Button(action: { viewModel.onUseLastWeights() }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "clock.arrow.circlepath")
-                                    .font(.system(size: 16, weight: .medium))
-                                Text("Continue with last weights")
-                                    .font(.system(size: 17, weight: .medium))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                            .background(Color.white.opacity(0.08),
-                                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                            )
-                            .foregroundStyle(.white.opacity(0.70))
-                        }
-                        .disabled(viewModel.isRetrying)
-                    }
-
-                    // Pause Session button
-                    Button(action: { viewModel.onPauseFromRetrySheet() }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "pause.circle")
-                                .font(.system(size: 16, weight: .medium))
-                            Text("Pause workout")
-                                .font(.system(size: 17, weight: .medium))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .background(Color.white.opacity(0.08),
-                                    in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                        )
-                        .foregroundStyle(.white.opacity(0.70))
-                    }
-                    .disabled(viewModel.isRetrying)
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 32)
+                actions
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, Apex.pad)
             .padding(.top, 24)
+            .padding(.bottom, 32)
         }
         // Force the user to choose — no swipe-to-dismiss
         .interactiveDismissDisabled()
+    }
+
+    // MARK: - Hero (icon + title + subtitle + optional reason)
+
+    private var hero: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Apex.amber.opacity(0.14))
+                    .frame(width: 88, height: 88)
+                Image(systemName: "wifi.exclamationmark")
+                    .font(.system(size: 34, weight: .black))
+                    .foregroundStyle(Apex.amber)
+                    .symbolEffect(.pulse, isActive: viewModel.isRetrying)
+            }
+
+            Text("Coach is offline")
+                .font(.system(size: 28, weight: .heavy))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .foregroundStyle(Apex.amber)
+
+            VStack(spacing: 10) {
+                Text("Couldn't reach the AI — and we won't guess your weights for you.")
+                    .font(.system(size: 16, weight: .medium))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let reason = viewModel.retryFailureDescription {
+                    Text(reason)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Apex.textDim)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private var actions: some View {
+        VStack(spacing: 14) {
+            // Primary — Try again. Dominant volt-lime action. Keeps its in-flight
+            // spinner overlaid while a retry is in progress → onRetryInference().
+            Button(action: { viewModel.onRetryInference() }) {
+                ApexButton(title: "Try again", icon: "arrow.clockwise")
+                    .opacity(viewModel.isRetrying ? 0 : 1)
+                    .overlay {
+                        if viewModel.isRetrying {
+                            ProgressView()
+                                .tint(Apex.onAccent)
+                        }
+                    }
+                    .background {
+                        // Keep the filled accent slab behind the spinner so the
+                        // in-flight button still reads as the primary action.
+                        if viewModel.isRetrying {
+                            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                                .fill(Apex.accent)
+                        }
+                    }
+            }
+            .disabled(viewModel.isRetrying)
+
+            // Use last session's weights — only when a real seed exists
+            // (#318 U7 / G-F1): an in-session set, last-session history,
+            // or a genuinely bodyweight movement. Offered during rest
+            // and (critic amendment 7.6) during preflight, so first-set
+            // / post-swap / resume failures get a manual path too.
+            if (viewModel.isResting || viewModel.isPreflight) && viewModel.canUseLastWeights {
+                Button(action: { viewModel.onUseLastWeights() }) {
+                    ApexButton(title: "Use last session's weights", kind: .ghost, icon: "clock.arrow.circlepath")
+                }
+                .disabled(viewModel.isRetrying)
+            }
+
+            // Pause workout — quiet, recessive text action.
+            Button(action: { viewModel.onPauseFromRetrySheet() }) {
+                Text("Pause workout")
+                    .font(.system(size: 13, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .tracking(1.0)
+                    .foregroundStyle(Apex.textDim)
+                    .padding(.vertical, 6)
+            }
+            .disabled(viewModel.isRetrying)
+        }
     }
 }
