@@ -66,46 +66,58 @@ struct WeightCorrectionView: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                Apex.bg.ignoresSafeArea()
+
                 // Main content
                 VStack(alignment: .leading, spacing: 24) {
 
                     // Header
                     VStack(alignment: .leading, spacing: 6) {
                         Text("This weight isn't available")
-                            .font(.title2.bold())
+                            .font(.system(size: 24, weight: .bold))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.text)
                         Text("Pick the nearest weight your gym has, then choose how to handle it.")
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Apex.textDim)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    // Quick-select buttons for nearest standard weights
+                    // Prescribed-weight badge
+                    HStack(spacing: 8) {
+                        ApexSectionLabel(text: "Prescribed", color: Apex.textFaint)
+                        Spacer()
+                        HStack(alignment: .firstTextBaseline, spacing: 3) {
+                            let parts = WeightParts(prescribedWeight)
+                            ApexNumeral(text: parts.whole, size: 22, weight: .bold)
+                            if let frac = parts.frac {
+                                ApexNumeral(text: frac, size: 16, weight: .bold, color: Apex.textDim)
+                            }
+                            Text("kg")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Apex.textFaint)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .apexCard()
+
+                    // Quick-select chips for nearest standard weights
                     if !nearestWeights.isEmpty {
-                        LazyVGrid(
-                            columns: [GridItem(.flexible()), GridItem(.flexible())],
-                            spacing: 12
-                        ) {
-                            ForEach(nearestWeights, id: \.self) { weight in
-                                Button {
-                                    selectedWeight = weight
-                                    customWeightText = ""
-                                } label: {
-                                    VStack(spacing: 4) {
-                                        Text("\(weight.formatted())kg")
-                                            .font(.headline)
-                                        Text(weight < prescribedWeight
-                                             ? "Lighter" : "Heavier")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 10) {
+                            ApexSectionLabel(text: "Nearby on your equipment", color: Apex.textFaint)
+                            LazyVGrid(
+                                columns: [GridItem(.flexible()), GridItem(.flexible())],
+                                spacing: 10
+                            ) {
+                                ForEach(nearestWeights, id: \.self) { weight in
+                                    Button {
+                                        selectedWeight = weight
+                                        customWeightText = ""
+                                    } label: {
+                                        nearbyChip(weight)
                                     }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 16)
-                                    .background(
-                                        selectedWeight == weight
-                                            ? Color.accentColor
-                                            : Color(.secondarySystemFill)
-                                    )
-                                    .foregroundStyle(selectedWeight == weight ? .white : .primary)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
@@ -113,56 +125,36 @@ struct WeightCorrectionView: View {
 
                     // Divider with label
                     HStack {
-                        Rectangle().fill(.separator).frame(height: 1)
+                        Rectangle().fill(Apex.hairline).frame(height: 1)
                         Text("or enter exact weight")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .apexLabel(Apex.textFaint)
                             .fixedSize()
-                        Rectangle().fill(.separator).frame(height: 1)
+                        Rectangle().fill(Apex.hairline).frame(height: 1)
                     }
 
                     // Custom weight input for non-standard increments
-                    HStack {
+                    HStack(spacing: 10) {
                         TextField("e.g. 17.5", text: $customWeightText)
                             .keyboardType(.decimalPad)
-                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 17, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(Apex.text)
+                            .tint(Apex.accent)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 13)
+                            .apexCard()
                             .onChange(of: customWeightText) { _, _ in
                                 selectedWeight = nil
                             }
                         Text("kg")
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Apex.textFaint)
                     }
 
                     Spacer()
 
                     // Two-path action buttons
-                    VStack(spacing: 10) {
-                        // Session-only path (primary — easier to tap, lower consequence)
-                        Button {
-                            guard let weight = confirmedWeight else { return }
-                            onSessionOnly(weight)
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.80)) {
-                                savedSessionOnly = true
-                            }
-                            Task {
-                                try? await Task.sleep(nanoseconds: 1_400_000_000)
-                                dismiss()
-                            }
-                        } label: {
-                            VStack(spacing: 2) {
-                                Text("Just for today")
-                                    .font(.headline)
-                                Text("Skip this weight this session only")
-                                    .font(.caption)
-                                    .opacity(0.75)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(confirmedWeight == nil)
-
-                        // Permanent path (secondary — requires deliberate choice)
+                    VStack(spacing: 12) {
+                        // Permanent path — filled volt-lime accent (primary action)
                         Button {
                             guard let weight = confirmedWeight else { return }
                             onConfirmed(weight)
@@ -174,20 +166,36 @@ struct WeightCorrectionView: View {
                                 dismiss()
                             }
                         } label: {
-                            VStack(spacing: 2) {
-                                Text("Missing permanently — lock it out")
-                                    .font(.subheadline.weight(.semibold))
-                                Text("AI will never prescribe \(formatWeight(prescribedWeight)) on this equipment again")
-                                    .font(.caption)
-                                    .opacity(0.70)
-                                    .multilineTextAlignment(.center)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
+                            ApexButton(title: "Missing permanently", icon: "xmark.bin")
+                                .opacity(confirmedWeight == nil ? 0.4 : 1.0)
                         }
-                        .buttonStyle(.bordered)
-                        .foregroundStyle(.secondary)
+                        .buttonStyle(.plain)
                         .disabled(confirmedWeight == nil)
+
+                        // Session-only path — ghost (secondary action)
+                        Button {
+                            guard let weight = confirmedWeight else { return }
+                            onSessionOnly(weight)
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.80)) {
+                                savedSessionOnly = true
+                            }
+                            Task {
+                                try? await Task.sleep(nanoseconds: 1_400_000_000)
+                                dismiss()
+                            }
+                        } label: {
+                            ApexButton(title: "Just for today", kind: .ghost)
+                                .opacity(confirmedWeight == nil ? 0.4 : 1.0)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(confirmedWeight == nil)
+
+                        // Explanatory caption
+                        Text("“Permanently” updates your gym profile so the coach never prescribes \(formatWeight(prescribedWeight)) on this equipment again.")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Apex.textFaint)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 2)
                     }
                 }
                 .padding(24)
@@ -199,11 +207,11 @@ struct WeightCorrectionView: View {
                     VStack(spacing: 20) {
                         Image(systemName: savedPermanently ? "lock.fill" : "checkmark.circle.fill")
                             .font(.system(size: 52, weight: .medium))
-                            .foregroundStyle(savedPermanently ? .orange : .green)
+                            .foregroundStyle(savedPermanently ? Apex.amber : Apex.accent)
                         Text(confirmationMessage)
                             .font(.system(size: 16, weight: .medium))
                             .multilineTextAlignment(.center)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(Apex.text)
                     }
                     .padding(32)
                     .transition(.opacity.combined(with: .scale(scale: 0.90)))
@@ -213,10 +221,40 @@ struct WeightCorrectionView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                        .foregroundStyle(Apex.textDim)
                         .opacity(anySaved ? 0 : 1)
                 }
             }
+            .toolbarBackground(Apex.bg, for: .navigationBar)
         }
+        .preferredColorScheme(.dark)
+    }
+
+    // MARK: - Nearby chip
+
+    /// A nearby available weight rendered as a tappable `apexCard` chip. Selected
+    /// state shifts the card stroke to the accent (`emphasized`) so the picked
+    /// weight stands out, mirroring the prescription card's live treatment.
+    @ViewBuilder
+    private func nearbyChip(_ weight: Double) -> some View {
+        let isSelected = selectedWeight == weight
+        VStack(spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                let parts = WeightParts(weight)
+                ApexNumeral(text: parts.whole, size: 20, weight: .bold)
+                if let frac = parts.frac {
+                    ApexNumeral(text: frac, size: 14, weight: .bold, color: Apex.textDim)
+                }
+                Text("kg")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Apex.textFaint)
+            }
+            Text(weight < prescribedWeight ? "Lighter" : "Heavier")
+                .apexLabel(isSelected ? Apex.accent : Apex.textFaint)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .apexCard(emphasized: isSelected)
     }
 
     // MARK: - Helpers
