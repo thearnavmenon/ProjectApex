@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-18 — Redesign finished: every workout screen now matches
+
+**The problem (in plain words):**
+After the first few screens, the rest of the workout still looked like the old
+app. This finishes the job — every remaining workout screen now wears the same
+bold black-and-lime design, so the whole workout finally feels like one app
+instead of a patchwork.
+
+**What I changed:**
+The remaining eleven workout screens were rebuilt in the new look: the paused
+screen, the floating "now training" pill, the weight-adjust sheet, the in-workout
+plan list, the "swap this exercise" chat, the manual/past-workout log, the
+"my gym doesn't have this weight" sheet, the "how did that set feel?" sheet, and
+the calibration, goal-review, and "coach is offline" screens. As before, only the
+looks changed — every button, timer, save, and safety rule kept working exactly
+as it did. Two safety details were specifically protected: the "missing
+permanently" weight option stays the quiet, secondary choice (so nobody edits
+their gym profile by accident), and the rule that you must pick an intent before
+logging a freestyle set is untouched.
+
+**How I made sure it works:**
+Each screen was rebuilt by its own agent in an isolated copy, one pull request
+each (#480, #481, #483–#491), all checked to build — a few agents' sandboxes
+couldn't run the build, so I built those here before merging. Then I built the
+whole app together one last time (BUILD SUCCEEDED, iPhone 17 Pro / iOS 26.5) and
+took real screenshots of the live tracker, rest timer, and summary screens to
+confirm the real app matches the approved design. All fifteen screens plus the
+shared design kit are now on main, tracked under #473. A short list of small
+look-and-feel judgement calls is noted on that issue for a final eyeball.
+
+---
+
 ## 2026-06-18 — The redesign goes live: the workout screens you see most
 
 **The problem (in plain words):**
