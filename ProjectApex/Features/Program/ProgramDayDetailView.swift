@@ -199,8 +199,8 @@ struct ProgramDayDetailView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Background
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+            // Background — pure-black Brutalist surface.
+            Apex.bg.ignoresSafeArea()
 
             if isGeneratingSession {
                 // FB-008: "Preparing your session…" loading screen
@@ -223,7 +223,7 @@ struct ProgramDayDetailView: View {
                             statusBadge(
                                 icon: "pause.circle.fill",
                                 label: "Workout paused",
-                                color: Color(red: 1.00, green: 0.70, blue: 0.10)
+                                color: Apex.amber
                             )
                         } else if currentDay.status == .skipped {
                             // Skipped session — grey info banner
@@ -252,7 +252,7 @@ struct ProgramDayDetailView: View {
                         } else if currentDay.status == .completed {
                             if isLoadingSetLogs {
                                 ProgressView()
-                                    .tint(.white.opacity(0.45))
+                                    .tint(Apex.textDim)
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 24)
                             } else {
@@ -309,7 +309,7 @@ struct ProgramDayDetailView: View {
         }
         .navigationTitle(currentDay.dayLabel.replacingOccurrences(of: "_", with: " "))
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
+        .toolbarBackground(Apex.bg, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear {
             if currentDay.status == .completed {
@@ -341,24 +341,25 @@ struct ProgramDayDetailView: View {
 
             Image(systemName: "brain.head.profile")
                 .font(.system(size: 56))
-                .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
+                .foregroundStyle(Apex.accent)
                 .symbolEffect(.pulse)
 
             VStack(spacing: 10) {
                 Text("Preparing Your Session")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 24, weight: .black))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
 
                 Text("Analysing your lift history and fatigue signals to build the optimal session for today.")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.60))
+                    .foregroundStyle(Apex.textDim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
 
             ProgressView()
                 .progressViewStyle(.circular)
-                .tint(Color(red: 0.23, green: 0.56, blue: 1.00))
+                .tint(Apex.accent)
                 .scaleEffect(1.2)
 
             Spacer()
@@ -368,28 +369,22 @@ struct ProgramDayDetailView: View {
     // MARK: - FB-008: Session Pending Banner
 
     private var sessionPendingBannerView: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             Image(systemName: "clock.badge.questionmark")
-                .font(.caption.bold())
-                .foregroundStyle(Color(red: 0.78, green: 0.82, blue: 0.88))
-            VStack(alignment: .leading, spacing: 2) {
-                Text("SESSION WILL BE GENERATED BEFORE YOU TRAIN")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Color(red: 0.78, green: 0.82, blue: 0.88))
-                    .kerning(0.5)
-                Text("Tap \"Start Workout\" to generate this session using your full lift history.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Apex.textDim)
+            VStack(alignment: .leading, spacing: 4) {
+                ApexSectionLabel(text: "Session will be generated before you train")
+                Text("Tap \"Generate Session\" to build this session using your full lift history.")
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(Apex.textDim)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        )
+        .apexCard()
     }
 
     // MARK: - FB-008: Pending exercises placeholder
@@ -397,12 +392,12 @@ struct ProgramDayDetailView: View {
     private var pendingExercisePlaceholder: some View {
         VStack(spacing: 12) {
             ForEach(0..<4, id: \.self) { _ in
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.04))
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .fill(Apex.surface)
                     .frame(height: 72)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .stroke(Apex.hairline, lineWidth: 1)
                     )
             }
         }
@@ -411,51 +406,78 @@ struct ProgramDayDetailView: View {
     // MARK: - FB-008: Session generation error card
 
     private func sessionErrorCard(error: String) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(Color(red: 0.91, green: 0.63, blue: 0.19))
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Apex.amber)
             Text(error)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.70))
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(Apex.text.opacity(0.80))
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 0.91, green: 0.63, blue: 0.19).opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Apex.amber.opacity(0.08), in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(red: 0.91, green: 0.63, blue: 0.19).opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(Apex.amber.opacity(0.30), lineWidth: 1)
         )
     }
 
     // MARK: - Day Header
 
     private var dayHeaderSection: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Week \(week.weekNumber) · \(week.phase.displayTitle)")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.55))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                ApexSectionLabel(
+                    text: "Week \(week.weekNumber) · \(week.phase.displayTitle)",
+                    color: Apex.textDim
+                )
+                Spacer()
+                // Phase chip — monochrome Brutalist tag.
+                Text(week.phase.displayTitle)
+                    .font(.system(size: 11, weight: .bold))
                     .textCase(.uppercase)
-                    .kerning(0.8)
-
-                Text("\(day.exercises.count) exercise\(day.exercises.count == 1 ? "" : "s")")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .tracking(0.6)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textDim)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Capsule().stroke(Apex.hairline, lineWidth: 1))
             }
 
-            Spacer()
-
-            // Phase badge
-            Text(week.phase.displayTitle)
-                .font(.caption2.bold())
-                .foregroundStyle(week.phase.accentColor)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(week.phase.accentColor.opacity(0.15), in: Capsule())
+            // Real muscle-focus line — derived from this day's exercise primary muscles
+            // (presentation of existing data; no fabricated duration). The day name
+            // itself remains the large navigation title (preserved), so it is not
+            // duplicated here.
+            if let focus = muscleFocusLine {
+                Text(focus)
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.8)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+            }
         }
         .padding(.horizontal, 4)
-        .padding(.bottom, 8)
+        .padding(.bottom, 4)
+    }
+
+    /// "N EXERCISES · CHEST · TRICEPS" — derived from the day's existing exercise
+    /// primaryMuscle data (deduplicated, in first-appearance order). Returns nil when
+    /// the day has no exercises (e.g. a pending day) so no empty line renders.
+    private var muscleFocusLine: String? {
+        let count = currentDay.exercises.count
+        guard count > 0 else { return nil }
+        var seen = Set<String>()
+        var muscles: [String] = []
+        for ex in currentDay.exercises {
+            let name = ex.primaryMuscle.formattedMuscleName.uppercased()
+            if seen.insert(name).inserted {
+                muscles.append(name)
+            }
+        }
+        let head = "\(count) EXERCISE\(count == 1 ? "" : "S")"
+        return ([head] + muscles).joined(separator: " · ")
     }
 
     // MARK: - Status Banner
@@ -468,117 +490,96 @@ struct ProgramDayDetailView: View {
                 icon: "calendar.badge.clock",
                 // #437 (Q1): non-next days are not startable — drop the "train this day early" Start promise.
                 label: "Scheduled — unlocks when it becomes your next workout",
-                color: Color(red: 0.54, green: 0.60, blue: 0.69)
+                color: Apex.textDim
             )
         case .past:
             statusBadge(
                 icon: "calendar.badge.checkmark",
                 // #437 (Q1): no re-run Start for past days; backdating via Log Past Session is kept.
                 label: "Past session — Log Past Session to backdate",
-                color: Color(red: 0.78, green: 0.82, blue: 0.88)
+                color: Apex.textDim
             )
         case .today:
             EmptyView()
         }
     }
 
-    /// Green "Session Completed" banner shown at the top of completed days.
-    /// These days are read-only — no workout or log actions available.
+    /// "Session Completed" banner shown at the top of completed days.
+    /// These days are read-only — no workout or log actions available. Monochrome
+    /// (the volt-lime accent is reserved for the live/primary action, never the
+    /// completed/done state).
     private var completedBannerView: some View {
-        let green = Color(red: 0.24, green: 0.82, blue: 0.46)
-        return HStack(spacing: 8) {
-            Image(systemName: "checkmark.seal.fill")
-                .font(.caption.bold())
-            Text("SESSION COMPLETED — THIS IS A HISTORICAL RECORD")
-                .font(.system(size: 11, weight: .semibold))
-                .kerning(0.8)
-        }
-        .foregroundStyle(green)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .background(green.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(green.opacity(0.25), lineWidth: 1)
+        statusBadge(
+            icon: "checkmark.seal.fill",
+            label: "Session completed — this is a historical record",
+            color: Apex.textDim
         )
     }
 
-    /// Grey "Session Skipped" banner shown at the top of skipped days.
+    /// "Session Skipped" banner shown at the top of skipped days.
     /// #437 (Q1): a skipped day is never the programme pointer, so it is read-only here.
     private var skippedBannerView: some View {
-        let grey = Color(red: 0.55, green: 0.58, blue: 0.63)
-        return HStack(spacing: 8) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.caption.bold())
-            Text("SESSION SKIPPED")
-                .font(.system(size: 11, weight: .semibold))
-                .kerning(0.8)
-        }
-        .foregroundStyle(grey)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .background(grey.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(grey.opacity(0.25), lineWidth: 1)
+        statusBadge(
+            icon: "xmark.circle.fill",
+            label: "Session skipped",
+            color: Apex.textFaint
         )
     }
 
     private func statusBadge(icon: String, label: String, color: Color) -> some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.caption.bold())
-            Text(label.uppercased())
-                .font(.system(size: 11, weight: .semibold))
-                .kerning(0.8)
+                .font(.system(size: 13, weight: .bold))
+            Text(label)
+                .font(.system(size: 11, weight: .bold))
+                .textCase(.uppercase)
+                .tracking(0.8)
+                .fontWidth(.condensed)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .foregroundStyle(color)
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity)
-        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(color.opacity(0.10), in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(color.opacity(0.25), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(color.opacity(0.28), lineWidth: 1)
         )
     }
 
     // MARK: - Session Notes
 
     private func sessionNotesCard(notes: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("SESSION NOTES")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.35))
-                .kerning(0.6)
+        VStack(alignment: .leading, spacing: 8) {
+            ApexSectionLabel(text: "Session notes", color: Apex.textFaint)
             Text(notes)
-                .font(.system(size: 14, weight: .regular).italic())
-                .foregroundStyle(.white.opacity(0.65))
+                .font(.system(size: 14, weight: .regular))
+                .foregroundStyle(Apex.textDim)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
-        )
+        .apexCard()
     }
 
     // MARK: - Start Workout Button
 
     private var startWorkoutButton: some View {
-        VStack(spacing: 0) {
-            Divider().background(Color.white.opacity(0.06))
-
-            VStack(spacing: 8) {
-                bottomActionContent
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color(red: 0.04, green: 0.04, blue: 0.06))
+        VStack(spacing: 12) {
+            bottomActionContent
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 22)
+        .padding(.bottom, 26)
+        .background(
+            LinearGradient(
+                colors: [Apex.bg.opacity(0), Apex.bg],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
         .sheet(isPresented: $showManualLogSheet) {
             ManualSessionLogView(
                 day: currentDay,
@@ -610,9 +611,6 @@ struct ProgramDayDetailView: View {
         let isPending   = currentDay.status == .pending
         let isSkipped   = currentDay.status == .skipped
         let hasExercises = !currentDay.exercises.isEmpty
-        let accentColor = Color(red: 0.23, green: 0.56, blue: 1.00)
-        let greenColor  = Color(red: 0.24, green: 0.82, blue: 0.46)
-        let amberColor  = Color(red: 1.00, green: 0.70, blue: 0.10)
         // Skipped days fall through to the non-pointer branch (read-only note + Log Past Session).
         let _ = isSkipped
 
@@ -621,73 +619,58 @@ struct ProgramDayDetailView: View {
             // pushing a second one under this stack. switchToTab defaults to a no-op
             // outside the root TabView (previews), so this is safe to call unguarded.
             Button(action: { switchToTab(1) }) {
-                HStack(spacing: 10) {
-                    Image(systemName: "play.circle.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text("Continue Workout")
-                        .font(.system(size: 17, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(accentColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .foregroundStyle(.white)
+                ApexButton(title: "Continue Workout", icon: "play.fill")
             }
 
         } else if isCompleted {
-            VStack(spacing: 10) {
-                // Read-only badge — always shown for completed days.
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark.seal.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                    Text("Session Completed")
-                        .font(.system(size: 17, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(greenColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(greenColor.opacity(0.35), lineWidth: 1)
-                )
-                .foregroundStyle(greenColor)
-                // #437 (Q1 = CUT non-next starts): a completed day is never the programme
-                // pointer, so the Continue/Restart re-run affordances are removed — a
-                // completed day is a read-only historical record here.
+            // Read-only badge — always shown for completed days. Monochrome (the
+            // volt-lime accent is reserved for the live/primary action, never done).
+            // #437 (Q1 = CUT non-next starts): a completed day is never the programme
+            // pointer, so the Continue/Restart re-run affordances are removed — a
+            // completed day is a read-only historical record here.
+            HStack(spacing: 9) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 16, weight: .bold))
+                Text("Session Completed")
+                    .textCase(.uppercase)
+                    .tracking(1.1)
+                    .fontWidth(.condensed)
             }
+            .font(.system(size: 17, weight: .bold))
+            .foregroundStyle(Apex.textDim)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 17)
+            .background(
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .stroke(Apex.hairline, lineWidth: 1)
+            )
 
         } else if isPaused {
             // Paused session — amber banner + resume button
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 HStack(spacing: 8) {
                     Image(systemName: "pause.circle.fill")
-                        .font(.system(size: 15, weight: .semibold))
-                    Text("WORKOUT PAUSED")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Workout Paused")
                         .font(.system(size: 13, weight: .bold))
-                        .kerning(0.5)
+                        .textCase(.uppercase)
+                        .tracking(0.8)
+                        .fontWidth(.condensed)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .background(amberColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .background(Apex.amber.opacity(0.12), in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(amberColor.opacity(0.30), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        .stroke(Apex.amber.opacity(0.30), lineWidth: 1)
                 )
-                .foregroundStyle(amberColor)
+                .foregroundStyle(Apex.amber)
 
                 // #437: resume routes to the single Workout-tab host. A paused day is the
                 // programme pointer (status .paused ≠ completed/skipped), so Tab 1 renders
                 // it and its PausedSessionState sentinel drives the resume.
                 Button(action: { switchToTab(1) }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "play.circle.fill")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text("Resume workout")
-                            .font(.system(size: 17, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(amberColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .foregroundStyle(.black)
+                    ApexButton(title: "Resume workout", icon: "play.fill", tint: Apex.amber)
                 }
             }
 
@@ -720,26 +703,19 @@ struct ProgramDayDetailView: View {
                         }
                     }
                 }) {
-                    HStack(spacing: 10) {
-                        Image(systemName: isPending ? "wand.and.stars" : "figure.strengthtraining.traditional")
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(buttonLabel)
-                            .font(.system(size: 17, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
-                    .background(
-                        isEnabled ? accentColor : Color.white.opacity(0.07),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    ApexButton(
+                        title: buttonLabel,
+                        icon: isPending ? "wand.and.stars" : "figure.strengthtraining.traditional"
                     )
-                    .foregroundStyle(isEnabled ? .white : .white.opacity(0.30))
+                    .opacity(isEnabled ? 1.0 : 0.35)
                 }
                 .disabled(!isEnabled)
             } else {
                 // Non-pointer day — not startable (Q1). Informational note only.
                 Text("This session unlocks when it becomes your next workout.")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.40))
+                    .foregroundStyle(Apex.textFaint)
+                    .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
@@ -747,20 +723,7 @@ struct ProgramDayDetailView: View {
             // Secondary: Log Past Session — only for generated days with exercises
             if !isPending && hasExercises {
                 Button(action: { showManualLogSheet = true }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "pencil.and.list.clipboard")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text("Log Past Session")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                    )
-                    .foregroundStyle(.white.opacity(0.70))
+                    ApexButton(title: "Log Past Session", kind: .ghost, icon: "pencil.and.list.clipboard")
                 }
             }
 
@@ -770,8 +733,9 @@ struct ProgramDayDetailView: View {
             if Self.isSkippableDay(status: currentDay.status, hasExercises: hasExercises) {
                 Button(action: { showSkipDayConfirmation = true }) {
                     Text("Skip this session")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .font(.system(size: 13, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
                 }
                 .alert("Skip this session?", isPresented: $showSkipDayConfirmation) {
                     Button("Skip Session", role: .destructive) {
@@ -792,8 +756,9 @@ struct ProgramDayDetailView: View {
                PausedSessionState.load()?.trainingDayId != currentDay.id {
                 Button(action: { showRegenerateConfirmation = true }) {
                     Text("Regenerate this session")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .font(.system(size: 13, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
                 }
                 .alert("Regenerate this session?", isPresented: $showRegenerateConfirmation) {
                     Button("Regenerate", role: .destructive) {
@@ -820,64 +785,40 @@ struct ProgramDayDetailView: View {
     // MARK: - Historical Set Log Views and Helpers (completed days)
 
     private func completedVolumeSummary(volume: Double) -> some View {
-        let formatted = volume >= 1000
-            ? String(format: "%.1f t", volume / 1000)
-            : String(format: "%.0f kg", volume)
-        return HStack(spacing: 8) {
-            Image(systemName: "chart.bar.fill")
-                .font(.caption.bold())
-            Text("Total Volume: \(formatted)")
-                .font(.system(size: 13, weight: .semibold))
+        // Volume hero — monochrome Brutalist (done state is never lime). Big tabular
+        // numeral over a tracked unit label.
+        let value = volume >= 1000
+            ? String(format: "%.1f", volume / 1000)
+            : String(format: "%.0f", volume)
+        let unit = volume >= 1000 ? "Tonnes Volume" : "KG Volume"
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            ApexNumeral(text: value, size: 44, color: Apex.text)
+            ApexSectionLabel(text: unit, color: Apex.textDim)
+            Spacer()
         }
-        .foregroundStyle(Color(red: 0.24, green: 0.82, blue: 0.46))
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(red: 0.24, green: 0.82, blue: 0.46).opacity(0.08),
-                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(Color(red: 0.24, green: 0.82, blue: 0.46).opacity(0.22), lineWidth: 1)
-        )
+        .apexCard()
     }
 
     /// Shown when a completed day has no set logs — lets the user backfill them.
     private var backfillSetLogsPrompt: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.circle")
-                    .font(.caption.bold())
-                    .foregroundStyle(.white.opacity(0.40))
-                Text("NO SET LOGS FOR THIS SESSION")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.40))
-                    .kerning(0.6)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Apex.textFaint)
+                ApexSectionLabel(text: "No set logs for this session", color: Apex.textFaint)
+                Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(action: { showBackfillSheet = true }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "pencil.and.list.clipboard")
-                        .font(.system(size: 14, weight: .semibold))
-                    Text("Add Set Logs")
-                        .font(.system(size: 14, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                )
-                .foregroundStyle(.white.opacity(0.70))
+                ApexButton(title: "Add Set Logs", kind: .ghost, icon: "pencil.and.list.clipboard")
             }
         }
-        .padding(14)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
-        )
+        .padding(16)
+        .apexCard()
         .sheet(isPresented: $showBackfillSheet) {
             if let sessionId = completedSessionId {
                 ManualSessionLogView(
@@ -1232,54 +1173,44 @@ private struct ExerciseDetailCard: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row
             HStack(alignment: .top, spacing: 12) {
-                // Exercise number badge
-                Text("\(index)")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .frame(width: 26, height: 26)
-                    .background(Color.white.opacity(0.08), in: Circle())
+                // Exercise number — condensed tabular numeral.
+                ApexNumeral(text: String(format: "%02d", index), size: 15, color: Apex.textFaint)
+                    .frame(width: 28, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(exercise.name)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 17, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
 
-                    // Muscle chip
-                    Text(exercise.primaryMuscle.formattedMuscleName)
-                        .font(.caption2.bold())
-                        .foregroundStyle(muscleColor(for: exercise.primaryMuscle))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(muscleColor(for: exercise.primaryMuscle).opacity(0.15), in: Capsule())
+                    // Muscle chip — monochrome Brutalist tag.
+                    ApexTagChip(text: exercise.primaryMuscle.formattedMuscleName)
                 }
 
                 Spacer()
 
-                // Equipment badge
-                Text(exercise.equipmentRequired.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.55))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.07), in: Capsule())
+                // Equipment label
+                Text(exercise.equipmentRequired.displayName.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.5)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
                     .lineLimit(1)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
-            .padding(.bottom, 12)
+            .padding(.bottom, 14)
 
-            Divider()
-                .background(Color.white.opacity(0.08))
+            cardDivider
 
             // Prescription grid
             prescriptionGrid
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 16)
 
             // Live set logs — shown when a session is in progress for this day
             if !liveSetLogs.isEmpty {
-                Divider()
-                    .background(Color.white.opacity(0.08))
+                cardDivider
                 liveSetLogsSection
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
@@ -1287,54 +1218,52 @@ private struct ExerciseDetailCard: View {
 
             // Coaching cues — expandable
             if !exercise.coachingCues.isEmpty {
-                Divider()
-                    .background(Color.white.opacity(0.08))
+                cardDivider
                 coachingCueSection
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 13)
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .apexCard()
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: cuesExpanded)
+    }
+
+    private var cardDivider: some View {
+        Rectangle().fill(Apex.hairline).frame(height: 1)
     }
 
     // MARK: Live Set Logs (active session)
 
     private var liveSetLogsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("LOGGED")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.35))
-                .kerning(0.6)
+        VStack(alignment: .leading, spacing: 10) {
+            ApexSectionLabel(text: "Logged", color: Apex.textFaint)
 
             ForEach(liveSetLogs, id: \.id) { log in
-                HStack(spacing: 6) {
-                    Text("Set \(log.setNumber)")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.50))
-                        .frame(width: 42, alignment: .leading)
+                HStack(spacing: 8) {
+                    Text("SET \(log.setNumber)")
+                        .font(.system(size: 11, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
+                        .frame(width: 44, alignment: .leading)
 
-                    Text(formatWeight(log.weightKg))
-                        .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white)
+                    ApexNumeral(text: formatWeight(log.weightKg), size: 15, color: Apex.text)
 
                     Text("×")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Apex.textFaint)
 
-                    Text("\(log.repsCompleted) reps")
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white)
+                    ApexNumeral(text: "\(log.repsCompleted)", size: 15, color: Apex.text)
+                    Text("REPS")
+                        .font(.system(size: 10, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
 
                     if let rpe = log.rpeFelt {
                         Spacer()
                         Text("RPE \(rpe)")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.50))
+                            .font(.system(size: 12, weight: .bold))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.textDim)
                     }
                 }
             }
@@ -1387,22 +1316,21 @@ private struct ExerciseDetailCard: View {
     }
 
     private func prescriptionCell(label: String, value: String) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 5) {
+            ApexNumeral(text: value, size: 17, color: Apex.text)
             Text(label)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.35))
-                .kerning(0.6)
-            Text(value)
-                .font(.system(size: 15, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.6)
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textFaint)
         }
         .frame(maxWidth: .infinity)
     }
 
     private var prescriptionDivider: some View {
         Rectangle()
-            .fill(Color.white.opacity(0.08))
-            .frame(width: 1, height: 32)
+            .fill(Apex.hairline)
+            .frame(width: 1, height: 34)
     }
 
     // MARK: Coaching Cues (Expandable)
@@ -1412,62 +1340,36 @@ private struct ExerciseDetailCard: View {
             // Expand/collapse toggle
             Button(action: { cuesExpanded.toggle() }) {
                 HStack {
-                    Text("COACHING CUES")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.35))
-                        .kerning(0.6)
+                    ApexSectionLabel(text: "Coaching cues", color: Apex.textDim)
                     Spacer()
                     Image(systemName: cuesExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.30))
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Apex.textFaint)
                 }
             }
             .buttonStyle(.plain)
 
             if cuesExpanded {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(exercise.coachingCues, id: \.self) { cue in
                         HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.35))
-                                .padding(.top, 2)
+                            Rectangle()
+                                .fill(Apex.accent)
+                                .frame(width: 3, height: 3)
+                                .padding(.top, 7)
                             Text(cue)
-                                .font(.system(size: 14, weight: .regular).italic())
-                                .foregroundStyle(.white.opacity(0.70))
+                                .font(.system(size: 13, weight: .regular))
+                                .foregroundStyle(Apex.textDim)
                         }
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, 10)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
     }
 
     // MARK: Helpers
-
-    private func muscleColor(for muscle: String) -> Color {
-        // Typed-first dispatch (Slice 1) with substring-match fallback for
-        // non-canonical strings. Core branch removed — core is excluded from
-        // the locked-six taxonomy per ADR-0005.
-        if let primary = PrimaryMuscle(rawValue: muscle.lowercased()) {
-            switch primary {
-            case .chest:                            return Color(red: 0.96, green: 0.42, blue: 0.30)
-            case .back:                             return Color(red: 0.30, green: 0.70, blue: 0.96)
-            case .shoulders:                        return Color(red: 0.70, green: 0.50, blue: 0.96)
-            case .quads, .hamstrings, .glutes,
-                 .calves:                           return Color(red: 0.30, green: 0.96, blue: 0.60)
-            case .biceps, .triceps:                 return Color(red: 0.96, green: 0.80, blue: 0.30)
-            }
-        }
-        let lower = muscle.lowercased()
-        if lower.contains("pector") || lower.contains("chest") { return Color(red: 0.96, green: 0.42, blue: 0.30) }
-        if lower.contains("lat") || lower.contains("back") || lower.contains("rhom") { return Color(red: 0.30, green: 0.70, blue: 0.96) }
-        if lower.contains("delt") || lower.contains("shoulder") { return Color(red: 0.70, green: 0.50, blue: 0.96) }
-        if lower.contains("quad") || lower.contains("hamstr") || lower.contains("glut") || lower.contains("calf") { return Color(red: 0.30, green: 0.96, blue: 0.60) }
-        if lower.contains("bicep") || lower.contains("tricep") { return Color(red: 0.96, green: 0.80, blue: 0.30) }
-        return Color(red: 0.78, green: 0.82, blue: 0.88) // apexChrome fallback
-    }
 
     private func restLabel(seconds: Int) -> String {
         if seconds >= 60 {
@@ -1591,46 +1493,38 @@ private struct CompletedExerciseCard: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header row
             HStack(alignment: .top, spacing: 12) {
-                Text("\(index)")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .frame(width: 26, height: 26)
-                    .background(Color.white.opacity(0.08), in: Circle())
+                ApexNumeral(text: String(format: "%02d", index), size: 15, color: Apex.textFaint)
+                    .frame(width: 28, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(exercise.name)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 17, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
 
-                    Text(exercise.primaryMuscle.formattedMuscleName)
-                        .font(.caption2.bold())
-                        .foregroundStyle(muscleColor(for: exercise.primaryMuscle))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(muscleColor(for: exercise.primaryMuscle).opacity(0.15), in: Capsule())
+                    ApexTagChip(text: exercise.primaryMuscle.formattedMuscleName)
                 }
 
                 Spacer()
 
-                Text(exercise.equipmentRequired.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.55))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.07), in: Capsule())
+                Text(exercise.equipmentRequired.displayName.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.5)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
                     .lineLimit(1)
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
             .padding(.bottom, 12)
 
-            Divider().background(Color.white.opacity(0.08))
+            cardDivider
 
             // Set log rows
             if setLogs.isEmpty {
                 Text("No sets logged")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.35))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Apex.textFaint)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
             } else {
@@ -1642,24 +1536,28 @@ private struct CompletedExerciseCard: View {
                             onTap: { onTapSet(log) }
                         )
                         if i < setLogs.count - 1 {
-                            Divider()
-                                .background(Color.white.opacity(0.06))
+                            Rectangle()
+                                .fill(Apex.hairline.opacity(0.6))
+                                .frame(height: 1)
                                 .padding(.leading, 16)
                         }
                     }
                 }
             }
 
-            // Add Set button
-            Divider().background(Color.white.opacity(0.06))
+            // Add Set button — monochrome (secondary editing action, not the live action).
+            cardDivider
             Button(action: { showAddSetSheet = true }) {
                 Label("Add Set", systemImage: "plus.circle")
-                    .font(.caption.bold())
-                    .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
+                    .font(.system(size: 12, weight: .bold))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                    .foregroundStyle(Apex.textDim)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
             .sheet(isPresented: $showAddSetSheet) {
                 SetLogAddSheet(exerciseId: exercise.exerciseId, setNumber: setLogs.count + 1) { newLog in
                     onAddSet(newLog)
@@ -1669,38 +1567,35 @@ private struct CompletedExerciseCard: View {
 
             // Coaching cues — expandable
             if !exercise.coachingCues.isEmpty {
-                Divider().background(Color.white.opacity(0.08))
+                cardDivider
                 VStack(alignment: .leading, spacing: 0) {
                     Button(action: { cuesExpanded.toggle() }) {
                         HStack {
-                            Text("COACHING CUES")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.35))
-                                .kerning(0.6)
+                            ApexSectionLabel(text: "Coaching cues", color: Apex.textDim)
                             Spacer()
                             Image(systemName: cuesExpanded ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.30))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Apex.textFaint)
                         }
                     }
                     .buttonStyle(.plain)
-                    .padding(.vertical, 12)
+                    .padding(.vertical, 13)
 
                     if cuesExpanded {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: 8) {
                             ForEach(exercise.coachingCues, id: \.self) { cue in
                                 HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption2)
-                                        .foregroundStyle(.white.opacity(0.35))
-                                        .padding(.top, 2)
+                                    Rectangle()
+                                        .fill(Apex.accent)
+                                        .frame(width: 3, height: 3)
+                                        .padding(.top, 7)
                                     Text(cue)
-                                        .font(.system(size: 14, weight: .regular).italic())
-                                        .foregroundStyle(.white.opacity(0.70))
+                                        .font(.system(size: 13, weight: .regular))
+                                        .foregroundStyle(Apex.textDim)
                                 }
                             }
                         }
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 13)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 }
@@ -1708,34 +1603,11 @@ private struct CompletedExerciseCard: View {
                 .animation(.spring(response: 0.28, dampingFraction: 0.82), value: cuesExpanded)
             }
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .apexCard()
     }
 
-    private func muscleColor(for muscle: String) -> Color {
-        // Typed-first dispatch (Slice 1) with substring-match fallback for
-        // non-canonical strings. Core branch removed — core is excluded from
-        // the locked-six taxonomy per ADR-0005.
-        if let primary = PrimaryMuscle(rawValue: muscle.lowercased()) {
-            switch primary {
-            case .chest:                            return Color(red: 0.96, green: 0.42, blue: 0.30)
-            case .back:                             return Color(red: 0.30, green: 0.70, blue: 0.96)
-            case .shoulders:                        return Color(red: 0.70, green: 0.50, blue: 0.96)
-            case .quads, .hamstrings, .glutes,
-                 .calves:                           return Color(red: 0.30, green: 0.96, blue: 0.60)
-            case .biceps, .triceps:                 return Color(red: 0.96, green: 0.80, blue: 0.30)
-            }
-        }
-        let lower = muscle.lowercased()
-        if lower.contains("pector") || lower.contains("chest") { return Color(red: 0.96, green: 0.42, blue: 0.30) }
-        if lower.contains("lat") || lower.contains("back") || lower.contains("rhom") { return Color(red: 0.30, green: 0.70, blue: 0.96) }
-        if lower.contains("delt") || lower.contains("shoulder") { return Color(red: 0.70, green: 0.50, blue: 0.96) }
-        if lower.contains("quad") || lower.contains("hamstr") || lower.contains("glut") || lower.contains("calf") { return Color(red: 0.30, green: 0.96, blue: 0.60) }
-        if lower.contains("bicep") || lower.contains("tricep") { return Color(red: 0.96, green: 0.80, blue: 0.30) }
-        return Color(red: 0.78, green: 0.82, blue: 0.88)
+    private var cardDivider: some View {
+        Rectangle().fill(Apex.hairline).frame(height: 1)
     }
 }
 
@@ -1756,45 +1628,44 @@ private struct SetLogRow: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 12) {
-                // Set number badge
-                Text("S\(log.setNumber)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.40))
-                    .frame(width: 30, height: 24)
-                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                // Set number
+                Text("SET \(log.setNumber)")
+                    .font(.system(size: 11, weight: .bold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+                    .frame(width: 44, alignment: .leading)
 
                 // Weight
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text(weightString(log.weightKg))
-                        .font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white)
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    ApexNumeral(text: weightString(log.weightKg), size: 16, color: Apex.text)
                     Text("kg")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: 10, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
                 }
 
                 Text("×")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Apex.textFaint)
 
                 // Reps
-                HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text("\(log.repsCompleted)")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white)
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    ApexNumeral(text: "\(log.repsCompleted)", size: 16, color: Apex.text)
                     Text("reps")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: 10, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
                 }
 
                 // RPE
                 if let rpe = log.rpeFelt {
                     Text("RPE \(rpe)")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: 11, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textDim)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color.white.opacity(0.07), in: Capsule())
+                        .background(Capsule().stroke(Apex.hairline, lineWidth: 1))
                 }
 
                 Spacer()
@@ -1802,19 +1673,22 @@ private struct SetLogRow: View {
                 // Edited badge
                 if isEdited {
                     Text("Edited")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color(red: 0.91, green: 0.63, blue: 0.19))
+                        .font(.system(size: 10, weight: .bold))
+                        .fontWidth(.condensed)
+                        .textCase(.uppercase)
+                        .tracking(0.5)
+                        .foregroundStyle(Apex.amber)
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color(red: 0.91, green: 0.63, blue: 0.19).opacity(0.15), in: Capsule())
+                        .background(Apex.amber.opacity(0.15), in: Capsule())
                 }
 
                 Image(systemName: "pencil")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.22))
+                    .foregroundStyle(Apex.textFaint.opacity(0.7))
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 11)
+            .padding(.vertical, 12)
         }
         .buttonStyle(.plain)
     }
@@ -1841,79 +1715,36 @@ private struct SetLogAddSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 0.06, green: 0.06, blue: 0.09).ignoresSafeArea()
+                Apex.bg.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 28) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Add Set \(setNumber)")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
+                    Text("Add Set \(setNumber)")
+                        .font(.system(size: 24, weight: .black))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
 
                     // Weight field
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("WEIGHT")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
-                            .kerning(0.8)
+                    VStack(alignment: .leading, spacing: 10) {
+                        ApexSectionLabel(text: "Weight", color: Apex.textDim)
                         HStack(spacing: 8) {
-                            TextField("e.g. 80", text: $weightText)
-                                .keyboardType(.decimalPad)
-                                .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .background(Color.white.opacity(0.08),
-                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            setLogTextField("e.g. 80", text: $weightText, keyboard: .decimalPad)
                             Text("kg")
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.50))
+                                .fontWidth(.condensed)
+                                .foregroundStyle(Apex.textDim)
                         }
                     }
 
                     // Reps field
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("REPS")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
-                            .kerning(0.8)
-                        TextField("e.g. 8", text: $repsText)
-                            .keyboardType(.numberPad)
-                            .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(Color.white.opacity(0.08),
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    VStack(alignment: .leading, spacing: 10) {
+                        ApexSectionLabel(text: "Reps", color: Apex.textDim)
+                        setLogTextField("e.g. 8", text: $repsText, keyboard: .numberPad)
                     }
 
                     // RPE stepper
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("RPE (OPTIONAL)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
-                            .kerning(0.8)
-                        HStack(spacing: 12) {
-                            ForEach([6, 7, 8, 9, 10], id: \.self) { value in
-                                Button {
-                                    rpeValue = rpeValue == value ? nil : value
-                                } label: {
-                                    Text("\(value)")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(
-                                            rpeValue == value
-                                                ? Color(red: 0.23, green: 0.56, blue: 1.00)
-                                                : Color.white.opacity(0.08),
-                                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        )
-                                        .foregroundStyle(rpeValue == value ? .white : .white.opacity(0.55))
-                                }
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 10) {
+                        ApexSectionLabel(text: "RPE (optional)", color: Apex.textDim)
+                        SetLogRPEPicker(rpeValue: $rpeValue)
                     }
 
                     Spacer()
@@ -1935,17 +1766,8 @@ private struct SetLogAddSheet: View {
                         onConfirm(newLog)
                         dismiss()
                     } label: {
-                        Text("Add Set")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                            .background(
-                                canConfirm
-                                    ? Color(red: 0.23, green: 0.56, blue: 1.00)
-                                    : Color.white.opacity(0.08),
-                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            )
-                            .foregroundStyle(canConfirm ? .white : .white.opacity(0.30))
+                        ApexButton(title: "Add Set")
+                            .opacity(canConfirm ? 1.0 : 0.35)
                     }
                     .disabled(!canConfirm)
                 }
@@ -1956,7 +1778,57 @@ private struct SetLogAddSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(Apex.textDim)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Set-log sheet shared atoms
+
+/// Brutalist numeric input field for the add/edit set sheets.
+private func setLogTextField(_ placeholder: String, text: Binding<String>, keyboard: UIKeyboardType) -> some View {
+    TextField(placeholder, text: text)
+        .keyboardType(keyboard)
+        .font(.system(size: 28, weight: .black).monospacedDigit())
+        .fontWidth(.condensed)
+        .foregroundStyle(Apex.text)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Apex.surface, in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(Apex.hairline, lineWidth: 1)
+        )
+}
+
+/// Brutalist RPE picker (6–10) shared by the add/edit set sheets. The selected
+/// value fills volt-lime — this is the primary in-sheet choice.
+private struct SetLogRPEPicker: View {
+    @Binding var rpeValue: Int?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ForEach([6, 7, 8, 9, 10], id: \.self) { value in
+                Button {
+                    rpeValue = rpeValue == value ? nil : value
+                } label: {
+                    Text("\(value)")
+                        .font(.system(size: 16, weight: .bold).monospacedDigit())
+                        .fontWidth(.condensed)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            rpeValue == value ? Apex.accent : Apex.surface,
+                            in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                                .stroke(rpeValue == value ? Color.clear : Apex.hairline, lineWidth: 1)
+                        )
+                        .foregroundStyle(rpeValue == value ? Apex.onAccent : Apex.textDim)
                 }
             }
         }
@@ -1998,85 +1870,45 @@ struct SetLogEditSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 0.06, green: 0.06, blue: 0.09).ignoresSafeArea()
+                Apex.bg.ignoresSafeArea()
 
                 VStack(alignment: .leading, spacing: 28) {
                     // Header
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text("Edit Set \(log.setNumber)")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundStyle(.white)
+                            .font(.system(size: 24, weight: .black))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.text)
                         if isEdited {
                             Label("Previously edited", systemImage: "pencil.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(Color(red: 0.91, green: 0.63, blue: 0.19))
+                                .font(.system(size: 12, weight: .semibold))
+                                .fontWidth(.condensed)
+                                .foregroundStyle(Apex.amber)
                         }
                     }
 
                     // Weight field
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("WEIGHT")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
-                            .kerning(0.8)
+                    VStack(alignment: .leading, spacing: 10) {
+                        ApexSectionLabel(text: "Weight", color: Apex.textDim)
                         HStack(spacing: 8) {
-                            TextField("e.g. 80", text: $weightText)
-                                .keyboardType(.decimalPad)
-                                .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 14)
-                                .background(Color.white.opacity(0.08),
-                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            setLogTextField("e.g. 80", text: $weightText, keyboard: .decimalPad)
                             Text("kg")
                                 .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.50))
+                                .fontWidth(.condensed)
+                                .foregroundStyle(Apex.textDim)
                         }
                     }
 
                     // Reps field
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("REPS")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
-                            .kerning(0.8)
-                        TextField("e.g. 8", text: $repsText)
-                            .keyboardType(.numberPad)
-                            .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(.white)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 14)
-                            .background(Color.white.opacity(0.08),
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    VStack(alignment: .leading, spacing: 10) {
+                        ApexSectionLabel(text: "Reps", color: Apex.textDim)
+                        setLogTextField("e.g. 8", text: $repsText, keyboard: .numberPad)
                     }
 
                     // RPE stepper
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("RPE (OPTIONAL)")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
-                            .kerning(0.8)
-                        HStack(spacing: 12) {
-                            ForEach([6, 7, 8, 9, 10], id: \.self) { value in
-                                Button {
-                                    rpeValue = rpeValue == value ? nil : value
-                                } label: {
-                                    Text("\(value)")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 12)
-                                        .background(
-                                            rpeValue == value
-                                                ? Color(red: 0.23, green: 0.56, blue: 1.00)
-                                                : Color.white.opacity(0.08),
-                                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        )
-                                        .foregroundStyle(rpeValue == value ? .white : .white.opacity(0.55))
-                                }
-                            }
-                        }
+                    VStack(alignment: .leading, spacing: 10) {
+                        ApexSectionLabel(text: "RPE (optional)", color: Apex.textDim)
+                        SetLogRPEPicker(rpeValue: $rpeValue)
                     }
 
                     Spacer()
@@ -2099,17 +1931,8 @@ struct SetLogEditSheet: View {
                         onConfirm(updated)
                         dismiss()
                     } label: {
-                        Text("Confirm Edit")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 18)
-                            .background(
-                                canConfirm
-                                    ? Color(red: 0.23, green: 0.56, blue: 1.00)
-                                    : Color.white.opacity(0.08),
-                                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            )
-                            .foregroundStyle(canConfirm ? .white : .white.opacity(0.30))
+                        ApexButton(title: "Confirm Edit")
+                            .opacity(canConfirm ? 1.0 : 0.35)
                     }
                     .disabled(!canConfirm)
                 }
@@ -2120,7 +1943,7 @@ struct SetLogEditSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(Apex.textDim)
                 }
             }
         }
