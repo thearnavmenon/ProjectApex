@@ -66,13 +66,14 @@ struct RestTimerView: View {
             VStack(spacing: 0) {
                 // Top bar with end-early menu (P3-T09)
                 HStack {
+                    ApexSectionLabel(text: "Rest", color: Apex.textDim)
                     Spacer()
                     Button {
                         viewModel.showSessionPlanSheet = true
                     } label: {
                         Image(systemName: "list.bullet.clipboard")
                             .font(.system(size: 17, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.38))
+                            .foregroundStyle(Apex.textFaint)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
@@ -93,26 +94,17 @@ struct RestTimerView: View {
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .font(.system(size: 18, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.38))
+                            .foregroundStyle(Apex.textFaint)
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Apex.pad)
                 .padding(.top, 8)
-
-                Spacer(minLength: 12)
-
-                // REST label
-                Text("REST")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.38))
-                    .tracking(2.5)
-                    .textCase(.uppercase)
 
                 Spacer(minLength: 20)
 
-                // Circular progress ring
+                // Circular progress ring (volt-lime, tabular numeral, finishes-at)
                 timerRing
 
                 Spacer(minLength: 28)
@@ -132,13 +124,14 @@ struct RestTimerView: View {
                 if notificationsDenied {
                     Text("Rest alerts are off — enable notifications in iOS Settings.")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .foregroundStyle(Apex.textFaint)
                         .padding(.bottom, 12)
                 }
 
-                // Skip rest button
+                // Skip rest button — lime primary
                 skipButton
-                    .padding(.bottom, 48)
+                    .padding(.horizontal, Apex.pad)
+                    .padding(.bottom, 40)
             }
         }
         .onChange(of: viewModel.restSecondsRemaining) { old, new in
@@ -209,36 +202,30 @@ struct RestTimerView: View {
 
     private var timerRing: some View {
         ZStack {
-            // Track ring
-            Circle()
-                .stroke(streak.tintColor.opacity(0.12), lineWidth: 3)
-                .frame(width: 220, height: 220)
-
-            // Progress ring — draws from full (1.0) down to 0
-            Circle()
-                .trim(from: 0, to: ringProgress)
-                .stroke(
-                    AngularGradient(
-                        colors: [
-                            streak.tintColor.opacity(0.45),
-                            streak.tintColor
-                        ],
-                        center: .center,
-                        startAngle: .degrees(-90),
-                        endAngle: .degrees(270)
-                    ),
-                    style: StrokeStyle(lineWidth: 3, lineCap: .round)
-                )
-                .frame(width: 220, height: 220)
-                .rotationEffect(.degrees(-90))
+            // Thick volt-lime progress ring (track + accent arc), drawn from
+            // full (1.0) down to 0.
+            ApexRing(progress: ringProgress, lineWidth: 14)
+                .frame(width: 286, height: 286)
                 .animation(.linear(duration: 1.0), value: ringProgress)
 
-            // Countdown number (m:ss — the "seconds" caption no longer applies)
-            Text(countdownDisplay)
-                .font(.system(size: 80, weight: .ultraLight, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white)
-                .contentTransition(.numericText())
-                .animation(.linear(duration: 0.3), value: viewModel.restSecondsRemaining)
+            VStack(spacing: 10) {
+                // Big tabular countdown numeral (m:ss).
+                ApexNumeral(text: countdownDisplay, size: 78)
+                    .contentTransition(.numericText())
+                    .animation(.linear(duration: 0.3), value: viewModel.restSecondsRemaining)
+
+                // "Finishes at HH:MM" subtitle — display-only, derived from the
+                // existing absolute expiry date.
+                if let finishesAt = finishesAtDisplay {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bell.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Finishes at \(finishesAt)")
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(Apex.textFaint)
+                }
+            }
         }
         .scaleEffect(prescriptionJustArrived ? 1.03 : 1.0)
         .animation(.spring(response: 0.45, dampingFraction: 0.70), value: prescriptionJustArrived)
@@ -253,59 +240,58 @@ struct RestTimerView: View {
                 HStack(spacing: 5) {
                     ForEach(0..<3, id: \.self) { i in
                         Circle()
-                            .fill(streak.tintColor.opacity(0.75))
+                            .fill(Apex.textDim)
                             .frame(width: 5, height: 5)
                             .modifier(LiquidWaveMiniModifier(index: i))
                     }
                 }
                 Text("Coach preparing next set…")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(Apex.textFaint)
             } else if viewModel.isAIOffline {
                 Image(systemName: "brain.head.profile.slash")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
+                    .foregroundStyle(Apex.amber)
                 Text(viewModel.fallbackDescription ?? "Coach offline — using program defaults")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(Apex.textDim)
             } else {
                 // Prescription ready
                 Image(systemName: "brain.head.profile")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(streak.tintColor)
+                    .foregroundStyle(Apex.text.opacity(0.80))
                 Text("Prescription ready")
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(streak.tintColor.opacity(0.80))
+                    .foregroundStyle(Apex.textDim)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(.white.opacity(0.05), in: Capsule())
+        .background(Apex.surface, in: Capsule())
+        .overlay(Capsule().stroke(Apex.hairline, lineWidth: 1))
     }
 
     // MARK: - Next Exercise Card
 
     private var nextExerciseCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("NEXT UP")
-                .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white.opacity(0.30))
-                .tracking(1.5)
+            ApexSectionLabel(text: "Next up", color: Apex.textFaint)
 
             HStack(alignment: .top, spacing: 14) {
                 // Muscle colour dot
                 Circle()
                     .fill(muscleColor(for: nextExercise.primaryMuscle))
                     .frame(width: 8, height: 8)
-                    .padding(.top, 5)
+                    .padding(.top, 6)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(nextExercise.name)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
                     Text("Set \(setNumber) · \(nextExercise.repRange.min)–\(nextExercise.repRange.max) reps · RIR \(nextExercise.rirTarget)")
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Apex.textDim)
                 }
                 Spacer()
 
@@ -313,18 +299,16 @@ struct RestTimerView: View {
                 if let p = viewModel.currentPrescription {
                     VStack(alignment: .trailing, spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 2) {
-                            Text(weightString(p.weightKg))
-                                .font(.system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
-                                .foregroundStyle(.white)
+                            ApexNumeral(text: weightString(p.weightKg), size: 22, weight: .bold)
                                 .contentTransition(.numericText())
                             Text("kg")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.55))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Apex.textDim)
                                 .baselineOffset(2)
                         }
                         Text("\(p.reps) reps")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.50))
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Apex.textDim)
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.85)))
                     .animation(.spring(response: 0.45, dampingFraction: 0.70),
@@ -333,12 +317,9 @@ struct RestTimerView: View {
             }
         }
         .padding(20)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(.white.opacity(0.08), lineWidth: 0.5)
-        )
-        .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
+        .padding(.horizontal, Apex.pad)
     }
 
     // MARK: - Skip Button
@@ -348,36 +329,15 @@ struct RestTimerView: View {
             UIImpactFeedbackGenerator(style: .soft).impactOccurred()
             viewModel.skipRest()
         } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "forward.fill")
-                    .font(.system(size: 13, weight: .bold))
-                Text("NEXT SET")
-                    .font(.system(size: 13, weight: .bold))
-                    .tracking(1.0)
-            }
-            .foregroundStyle(.white.opacity(0.55))
-            .padding(.horizontal, 20)
-            .padding(.vertical, 10)
-            .background(.white.opacity(0.04), in: Capsule())
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
+            ApexButton(title: "Next set", icon: "forward.fill")
         }
+        .accessibilityLabel("Next set")
     }
 
     // MARK: - Background
 
     private var apexBackground: some View {
-        ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
-            RadialGradient(
-                colors: [streak.tintColor.opacity(0.12), Color.clear],
-                center: UnitPoint(x: 0.5, y: 0.30),
-                startRadius: 0,
-                endRadius: 380
-            )
-            .ignoresSafeArea()
-            .blendMode(.plusLighter)
-        }
+        Apex.bg.ignoresSafeArea()
     }
 
     // MARK: - Computed Helpers
@@ -390,6 +350,13 @@ struct RestTimerView: View {
 
     private var countdownDisplay: String {
         viewModel.formattedRestTime
+    }
+
+    /// "Finishes at HH:MM" subtitle — display-only, formatted from the existing
+    /// absolute expiry date. `nil` when no expiry is set (no behaviour change).
+    private var finishesAtDisplay: String? {
+        guard let expiresAt = viewModel.restExpiresAt else { return nil }
+        return expiresAt.formatted(date: .omitted, time: .shortened)
     }
 
     private func weightString(_ kg: Double) -> String {
