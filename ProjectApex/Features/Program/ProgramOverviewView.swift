@@ -2,14 +2,21 @@
 // ProjectApex — Features/Program
 //
 // 12-week mesocycle calendar grid. Each row is a training week; columns are
-// training days. Deload weeks use a distinct silver-tinted background.
-// The current week row is highlighted with an accent border.
+// training days. Deload weeks use a distinct dashed-silver treatment.
+// The current week row is highlighted with a volt-lime border.
 // Tapping any day card navigates to ProgramDayDetailView.
+//
+// Brutalist Athletic restyle (#507): pure-black surface, condensed-black
+// numerals + headlines, sharp 4pt corners, the single volt-lime accent reserved
+// for the live/current/primary action and amber for paused. Phase
+// differentiation stays monochrome (condensed labels + a segmented bar whose
+// active segment is the one lime accent). Visual layer only — all behaviour,
+// state, bindings, navigation and accessibility are unchanged.
 //
 // Acceptance criteria (P2-T05):
 // ✓ Scrollable grid: 12 rows (weeks) × N columns (days per week)
 // ✓ Each day cell shows day label, primary muscle group chip, training indicator
-// ✓ Deload weeks visually distinct (silver / muted background)
+// ✓ Deload weeks visually distinct (dashed-silver treatment)
 // ✓ Current week highlighted with accent border
 // ✓ Tap navigates to ProgramDayDetailView
 // ✓ Week header shows phase label
@@ -32,8 +39,8 @@ struct ProgramOverviewView: View {
 
     var body: some View {
         ZStack {
-            // Base background
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+            // Pure-black Brutalist backdrop.
+            Apex.bg.ignoresSafeArea()
 
             switch viewModel.viewState {
             case .loading:
@@ -63,7 +70,7 @@ struct ProgramOverviewView: View {
         }
         .navigationTitle("My Program")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
+        .toolbarBackground(Apex.bg, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task {
             await viewModel.loadProgram()
@@ -85,35 +92,47 @@ struct ProgramOverviewView: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 Image(systemName: "exclamationmark.icloud")
-                    .foregroundStyle(Color(red: 0.91, green: 0.63, blue: 0.19))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Apex.amber)
 
                 Text(message)
-                    .font(.footnote)
-                    .foregroundStyle(.white)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Apex.text.opacity(0.85))
                     .lineLimit(2)
 
                 Spacer()
 
                 if viewModel.persistRetryAction != nil {
-                    Button("Retry") {
+                    Button {
                         Task { await viewModel.persistRetryAction?() }
+                    } label: {
+                        Text("Retry")
+                            .font(.system(size: 13, weight: .bold))
+                            .fontWidth(.condensed)
+                            .textCase(.uppercase)
+                            .tracking(0.8)
+                            .foregroundStyle(Apex.accent)
                     }
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
                 }
 
                 Button {
                     viewModel.dismissPersistError()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.6))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Apex.textFaint)
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color(red: 0.12, green: 0.12, blue: 0.16).opacity(0.95))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .padding(.vertical, 12)
+            .background {
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .fill(Apex.surface)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .stroke(Apex.amber.opacity(0.45), lineWidth: 1)
+            }
             .padding(.horizontal, 12)
             .padding(.top, 8)
         }
@@ -127,56 +146,57 @@ struct ProgramOverviewView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .progressViewStyle(.circular)
-                .tint(Color(red: 0.78, green: 0.82, blue: 0.88))
+                .tint(Apex.accent)
                 .scaleEffect(1.5)
-            Text("Loading program…")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.55))
+            Text("Loading program\u{2026}")
+                .font(.system(size: 13, weight: .medium))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .tracking(1.0)
+                .foregroundStyle(Apex.textDim)
         }
     }
 
     // MARK: - Empty State
 
     private var emptyView: some View {
-        VStack(spacing: 32) {
+        VStack(spacing: 28) {
             Spacer()
 
             Image(systemName: "calendar.badge.plus")
-                .font(.system(size: 72))
-                .foregroundStyle(Color(red: 0.78, green: 0.82, blue: 0.88).opacity(0.6))
+                .font(.system(size: 64, weight: .regular))
+                .foregroundStyle(Apex.textFaint)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Text("No Program Yet")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 30, weight: .black))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Apex.text)
 
                 Text(gymProfile == nil
                      ? "Scan your gym first, then generate a personalised 12-week program."
                      : "Generate a personalised 12-week periodised program for your gym.")
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.60))
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(Apex.textDim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
 
             if gymProfile != nil {
-                Button(action: {
+                Button {
                     guard let profile = gymProfile else { return }
                     Task { await viewModel.generateMacroSkeleton(gymProfile: profile) }
-                }) {
-                    Label("Generate My Program", systemImage: "wand.and.stars")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
+                } label: {
+                    ApexButton(title: "Generate My Program", icon: "wand.and.stars")
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color(red: 0.23, green: 0.56, blue: 1.00))
                 .padding(.horizontal, 32)
+                .padding(.top, 4)
             } else {
                 Button(action: { switchToTab(3) }) {
                     Text("Set up your gym in Settings")
-                        .font(.footnote)
-                        .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Apex.accent)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
                 }
@@ -184,6 +204,7 @@ struct ProgramOverviewView: View {
 
             Spacer()
         }
+        .padding(.horizontal, Apex.pad)
     }
 
     // MARK: - Generating
@@ -194,29 +215,32 @@ struct ProgramOverviewView: View {
 
             // Animated brain icon
             Image(systemName: "brain.head.profile")
-                .font(.system(size: 64))
-                .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
+                .font(.system(size: 60, weight: .regular))
+                .foregroundStyle(Apex.accent)
                 .symbolEffect(.pulse)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Text("Building Your Program")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 26, weight: .black))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Apex.text)
 
                 Text("The AI coach is crafting a personalised 12-week mesocycle. This may take up to a minute.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.60))
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Apex.textDim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
 
             ProgressView()
                 .progressViewStyle(.circular)
-                .tint(Color(red: 0.23, green: 0.56, blue: 1.00))
+                .tint(Apex.accent)
                 .scaleEffect(1.2)
 
             Spacer()
         }
+        .padding(.horizontal, Apex.pad)
     }
 
     // MARK: - Error
@@ -226,22 +250,24 @@ struct ProgramOverviewView: View {
             Spacer()
 
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(Color(red: 0.91, green: 0.63, blue: 0.19))
+                .font(.system(size: 56, weight: .regular))
+                .foregroundStyle(Apex.amber)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 Text("Generation Failed")
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 24, weight: .black))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .foregroundStyle(Apex.text)
 
                 Text(message)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.60))
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundStyle(Apex.textDim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
             }
 
-            Button("Try Again") {
+            Button {
                 Task {
                     if let profile = gymProfile {
                         await viewModel.generateMacroSkeleton(gymProfile: profile)
@@ -249,12 +275,15 @@ struct ProgramOverviewView: View {
                         await viewModel.loadProgram()
                     }
                 }
+            } label: {
+                ApexButton(title: "Try Again", icon: "arrow.clockwise")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(Color(red: 0.23, green: 0.56, blue: 1.00))
+            .padding(.horizontal, 48)
+            .padding(.top, 4)
 
             Spacer()
         }
+        .padding(.horizontal, Apex.pad)
     }
 
     // MARK: - Loaded: 12-Week Grid
@@ -263,12 +292,11 @@ struct ProgramOverviewView: View {
         let currentWeekIndex = viewModel.currentWeekIndex(in: mesocycle)
         return ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 2) {
+                LazyVStack(spacing: 12) {
                     // Phase progress bar header
                     phaseProgressBar(mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
-                        .padding(.bottom, 8)
                         .id("header")
 
                     // Per-pattern phase tracking — collapsed by default
@@ -304,8 +332,7 @@ struct ProgramOverviewView: View {
                             liveTrainingDayId: deps.activeSessionCoordinator.liveTrainingDayId,
                             liveSetSummary: deps.activeSessionCoordinator.liveSetSummary
                         )
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 16)
                         .id(week.id)
                     }
                 }
@@ -345,39 +372,35 @@ struct ProgramOverviewView: View {
                     }
                 } label: {
                     HStack {
-                        Text("PATTERN PROGRESS")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
-                            .kerning(0.6)
+                        ApexSectionLabel(text: "Pattern progress", color: Apex.textDim)
                         Spacer()
                         Image(systemName: isPatternProgressExpanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.30))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Apex.textFaint)
                     }
                     .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 12)
                 }
                 .buttonStyle(.plain)
 
                 if isPatternProgressExpanded {
-                    VStack(spacing: 6) {
-                        ForEach(summaries, id: \.pattern) { summary in
+                    VStack(spacing: 0) {
+                        ForEach(Array(summaries.enumerated()), id: \.element.pattern) { index, summary in
                             patternPhaseRow(summary)
+                            if index < summaries.count - 1 {
+                                Rectangle()
+                                    .fill(Apex.hairline.opacity(0.6))
+                                    .frame(height: 1)
+                            }
                         }
                     }
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 12)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
-            .background(Color.white.opacity(0.03),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
-            )
+            .apexCard()
             .padding(.horizontal, 16)
-            .padding(.bottom, 8)
         }
     }
 
@@ -388,18 +411,21 @@ struct ProgramOverviewView: View {
         HStack(spacing: 10) {
             // Human-readable pattern name (e.g. "Horizontal Push")
             Text(summary.pattern.displayName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.75))
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Apex.text.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Phase badge
+            // Phase badge — monochrome, outlined.
             Text(shortPhaseName(summary.currentPhase))
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(summary.currentPhase.accentColor)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(summary.currentPhase.accentColor.opacity(0.15), in: Capsule())
+                .fontWidth(.condensed)
+                .tracking(0.4)
+                .foregroundStyle(Apex.textDim)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(Capsule().stroke(Apex.hairline, lineWidth: 1))
         }
+        .padding(.vertical, 11)
     }
 
     private func shortPhaseName(_ phase: MesocyclePhase) -> String {
@@ -414,11 +440,11 @@ struct ProgramOverviewView: View {
     // MARK: - Phase Progress Bar
 
     private func phaseProgressBar(mesocycle: Mesocycle, currentWeekIndex: Int) -> some View {
-        let phases: [(phase: MesocyclePhase, weeks: ClosedRange<Int>)] = [
-            (.accumulation, 0...3),
-            (.intensification, 4...7),
-            (.peaking, 8...10),
-            (.deload, 11...11)
+        let phases: [(phase: MesocyclePhase, label: String, weeks: ClosedRange<Int>)] = [
+            (.accumulation, "ACCUM", 0...3),
+            (.intensification, "INTENS", 4...7),
+            (.peaking, "PEAK", 8...10),
+            (.deload, "DL", 11...11)
         ]
 
         // Count completed+skipped sessions across all days for the progress label.
@@ -429,45 +455,70 @@ struct ProgramOverviewView: View {
         // Session-based completion fraction — updates immediately when a day is marked done.
         let sessionProgress = totalDays > 0 ? Double(completedCount) / Double(totalDays) : 0.0
 
-        return VStack(alignment: .leading, spacing: 8) {
-            // Phase segments
-            HStack(spacing: 3) {
+        return VStack(alignment: .leading, spacing: 14) {
+            // Week count (hero) + sessions/percent
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("WEEK")
+                        .font(.system(size: 12, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textDim)
+                        .baselineOffset(2)
+                    ApexNumeral(text: "\(currentWeekIndex + 1)", size: 34)
+                    Text("/ \(mesocycle.weeks.count)")
+                        .font(.system(size: 15, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textDim)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 1) {
+                    HStack(spacing: 4) {
+                        ApexNumeral(text: "\(completedCount)", size: 17, color: Apex.accent)
+                        Text("/ \(totalDays) SESSIONS")
+                            .font(.system(size: 11, weight: .bold))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.textDim)
+                    }
+                    Text("\(Int(sessionProgress * 100))% COMPLETE")
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(0.5)
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
+                }
+            }
+
+            // Phase segments — active segment is the one lime accent.
+            HStack(spacing: 4) {
                 ForEach(phases, id: \.phase) { item in
                     let isActive = item.weeks.contains(currentWeekIndex)
                     Rectangle()
-                        .fill(isActive ? item.phase.accentColor : item.phase.accentColor.opacity(0.25))
-                        .frame(height: 4)
-                        .cornerRadius(2)
+                        .fill(isActive ? Apex.accent : Color.white.opacity(0.16))
+                        .frame(height: 5)
                         .frame(maxWidth: .infinity)
                 }
             }
 
             // Phase labels
             HStack(spacing: 0) {
-                Text("Accumulation")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text("Intensification")
-                    .frame(maxWidth: .infinity, alignment: .center)
-                Text("Peaking")
-                    .frame(width: 60, alignment: .leading)
-                Text("DL")
-                    .frame(width: 30, alignment: .trailing)
-            }
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.35))
-            .kerning(0.4)
-
-            HStack {
-                Text("Week \(currentWeekIndex + 1) of \(mesocycle.weeks.count)")
-                    .font(.footnote.bold())
-                    .foregroundStyle(.white.opacity(0.70))
-                Spacer()
-                // Show sessions completed / total; percentage updates live as days complete.
-                Text("\(completedCount) of \(totalDays) sessions · \(Int(sessionProgress * 100))%")
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.40))
+                phaseTick("ACCUM", active: phases[0].weeks.contains(currentWeekIndex))
+                phaseTick("INTENS", active: phases[1].weeks.contains(currentWeekIndex))
+                phaseTick("PEAK", active: phases[2].weeks.contains(currentWeekIndex))
+                phaseTick("DL", active: phases[3].weeks.contains(currentWeekIndex), width: 26)
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
+    }
+
+    private func phaseTick(_ t: String, active: Bool, width: CGFloat? = nil) -> some View {
+        Text(t)
+            .font(.system(size: 9, weight: .bold))
+            .tracking(0.6)
+            .fontWidth(.condensed)
+            .foregroundStyle(active ? Apex.accent : Apex.textFaint)
+            .frame(maxWidth: width == nil ? .infinity : nil, alignment: width == nil ? .leading : .trailing)
+            .frame(width: width)
     }
 }
 
@@ -492,39 +543,43 @@ private struct WeekRowView: View {
     var liveSetSummary: LiveSetSummary? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             // Week header
             HStack(spacing: 8) {
-                Text("W\(week.weekNumber)")
-                    .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(isCurrent ? week.phase.accentColor : .white.opacity(0.45))
-                    .frame(width: 28, alignment: .leading)
+                ApexNumeral(
+                    text: "W\(week.weekNumber)",
+                    size: 16,
+                    color: isCurrent ? Apex.accent : Apex.text
+                )
 
                 // FB-008: Show weekLabel if available, else fall back to phase title
-                Text((week.weekLabel ?? week.phase.displayTitle).uppercased())
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(week.phase.accentColor.opacity(isCurrent ? 1.0 : 0.55))
-                    .kerning(0.8)
+                Text((week.isDeload ? "DELOAD" : (week.weekLabel ?? week.phase.displayTitle)).uppercased())
+                    .font(.system(size: 11, weight: .bold))
+                    .fontWidth(.condensed)
+                    .tracking(0.8)
+                    .foregroundStyle(isCurrent ? Apex.text : Apex.textDim)
                     .lineLimit(1)
 
                 if isCurrent {
                     Text("CURRENT")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(week.phase.accentColor, in: Capsule())
+                        .font(.system(size: 9, weight: .black))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.onAccent)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Apex.accent, in: Capsule())
                 }
 
                 Spacer()
 
-                // Phase-relative progress: "Week 2 of 4"
-                Text("Week \(phaseWeekNumber) of \(phaseWeekTotal)")
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.30))
+                // Phase-relative progress: "WK 2/4"
+                Text("WK \(phaseWeekNumber)/\(phaseWeekTotal)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 10)
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
 
             // Day cards scroll row
             ScrollView(.horizontal, showsIndicators: false) {
@@ -551,42 +606,31 @@ private struct WeekRowView: View {
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 13)
             }
         }
         .background(weekBackground)
         .overlay(currentWeekBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     @ViewBuilder
     private var weekBackground: some View {
-        if week.isDeload {
-            // Deload: muted silver-grey tint
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(red: 0.54, green: 0.60, blue: 0.69).opacity(0.08))
-        } else if isCurrent {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(week.phase.accentColor.opacity(0.06))
-        } else {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.04))
-        }
+        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .fill(week.isDeload ? Color.white.opacity(0.04) : Color.white.opacity(0.025))
     }
 
     @ViewBuilder
     private var currentWeekBorder: some View {
-        if isCurrent {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(week.phase.accentColor.opacity(0.50), lineWidth: 1.5)
-        } else if week.isDeload {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color(red: 0.54, green: 0.60, blue: 0.69).opacity(0.20), lineWidth: 1)
-        } else {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
-        }
+        // Readable deload: dashed silver stroke; current: lime; else hairline.
+        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .strokeBorder(
+                isCurrent ? Apex.accent.opacity(0.55)
+                    : (week.isDeload ? Color(white: 0.62).opacity(0.5) : Apex.hairline),
+                style: week.isDeload
+                    ? StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    : StrokeStyle(lineWidth: isCurrent ? 1.5 : 1)
+            )
     }
 }
 
@@ -618,50 +662,26 @@ private struct DayCardView: View {
     private var isPaused: Bool    { day.status == .paused }
     private var isSkipped: Bool   { day.status == .skipped }
 
-    // Green used for completed day styling
-    private let completedGreen = Color(red: 0.24, green: 0.82, blue: 0.46)
-    private let pausedAmber    = Color(red: 1.00, green: 0.70, blue: 0.10)
-    private let skippedGrey    = Color(red: 0.55, green: 0.58, blue: 0.63)
-
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             // Weekday + day label row
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(weekdayLabel(dayOfWeek: day.dayOfWeek))
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(isCompleted ? completedGreen.opacity(0.6) : .white.opacity(0.35))
-                        .kerning(0.5)
+                        .font(.system(size: 10, weight: .bold))
+                        .fontWidth(.condensed)
+                        .tracking(0.5)
+                        .foregroundStyle(isLive ? Apex.accent : Apex.textFaint)
 
-                    Text(day.dayLabel.replacingOccurrences(of: "_", with: " "))
-                        .font(.system(size: 14, weight: .bold, design: .rounded))
-                        .foregroundStyle(isPending ? .white.opacity(0.55) : isCompleted ? completedGreen : isPaused ? pausedAmber : isSkipped ? skippedGrey : .white)
+                    Text(day.dayLabel.replacingOccurrences(of: "_", with: " ").uppercased())
+                        .font(.system(size: 15, weight: .black))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(dayTitleColor)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 0)
-                // Status icon — record for live, checkmark for completed, pause for paused, xmark for skipped
-                if isLive {
-                    Image(systemName: "record.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(week.phase.accentColor)
-                        .opacity(reduceMotion ? 0.6 : (livePulse ? 1.0 : 0.4))
-                        .accessibilityLabel("Session in progress")
-                } else if isCompleted {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(completedGreen)
-                        .accessibilityLabel("Session completed")
-                } else if isPaused {
-                    Image(systemName: "pause.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(pausedAmber)
-                        .accessibilityLabel("Workout paused")
-                } else if isSkipped {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundStyle(skippedGrey)
-                        .accessibilityLabel("Session skipped")
-                }
+                // Status glyph — record for live, checkmark for completed, pause for paused, xmark for skipped
+                statusGlyph
             }
 
             if isLive {
@@ -670,29 +690,33 @@ private struct DayCardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if let s = liveSetSummary, s.setsCompleted > 0 {
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("\(s.setsCompleted) set\(s.setsCompleted == 1 ? "" : "s") done")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.70))
+                            Text("\(s.setsCompleted) SET\(s.setsCompleted == 1 ? "" : "S") DONE")
+                                .font(.system(size: 9, weight: .bold))
+                                .fontWidth(.condensed)
+                                .tracking(0.4)
+                                .foregroundStyle(Apex.text.opacity(0.75))
                             if let kg = s.lastWeightKg, let reps = s.lastRepsCompleted {
                                 Text("\(formatWeight(kg))kg · \(reps) reps")
-                                    .font(.system(size: 9))
-                                    .foregroundStyle(.white.opacity(0.45))
+                                    .font(.system(size: 9, weight: .medium))
+                                    .fontWidth(.condensed)
+                                    .foregroundStyle(Apex.textDim)
                                     .lineLimit(1)
                             }
                         }
                     }
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(week.phase.accentColor)
+                            .fill(Apex.accent)
                             .frame(width: 5, height: 5)
                             .opacity(reduceMotion ? 0.6 : (livePulse ? 1.0 : 0.2))
                         Text("LIVE")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(week.phase.accentColor)
+                            .font(.system(size: 9, weight: .black))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.accent)
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(week.phase.accentColor.opacity(0.14), in: Capsule())
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().stroke(Apex.accent.opacity(0.5), lineWidth: 1))
                 }
             } else if isPending {
                 // FB-008: Session pending indicator
@@ -700,51 +724,29 @@ private struct DayCardView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Image(systemName: "clock.badge.questionmark")
                         .font(.system(size: 14))
-                        .foregroundStyle(.white.opacity(0.35))
-                    Text("Session\npending")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.35))
+                        .foregroundStyle(Apex.textFaint)
+                    Text("SESSION\nPENDING")
+                        .font(.system(size: 9, weight: .bold))
+                        .fontWidth(.condensed)
+                        .tracking(0.3)
+                        .foregroundStyle(Apex.textFaint)
                         .lineLimit(2)
                 }
             } else if isCompleted {
-                // Completed: show "Done" label in green
                 Spacer(minLength: 0)
-                Text("DONE")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(completedGreen)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(completedGreen.opacity(0.14), in: Capsule())
+                statusPill("DONE", color: Apex.textDim)
             } else if isPaused {
-                // Paused: show "PAUSED" capsule in amber
                 Spacer(minLength: 0)
-                Text("PAUSED")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(pausedAmber)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(pausedAmber.opacity(0.14), in: Capsule())
+                statusPill("PAUSED", color: Apex.amber)
             } else if isSkipped {
-                // Skipped: show "SKIPPED" capsule in grey
                 Spacer(minLength: 0)
-                Text("SKIPPED")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(skippedGrey)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(skippedGrey.opacity(0.14), in: Capsule())
+                statusPill("SKIPPED", color: Apex.textFaint)
             } else {
-                // Primary muscles chips (top 2)
+                // Primary muscles chips (top 2) — monochrome ApexTagChip (lime dot baked in).
                 let muscles = uniqueTopMuscles(from: day.exercises)
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 5) {
                     ForEach(muscles.prefix(2), id: \.self) { muscle in
-                        Text(muscle)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(muscleColor(for: muscle))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(muscleColor(for: muscle).opacity(0.14), in: Capsule())
-                            .lineLimit(1)
+                        ApexTagChip(text: muscle)
                     }
                 }
 
@@ -753,20 +755,19 @@ private struct DayCardView: View {
                 // Exercise count indicator
                 HStack(spacing: 4) {
                     Image(systemName: "dumbbell.fill")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.35))
-                    Text("\(day.exercises.count) ex")
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.40))
+                        .font(.system(size: 8))
+                        .foregroundStyle(Apex.textFaint)
+                    Text("\(day.exercises.count) EX")
+                        .font(.system(size: 10, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(width: 110, height: 120, alignment: .topLeading)
+        .padding(11)
+        .frame(width: 118, height: 122, alignment: .topLeading)
         .background(cardBackground)
         .overlay(cardBorder)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onAppear {
             guard isLive, !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
@@ -788,54 +789,73 @@ private struct DayCardView: View {
         }
     }
 
+    // MARK: Status glyph
+
+    @ViewBuilder
+    private var statusGlyph: some View {
+        if isLive {
+            Image(systemName: "record.circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(Apex.accent)
+                .opacity(reduceMotion ? 0.6 : (livePulse ? 1.0 : 0.4))
+                .accessibilityLabel("Session in progress")
+        } else if isCompleted {
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .black))
+                .foregroundStyle(Apex.textDim)
+                .accessibilityLabel("Session completed")
+        } else if isPaused {
+            Image(systemName: "pause.fill")
+                .font(.system(size: 10, weight: .black))
+                .foregroundStyle(Apex.amber)
+                .accessibilityLabel("Workout paused")
+        } else if isSkipped {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .black))
+                .foregroundStyle(Apex.textFaint)
+                .accessibilityLabel("Session skipped")
+        }
+    }
+
+    private func statusPill(_ t: String, color: Color) -> some View {
+        Text(t)
+            .font(.system(size: 9, weight: .black))
+            .fontWidth(.condensed)
+            .foregroundStyle(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(Capsule().stroke(color.opacity(0.4), lineWidth: 1))
+    }
+
+    private var dayTitleColor: Color {
+        if isSkipped { return Apex.textFaint }
+        if isPaused { return Apex.amber }
+        if isPending { return Apex.text.opacity(0.55) }
+        return Apex.text
+    }
+
     @ViewBuilder
     private var cardBackground: some View {
-        if isLive {
-            // Live session — brighter phase-tinted background
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(week.phase.accentColor.opacity(0.15))
-        } else if isCompleted {
-            // Completed days get a subtle green tint
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(completedGreen.opacity(0.08))
-        } else if isPaused {
-            // Paused days get a subtle amber tint
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(pausedAmber.opacity(0.08))
-        } else if isSkipped {
-            // Skipped days get a muted grey tint
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(skippedGrey.opacity(0.07))
-        } else if week.isDeload {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(red: 0.54, green: 0.60, blue: 0.69).opacity(0.10))
-        } else {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.07))
-        }
+        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .fill(dayFill)
     }
 
     @ViewBuilder
     private var cardBorder: some View {
-        if isLive {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(week.phase.accentColor.opacity(0.65), lineWidth: 1.5)
-        } else if isCompleted {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(completedGreen.opacity(0.30), lineWidth: 1)
-        } else if isPaused {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(pausedAmber.opacity(0.30), lineWidth: 1)
-        } else if isSkipped {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(skippedGrey.opacity(0.25), lineWidth: 1)
-        } else if isCurrentWeek {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(week.phase.accentColor.opacity(0.35), lineWidth: 1)
-        } else {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
-        }
+        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .stroke(dayStroke, lineWidth: isLive ? 1.5 : 1)
+    }
+
+    private var dayFill: Color {
+        if isLive { return Apex.accent.opacity(0.12) }
+        if isPaused { return Apex.amber.opacity(0.07) }
+        return Color.white.opacity(0.05)
+    }
+
+    private var dayStroke: Color {
+        if isLive { return Apex.accent.opacity(0.6) }
+        if isPaused { return Apex.amber.opacity(0.30) }
+        return Apex.hairline
     }
 
     // MARK: Helpers
@@ -864,30 +884,6 @@ private struct DayCardView: View {
             if result.count >= 3 { break }
         }
         return result
-    }
-
-    private func muscleColor(for muscle: String) -> Color {
-        // Typed-first dispatch (Slice 1). Falls back to substring-match for
-        // non-canonical strings (e.g. "pectoralis_major" coming from a free-form
-        // muscle field). Core branch removed — core is excluded from the
-        // locked-six taxonomy per ADR-0005.
-        if let primary = PrimaryMuscle(rawValue: muscle.lowercased()) {
-            switch primary {
-            case .chest:                            return Color(red: 0.96, green: 0.42, blue: 0.30)
-            case .back:                             return Color(red: 0.30, green: 0.70, blue: 0.96)
-            case .shoulders:                        return Color(red: 0.70, green: 0.50, blue: 0.96)
-            case .quads, .hamstrings, .glutes,
-                 .calves:                           return Color(red: 0.30, green: 0.96, blue: 0.60)
-            case .biceps, .triceps:                 return Color(red: 0.96, green: 0.80, blue: 0.30)
-            }
-        }
-        let lower = muscle.lowercased()
-        if lower.contains("chest") || lower.contains("pect") { return Color(red: 0.96, green: 0.42, blue: 0.30) }
-        if lower.contains("back") || lower.contains("lat") { return Color(red: 0.30, green: 0.70, blue: 0.96) }
-        if lower.contains("shoulder") || lower.contains("delt") { return Color(red: 0.70, green: 0.50, blue: 0.96) }
-        if lower.contains("leg") || lower.contains("quad") || lower.contains("glut") || lower.contains("hamstr") || lower.contains("calf") { return Color(red: 0.30, green: 0.96, blue: 0.60) }
-        if lower.contains("arm") || lower.contains("bicep") || lower.contains("tricep") { return Color(red: 0.96, green: 0.80, blue: 0.30) }
-        return Color(red: 0.78, green: 0.82, blue: 0.88)
     }
 }
 
@@ -934,4 +930,5 @@ private extension String {
             gymProfile: nil
         )
     }
+    .preferredColorScheme(.dark)
 }
