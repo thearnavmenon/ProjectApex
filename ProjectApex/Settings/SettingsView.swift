@@ -83,7 +83,16 @@ struct SettingsView: View {
     /// Projections fetched on demand when "Review targets" is tapped.
     @State private var calibrationProjections: [PatternProjection] = []
 
+    // #494 PR5: release-safe full reset.
+    /// Controls the destructive "Reset all data" confirmation alert.
+    @State private var showResetAllConfirmation = false
+
     private static let daysPerWeekRange = 2...6
+
+    /// Destructive-action red. The production design system has no danger token
+    /// (lime stays reserved for additive/commit actions), so this destructive row
+    /// defines its own red locally rather than adding to the shared DesignSystem.
+    private let dangerRed = Color(red: 0.92, green: 0.30, blue: 0.30)
 
     /// True when the user skipped the gym scan during onboarding — drives the setup prompt.
     private var gymScanSkipped: Bool {
@@ -102,6 +111,7 @@ struct SettingsView: View {
                 programSection
             }
             developerSection
+            dataSection
             aboutSection
         }
         .listStyle(.plain)
@@ -177,6 +187,18 @@ struct SettingsView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(regenerateErrorMessage ?? "")
+        }
+        // #494 PR5: release-safe full reset confirmation.
+        .alert("Reset all data?", isPresented: $showResetAllConfirmation) {
+            Button("Reset", role: .destructive) {
+                Task {
+                    await performFullDataReset(deps: deps)
+                    onResetAll?()
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This erases your profile, program, and history on this device. This can't be undone.")
         }
     }
 
@@ -630,6 +652,32 @@ struct SettingsView: View {
             ApexSectionLabel(text: "Developer")
         }
         #endif
+    }
+
+    /// Release-safe "Reset all data" — destructive, red, gated behind a confirm.
+    /// Wipes on-device data + the anonymous Supabase session via the shared
+    /// `performFullDataReset` (same code path as the developer reset).
+    private var dataSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showResetAllConfirmation = true
+            } label: {
+                HStack(spacing: 13) {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(dangerRed)
+                        .frame(width: 30)
+                    Text("Reset all data")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(dangerRed)
+                }
+            }
+            .settingsCardRow(.single)
+        } header: {
+            ApexSectionLabel(text: "Data")
+        } footer: {
+            footerText("Erases your profile, program, and history on this device. Can't be undone.")
+        }
     }
 
     private var aboutSection: some View {
