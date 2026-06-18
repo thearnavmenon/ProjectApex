@@ -17,6 +17,10 @@
 // screen previews and opens outside the heavy-reassessment flow. Slice E2
 // wires the banner → this screen and passes the real count. This slice does
 // NOT touch WorkoutView / PreWorkoutView wiring (E2 owns that).
+//
+// VISUAL: Brutalist Athletic (#473) — pure-black surfaces, an emphasized goal
+// card, lime-on-selected focus chips, tabular ApexNumeral capability values,
+// and a lime "Save goal" action. Behaviour/logic/state untouched.
 
 import SwiftUI
 
@@ -44,9 +48,6 @@ struct GoalReviewView: View {
     /// Cap the read-only capability list to the strongest few so the screen
     /// stays readable — the model can track dozens of exercises.
     private static let maxCapabilitiesShown = 8
-
-    private static let accentBlue = Color(red: 0.23, green: 0.56, blue: 1.00)
-    private static let darkChrome = Color(red: 0.04, green: 0.04, blue: 0.06)
 
     private var canSave: Bool {
         !isSaving &&
@@ -86,34 +87,31 @@ struct GoalReviewView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Self.darkChrome.ignoresSafeArea()
+            ZStack(alignment: .bottom) {
+                Apex.bg.ignoresSafeArea()
 
                 ScrollView {
-                    LazyVStack(spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: 22) {
                         goalCard
-                        focusAreasCard
-                        capabilitiesCard
-                        Color.clear.frame(height: 24)
+                        focusAreasSection
+                        capabilitiesSection
+                        Color.clear.frame(height: 110)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, Apex.pad)
                     .padding(.top, 16)
                 }
+
+                saveBar
             }
-            .navigationTitle("Review Goals")
+            .navigationTitle("Review your goal")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Self.darkChrome, for: .navigationBar)
+            .toolbarBackground(Apex.bg, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.70))
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(canSave ? Self.accentBlue : .white.opacity(0.30))
-                        .disabled(!canSave)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Apex.textDim)
                 }
             }
             .task {
@@ -141,10 +139,10 @@ struct GoalReviewView: View {
 
     private var goalCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("YOUR GOAL")
+            ApexSectionLabel(text: "Your goal", color: Apex.accent)
             Text("Your training leveled up. Revise what you're working toward.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Apex.textDim)
 
             TextField(
                 "What are you training for?",
@@ -152,20 +150,29 @@ struct GoalReviewView: View {
                 axis: .vertical
             )
             .lineLimit(3...6)
-            .font(.system(size: 16))
-            .foregroundStyle(.white)
+            .font(.system(size: 16, weight: .medium))
+            .foregroundStyle(Apex.text)
+            .tint(Apex.accent)
             .padding(14)
-            .background(Color.white.opacity(0.08),
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .fill(Color.white.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .stroke(Apex.hairline, lineWidth: 1)
+            )
         }
-        .cardChrome()
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard(emphasized: true)
     }
 
     // MARK: - Focus areas
 
-    private var focusAreasCard: some View {
+    private var focusAreasSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("FOCUS AREAS")
+            ApexSectionLabel(text: "Focus areas", color: Apex.textFaint)
 
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 96), spacing: 10)],
@@ -177,7 +184,6 @@ struct GoalReviewView: View {
                 }
             }
         }
-        .cardChrome()
     }
 
     private func focusChip(_ area: MuscleGroup) -> some View {
@@ -190,20 +196,21 @@ struct GoalReviewView: View {
             }
         } label: {
             Text(area.rawValue.capitalized)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: .bold))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .tracking(0.6)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .padding(.vertical, 11)
                 .background(
-                    isSelected ? Self.accentBlue : Color.white.opacity(0.08),
-                    in: Capsule()
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        .fill(isSelected ? Apex.accent : Color.white.opacity(0.05))
                 )
                 .overlay(
-                    Capsule().stroke(
-                        isSelected ? Color.clear : Color.white.opacity(0.12),
-                        lineWidth: 0.5
-                    )
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        .stroke(isSelected ? Color.clear : Apex.hairline, lineWidth: 1)
                 )
-                .foregroundStyle(isSelected ? .white : .white.opacity(0.60))
+                .foregroundStyle(isSelected ? Apex.onAccent : Apex.text)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(area.rawValue.capitalized)
@@ -212,31 +219,34 @@ struct GoalReviewView: View {
 
     // MARK: - Where you are now (read-only)
 
-    private var capabilitiesCard: some View {
+    private var capabilitiesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("WHERE YOU ARE NOW")
+            ApexSectionLabel(text: "Where you are now", color: Apex.textFaint)
             Text("Current estimated 1RMs — informational, not editable.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Apex.textDim)
 
             if capabilities.isEmpty {
                 Text("No capability estimates yet — log a few sessions and they'll appear here.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.40))
-                    .padding(.vertical, 4)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Apex.textFaint)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .apexCard()
             } else {
                 VStack(spacing: 0) {
                     let shown = capabilities.prefix(Self.maxCapabilitiesShown)
                     ForEach(Array(shown.enumerated()), id: \.element.exerciseId) { index, profile in
                         capabilityRow(profile)
                         if index != shown.count - 1 {
-                            Divider().background(Color.white.opacity(0.06))
+                            Rectangle().fill(Apex.hairline).frame(height: 1)
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .apexCard()
             }
         }
-        .cardChrome()
     }
 
     private func capabilityRow(_ profile: ExerciseProfile) -> some View {
@@ -244,34 +254,51 @@ struct GoalReviewView: View {
         // pattern via the canonical ExerciseLibrary, then check the captured set.
         let pattern = ExerciseLibrary.lookup(profile.exerciseId)?.movementPattern
         let inTransition = pattern.map { transitionPatterns.contains($0) } ?? false
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack {
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
                 Text(profile.exerciseId.replacingOccurrences(of: "_", with: " ").capitalized)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.85))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Apex.text)
                 Spacer()
-                Text("\(Int(profile.e1rmCurrent.rounded())) kg")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    ApexNumeral(text: "\(Int(profile.e1rmCurrent.rounded()))", size: 16, color: Apex.textDim)
+                    ApexNumeral(text: " kg", size: 12, color: Apex.textFaint)
+                }
             }
             // Re-anchoring after a long absence: the number is provisional, so caption
             // it rather than present the raw estimate without context.
             if inTransition {
                 Text("Re-establishing after a break")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Apex.textDim)
             }
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 13)
     }
 
-    // MARK: - Section header
+    // MARK: - Save bar
 
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.40))
-            .kerning(0.8)
+    private var saveBar: some View {
+        Button {
+            Task { await save() }
+        } label: {
+            ApexButton(title: isSaving ? "Saving…" : "Save goal", icon: isSaving ? nil : "checkmark")
+                .opacity(canSave ? 1.0 : 0.35)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSave)
+        .animation(.easeInOut(duration: 0.18), value: canSave)
+        .padding(.horizontal, Apex.pad)
+        .padding(.top, 22)
+        .padding(.bottom, 26)
+        .background(
+            LinearGradient(
+                colors: [Apex.bg.opacity(0), Apex.bg],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
     }
 
     // MARK: - Save
@@ -310,24 +337,6 @@ struct GoalReviewView: View {
         }
 
         dismiss()
-    }
-}
-
-// MARK: - Card chrome
-
-private extension View {
-    /// The translucent rounded-card surface used across the dark-chrome
-    /// feature screens (matches ManualSessionLogView's card styling).
-    func cardChrome() -> some View {
-        self
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(Color.white.opacity(0.06),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-            )
     }
 }
 
