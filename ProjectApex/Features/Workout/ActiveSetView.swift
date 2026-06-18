@@ -85,7 +85,7 @@ struct ActiveSetView: View {
             VStack(spacing: 0) {
                 sessionHeader
                     .padding(.top, 16)
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, Apex.pad)
 
                 exerciseProgressDots
                     .padding(.top, 12)
@@ -103,7 +103,7 @@ struct ActiveSetView: View {
                 Spacer(minLength: 20)
 
                 setCompleteButton
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, Apex.pad)
                     .padding(.bottom, 32)
             }
 
@@ -113,7 +113,7 @@ struct ActiveSetView: View {
                 HStack {
                     Spacer()
                     voiceNoteButton
-                        .padding(.trailing, 24)
+                        .padding(.trailing, Apex.pad)
                         .padding(.bottom, 120) // above Set Complete button
                 }
             }
@@ -213,7 +213,8 @@ struct ActiveSetView: View {
             HStack {
                 Text("\(exercise.name.uppercased()) · SET \(setNumber) OF \(exercise.sets)")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
                     .tracking(0.8)
                     .lineLimit(1)
                 Spacer()
@@ -222,7 +223,7 @@ struct ActiveSetView: View {
                 } label: {
                     Image(systemName: "list.bullet.clipboard")
                         .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .foregroundStyle(Apex.textFaint)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -253,7 +254,7 @@ struct ActiveSetView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                         .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.38))
+                        .foregroundStyle(Apex.textFaint)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -274,10 +275,10 @@ struct ActiveSetView: View {
             ForEach(1...exercise.sets, id: \.self) { n in
                 Capsule()
                     .fill(n < setNumber
-                          ? streak.tintColor
+                          ? Apex.accent
                           : (n == setNumber
-                             ? streak.tintColor.opacity(0.80)
-                             : Color.white.opacity(0.15)))
+                             ? Apex.accent.opacity(0.45)
+                             : Color.white.opacity(0.12)))
                     .frame(width: n == setNumber ? 20 : 8, height: 4)
                     .animation(.apexSnap, value: setNumber)
             }
@@ -291,14 +292,14 @@ struct ActiveSetView: View {
             HStack(spacing: 6) {
                 ForEach(0..<3, id: \.self) { i in
                     Circle()
-                        .fill(streak.tintColor.opacity(0.80))
+                        .fill(Apex.accent.opacity(0.80))
                         .frame(width: 8, height: 8)
                         .modifier(LiquidWaveModifier(index: i))
                 }
             }
             Text("Coach preparing prescription…")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Apex.textDim)
         }
         .padding(.vertical, 60)
     }
@@ -311,42 +312,39 @@ struct ActiveSetView: View {
 
             // Header: exercise name + set badge + intent pill (Slice 6 / #10)
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(exercise.name)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
+                        .font(.system(size: 24, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
+                        .fixedSize(horizontal: false, vertical: true)
                         .lineLimit(2)
-                    Text(exercise.primaryMuscle.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(muscleColor(for: exercise.primaryMuscle))
+                    ApexTagChip(text: exercise.primaryMuscle.replacingOccurrences(of: "_", with: " "))
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text("SET \(setNumber)/\(exercise.sets)")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(streak.tintColor)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(streak.tintColor.opacity(0.14), in: Capsule())
+                VStack(alignment: .trailing, spacing: 6) {
+                    ApexSectionLabel(text: "Set \(setNumber)/\(exercise.sets)")
                     if let intent = prescription.intent {
                         // Intent pill — uppercased, smaller. Slice 6 / #10.
                         // Sets the user's frame for what kind of set this is
                         // BEFORE they read weight/reps.
-                        Text(RepRPEIntentConfirmationSheet.label(for: intent).uppercased())
+                        Text(RepRPEIntentConfirmationSheet.label(for: intent))
                             .font(.system(size: 10, weight: .heavy))
+                            .fontWidth(.condensed)
+                            .textCase(.uppercase)
                             .tracking(1.2)
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(Apex.text.opacity(0.85))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
-                            .background(Color.white.opacity(0.10), in: Capsule())
-                            .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
+                            .background(Color.white.opacity(0.08))
+                            .overlay(Rectangle().stroke(Apex.hairline, lineWidth: 1))
                             .accessibilityLabel("Intent: \(RepRPEIntentConfirmationSheet.label(for: intent))")
                     }
                 }
             }
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 22)
+            .padding(.top, 20)
+            .padding(.bottom, 10)
 
             // Set framing — 1-line mental-set framing under the header
             // (Slice 6 / #10). Italic 14pt. Italics carry the "thought,
@@ -355,72 +353,39 @@ struct ActiveSetView: View {
             if let framing = prescription.setFraming, !framing.isEmpty {
                 Text(framing)
                     .font(.system(size: 14, weight: .regular).italic())
-                    .foregroundStyle(.white.opacity(0.78))
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 12)
+                    .foregroundStyle(Apex.text.opacity(0.78))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 14)
                     .accessibilityLabel("Set framing: \(framing)")
             }
 
-            // Weight / Reps hero numbers
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                if prescription.weightKg == 0 {
-                    // Bodyweight exercise — show non-interactive "BW" label
-                    Text("BW")
-                        .font(.system(size: 72, weight: .black, design: .rounded))
-                        .foregroundStyle(.white)
-                        .accessibilityLabel("Bodyweight exercise")
-                } else {
-                    // Tappable weight value — opens inline override sheet (FB-001)
-                    Button {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        showWeightOverride = true
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text(weightString(prescription.weightKg))
-                                .font(.system(size: 72, weight: .black, design: .rounded).monospacedDigit())
-                                .foregroundStyle(.white)
-                                .contentTransition(.numericText())
-                                .id("weight_\(prescription.weightKg)")
-                                .underline(true, color: .white.opacity(0.28))
-                            Text("kg")
-                                .font(.system(size: 24, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white.opacity(0.55))
-                                .baselineOffset(6)
-                            Image(systemName: "pencil")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.35))
-                                .baselineOffset(8)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Adjust weight: \(weightString(prescription.weightKg)) kilograms")
-                    .accessibilityHint("Double tap to change the weight")
-                }
-
-                Spacer()
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("\(prescription.reps)")
-                        .font(.system(size: 56, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white)
-                        .contentTransition(.numericText())
-                    Text("reps")
-                        .font(.system(size: 20, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .baselineOffset(4)
-                }
+            // Weight / Reps hero numbers — each in its own fixed-width tile
+            // (the weight-truncation fix). Tabular ApexNumeral + WeightParts
+            // means 17.5 / 80 / 142.5 all render cleanly and never reflow.
+            HStack(alignment: .top, spacing: 12) {
+                weightHeroTile(prescription)
+                repsHeroTile(prescription)
+                    .frame(width: 120)
             }
-            .padding(.horizontal, 24)
-            .padding(.bottom, 4)
+            .padding(.horizontal, 22)
+            .padding(.bottom, 14)
 
             // "Last time" line (#318 U7 / G-F6) — last session's performance
             // for this exercise, muted, directly under the hero numbers.
             if let lastTime = viewModel.lastPerformanceSummary {
-                Text(lastTime)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 4)
-                    .accessibilityLabel("Last session: \(lastTime)")
+                HStack(spacing: 6) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(lastTime)
+                        .font(.system(size: 13, weight: .medium))
+                }
+                .foregroundStyle(Apex.textFaint)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 6)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Last session: \(lastTime)")
             }
 
             // "Adjusted" badge — shown after user overrides weight (FB-001)
@@ -433,8 +398,9 @@ struct ActiveSetView: View {
                         .tracking(0.3)
                 }
                 .foregroundStyle(Color(red: 0.40, green: 0.85, blue: 0.60))
-                .padding(.horizontal, 24)
-                .padding(.bottom, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 6)
             }
 
             // "Using last session weights" badge — AI was unavailable, user chose manual fallback
@@ -446,18 +412,20 @@ struct ActiveSetView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .tracking(0.3)
                 }
-                .foregroundStyle(Color(red: 1.0, green: 0.65, blue: 0.0))
-                .padding(.horizontal, 24)
-                .padding(.bottom, 4)
+                .foregroundStyle(Apex.amber)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 6)
             }
 
             // Adjusted weight annotation (equipment snap note from AI)
             if let adjustedNote = viewModel.weightAdjustmentNote {
                 Text(adjustedNote)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(streak.tintColor.opacity(0.80))
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 6)
+                    .foregroundStyle(Apex.accent.opacity(0.80))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 8)
             }
 
             // "My gym doesn't have this weight" button — hidden for bodyweight exercises
@@ -471,112 +439,37 @@ struct ActiveSetView: View {
                         Text("My gym doesn't have this weight")
                             .font(.system(size: 12, weight: .medium))
                     }
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Apex.textFaint)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, viewModel.gymWeightHintText != nil ? 4 : 8)
+                .padding(.horizontal, 22)
+                .padding(.bottom, viewModel.gymWeightHintText != nil ? 4 : 10)
 
                 // Available weight range hint — shown when GymFactStore has corrections for this equipment
                 if let hint = viewModel.gymWeightHintText {
                     Text(hint)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(.white.opacity(0.25))
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 22)
+                        .padding(.bottom, 10)
                 }
             }
 
-            glassRowDivider
-
-            // Tempo / RIR / Rest row
-            HStack(spacing: 0) {
-                metricChip(icon: "metronome", label: prescription.tempo)
-                Spacer()
-                metricChip(icon: "target", label: "RIR \(prescription.rirTarget)")
-                Spacer()
-                metricChip(icon: "timer", label: "\(prescription.restSeconds)s rest")
+            // Tempo / RIR / Rest — metric pills (tabular value over faint label)
+            HStack(spacing: 10) {
+                ApexMetricPill(label: "Tempo", value: prescription.tempo)
+                ApexMetricPill(label: "RIR", value: "\(prescription.rirTarget)")
+                ApexMetricPill(label: "Rest", value: restString(prescription.restSeconds))
             }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 22)
+            .padding(.top, 4)
+            .padding(.bottom, 14)
 
-            // Coaching cue
-            if !prescription.coachingCue.isEmpty {
-                glassRowDivider
-                Text("\u{201C}\(prescription.coachingCue)\u{201D}")
-                    .font(.system(size: 15, weight: .regular).italic())
-                    .foregroundStyle(.white.opacity(0.72))
-                    .multilineTextAlignment(.leading)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 14)
-            }
-
-            // Reasoning (collapsible)
-            if !prescription.reasoning.isEmpty {
-                glassRowDivider
-                Button {
-                    withAnimation(.apexSnap) { reasoningExpanded.toggle() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: reasoningExpanded
-                              ? "chevron.up" : "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.30))
-                        Text("Coach reasoning")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.30))
-                        Spacer()
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-                }
-                if reasoningExpanded {
-                    Text(prescription.reasoning)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.28))
-                        .multilineTextAlignment(.leading)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 14)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-
-            // Safety flags
-            if !prescription.safetyFlags.isEmpty {
-                glassRowDivider
-                HStack(spacing: 8) {
-                    ForEach(prescription.safetyFlags, id: \.rawValue) { flag in
-                        SafetyFlagBadge(flag: flag)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 12)
-            }
-
-            // Confidence arc (bottom edge)
-            if let conf = prescription.confidence {
-                confidenceArc(conf)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 14)
-            }
+            // Coach card — cue + collapsible reasoning + safety + confidence,
+            // grouped under one accent left-rail (prototype coach treatment).
+            coachCard(prescription)
         }
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(.white.opacity(0.06))
-                // Specular top-edge highlight
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .stroke(
-                        LinearGradient(
-                            colors: [.white.opacity(0.28), .white.opacity(0.06)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        ),
-                        lineWidth: 0.8
-                    )
-            }
-        )
-        .padding(.horizontal, 20)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabelFor(prescription))
         .accessibilityHint("Double tap to mark set as complete")
@@ -594,33 +487,197 @@ struct ActiveSetView: View {
         }
     }
 
+    // MARK: - Hero Tiles (weight-truncation fix)
+
+    /// Weight tile — fixed-width card with the tabular ApexNumeral split into a
+    /// big whole + de-emphasised fraction + small "kg" (WeightParts). Preserves
+    /// the tap-to-edit affordance (FB-001) and the bodyweight `BW` case.
+    @ViewBuilder
+    private func weightHeroTile(_ prescription: SetPrescription) -> some View {
+        if prescription.weightKg == 0 {
+            // Bodyweight exercise — non-interactive "BW" label.
+            weightTileCard(prescription, interactive: false)
+        } else {
+            // Tappable weight value — opens inline override sheet (FB-001).
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                showWeightOverride = true
+            } label: {
+                weightTileCard(prescription, interactive: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Adjust weight: \(weightString(prescription.weightKg)) kilograms")
+            .accessibilityHint("Double tap to change the weight")
+        }
+    }
+
+    /// The visual card for the weight tile. `interactive` shows the pencil
+    /// affordance (suppressed for the non-tappable bodyweight case).
+    @ViewBuilder
+    private func weightTileCard(_ prescription: SetPrescription, interactive: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                ApexSectionLabel(text: "Weight")
+                Spacer()
+                if interactive {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Apex.accent)
+                }
+            }
+            if prescription.weightKg == 0 {
+                ApexNumeral(text: "BW", size: 58)
+                    .accessibilityLabel("Bodyweight exercise")
+            } else {
+                let parts = WeightParts(prescription.weightKg)
+                HStack(alignment: .firstTextBaseline, spacing: 1) {
+                    ApexNumeral(text: parts.whole, size: 58)
+                    if let frac = parts.frac {
+                        ApexNumeral(text: frac, size: 32, weight: .bold, color: Apex.textDim)
+                    }
+                    Text("kg")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Apex.textDim)
+                        .baselineOffset(2)
+                        .padding(.leading, 3)
+                }
+                .fixedSize()
+                .contentTransition(.numericText())
+                .id("weight_\(prescription.weightKg)")
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard(emphasized: true)
+    }
+
+    /// Reps tile — fixed-width card with a tabular ApexNumeral.
+    @ViewBuilder
+    private func repsHeroTile(_ prescription: SetPrescription) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ApexSectionLabel(text: "Reps")
+            ApexNumeral(text: "\(prescription.reps)", size: 58)
+                .fixedSize()
+                .contentTransition(.numericText())
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
+    }
+
+    // MARK: - Coach Card
+
+    /// Coach card — verdict (coaching cue) + collapsible reasoning + safety
+    /// flags + confidence, grouped under a single accent left-rail. Mirrors the
+    /// prototype's coach treatment. Only rendered when there's something to say.
+    @ViewBuilder
+    private func coachCard(_ prescription: SetPrescription) -> some View {
+        let hasContent = !prescription.coachingCue.isEmpty
+            || !prescription.reasoning.isEmpty
+            || !prescription.safetyFlags.isEmpty
+            || prescription.confidence != nil
+
+        if hasContent {
+            HStack(alignment: .top, spacing: 13) {
+                Capsule()
+                    .fill(Apex.accent)
+                    .frame(width: 3)
+                    .frame(maxHeight: .infinity)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Apex.accent)
+                        ApexSectionLabel(text: "Coach", color: Apex.accent)
+                    }
+
+                    // Coaching cue (verdict)
+                    if !prescription.coachingCue.isEmpty {
+                        Text("\u{201C}\(prescription.coachingCue)\u{201D}")
+                            .font(.system(size: 15, weight: .regular).italic())
+                            .foregroundStyle(Apex.text.opacity(0.85))
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    // Reasoning (collapsible)
+                    if !prescription.reasoning.isEmpty {
+                        Button {
+                            withAnimation(.apexSnap) { reasoningExpanded.toggle() }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text("Why this weight")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Image(systemName: reasoningExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .foregroundStyle(Apex.accent)
+                        }
+                        .buttonStyle(.plain)
+                        if reasoningExpanded {
+                            Text(prescription.reasoning)
+                                .font(.system(size: 12, weight: .regular, design: .monospaced))
+                                .foregroundStyle(Apex.textDim)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
+
+                    // Safety flags
+                    if !prescription.safetyFlags.isEmpty {
+                        HStack(spacing: 8) {
+                            ForEach(prescription.safetyFlags, id: \.rawValue) { flag in
+                                SafetyFlagBadge(flag: flag)
+                            }
+                            Spacer()
+                        }
+                    }
+
+                    // Confidence arc
+                    if let conf = prescription.confidence {
+                        confidenceArc(conf)
+                    }
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .apexCard()
+            .padding(.horizontal, 22)
+            .padding(.bottom, 4)
+        }
+    }
+
     // MARK: - Set Complete Button
 
     private var setCompleteButton: some View {
         Button {
             handleSetCompleteTap()
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 9) {
                 if viewModel.isCompletingSet {
                     ProgressView()
                         .progressViewStyle(.circular)
-                        .tint(.white)
+                        .tint(Apex.onAccent)
                         .scaleEffect(0.85)
                 } else {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 22, weight: .bold))
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 18, weight: .bold))
                 }
                 Text(viewModel.isCompletingSet ? "Logging…" : "Set Complete")
-                    .font(.system(size: 19, weight: .bold))
+                    .font(.system(size: 18, weight: .bold))
+                    .textCase(.uppercase)
+                    .tracking(1.1)
+                    .fontWidth(.condensed)
             }
-            .foregroundStyle(.white)
+            .foregroundStyle(Apex.onAccent)
             .frame(maxWidth: .infinity)
-            .frame(height: 72)
+            .frame(height: 64)
             .background(
-                streak.tintColor.opacity(viewModel.isCompletingSet ? 0.40 : 0.88),
-                in: Capsule()
+                Apex.accent.opacity(viewModel.isCompletingSet ? 0.45 : 1.0),
+                in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
             )
-            .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
         }
         .disabled(viewModel.isCompletingSet)
         .buttonStyle(HapticButtonStyle(style: .heavy))
@@ -640,11 +697,11 @@ struct ActiveSetView: View {
             } label: {
                 Text("Enable Microphone")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.white.opacity(0.06), in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.10), lineWidth: 0.5))
+                    .foregroundStyle(Apex.textDim)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Capsule().fill(Color.white.opacity(0.06)))
+                    .overlay(Capsule().stroke(Apex.hairline, lineWidth: 1))
             }
             .accessibilityLabel("Enable Microphone")
             .accessibilityHint("Opens Settings to grant microphone permission")
@@ -653,21 +710,17 @@ struct ActiveSetView: View {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 showVoiceNoteModal = true
             } label: {
-                VStack(spacing: 4) {
-                    ZStack {
-                        Circle()
-                            .fill(.white.opacity(0.08))
-                            .frame(width: 56, height: 56)
-                            .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 0.5))
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.75))
-                    }
+                HStack(spacing: 7) {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 12, weight: .bold))
                     Text("Coach, note this")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.40))
-                        .tracking(0.3)
+                        .font(.system(size: 13, weight: .semibold))
                 }
+                .foregroundStyle(Apex.textDim)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(Color.white.opacity(0.06)))
+                .overlay(Capsule().stroke(Apex.hairline, lineWidth: 1))
             }
             .accessibilityLabel("Coach, note this")
             .accessibilityHint("Open speech recording for a training note")
@@ -881,24 +934,6 @@ struct ActiveSetView: View {
 
     // MARK: - Shared Sub-components
 
-    private var glassRowDivider: some View {
-        Rectangle()
-            .fill(.white.opacity(0.07))
-            .frame(height: 0.5)
-            .padding(.horizontal, 24)
-    }
-
-    private func metricChip(icon: String, label: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.45))
-            Text(label)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.65))
-        }
-    }
-
     private func confidenceArc(_ confidence: Double) -> some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
@@ -906,7 +941,7 @@ struct ActiveSetView: View {
                     .fill(.white.opacity(0.07))
                     .frame(height: 2)
                 Capsule()
-                    .fill(streak.tintColor.opacity(0.55))
+                    .fill(Apex.accent.opacity(0.55))
                     .frame(width: geo.size.width * CGFloat(confidence), height: 2)
             }
         }
@@ -914,17 +949,7 @@ struct ActiveSetView: View {
     }
 
     private var apexBackground: some View {
-        ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
-            RadialGradient(
-                colors: [streak.tintColor.opacity(0.16), Color.clear],
-                center: UnitPoint(x: 0.5, y: 0.12),
-                startRadius: 0,
-                endRadius: 400
-            )
-            .ignoresSafeArea()
-            .blendMode(.plusLighter)
-        }
+        Apex.bg.ignoresSafeArea()
     }
 
     // MARK: - Helpers
@@ -936,18 +961,11 @@ struct ActiveSetView: View {
         return String(format: "%.1f", kg)
     }
 
-    private func muscleColor(for muscle: String) -> Color {
-        switch muscle {
-        case let m where m.contains("pectoral"): return Color(red: 0.96, green: 0.42, blue: 0.30)
-        case let m where m.contains("lat"), let m where m.contains("back"), let m where m.contains("dorsi"):
-            return Color(red: 0.30, green: 0.70, blue: 0.96)
-        case let m where m.contains("delt"):     return Color(red: 0.70, green: 0.50, blue: 0.96)
-        case let m where m.contains("quad"), let m where m.contains("hamstring"), let m where m.contains("glute"):
-            return Color(red: 0.30, green: 0.96, blue: 0.60)
-        case let m where m.contains("bicep"), let m where m.contains("tricep"):
-            return Color(red: 0.96, green: 0.80, blue: 0.30)
-        default: return Color.white.opacity(0.45)
-        }
+    /// Format rest seconds as a compact "m:ss" (or "Ns" under a minute) for the
+    /// rest metric pill.
+    private func restString(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 
     private func accessibilityLabelFor(_ p: SetPrescription) -> String {
