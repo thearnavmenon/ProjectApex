@@ -69,33 +69,33 @@ struct WeightOverrideView: View {
     var body: some View {
         VStack(spacing: 0) {
             headerRow
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Apex.pad)
                 .padding(.top, 24)
                 .padding(.bottom, 20)
 
             if !useCustomInput {
                 stepperSection
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, Apex.pad)
                     .padding(.bottom, 20)
             }
 
             customInputToggle
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Apex.pad)
                 .padding(.bottom, 16)
 
             if useCustomInput {
                 customInputSection
-                    .padding(.horizontal, 24)
+                    .padding(.horizontal, Apex.pad)
                     .padding(.bottom, 20)
             }
 
             Spacer(minLength: 8)
 
             confirmButton
-                .padding(.horizontal, 24)
+                .padding(.horizontal, Apex.pad)
                 .padding(.bottom, 32)
         }
-        .background(Color(red: 0.07, green: 0.08, blue: 0.10))
+        .background(Apex.bg)
         .preferredColorScheme(.dark)
     }
 
@@ -106,15 +106,15 @@ struct WeightOverrideView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Adjust Weight")
                     .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text("AI suggested \(weightString(currentWeight)) kg")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
+                ApexSectionLabel(text: "AI suggested \(weightString(currentWeight)) kg", color: Apex.textFaint)
             }
             Spacer()
             Button("Cancel") { dismiss() }
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(.white.opacity(0.50))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textDim)
         }
     }
 
@@ -122,50 +122,59 @@ struct WeightOverrideView: View {
 
     private var stepperSection: some View {
         VStack(spacing: 16) {
-            // Large weight display
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(weightString(displayWeight))
-                    .font(.system(size: 64, weight: .black, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
+            // Large weight display — tabular numeral with de-emphasised fraction.
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                let parts = WeightParts(displayWeight)
+                ApexNumeral(text: parts.whole, size: 64)
                     .contentTransition(.numericText())
                     .animation(.spring(response: 0.25, dampingFraction: 0.85), value: displayWeight)
+                if let frac = parts.frac {
+                    ApexNumeral(text: frac, size: 36, color: Apex.textDim)
+                        .contentTransition(.numericText())
+                        .animation(.spring(response: 0.25, dampingFraction: 0.85), value: displayWeight)
+                }
                 Text("kg")
-                    .font(.system(size: 22, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.50))
+                    .font(.system(size: 22, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textDim)
                     .baselineOffset(4)
+                    .padding(.leading, 4)
             }
 
             // Stepper row
-            HStack(spacing: 32) {
-                Button {
-                    stepDown()
-                } label: {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.white.opacity(0.60))
-                }
-                .frame(minWidth: 56, minHeight: 56)
-                .disabled(nearestIndex <= 0)
-
-                Button {
-                    stepUp()
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 48))
-                        .foregroundStyle(Color(red: 0.40, green: 0.85, blue: 0.60).opacity(nearestIndex >= increments.count - 1 ? 0.30 : 0.90))
-                }
-                .frame(minWidth: 56, minHeight: 56)
-                .disabled(nearestIndex >= increments.count - 1)
+            HStack(spacing: 12) {
+                stepperButton(
+                    icon: "minus",
+                    tint: Apex.text,
+                    disabled: nearestIndex <= 0,
+                    action: stepDown
+                )
+                stepperButton(
+                    icon: "plus",
+                    tint: Apex.accent,
+                    disabled: nearestIndex >= increments.count - 1,
+                    action: stepUp
+                )
             }
 
             // Show nearest increment hint
             if let hint = incrementHint {
-                Text(hint)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.30))
+                ApexSectionLabel(text: hint, color: Apex.textFaint)
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func stepperButton(icon: String, tint: Color, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(disabled ? Apex.textFaint : tint)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .apexCard()
+        }
+        .disabled(disabled)
     }
 
     private var incrementHint: String? {
@@ -203,8 +212,9 @@ struct WeightOverrideView: View {
                     .font(.system(size: 12, weight: .medium))
                 Text(useCustomInput ? "Use stepper instead" : "Enter exact weight")
                     .font(.system(size: 12, weight: .medium))
+                    .fontWidth(.condensed)
             }
-            .foregroundStyle(.white.opacity(0.38))
+            .foregroundStyle(Apex.textDim)
         }
     }
 
@@ -214,19 +224,17 @@ struct WeightOverrideView: View {
         HStack(spacing: 10) {
             TextField("e.g. 37.5", text: $customText)
                 .keyboardType(.decimalPad)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
+                .font(Apex.numeral(28, weight: .bold))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(.white.opacity(0.12), lineWidth: 0.5)
-                )
+                .apexCard()
             Text("kg")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.system(size: 20, weight: .semibold))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textDim)
         }
     }
 
@@ -239,17 +247,8 @@ struct WeightOverrideView: View {
             onConfirmed(weight)
             dismiss()
         } label: {
-            Text("Use This Weight")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
-                .background(
-                    canConfirm
-                        ? Color(red: 0.40, green: 0.85, blue: 0.60)
-                        : Color.white.opacity(0.10),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-                )
+            ApexButton(title: "Use this weight", kind: canConfirm ? .filled : .ghost, icon: "checkmark")
+                .opacity(canConfirm ? 1 : 0.4)
         }
         .disabled(!canConfirm)
         .animation(.spring(response: 0.28, dampingFraction: 0.82), value: canConfirm)
