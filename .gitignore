@@ -45,3 +45,6 @@ scripts/phase2-verification-gate/node_modules/
 # report is reviewed and the PR merges. .gitkeep retained for directory.
 scripts/phase2-verification-gate/fixtures/*
 !scripts/phase2-verification-gate/fixtures/.gitkeep
+
+# UI redesign exploration harness (not production)
+UIPrototypes/

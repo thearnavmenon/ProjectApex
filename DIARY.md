@@ -7,6 +7,34 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-18 — Starting the workout-screen redesign (the look-and-feel foundation)
+
+**The problem (in plain words):**
+The workout screens never had one clear look — different screens felt like
+different apps, so you couldn't really say what "the app" looks like. We explored
+a fresh, bold design (nicknamed "Brutalist": pure black, big chunky condensed
+lettering, and one bright lime-green colour used only on the button you actually
+press), showed it as picture-perfect simulations, and it got the thumbs up. Now
+we're putting it into the real app, one screen at a time.
+
+**What I changed:**
+This first piece is just the shared foundation — the colours, the fonts, and the
+small reusable building blocks (buttons, the number style, cards, labels, the
+rest-timer ring) — so every screen can be built from the same kit and finally
+look like one app. It also bakes in the fix for the weight number that used to get
+squished (like "17.5" collapsing): numbers now sit in fixed-width slots that never
+shrink. Nothing you can see changed yet — no existing screen was touched — this is
+just the box of parts the screens get rebuilt from next.
+
+**How I made sure it works:**
+Built as one small, additive change on its own branch and pull request (#474, part
+of the redesign tracker #473), confirmed the whole app still builds clean (BUILD
+SUCCEEDED on iPhone 17 Pro, iOS 26.5), then merged. Next up: the live workout
+("tracker") screen gets rebuilt first, and we'll double-check it matches the
+simulation before doing the rest.
+
+---
+
 ## 2026-06-18 — Tidying up what happens when you pause a workout
 
 **The problem (in plain words):**
