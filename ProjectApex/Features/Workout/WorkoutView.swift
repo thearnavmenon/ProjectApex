@@ -455,8 +455,12 @@ struct WorkoutView: View {
             )
             .transition(setCompleteTransition)
 
-        case .exerciseComplete(let completedExercise, _):
-            exerciseCompletePlaceholder(exerciseName: completedExercise.name, vm: vm)
+        case .exerciseComplete(let completedExercise, let nextExercise):
+            ExerciseCompleteView(
+                exerciseName: completedExercise.name,
+                setCount: completedExercise.sets,
+                nextExerciseName: nextExercise?.name
+            )
 
         case .sessionComplete(let summary):
             PostWorkoutSummaryView(
@@ -475,22 +479,6 @@ struct WorkoutView: View {
 
         case .error(let message):
             errorView(message: message, vm: vm)
-        }
-    }
-
-    // MARK: - Exercise Complete (transient flash state)
-
-    private func exerciseCompletePlaceholder(exerciseName: String, vm: WorkoutViewModel) -> some View {
-        ZStack {
-            apexBackground(tint: streak.tintColor)
-            VStack(spacing: 16) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 64))
-                    .foregroundStyle(streak.tintColor)
-                Text("\(exerciseName) — done.")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
         }
     }
 
