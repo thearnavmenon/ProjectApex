@@ -73,73 +73,59 @@ struct PostWorkoutSummaryView: View {
             apexBackground
 
             ScrollView {
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 22) {
 
                     // Partial session badge (P3-T09)
                     if summary.earlyExitReason != nil {
                         partialSessionBadge
-                            .padding(.top, 20)
                     }
 
                     // Late-arrival notifications (Slice A3 / ADR-0008)
                     if !lateArrivalNotices.isEmpty {
                         lateArrivalNoticesSection
-                            .padding(.top, summary.earlyExitReason != nil ? 12 : 20)
-                            .padding(.horizontal, 24)
                     }
 
-                    // Trophy header
+                    // Header
                     headerSection
-                        .padding(.top, summary.earlyExitReason != nil ? 12 : 40)
 
-                    // Hero stats row
+                    // Hero volume numeral
+                    heroSection
+
+                    // 3-up muted stat row
                     heroStatsRow
-                        .padding(.top, 28)
-                        .padding(.horizontal, 24)
 
-                    // Sets progress ring
-                    setsProgressSection
-                        .padding(.top, 28)
-
-                    // Personal records
+                    // Personal records — gold-gated badges
                     if !summary.personalRecords.isEmpty {
                         personalRecordsSection
-                            .padding(.top, 28)
-                            .padding(.horizontal, 24)
                     }
 
                     // AI adjustments
                     if summary.aiAdjustmentCount > 0 {
                         aiAdjustmentsSection
-                            .padding(.top, 24)
-                            .padding(.horizontal, 24)
                     }
 
                     // Exercise swaps (P3-T10)
                     if let swaps = summary.swappedExercises, !swaps.isEmpty {
                         exerciseSwapsSection(swaps)
-                            .padding(.top, 24)
-                            .padding(.horizontal, 24)
                     }
 
                     // Voice notes
                     if !summary.notableNotes.isEmpty {
                         voiceNotesSection
-                            .padding(.top, 24)
-                            .padding(.horizontal, 24)
                     }
 
-                    // AI Insights
+                    // AI Insights — coach recap card
                     insightsSection
-                        .padding(.top, 28)
-                        .padding(.horizontal, 24)
 
                     // Action buttons
                     actionButtons
-                        .padding(.top, 36)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 48)
+
+                    Color.clear.frame(height: 8)
                 }
+                .padding(.horizontal, Apex.pad)
+                .padding(.top, 20)
+                .padding(.bottom, 40)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // "Copied" banner overlay
@@ -176,26 +162,26 @@ struct PostWorkoutSummaryView: View {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "clock.badge.exclamationmark")
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
+                            .foregroundStyle(Apex.amber)
                             .padding(.top, 1)
                         Text(notice.message)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.80))
+                            .foregroundStyle(Apex.text.opacity(0.80))
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 8)
                         Image(systemName: "xmark")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.40))
+                            .foregroundStyle(Apex.textFaint)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.10),
-                                in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .background(Apex.amber.opacity(0.10),
+                                in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.30), lineWidth: 0.5)
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .stroke(Apex.amber.opacity(0.40), lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
@@ -209,307 +195,276 @@ struct PostWorkoutSummaryView: View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
+                .foregroundStyle(Apex.amber)
             Text("Partial Session")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
-                .tracking(0.5)
+                .font(.system(size: 12, weight: .bold))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .tracking(1.1)
+                .foregroundStyle(Apex.amber)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.12), in: Capsule())
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(Apex.amber.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
         .overlay(
-            Capsule()
-                .stroke(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.30), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(Apex.amber.opacity(0.40), lineWidth: 1)
         )
     }
 
     // MARK: - Header
 
     private var headerSection: some View {
-        VStack(spacing: 12) {
-            Image(systemName: summary.earlyExitReason != nil ? "flag.checkered" : "trophy.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(streak.tintColor)
+        VStack(alignment: .leading, spacing: 6) {
+            ApexSectionLabel(
+                text: summary.earlyExitReason != nil ? "Session ended" : "Workout complete",
+                color: Apex.accent
+            )
             Text(summary.earlyExitReason != nil ? "Session Ended" : "Session Complete")
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.white)
-            if summary.durationSeconds > 0 {
-                Text(formattedDuration)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.45))
-            }
+                .font(.system(size: 26, weight: .bold))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Hero Volume
+
+    private var heroSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                ApexNumeral(text: formattedVolume, size: 76)
+                Text("kg")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Apex.textDim)
+            }
+            Text("Total volume moved")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(Apex.textDim)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Hero Stats Row
 
     private var heroStatsRow: some View {
-        HStack(spacing: 0) {
-            // Total volume
+        HStack(spacing: 10) {
             statCard(
-                value: formattedVolume,
-                unit: "kg",
-                label: "Total Volume",
-                icon: "scalemass.fill"
-            )
-
-            Spacer()
-
-            // Sets
-            statCard(
-                value: "\(summary.setsCompleted)",
-                unit: "/ \(summary.setsPlanned)",
                 label: "Sets",
-                icon: "checkmark.circle.fill"
+                value: "\(summary.setsCompleted)",
+                sub: "of \(summary.setsPlanned)"
             )
-
-            Spacer()
-
-            // AI adjustments
             statCard(
-                value: "\(summary.aiAdjustmentCount)",
-                unit: "",
+                label: "Time",
+                value: summary.durationSeconds > 0 ? formattedDuration : "—",
+                sub: "active"
+            )
+            statCard(
                 label: "AI Coached",
-                icon: "brain.head.profile"
+                value: "\(summary.aiAdjustmentCount)",
+                sub: "sets"
             )
         }
     }
 
-    private func statCard(value: String, unit: String, label: String, icon: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(streak.tintColor.opacity(0.70))
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value)
-                    .font(.system(size: 28, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
-                if !unit.isEmpty {
-                    Text(unit)
-                        .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.45))
-                }
-            }
-            Text(label)
+    private func statCard(label: String, value: String, sub: String) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ApexSectionLabel(text: label, color: Apex.textFaint)
+            ApexNumeral(text: value, size: 28, weight: .bold)
+            Text(sub)
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.38))
-                .tracking(0.3)
+                .foregroundStyle(Apex.textFaint)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 15)
+        .padding(.horizontal, 15)
+        .apexCard()
     }
 
-    // MARK: - Sets Progress Section
-
-    private var setsProgressSection: some View {
-        VStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .stroke(.white.opacity(0.08), lineWidth: 6)
-                    .frame(width: 100, height: 100)
-                Circle()
-                    .trim(from: 0, to: setsProgress)
-                    .stroke(streak.tintColor, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                    .frame(width: 100, height: 100)
-                    .rotationEffect(.degrees(-90))
-                VStack(spacing: 2) {
-                    Text("\(completionPercent)%")
-                        .font(.system(size: 22, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white)
-                    Text("complete")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.38))
-                }
-            }
-        }
-    }
-
-    // MARK: - Personal Records
+    // MARK: - Personal Records (gold-gated badges)
 
     private var personalRecordsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "star.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.0))
-                Text("Personal Records")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.80))
-            }
+            ApexSectionLabel(text: "Personal records", color: Apex.gold)
 
             ForEach(summary.personalRecords, id: \.exerciseId) { pr in
-                HStack {
+                HStack(spacing: 13) {
+                    ZStack {
+                        Image(systemName: "hexagon.fill")
+                            .font(.system(size: 34))
+                            .foregroundStyle(Apex.gold.opacity(0.18))
+                        Image(systemName: "trophy.fill")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(Apex.gold)
+                    }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(pr.exerciseName)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.80))
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Apex.text)
                         Text(prMetricLabel(pr.metric))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.38))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(Apex.textFaint)
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(String(format: "%.1f", pr.newBest))
-                            .font(.system(size: 17, weight: .bold, design: .rounded).monospacedDigit())
-                            .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.0))
+                        ApexNumeral(
+                            text: String(format: "%.1f", pr.newBest),
+                            size: 18,
+                            weight: .bold,
+                            color: Apex.gold
+                        )
                         Text(String(format: "%.1f → %.1f", pr.previousBest, pr.newBest))
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.38))
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .foregroundStyle(Apex.textFaint)
                     }
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 16)
-                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
     }
 
     // MARK: - Exercise Swaps (P3-T10)
 
     private func exerciseSwapsSection(_ swaps: [SwapRecord]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Color(red: 1.00, green: 0.60, blue: 0.20))
-                Text("Exercise Swaps")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.80))
-            }
+            ApexSectionLabel(text: "Exercise swaps")
 
             ForEach(swaps, id: \.newExerciseId) { swap in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(swap.originalExerciseName)
                             .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.55))
-                            .strikethrough(true, color: .white.opacity(0.30))
+                            .foregroundStyle(Apex.textDim)
+                            .strikethrough(true, color: Apex.textFaint)
                         Image(systemName: "arrow.right")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(Color(red: 1.00, green: 0.60, blue: 0.20))
+                            .foregroundStyle(Apex.accent)
                         Text(swap.newExerciseName)
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.85))
+                            .foregroundStyle(Apex.text)
                     }
                     if !swap.reason.isEmpty {
                         Text(swap.reason)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.38))
-                            .italic()
+                            .font(.system(size: 11, weight: .medium).italic())
+                            .foregroundStyle(Apex.textFaint)
                     }
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 16)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
     }
 
     // MARK: - AI Adjustments
 
     private var aiAdjustmentsSection: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 13) {
             Image(systemName: "brain.head.profile")
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(streak.tintColor)
+                .foregroundStyle(Apex.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(summary.aiAdjustmentCount) AI-coached sets")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.80))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Apex.text)
                 Text("Real-time prescriptions adapted to your performance")
                     .font(.system(size: 11, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.38))
+                    .foregroundStyle(Apex.textFaint)
             }
             Spacer()
         }
         .padding(16)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
     }
 
     // MARK: - Voice Notes
 
     private var voiceNotesSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.55))
-                Text("Session Notes")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.80))
-            }
+            ApexSectionLabel(text: "Session notes")
 
             ForEach(Array(summary.notableNotes.enumerated()), id: \.offset) { index, note in
                 HStack(alignment: .top, spacing: 10) {
-                    Text("\(index + 1)")
-                        .font(.system(size: 11, weight: .bold, design: .rounded).monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.25))
-                        .frame(width: 18)
+                    ApexNumeral(text: "\(index + 1)", size: 13, weight: .bold, color: Apex.textFaint)
+                        .frame(width: 18, alignment: .leading)
                     Text(note)
                         .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.60))
+                        .foregroundStyle(Apex.textDim)
                         .lineLimit(3)
                 }
-                .padding(.vertical, 6)
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
     }
 
     // MARK: - AI Insights
 
     private var insightsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(streak.tintColor)
-                Text("Session Insights")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.80))
-            }
+        // Coach recap — accent left-rail, matching the prototype's coach
+        // treatment. Content varies by insights state; the rail + "Coach"
+        // header are constant.
+        HStack(alignment: .top, spacing: 13) {
+            Capsule()
+                .fill(Apex.accent)
+                .frame(width: 3)
+                .frame(maxHeight: .infinity)
 
-            switch insightsState {
-            case .loading:
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(streak.tintColor)
-                        .scaleEffect(0.8)
-                    Text("Analysing your session…")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.45))
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 7) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(Apex.accent)
+                    ApexSectionLabel(text: "Coach", color: Apex.accent)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
-                .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-            case .loaded(let insights):
-                // AI succeeded — bullet list only, no notice.
-                insightsListCard(insights, notice: nil)
+                switch insightsState {
+                case .loading:
+                    HStack(spacing: 10) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(Apex.accent)
+                            .scaleEffect(0.8)
+                        Text("Analysing your session…")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Apex.textDim)
+                    }
 
-            case .failed(let insights):
-                // Fail loud (#242, ADR-0007 §3): still show the deterministic
-                // fallback insights, but surface that the AI didn't run.
-                insightsListCard(insights, notice: Self.insightsFallbackNotice(for: insightsState))
+                case .loaded(let insights):
+                    // AI succeeded — bullet list only, no notice.
+                    insightsList(insights, notice: nil)
+
+                case .failed(let insights):
+                    // Fail loud (#242, ADR-0007 §3): still show the deterministic
+                    // fallback insights, but surface that the AI didn't run.
+                    insightsList(insights, notice: Self.insightsFallbackNotice(for: insightsState))
+                }
             }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard()
     }
 
-    /// Insights bullet card. When `notice` is non-nil (the `.failed` fail-loud
+    /// Insights bullet list. When `notice` is non-nil (the `.failed` fail-loud
     /// path), a small warning row is prepended above the list (#242).
     @ViewBuilder
-    private func insightsListCard(_ insights: [String], notice: String?) -> some View {
+    private func insightsList(_ insights: [String], notice: String?) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if let notice {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(Apex.amber)
                     Text(notice)
                         .font(.system(size: 12, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.6))
+                        .foregroundStyle(Apex.textDim)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.bottom, 2)
@@ -517,21 +472,17 @@ struct PostWorkoutSummaryView: View {
             ForEach(Array(insights.enumerated()), id: \.offset) { _, insight in
                 HStack(alignment: .top, spacing: 10) {
                     Circle()
-                        .fill(streak.tintColor)
+                        .fill(Apex.accent)
                         .frame(width: 5, height: 5)
                         .padding(.top, 6)
                     Text(insight)
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.75))
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Apex.text)
                         .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     // MARK: - Insights Loading
@@ -631,38 +582,28 @@ struct PostWorkoutSummaryView: View {
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
-        VStack(spacing: 14) {
-            // Share button
+        HStack(spacing: 12) {
+            // Share button (ghost) — copies the summary text to the clipboard.
             Button {
                 copyToClipboard()
             } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.on.doc.fill")
-                        .font(.system(size: 15, weight: .medium))
-                    Text("Copy Summary")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-                .foregroundStyle(.white.opacity(0.80))
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(.white.opacity(0.08), in: Capsule())
-                .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 0.5))
+                ApexButton(title: "Share", kind: .ghost, icon: "square.and.arrow.up")
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Share")
+            .accessibilityHint("Copies the workout summary to the clipboard")
 
-            // Done button
+            // Done button (filled lime) — resets the session.
             Button {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 onDone()
             } label: {
-                Text("Done")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 60)
-                    .background(streak.tintColor.opacity(0.88), in: Capsule())
-                    .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
+                ApexButton(title: "Done")
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Done")
         }
+        .padding(.top, 6)
     }
 
     // MARK: - Copied Banner
@@ -671,31 +612,25 @@ struct PostWorkoutSummaryView: View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.green)
+                .foregroundStyle(Apex.accent)
             Text("Summary copied to clipboard")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.80))
+                .foregroundStyle(Apex.text.opacity(0.80))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.white.opacity(0.10), in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.14), lineWidth: 0.5))
+        .background(Apex.surface,
+                    in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(Apex.hairline, lineWidth: 1)
+        )
     }
 
     // MARK: - Background
 
     private var apexBackground: some View {
-        ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
-            RadialGradient(
-                colors: [streak.tintColor.opacity(0.15), Color.clear],
-                center: UnitPoint(x: 0.5, y: 0.10),
-                startRadius: 0,
-                endRadius: 380
-            )
-            .ignoresSafeArea()
-            .blendMode(.plusLighter)
-        }
+        Apex.bg.ignoresSafeArea()
     }
 
     // MARK: - Helpers
@@ -714,16 +649,6 @@ struct PostWorkoutSummaryView: View {
             return "\(hours)h \(minutes)m"
         }
         return "\(minutes) min"
-    }
-
-    private var setsProgress: CGFloat {
-        guard summary.setsPlanned > 0 else { return 1.0 }
-        return CGFloat(summary.setsCompleted) / CGFloat(summary.setsPlanned)
-    }
-
-    private var completionPercent: Int {
-        guard summary.setsPlanned > 0 else { return 100 }
-        return Int(round(Double(summary.setsCompleted) / Double(summary.setsPlanned) * 100))
     }
 
     private func prMetricLabel(_ metric: PRMetric) -> String {
