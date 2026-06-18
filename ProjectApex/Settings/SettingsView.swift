@@ -16,6 +16,11 @@ import SwiftUI
 
 struct SettingsView: View {
 
+    /// Injected app dependencies — used to fetch calibration projections on
+    /// demand for the "Review targets" sheet. Flows in from the app-root
+    /// `.environment(deps)`; sheets inherit it, so no ContentView change needed.
+    @Environment(AppDependencies.self) private var deps
+
     /// Set to true when the user has an existing GymProfile. Controls
     /// whether "Re-scan Gym" vs "Scan Your Gym" is shown.
     var hasExistingProfile: Bool = false
@@ -64,6 +69,18 @@ struct SettingsView: View {
     @State private var heightText: String = ""
     @State private var ageText: String = ""
     @State private var trainingAge: TrainingAge = .beginner
+
+    // #494 PR3: Program controls.
+    /// Training days per week — backed by `UserProfileConstants.daysPerWeekKey`.
+    /// Applied on the user's NEXT regenerate (program generation reads this key);
+    /// changing it here does NOT auto-regenerate. Clamped 2–6, default 4.
+    @State private var daysPerWeek: Int = 4
+    @State private var showGoalReview = false
+    @State private var showCalibrationReview = false
+    /// Projections fetched on demand when "Review targets" is tapped.
+    @State private var calibrationProjections: [PatternProjection] = []
+
+    private static let daysPerWeekRange = 2...6
 
     /// True when the user skipped the gym scan during onboarding — drives the setup prompt.
     private var gymScanSkipped: Bool {
@@ -125,6 +142,19 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showingRegenerateSheet) {
             regenerateConfirmationSheet
+        }
+        .sheet(isPresented: $showGoalReview) {
+            // Standalone use (no banner): GoalReviewView reads `deps` from the
+            // environment, inherited through the sheet.
+            GoalReviewView(triggeringSessionCount: nil)
+                .presentationDetents([.large])
+                .presentationCornerRadius(24)
+        }
+        .sheet(isPresented: $showCalibrationReview) {
+            // Renders the current per-pattern targets fetched on demand. Empty
+            // when no projections exist yet — the screen shows its own empty state.
+            CalibrationReviewView(projections: calibrationProjections, recalibratedPatterns: [])
+                .presentationDetents([.large])
         }
         .alert("Re-scan Gym?", isPresented: $showingRescanAlert) {
             Button("Cancel", role: .cancel) { }
@@ -392,11 +422,53 @@ struct SettingsView: View {
            let match = TrainingAge.allCases.first(where: { $0.rawValue == ta }) {
             trainingAge = match
         }
+
+        // #494 PR3: default 4 when absent or non-positive (integer(forKey:)
+        // returns 0 for a missing key), then clamp into the valid 2–6 range.
+        let stored = defaults.integer(forKey: UserProfileConstants.daysPerWeekKey)
+        daysPerWeek = (stored <= 0 ? 4 : stored)
+            .clamped(to: Self.daysPerWeekRange)
     }
 
     /// Program management section — only shown when a gym profile exists.
     private var programSection: some View {
         Section {
+            // Training days — adjusts the next regenerate (does not auto-regen).
+            HStack(spacing: 13) {
+                boxedIcon("calendar")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Training days")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Apex.text)
+                    Text("per week")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Apex.textFaint)
+                }
+                Spacer()
+                DaysStepper(value: $daysPerWeek, range: Self.daysPerWeekRange)
+                    .onChange(of: daysPerWeek) { _, v in
+                        UserDefaults.standard.set(v, forKey: UserProfileConstants.daysPerWeekKey)
+                    }
+            }
+            .settingsCardRow(.first)
+
+            // Goal & focus — presents the goal-review screen.
+            Button {
+                showGoalReview = true
+            } label: {
+                navRowLabel(icon: "flag.fill", title: "Goal & focus")
+            }
+            .settingsCardRow(.middle)
+
+            // Review targets — fetches current projections, then presents them.
+            Button {
+                Task { await presentCalibrationReview() }
+            } label: {
+                navRowLabel(icon: "scope", title: "Review targets")
+            }
+            .settingsCardRow(.middle)
+
+            // Regenerate Program.
             Button {
                 showingRegenerateSheet = true
             } label: {
@@ -407,10 +479,27 @@ struct SettingsView: View {
                 )
             }
             .disabled(isRegenerating)
-            .settingsCardRow(.single)
+            .settingsCardRow(.last)
         } header: {
             ApexSectionLabel(text: "Program")
+        } footer: {
+            footerText("Changing your training days or goal updates your next regenerate.")
         }
+    }
+
+    /// Fetches the current per-pattern projections from the cached trainee model
+    /// and presents the calibration-review screen. The projections live on the
+    /// model regardless of banner-ack state, so this surfaces current targets at
+    /// any time (unlike the digest's `calibrationReviewSignal`, which is gated on
+    /// a pending review). Sorted by pattern for deterministic ordering, matching
+    /// the signal-derivation convention. Presents even when empty — the screen
+    /// renders its own "no targets yet" state.
+    @MainActor
+    private func presentCalibrationReview() async {
+        let digest = await deps.traineeModelService.digest()
+        calibrationProjections = (digest?.projections?.patternProjections ?? [])
+            .sorted { $0.pattern.rawValue < $1.pattern.rawValue }
+        showCalibrationReview = true
     }
 
     // MARK: - Regenerate Confirmation Sheet
@@ -598,6 +687,21 @@ struct SettingsView: View {
         }
     }
 
+    /// Neutral navigation row that opens a sheet: leading boxed icon + title +
+    /// trailing chevron. No accent — the chevron signals "drills in".
+    private func navRowLabel(icon: String, title: String) -> some View {
+        HStack(spacing: 13) {
+            boxedIcon(icon)
+            Text(title)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Apex.text)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Apex.textFaint)
+        }
+    }
+
     /// Section footer styling — faint condensed caption.
     private func footerText(_ text: String) -> some View {
         Text(text)
@@ -653,6 +757,56 @@ private struct BodyweightModeControl: View {
     }
 }
 
+// MARK: - Training-days stepper
+//
+// A `−  N  +` pill bound to an Int, clamped to a range. Ported from the
+// prototype's `StepperPill`, baked to the Brutalist identity (lime − / + as
+// the interactive controls, tabular numeral in a fixed-width slot so the
+// digit never reflows). Kept local to Settings — not a shared design-system atom.
+private struct DaysStepper: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+
+    var body: some View {
+        HStack(spacing: 0) {
+            btn("minus", enabled: value > range.lowerBound) {
+                value = max(range.lowerBound, value - 1)
+            }
+            Rectangle().fill(Apex.hairline).frame(width: 1, height: 22)
+            ApexNumeral(text: "\(value)", size: 18, weight: .bold, color: Apex.text)
+                .frame(width: 40)
+            Rectangle().fill(Apex.hairline).frame(width: 1, height: 22)
+            btn("plus", enabled: value < range.upperBound) {
+                value = min(range.upperBound, value + 1)
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .fill(Color.white.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+            .stroke(Apex.hairline, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: Apex.corner, style: .continuous))
+    }
+
+    private func btn(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .black))
+                .foregroundStyle(enabled ? Apex.accent : Apex.textFaint)
+                .frame(width: 38, height: 38)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+}
+
+private extension Comparable {
+    /// Clamps a value into a closed range.
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
 // MARK: - Sharp-corner grouped-card rows
 //
 // A `List` gives swipe-to-delete, but `.insetGrouped` forces ~10pt rounded
@@ -701,6 +855,7 @@ private extension View {
             onEquipmentChanged: { _ in }
         )
     }
+    .environment(AppDependencies())
     .preferredColorScheme(.dark)
 }
 
@@ -708,6 +863,7 @@ private extension View {
     NavigationStack {
         SettingsView()
     }
+    .environment(AppDependencies())
     .preferredColorScheme(.dark)
 }
 
@@ -719,5 +875,6 @@ private extension View {
             isRegenerating: true
         )
     }
+    .environment(AppDependencies())
     .preferredColorScheme(.dark)
 }
