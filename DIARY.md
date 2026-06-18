@@ -7,6 +7,41 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-18 — The redesign goes live: the workout screens you see most
+
+**The problem (in plain words):**
+With the shared look-and-feel kit in place, it was time to actually make the
+workout screens wear the new bold black-and-lime design. We started with the
+screen you stare at most — the live "tracker" where the app tells you the weight
+and reps for the set you're on — then did the next three around a workout: the
+rest timer between sets, the screen before you start, and the summary after you
+finish.
+
+**What I changed:**
+Four screens rebuilt in the new look, one separate change each:
+- The live set screen now shows the weight in a big fixed slot, so "17.5" finally
+  displays properly instead of getting squished, with one bright lime button to
+  log the set. Everything it used to do — tapping to change the weight, "my gym
+  doesn't have this", the coach's reasoning, the voice note — still works the same.
+- The rest timer is a big number inside a thick lime ring with a "finishes at
+  4:32 PM" line.
+- The pre-workout screen got a cleaner streak, a tidy list of today's exercises,
+  and one Start button (all the welcome-back and review reminders still appear).
+- The after-workout summary leads with your total weight lifted, your records in
+  gold, and a short note from the coach.
+Only the looks changed — none of the buttons, timers, or saving logic was touched.
+
+**How I made sure it works:**
+Each screen was built by its own agent in an isolated copy of the project, each
+checked that the whole app still builds, and merged separately: tracker (#476),
+rest timer (#478), pre-workout (#477), summary (#479) — all part of the redesign
+tracker #473. One screen's agent couldn't run the build itself, so I ran it here
+and confirmed it passed. I also grabbed a real screenshot of the live tracker
+from the actual app to confirm it matches the approved design. Still to come: the
+paused screen, the "now training" pill, and the smaller edit/log screens.
+
+---
+
 ## 2026-06-18 — Starting the workout-screen redesign (the look-and-feel foundation)
 
 **The problem (in plain words):**
