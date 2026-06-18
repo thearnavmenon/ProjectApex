@@ -1064,6 +1064,9 @@ enum UserProfileConstants {
     static let bodyweightKgKey  = "com.projectapex.user.bodyweightKg"
     static let heightCmKey      = "com.projectapex.user.heightCm"
     static let ageKey           = "com.projectapex.user.age"
+    /// Biological sex used by the AI coach to calibrate first-session pressing
+    /// loads. Stored lowercase ("male"/"female"); absent = unset (#494 PR4).
+    static let sexKey           = "com.projectapex.user.sex"
     static let trainingAgeKey   = "com.projectapex.user.trainingAge"
     /// Primary training goal selected during onboarding (TrainingGoal.rawValue).
     /// Read by GenerationUserProfile.assemble as the fallback goal source when

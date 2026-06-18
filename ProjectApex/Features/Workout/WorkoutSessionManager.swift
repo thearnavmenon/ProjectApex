@@ -2278,10 +2278,11 @@ actor WorkoutSessionManager {
         let bodyweight = defaults.object(forKey: UserProfileConstants.bodyweightKgKey) as? Double
         let height     = defaults.object(forKey: UserProfileConstants.heightCmKey) as? Double
         let age        = defaults.object(forKey: UserProfileConstants.ageKey) as? Int
+        let sex        = defaults.string(forKey: UserProfileConstants.sexKey)
         let trainingAge = defaults.string(forKey: UserProfileConstants.trainingAgeKey)
 
         // Only return a profile if we have at least one meaningful field.
-        guard bodyweight != nil || height != nil || age != nil || trainingAge != nil else {
+        guard bodyweight != nil || height != nil || age != nil || sex != nil || trainingAge != nil else {
             return nil
         }
 
@@ -2289,6 +2290,7 @@ actor WorkoutSessionManager {
             bodyweightKg: bodyweight,
             heightCm: height,
             age: age,
+            sex: sex,
             trainingAge: trainingAge
         )
     }
