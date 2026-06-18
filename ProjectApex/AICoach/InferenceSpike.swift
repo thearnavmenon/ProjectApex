@@ -173,6 +173,7 @@ enum InferenceSpike {
                 bodyweightKg: 82.0,
                 heightCm: 180.0,
                 age: 30,
+                sex: nil,
                 trainingAge: "Intermediate (1–3 yrs)"
             ),
             isFirstSession: false,

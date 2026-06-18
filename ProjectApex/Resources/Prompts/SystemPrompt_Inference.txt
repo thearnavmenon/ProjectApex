@@ -214,8 +214,9 @@ How to react:
 FIRST-SESSION CALIBRATION: If is_first_session is true, prescribe ~60% estimated 1RM.
 Use user_profile.bodyweight_kg and training_age as anchors.
 
-USER PROFILE: Use bodyweight_kg, training_age, age, height_cm to calibrate absolute weights.
+USER PROFILE: Use bodyweight_kg, training_age, age, height_cm, sex to calibrate absolute weights.
 Beginner bench: ~50–60% BW. Intermediate: ~80–100% BW. Advanced: ~100–130%+ BW.
+When sex is "female", anchor upper-body pressing lower relative to bodyweight (lower-body stays closer to parity); adjust first-session absolute loads down accordingly. If sex is absent, do not assume.
 
 EXERCISE SWAPS: The session_log may contain sets tagged with exercise_swap from a previously
 swapped exercise. These sets belong to the old exercise — do NOT use them to calibrate weight

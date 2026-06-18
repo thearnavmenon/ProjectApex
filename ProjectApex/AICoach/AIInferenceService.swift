@@ -86,6 +86,9 @@ nonisolated struct UserProfileContext: Codable, Sendable {
     let heightCm: Double?
     /// Age in years. Informs rest duration and conservative RIR targets for older users.
     let age: Int?
+    /// Biological sex ("male"/"female"). Optional — anchors first-session pressing
+    /// loads relative to bodyweight. Absent = unset (coach falls back to default).
+    let sex: String?
     /// Training age label: "Beginner (< 1 yr)", "Intermediate (1–3 yrs)", "Advanced (3+ yrs)".
     let trainingAge: String?
 
@@ -93,6 +96,7 @@ nonisolated struct UserProfileContext: Codable, Sendable {
         case bodyweightKg  = "bodyweight_kg"
         case heightCm      = "height_cm"
         case age
+        case sex
         case trainingAge   = "training_age"
     }
 }
@@ -738,6 +742,7 @@ extension WorkoutContext {
                 bodyweightKg: 80.0,
                 heightCm: 178.0,
                 age: 28,
+                sex: nil,
                 trainingAge: "Intermediate (1–3 yrs)"
             ),
             isFirstSession: false,

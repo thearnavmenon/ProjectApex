@@ -643,7 +643,7 @@ final class AIInferenceServiceTests: XCTestCase {
             ),
             biometrics: Biometrics(bodyweightKg: 80.0, restingHeartRate: 52, readinessScore: 8, sleepHours: 7.5),
             streakResult: nil,
-            userProfile: UserProfileContext(bodyweightKg: 80.0, heightCm: 178.0, age: 28, trainingAge: "Intermediate (1–3 yrs)"),
+            userProfile: UserProfileContext(bodyweightKg: 80.0, heightCm: 178.0, age: 28, sex: nil, trainingAge: "Intermediate (1–3 yrs)"),
             isFirstSession: false,
             currentExercise: CurrentExercise(
                 name: exerciseName,

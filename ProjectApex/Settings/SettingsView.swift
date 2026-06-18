@@ -68,6 +68,9 @@ struct SettingsView: View {
     @State private var bodyweightText: String = ""
     @State private var heightText: String = ""
     @State private var ageText: String = ""
+    /// Biological sex stored lowercase ("male"/"female") in `UserProfileConstants.sexKey`.
+    /// nil = unset; existing users keep their current (sex-agnostic) coach behaviour (#494 PR4).
+    @State private var sex: String? = nil
     @State private var trainingAge: TrainingAge = .beginner
 
     // #494 PR3: Program controls.
@@ -349,6 +352,21 @@ struct SettingsView: View {
                 UserDefaults.standard.set(age, forKey: UserProfileConstants.ageKey)
             }
 
+            // Sex — stored lowercase ("male"/"female"); nil = unset (#494 PR4).
+            HStack(spacing: 13) {
+                boxedIcon("figure.stand")
+                Picker("Sex", selection: $sex) {
+                    Text("Male").tag(String?.some("male"))
+                    Text("Female").tag(String?.some("female"))
+                }
+                .font(.system(size: 16, weight: .medium))
+                .tint(Apex.textDim)
+            }
+            .onChange(of: sex) { _, v in
+                UserDefaults.standard.set(v, forKey: UserProfileConstants.sexKey)
+            }
+            .settingsCardRow(.middle)
+
             // Training age
             HStack(spacing: 13) {
                 boxedIcon("chart.bar.fill")
@@ -418,6 +436,7 @@ struct SettingsView: View {
         if let a = defaults.object(forKey: UserProfileConstants.ageKey) as? Int {
             ageText = String(a)
         }
+        sex = defaults.string(forKey: UserProfileConstants.sexKey)
         if let ta = defaults.string(forKey: UserProfileConstants.trainingAgeKey),
            let match = TrainingAge.allCases.first(where: { $0.rawValue == ta }) {
             trainingAge = match
