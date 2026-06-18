@@ -7,6 +7,29 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — Redesign playbook now includes a "what can we improve?" step
+
+**The problem (in plain words):**
+Our screen-redesign process only covered making a screen *look* right. But a
+redesign is also the best moment to ask "what's missing here, or what could be
+better?" The Settings redesign proved that out, so I wrote the step down so we
+do it every time.
+
+**What I changed:**
+Added a step to the redesign playbook: an optional panel of agents that reviews
+a screen from different angles — product, visual, an expert user, and a skeptic
+who pushes back on adding too much — covering what's missing, what to add, and
+how it looks and feels. The panel hands back a short list, the user picks, and
+the chosen ideas get prototyped and built like any other change.
+
+**How I checked it:**
+Docs-only change to the redesign guide; merged via PR.
+
+**Status:** Merged to main (#502). The how-to lives in
+`docs/agents/screen-redesign.md` (Phase 2.5).
+
+---
+
 ## 2026-06-18 — Settings tab redesign (part 2): new features
 
 **The problem (in plain words):**
