@@ -43,9 +43,6 @@ struct CalibrationReviewView: View {
     /// Increment used by the +/- stretch controls.
     private static let stretchStep: Double = 2.5
 
-    private static let accentPurple = Color(red: 0.58, green: 0.45, blue: 0.95)
-    private static let darkChrome = Color(red: 0.04, green: 0.04, blue: 0.06)
-
     init(projections: [PatternProjection], recalibratedPatterns: Set<MovementPattern> = []) {
         self.projections = projections
         self.recalibratedPatterns = recalibratedPatterns
@@ -94,23 +91,36 @@ struct CalibrationReviewView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Self.darkChrome.ignoresSafeArea()
+                Apex.bg.ignoresSafeArea()
 
                 ScrollView {
-                    LazyVStack(spacing: 16) {
-                        introCard
-                        projectionsCard
-                        saveButton
-                        Color.clear.frame(height: 24)
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        introBlock
+                        projectionsSection
+                        Color.clear.frame(height: 110)
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 16)
                 }
+
+                VStack {
+                    Spacer()
+                    saveBar
+                }
             }
-            .navigationTitle("Your Targets")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Self.darkChrome, for: .navigationBar)
+            .toolbarBackground(Apex.bg, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("YOUR TARGETS")
+                        .font(.system(size: 12, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .textCase(.uppercase)
+                        .tracking(1.5)
+                        .foregroundStyle(Apex.textDim)
+                }
+            }
         }
         .preferredColorScheme(.dark)
         .onAppear {
@@ -126,80 +136,76 @@ struct CalibrationReviewView: View {
 
     // MARK: - Intro
 
-    private var introCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionHeader("WHAT THIS MEANS")
-            Text(isRecalibration
-                ? "You've consistently climbed past some of your targets — so we've raised them. Floor is the level we'll keep you at; stretch is your next milestone. Nudge it up if you want a bigger goal."
-                : "Your starting targets are ready. Floor is the level we'll keep you at; stretch is the next milestone to aim for — nudge it up if you want a bigger goal.")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.55))
-        }
-        .calibrationCardChrome()
+    private var introBlock: some View {
+        Text(isRecalibration
+            ? "You've consistently climbed past some of your targets — so we've raised them. Floor is the level we'll keep you at; stretch is your next milestone. Nudge it up if you want a bigger goal."
+            : "Where you are now, and where we're headed. Floor is the level we'll keep you at; stretch is the next milestone to aim for — nudge it up if you want a bigger goal.")
+            .font(.system(size: 14, weight: .medium))
+            .foregroundStyle(Apex.textDim)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, 2)
     }
 
     // MARK: - Projections (stretch editable)
 
-    private var projectionsCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("STARTING TARGETS")
-
-            if projections.isEmpty {
-                Text("No targets yet — log a few sessions and they'll appear here.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.40))
-                    .padding(.vertical, 4)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(projections.enumerated()), id: \.element.pattern) { index, projection in
-                        projectionRow(projection)
-                        if index != projections.count - 1 {
-                            Divider().background(Color.white.opacity(0.06))
-                        }
-                    }
-                }
+    @ViewBuilder
+    private var projectionsSection: some View {
+        if projections.isEmpty {
+            Text("No targets yet — log a few sessions and they'll appear here.")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Apex.textFaint)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .apexCard()
+        } else {
+            ForEach(projections, id: \.pattern) { projection in
+                projectionRow(projection)
             }
         }
-        .calibrationCardChrome()
     }
 
     private func projectionRow(_ projection: PatternProjection) -> some View {
         let current = editedStretch[projection.pattern] ?? projection.stretch
         // Lowering is clamped at the original stretch — never below it.
         let canLower = current - Self.stretchStep >= projection.stretch
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text(projection.pattern.displayName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                Spacer()
+                    .font(.system(size: 16, weight: .bold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
                 // #305: a freshly re-calibrated pattern shows a "Levelled up"
                 // badge rather than its (just-reset) progress label, so hitting
                 // the old target reads as a win, not a demotion to "On track".
                 if recalibratedPatterns.contains(projection.pattern) {
-                    Text("Levelled up")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Self.accentPurple)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(Self.accentPurple.opacity(0.14), in: Capsule())
-                } else {
+                    levelledUpChip
+                }
+                Spacer()
+                if !recalibratedPatterns.contains(projection.pattern) {
                     Text(Self.progressLabel(projection.progress))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Self.accentPurple)
+                        .font(.system(size: 11, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .textCase(.uppercase)
+                        .tracking(0.6)
+                        .foregroundStyle(Apex.textDim)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(Self.accentPurple.opacity(0.14), in: Capsule())
+                        .background(Capsule().fill(Color.white.opacity(0.06)))
+                        .overlay(Capsule().stroke(Apex.hairline, lineWidth: 0.5))
                 }
             }
-            Text("Floor: \(Self.formatWeight(projection.floor)) kg")
-                .font(.system(size: 13).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.65))
+
             HStack(spacing: 12) {
-                Text("Stretch: \(Self.formatWeight(current)) kg")
-                    .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(.white.opacity(0.85))
-                Spacer()
+                valueBox(label: "Floor", value: projection.floor, editable: false)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Apex.textFaint)
+                valueBox(label: "Stretch", value: current, editable: true)
+            }
+
+            // Upward-only stretch controls. Lowering is clamped at the original
+            // stretch; raising is unbounded.
+            HStack(spacing: 10) {
                 stretchStepButton(label: "\u{2212}2.5 kg", enabled: canLower) {
                     editedStretch[projection.pattern] = max(projection.stretch, current - Self.stretchStep)
                 }
@@ -208,19 +214,80 @@ struct CalibrationReviewView: View {
                 }
             }
         }
+        .padding(16)
+        .apexCard()
+    }
+
+    /// "Levelled up" lime chip — filled accent, black label, with an up-right
+    /// arrow. Marks a pattern whose floor just ratcheted up (#305).
+    private var levelledUpChip: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.up.right")
+                .font(.system(size: 9, weight: .black))
+            Text("Levelled up")
+                .font(.system(size: 10, weight: .black))
+                .textCase(.uppercase)
+                .tracking(0.8)
+        }
+        .foregroundStyle(Apex.onAccent)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(Apex.accent))
+    }
+
+    /// A floor / stretch value box. The editable (stretch) box carries an
+    /// accent outline + pencil glyph; the read-only (floor) box is plain.
+    private func valueBox(label: String, value: Double, editable: Bool) -> some View {
+        let parts = WeightParts(value)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                ApexSectionLabel(text: label, color: editable ? Apex.accent : Apex.textFaint)
+                if editable {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(Apex.accent)
+                }
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                ApexNumeral(text: parts.whole, size: 26, weight: .bold, color: Apex.text)
+                if let frac = parts.frac {
+                    ApexNumeral(text: frac, size: 18, weight: .bold, color: Apex.textDim)
+                }
+                Text("kg")
+                    .font(.system(size: 13, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+                    .padding(.leading, 2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
         .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        .stroke(editable ? Apex.accent.opacity(0.4) : Apex.hairline, lineWidth: 1)
+                )
+        )
     }
 
     private func stretchStepButton(label: String, enabled: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold).monospacedDigit())
-                .foregroundStyle(enabled ? Self.accentPurple : .white.opacity(0.25))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .font(.system(size: 13, weight: .bold).monospacedDigit())
+                .fontWidth(.condensed)
+                .foregroundStyle(enabled ? Apex.accent : Apex.textFaint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
                 .background(
-                    (enabled ? Self.accentPurple.opacity(0.14) : Color.white.opacity(0.04)),
-                    in: Capsule()
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        .fill(enabled ? Apex.accent.opacity(0.14) : Color.white.opacity(0.04))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                        .stroke(enabled ? Apex.accent.opacity(0.4) : Apex.hairline, lineWidth: 1)
                 )
         }
         .buttonStyle(.plain)
@@ -230,24 +297,28 @@ struct CalibrationReviewView: View {
 
     // MARK: - Save targets
 
-    private var saveButton: some View {
+    private var saveBar: some View {
         Button {
             Task { await save() }
         } label: {
-            Text(isSaving ? "Saving\u{2026}" : "Save targets")
-                .font(.system(size: 17, weight: .bold))
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: 56)
-                .background(Self.accentPurple.opacity(isSaving ? 0.40 : 0.85),
-                           in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.20), lineWidth: 0.5)
-                )
+            ApexButton(
+                title: isSaving ? "Saving\u{2026}" : "Save targets",
+                icon: isSaving ? nil : "checkmark"
+            )
+            .opacity(isSaving ? 0.45 : 1.0)
         }
         .disabled(isSaving)
-        .padding(.top, 8)
+        .padding(.horizontal, 16)
+        .padding(.top, 22)
+        .padding(.bottom, 26)
+        .background(
+            LinearGradient(
+                colors: [Apex.bg.opacity(0), Apex.bg],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
     }
 
     // MARK: - Save
@@ -303,15 +374,6 @@ struct CalibrationReviewView: View {
         dismiss()
     }
 
-    // MARK: - Section header
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.40))
-            .kerning(0.8)
-    }
-
     // MARK: - Display helpers
 
     /// Maps a ProjectionProgress to its human-facing label.
@@ -322,32 +384,6 @@ struct CalibrationReviewView: View {
         case .ahead:    return "Ahead"
         case .achieved: return "Achieved"
         }
-    }
-
-    /// Renders a weight, dropping a trailing ".0" so whole kilos read cleanly.
-    private static func formatWeight(_ value: Double) -> String {
-        value == value.rounded()
-            ? String(Int(value))
-            : String(format: "%.1f", value)
-    }
-}
-
-// MARK: - Card chrome
-
-private extension View {
-    /// The translucent rounded-card surface used across the dark-chrome feature
-    /// screens (matches GoalReviewView's `cardChrome`). Named distinctly to avoid
-    /// clashing with that file's private extension.
-    func calibrationCardChrome() -> some View {
-        self
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-            .background(Color.white.opacity(0.06),
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
-            )
     }
 }
 
