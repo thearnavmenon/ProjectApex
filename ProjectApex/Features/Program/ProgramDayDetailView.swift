@@ -222,7 +222,7 @@ struct ProgramDayDetailView: View {
                             // Paused session — amber info banner
                             statusBadge(
                                 icon: "pause.circle.fill",
-                                label: "Session Paused — tap Resume to continue",
+                                label: "Workout paused",
                                 color: Color(red: 1.00, green: 0.70, blue: 0.10)
                             )
                         } else if currentDay.status == .skipped {
@@ -591,8 +591,8 @@ struct ProgramDayDetailView: View {
                 }
             )
         }
-        .alert("Existing Paused Session", isPresented: $showExistingPausedSessionAlert) {
-            Button("Discard Paused Session", role: .destructive) {
+        .alert("Workout paused", isPresented: $showExistingPausedSessionAlert) {
+            Button("Discard workout", role: .destructive) {
                 PausedSessionState.clear()
                 switchToTab(1)
             }
@@ -661,7 +661,7 @@ struct ProgramDayDetailView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "pause.circle.fill")
                         .font(.system(size: 15, weight: .semibold))
-                    Text("SESSION PAUSED")
+                    Text("WORKOUT PAUSED")
                         .font(.system(size: 13, weight: .bold))
                         .kerning(0.5)
                 }
@@ -681,7 +681,7 @@ struct ProgramDayDetailView: View {
                     HStack(spacing: 10) {
                         Image(systemName: "play.circle.fill")
                             .font(.system(size: 17, weight: .semibold))
-                        Text("Resume Session")
+                        Text("Resume workout")
                             .font(.system(size: 17, weight: .semibold))
                     }
                     .frame(maxWidth: .infinity)

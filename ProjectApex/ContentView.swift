@@ -228,8 +228,8 @@ struct ContentView: View {
                 showTrainingTimeMigrationNotice = true
             }
         }
-        .alert("Unfinished Workout", isPresented: $showCrashRecoveryAlert) {
-            Button("Resume") {
+        .alert("Workout paused", isPresented: $showCrashRecoveryAlert) {
+            Button("Resume workout") {
                 // #441: Resume no longer seeds sticky overrides. It only adjudicates
                 // which alert to show: if the paused sentinel resolves to a real day
                 // anywhere in the mesocycle, switch to the Workout tab — which
@@ -249,7 +249,7 @@ struct ContentView: View {
                     showOrphanedRecoveryAlert = true
                 }
             }
-            Button("Abandon Session", role: .destructive) {
+            Button("Discard workout", role: .destructive) {
                 if let saved = crashRecoveryState {
                     Task {
                         await deps.workoutSessionManager.abandonSession(sessionId: saved.sessionId)
@@ -654,12 +654,12 @@ struct ContentView: View {
 
     private var crashRecoveryMessage: String {
         guard let saved = crashRecoveryState else {
-            return "You have an unfinished session. Resume it or abandon it?"
+            return "Your workout is paused. Resume where you left off, or discard it?"
         }
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         formatter.dateStyle = .none
-        return "You have an unfinished session from \(formatter.string(from: saved.pausedAt)). Resume it or abandon it?"
+        return "Your workout is paused from \(formatter.string(from: saved.pausedAt)). Resume where you left off, or discard it?"
     }
 
     // MARK: - Regenerate Program

@@ -20,7 +20,7 @@ struct PausedSessionBannerView: View {
                 .foregroundStyle(amberColor)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Paused Session")
+                Text("Workout paused")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white)
                 Text("\(dayLabel.replacingOccurrences(of: "_", with: " ").capitalized) · Week \(weekNumber)")

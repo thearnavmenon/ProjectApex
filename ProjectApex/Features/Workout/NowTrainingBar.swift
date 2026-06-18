@@ -6,7 +6,7 @@
 // own red dot, so live vs paused was indistinguishable). The pill carries the
 // distinction in THREE redundant channels so it survives colourblindness and Reduce
 // Motion: motion (a pulsing dot when live), colour (blue vs amber), and text+icon
-// ("Training" + circle vs "Paused — tap to resume" + pause glyph).
+// ("Training" + circle vs "Workout paused" + pause glyph).
 //
 // State is a pure function of the ActiveSessionCoordinator's isLive / pausedSessionExists
 // (BarState.resolve), so it is unit-testable without rendering. Tapping the pill switches
@@ -51,9 +51,14 @@ struct NowTrainingBar: View {
         state == .live ? Self.liveAccent : Self.pausedAccent
     }
 
-    private var label: String {
-        state == .live ? "Training" : "Paused — tap to resume"
+    /// Canonical pill copy. Static so it is unit-testable without rendering
+    /// (mirrors `BarState.resolve`). #468 — one vocabulary: the paused state reads
+    /// "Workout paused" everywhere; the chevron already signals tappable, so the
+    /// word "Resume" is reserved for the surface that actually resumes.
+    static func label(for state: BarState) -> String {
+        state == .live ? "Training" : "Workout paused"
     }
+    private var label: String { Self.label(for: state) }
 
     private var pill: some View {
         Button(action: onTap) {
