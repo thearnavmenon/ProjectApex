@@ -128,7 +128,7 @@ struct ManualSessionLogView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+                Apex.bg.ignoresSafeArea()
 
                 ScrollView {
                     LazyVStack(spacing: 16) {
@@ -147,14 +147,22 @@ struct ManualSessionLogView: View {
                     submitButton
                 }
             }
-            .navigationTitle(existingSessionId != nil ? "Add Set Logs" : "Log Past Session")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
+            .toolbarBackground(Apex.bg, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(existingSessionId != nil ? "ADD SET LOGS" : "LOG PAST SESSION")
+                        .font(.system(size: 12, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .textCase(.uppercase)
+                        .tracking(1.5)
+                        .foregroundStyle(Apex.textDim)
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundStyle(.white.opacity(0.70))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Apex.textDim)
                 }
             }
             .alert("Log Failed", isPresented: Binding(
@@ -180,35 +188,38 @@ struct ManualSessionLogView: View {
     // MARK: - Header Card
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(day.dayLabel.replacingOccurrences(of: "_", with: " "))
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                        .foregroundStyle(.white)
-                    Text("Week \(week.weekNumber) · \(week.phase.displayTitle)")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.55))
+                        .font(.system(size: 20, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
+                    ApexSectionLabel(
+                        text: "Week \(week.weekNumber) · \(week.phase.displayTitle)",
+                        color: Apex.textFaint
+                    )
                 }
                 Spacer()
                 Text("MANUAL")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Color(red: 0.78, green: 0.82, blue: 0.88))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color(red: 0.78, green: 0.82, blue: 0.88).opacity(0.12), in: Capsule())
+                    .font(.system(size: 10, weight: .black))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .tracking(1.2)
+                    .foregroundStyle(Apex.onAccent)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Apex.accent))
             }
 
-            Divider().background(Color.white.opacity(0.08))
+            Rectangle().fill(Apex.hairline).frame(height: 1)
 
             // Date picker
             HStack {
                 Image(systemName: "calendar")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.55))
-                Text("Session Date")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.70))
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(Apex.textDim)
+                ApexSectionLabel(text: "Session Date")
                 Spacer()
                 DatePicker(
                     "",
@@ -219,14 +230,11 @@ struct ManualSessionLogView: View {
                 .datePickerStyle(.compact)
                 .labelsHidden()
                 .colorScheme(.dark)
+                .tint(Apex.accent)
             }
         }
         .padding(16)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .apexCard()
     }
 
     // MARK: - Submit Button
@@ -239,60 +247,47 @@ struct ManualSessionLogView: View {
     }
 
     private var submitButton: some View {
-        VStack(spacing: 0) {
-            Divider().background(Color.white.opacity(0.06))
-
+        VStack(spacing: 10) {
             // Inline hint when the gate is closed by missing intents — gives
             // the user a reason for the disabled state rather than a silent
             // dead button.
             if !isSubmitting && !manualLogCanSubmit(entries: entries) {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 11, weight: .bold))
                     Text("Pick an intent for every logged set before saving")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 12, weight: .semibold))
                     Spacer()
                 }
-                .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0).opacity(0.85))
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+                .foregroundStyle(Apex.amber)
             }
 
             Button(action: {
                 Task { await submitSession() }
             }) {
-                HStack(spacing: 10) {
-                    if isSubmitting {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(.white)
-                            .scaleEffect(0.85)
-                    } else {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 17, weight: .semibold))
-                    }
-                    Text(isSubmitting ? "Saving…" : "Save Session")
-                        .font(.system(size: 17, weight: .semibold))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(
-                    canSubmit
-                        ? Color(red: 0.23, green: 0.56, blue: 1.00)
-                        : Color(red: 0.23, green: 0.56, blue: 1.00).opacity(0.30),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                ApexButton(
+                    title: isSubmitting ? "Saving…" : "Save Session",
+                    icon: isSubmitting ? nil : "checkmark"
                 )
-                .foregroundStyle(.white)
+                .opacity(canSubmit ? 1.0 : 0.35)
             }
             .disabled(!canSubmit)
             .accessibilityHint(canSubmit
                                ? "Save this manual session"
                                : "Pick an intent for every logged set first")
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .background(Color(red: 0.04, green: 0.04, blue: 0.06))
             .animation(.easeInOut(duration: 0.18), value: canSubmit)
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 22)
+        .padding(.bottom, 26)
+        .background(
+            LinearGradient(
+                colors: [Apex.bg.opacity(0), Apex.bg],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        )
     }
 
     // MARK: - Success Banner
@@ -300,15 +295,16 @@ struct ManualSessionLogView: View {
     private var successBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(Color(red: 0.30, green: 0.96, blue: 0.60))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(Apex.accent)
             Text("Session logged successfully")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.white)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Apex.text)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
-        .background(Color.white.opacity(0.12), in: Capsule())
-        .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
+        .background(Capsule().fill(Apex.surface))
+        .overlay(Capsule().stroke(Apex.hairline, lineWidth: 1))
     }
 
     // MARK: - Submission Logic
@@ -482,51 +478,48 @@ private struct ExerciseLogCard: View {
         VStack(alignment: .leading, spacing: 0) {
             // Exercise header
             HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(entry.exercise.name)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text(entry.exercise.primaryMuscle.formattedMuscleName)
-                        .font(.caption2.bold())
-                        .foregroundStyle(muscleColor(for: entry.exercise.primaryMuscle))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(muscleColor(for: entry.exercise.primaryMuscle).opacity(0.15), in: Capsule())
+                        .font(.system(size: 16, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
+                    ApexTagChip(
+                        text: entry.exercise.primaryMuscle.formattedMuscleName,
+                        tint: muscleColor(for: entry.exercise.primaryMuscle)
+                    )
                 }
                 Spacer()
                 Text(entry.exercise.equipmentRequired.displayName)
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.45))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.07), in: Capsule())
+                    .font(.system(size: 11, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Capsule().fill(Color.white.opacity(0.07)))
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
-            .padding(.bottom, 10)
+            .padding(.bottom, 12)
 
-            Divider().background(Color.white.opacity(0.08))
+            Rectangle().fill(Apex.hairline).frame(height: 1)
 
             // Column headers
             HStack(spacing: 0) {
-                Text("SET")
+                ApexSectionLabel(text: "Set", color: Apex.textFaint)
                     .frame(width: 32, alignment: .center)
-                Text("WEIGHT (KG)")
+                ApexSectionLabel(text: "Weight (kg)", color: Apex.textFaint)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Text("REPS")
+                ApexSectionLabel(text: "Reps", color: Apex.textFaint)
                     .frame(width: 56, alignment: .center)
-                Text("RPE")
+                ApexSectionLabel(text: "RPE", color: Apex.textFaint)
                     .frame(width: 48, alignment: .center)
-                Text("INTENT")
+                ApexSectionLabel(text: "Intent", color: Apex.textFaint)
                     .frame(width: 80, alignment: .center)
             }
-            .font(.system(size: 10, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.35))
-            .kerning(0.4)
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 9)
 
-            Divider().background(Color.white.opacity(0.06))
+            Rectangle().fill(Apex.hairline.opacity(0.5)).frame(height: 1)
 
             // Set rows
             ForEach($entry.sets) { $setEntry in
@@ -535,22 +528,29 @@ private struct ExerciseLogCard: View {
                     setEntry: $setEntry
                 )
                 if setEntry.id != entry.sets.last?.id {
-                    Divider()
-                        .background(Color.white.opacity(0.05))
+                    Rectangle().fill(Apex.hairline.opacity(0.35))
+                        .frame(height: 1)
                         .padding(.leading, 16)
                 }
             }
 
-            Divider().background(Color.white.opacity(0.06))
+            Rectangle().fill(Apex.hairline.opacity(0.5)).frame(height: 1)
 
             // Add / remove set buttons
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
                 Button(action: {
                     entry.sets.append(ManualSetEntry())
                 }) {
-                    Label("Add Set", systemImage: "plus.circle")
-                        .font(.caption.bold())
-                        .foregroundStyle(Color(red: 0.23, green: 0.56, blue: 1.00))
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .black))
+                        Text("Add Set")
+                            .font(.system(size: 13, weight: .bold))
+                            .fontWidth(.condensed)
+                            .textCase(.uppercase)
+                            .tracking(0.8)
+                    }
+                    .foregroundStyle(Apex.accent)
                 }
                 .buttonStyle(.plain)
 
@@ -558,22 +558,25 @@ private struct ExerciseLogCard: View {
                     Button(action: {
                         entry.sets.removeLast()
                     }) {
-                        Label("Remove", systemImage: "minus.circle")
-                            .font(.caption.bold())
-                            .foregroundStyle(.white.opacity(0.40))
+                        HStack(spacing: 6) {
+                            Image(systemName: "minus")
+                                .font(.system(size: 12, weight: .black))
+                            Text("Remove")
+                                .font(.system(size: 13, weight: .bold))
+                                .fontWidth(.condensed)
+                                .textCase(.uppercase)
+                                .tracking(0.8)
+                        }
+                        .foregroundStyle(Apex.textDim)
                     }
                     .buttonStyle(.plain)
                 }
                 Spacer()
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.vertical, 12)
         }
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.white.opacity(0.08), lineWidth: 1)
-        )
+        .apexCard()
     }
 
     private func muscleColor(for muscle: String) -> Color {
@@ -610,16 +613,15 @@ private struct SetInputRow: View {
     var body: some View {
         HStack(spacing: 0) {
             // Set number
-            Text("\(setNumber)")
-                .font(.system(size: 14, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.45))
+            ApexNumeral(text: "\(setNumber)", size: 15, color: Apex.textDim)
                 .frame(width: 32, alignment: .center)
 
             // Weight input
             TextField("0", text: $setEntry.weightString)
                 .keyboardType(.decimalPad)
-                .font(.system(size: 16, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white)
+                .font(Apex.numeral(16, weight: .bold))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
@@ -630,24 +632,22 @@ private struct SetInputRow: View {
                     setEntry.reps = max(0, setEntry.reps - 1)
                 }) {
                     Image(systemName: "minus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Apex.textDim)
                         .frame(width: 20, height: 20)
                         .background(Color.white.opacity(0.08), in: Circle())
                 }
                 .buttonStyle(.plain)
 
-                Text("\(setEntry.reps)")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                    .foregroundStyle(.white)
+                ApexNumeral(text: "\(setEntry.reps)", size: 15)
                     .frame(width: 24, alignment: .center)
 
                 Button(action: {
                     setEntry.reps = setEntry.reps + 1
                 }) {
                     Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.50))
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Apex.textDim)
                         .frame(width: 20, height: 20)
                         .background(Color.white.opacity(0.08), in: Circle())
                 }
@@ -658,8 +658,9 @@ private struct SetInputRow: View {
             // RPE input (optional, 1-10)
             TextField("—", text: $setEntry.rpeString)
                 .keyboardType(.numberPad)
-                .font(.system(size: 14, weight: .semibold, design: .rounded).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.70))
+                .font(Apex.numeral(15, weight: .bold))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textDim)
                 .multilineTextAlignment(.center)
                 .frame(width: 48)
                 .padding(.vertical, 10)
@@ -715,28 +716,29 @@ private struct SetInputRow: View {
                 Text(setEntry.intentTouched
                      ? (setEntry.intent.map(intentLabel) ?? "—")
                      : "—")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .bold))
+                    .fontWidth(.condensed)
                     .foregroundStyle(setEntry.intentTouched
-                                     ? Color(red: 0.23, green: 0.56, blue: 1.00)
-                                     : .white.opacity(0.45))
+                                     ? Apex.accent
+                                     : Apex.textDim)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.40))
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(Apex.textFaint)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
             .background(
-                Capsule()
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
                     .fill(Color.white.opacity(0.06))
             )
             .overlay(
-                Capsule()
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
                     .stroke(
                         setEntry.intentTouched
-                            ? Color(red: 0.23, green: 0.56, blue: 1.00).opacity(0.50)
-                            : Color.white.opacity(0.15),
-                        lineWidth: 0.5
+                            ? Apex.accent.opacity(0.55)
+                            : Apex.hairline,
+                        lineWidth: setEntry.intentTouched ? 1 : 0.5
                     )
             )
         }
@@ -908,7 +910,7 @@ private struct ManualLogIntentPickerPreview: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+            Apex.bg.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 16) {
                     ExerciseLogCard(entry: $entry)
