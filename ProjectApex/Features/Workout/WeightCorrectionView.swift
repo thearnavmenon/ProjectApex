@@ -152,50 +152,65 @@ struct WeightCorrectionView: View {
 
                     Spacer()
 
-                    // Two-path action buttons
-                    VStack(spacing: 12) {
-                        // Permanent path — filled volt-lime accent (primary action)
-                        Button {
-                            guard let weight = confirmedWeight else { return }
-                            onConfirmed(weight)
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.80)) {
-                                savedPermanently = true
+                    // Two-path action buttons. Session-only is the prominent,
+                    // low-consequence default; the permanent path is the recessive,
+                    // amber-flagged action because it edits the gym profile forever
+                    // (the two-path design deliberately guards against accidental
+                    // permanent corrections — see this file's header).
+                    VStack(spacing: 16) {
+                        // Session-only path — PRIMARY (filled lime, safe default)
+                        VStack(spacing: 5) {
+                            Button {
+                                guard let weight = confirmedWeight else { return }
+                                onSessionOnly(weight)
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.80)) {
+                                    savedSessionOnly = true
+                                }
+                                Task {
+                                    try? await Task.sleep(nanoseconds: 1_400_000_000)
+                                    dismiss()
+                                }
+                            } label: {
+                                ApexButton(title: "Just for today", icon: "clock.arrow.circlepath")
+                                    .opacity(confirmedWeight == nil ? 0.4 : 1.0)
                             }
-                            Task {
-                                try? await Task.sleep(nanoseconds: 1_600_000_000)
-                                dismiss()
-                            }
-                        } label: {
-                            ApexButton(title: "Missing permanently", icon: "xmark.bin")
-                                .opacity(confirmedWeight == nil ? 0.4 : 1.0)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(confirmedWeight == nil)
+                            .buttonStyle(.plain)
+                            .disabled(confirmedWeight == nil)
 
-                        // Session-only path — ghost (secondary action)
-                        Button {
-                            guard let weight = confirmedWeight else { return }
-                            onSessionOnly(weight)
-                            withAnimation(.spring(response: 0.35, dampingFraction: 0.80)) {
-                                savedSessionOnly = true
-                            }
-                            Task {
-                                try? await Task.sleep(nanoseconds: 1_400_000_000)
-                                dismiss()
-                            }
-                        } label: {
-                            ApexButton(title: "Just for today", kind: .ghost)
-                                .opacity(confirmedWeight == nil ? 0.4 : 1.0)
+                            Text("Skip it this session only — the coach keeps \(formatWeight(prescribedWeight)) in its toolkit.")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Apex.textFaint)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(confirmedWeight == nil)
 
-                        // Explanatory caption
-                        Text("“Permanently” updates your gym profile so the coach never prescribes \(formatWeight(prescribedWeight)) on this equipment again.")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(Apex.textFaint)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.top, 2)
+                        // Permanent path — SECONDARY (recessive amber ghost)
+                        VStack(spacing: 5) {
+                            Button {
+                                guard let weight = confirmedWeight else { return }
+                                onConfirmed(weight)
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.80)) {
+                                    savedPermanently = true
+                                }
+                                Task {
+                                    try? await Task.sleep(nanoseconds: 1_600_000_000)
+                                    dismiss()
+                                }
+                            } label: {
+                                ApexButton(title: "Missing permanently", kind: .ghost, icon: "xmark.bin", tint: Apex.amber)
+                                    .opacity(confirmedWeight == nil ? 0.4 : 1.0)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(confirmedWeight == nil)
+
+                            Text("Updates your gym profile so the coach never prescribes \(formatWeight(prescribedWeight)) on \(equipmentType.displayName) again.")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(Apex.textFaint)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .padding(24)
