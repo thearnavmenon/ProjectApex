@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-18 — Settings tab redesign (part 1): the look
+
+**The problem (in plain words):**
+The Settings tab still looked like a plain old iOS list while the rest of the
+app had moved to the bold black-and-lime look. This makes Settings match — and
+fixes a control that felt clunky.
+
+**What I changed:**
+The whole Settings screen was rebuilt in the new look: pure black, big bold
+numbers for your bodyweight/height/age, sharp-cornered cards, and the lime
+accent used only on the "add" action. The equipment list's old on/off switch
+for "bodyweight only" — which was confusing and, being orange, looked like a
+warning — is now a clear two-button "LOADABLE | BODYWEIGHT" choice. The
+"Add Equipment" sheet got the same treatment. Only the looks changed: editing
+your details, swiping to delete equipment, re-scanning, and regenerating your
+program all work exactly as before.
+
+**How I made sure it works:**
+Two agents rebuilt the two files in isolated copies, one pull request each. I
+built the app here (BUILD SUCCEEDED, iPhone 17 Pro / iOS 26.5) and took a real
+screenshot of the live Settings screen to confirm it looks finished before
+merging — the same "show it for real" check the abandoned redesign skipped. I
+also tightened the cards to the app's sharp 4pt corners after a first pass came
+out too rounded.
+
+**Status:** Merged to main — #496 (the screen) and #495 (the add-equipment
+sheet), both part of #494. Next: a few small new Settings features (training-days
+& goal editing, a re-open for the targets review, a sex field, and a release-safe
+reset), then final sign-off.
+
+---
+
 ## 2026-06-18 — Redesign finished: every workout screen now matches
 
 **The problem (in plain words):**
