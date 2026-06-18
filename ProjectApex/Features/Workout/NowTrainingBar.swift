@@ -5,7 +5,7 @@
 // colour-coded tab badge (iOS strips a Text badge's foregroundStyle and renders its
 // own red dot, so live vs paused was indistinguishable). The pill carries the
 // distinction in THREE redundant channels so it survives colourblindness and Reduce
-// Motion: motion (a pulsing dot when live), colour (blue vs amber), and text+icon
+// Motion: motion (a pulsing dot when live), colour (lime vs amber), and text+icon
 // ("Training" + circle vs "Workout paused" + pause glyph).
 //
 // State is a pure function of the ActiveSessionCoordinator's isLive / pausedSessionExists
@@ -35,9 +35,6 @@ struct NowTrainingBar: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static let liveAccent = Color(red: 0.25, green: 0.72, blue: 1.0)
-    private static let pausedAccent = Color(red: 1.0, green: 0.65, blue: 0.0)
-
     var body: some View {
         switch state {
         case .idle:
@@ -47,8 +44,9 @@ struct NowTrainingBar: View {
         }
     }
 
+    /// Live uses the volt-lime accent; paused uses amber. (Brutalist design system.)
     private var accent: Color {
-        state == .live ? Self.liveAccent : Self.pausedAccent
+        state == .live ? Apex.accent : Apex.amber
     }
 
     /// Canonical pill copy. Static so it is unit-testable without rendering
@@ -66,21 +64,22 @@ struct NowTrainingBar: View {
                 indicator
                 Text(label)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Apex.text)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .foregroundStyle(Apex.textDim)
             }
-            .padding(.horizontal, 18)
+            .padding(.horizontal, 16)
             .padding(.vertical, 11)
             .background(
-                // A raised dark fill (not the tab bar's chrome) so the pill reads as a
-                // distinct floating element rather than part of the tab bar.
-                Color(red: 0.13, green: 0.13, blue: 0.16),
-                in: Capsule()
+                // A raised dark surface (not the tab bar's chrome) so the pill reads as
+                // a distinct floating element rather than part of the tab bar.
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Apex.surface)
             )
             .overlay(
-                Capsule().stroke(accent.opacity(0.45), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(accent.opacity(0.35), lineWidth: 1)
             )
             .shadow(color: .black.opacity(0.40), radius: 12, y: 4)
         }
@@ -93,27 +92,34 @@ struct NowTrainingBar: View {
 
     @ViewBuilder
     private var indicator: some View {
-        switch state {
-        case .live:
-            // Motion is the PRIMARY live signal; suppressed under Reduce Motion, where
-            // colour + the filled dot + "Training" still carry the state.
-            Image(systemName: "circle.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(Self.liveAccent)
-                .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-        case .paused:
-            Image(systemName: "pause.circle.fill")
-                .font(.system(size: 15))
-                .foregroundStyle(Self.pausedAccent)
-        case .idle:
-            EmptyView()
+        // A halo ring around the state glyph (matches the prototype LivePill).
+        ZStack {
+            Circle()
+                .fill(accent.opacity(0.25))
+                .frame(width: 22, height: 22)
+            switch state {
+            case .live:
+                // Motion is the PRIMARY live signal; suppressed under Reduce Motion, where
+                // colour + the filled dot + "Training" still carry the state. The dot is an
+                // SF Symbol (not a plain Circle) so `.symbolEffect(.pulse)` actually animates.
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(Apex.accent)
+                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+            case .paused:
+                Image(systemName: "pause.fill")
+                    .font(.system(size: 9, weight: .black))
+                    .foregroundStyle(Apex.amber)
+            case .idle:
+                EmptyView()
+            }
         }
     }
 }
 
 #Preview {
     ZStack {
-        Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+        Apex.bg.ignoresSafeArea()
         VStack(spacing: 24) {
             NowTrainingBar(state: .live, onTap: {})
             NowTrainingBar(state: .paused, onTap: {})
