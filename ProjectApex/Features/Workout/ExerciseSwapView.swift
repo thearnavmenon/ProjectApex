@@ -4,6 +4,11 @@
 // Chat-style sheet for mid-session exercise swaps (P3-T10).
 // Presented as a .large detent sheet over ActiveSetView.
 //
+// Restyled to the Brutalist Athletic identity (umbrella #473): pure-black
+// surfaces, volt-lime accent reserved for the primary action, sharp corners,
+// condensed labels. Visual layer only — all behaviour, state, bindings and
+// the onConfirmSwap callback are preserved.
+//
 // Layout:
 //   ┌─────────────────────────────┐
 //   │  Swap Exercise         [X]  │  ← header
@@ -23,52 +28,50 @@ struct ExerciseSwapView: View {
 
     @State var viewModel: ExerciseSwapViewModel
 
-    // Background colour token
-    private let bg = Color(red: 0.07, green: 0.08, blue: 0.10)
-    private let bubbleAssistant = Color(red: 0.14, green: 0.15, blue: 0.18)
-    private let bubbleUser = Color(red: 0.23, green: 0.56, blue: 1.00)
-    private let accentOrange = Color(red: 1.00, green: 0.60, blue: 0.20)
-
     var body: some View {
         ZStack {
-            bg.ignoresSafeArea()
+            Apex.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 header
-                Divider().overlay(Color.white.opacity(0.10))
                 messageList
                 bottomBar
             }
         }
         .presentationDetents([.large])
-        .presentationCornerRadius(24)
+        .presentationCornerRadius(Apex.corner)
     }
 
     // MARK: - Header
 
     private var header: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Swap Exercise")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 19, weight: .heavy))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
                 Text("AI-powered substitution")
-                    .font(.system(size: 12, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.45))
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Apex.textFaint)
             }
             Spacer()
             Button {
                 viewModel.dismiss()
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(.white.opacity(0.35))
-                    .symbolRenderingMode(.hierarchical)
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(Apex.textDim)
+                    .frame(width: 38, height: 38)
+                    .background(Circle().fill(Apex.surface))
+                    .overlay(Circle().stroke(Apex.hairline, lineWidth: 1))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close")
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, Apex.pad)
         .padding(.vertical, 16)
+        .overlay(Rectangle().fill(Apex.hairline).frame(height: 1), alignment: .bottom)
     }
 
     // MARK: - Message list
@@ -76,7 +79,7 @@ struct ExerciseSwapView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 14) {
                     ForEach(viewModel.messages) { message in
                         messageBubble(message)
                             .id(message.id)
@@ -87,8 +90,8 @@ struct ExerciseSwapView: View {
                             .id("thinking")
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.horizontal, Apex.pad)
+                .padding(.vertical, 14)
             }
             .onChange(of: viewModel.messages.count) { _, _ in
                 withAnimation {
@@ -110,15 +113,19 @@ struct ExerciseSwapView: View {
         let isUser = message.role == .user || message.role == .chip
         HStack {
             if isUser { Spacer(minLength: 40) }
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 6) {
+            VStack(alignment: isUser ? .trailing : .leading, spacing: 8) {
                 Text(message.displayText)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 15, weight: isUser ? .semibold : .medium))
+                    .foregroundStyle(isUser ? Apex.onAccent : Apex.text)
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.vertical, 11)
                     .background(
-                        isUser ? bubbleUser : bubbleAssistant,
-                        in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .fill(isUser ? Apex.accent : Apex.surface)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .stroke(isUser ? Color.clear : Apex.hairline, lineWidth: 1)
                     )
                     .multilineTextAlignment(isUser ? .trailing : .leading)
 
@@ -132,36 +139,33 @@ struct ExerciseSwapView: View {
     }
 
     private func suggestionCard(_ s: ExerciseSwapService.ExerciseSuggestion) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(accentOrange)
-                Text("Suggested Swap")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(accentOrange)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ApexSectionLabel(text: "Swap to", color: Apex.accent)
+                    Text(s.name)
+                        .font(.system(size: 18, weight: .heavy))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
             }
-            Text(s.name)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
 
             let weightLabel = s.suggestedWeightKg == 0 ? "BW" : "\(Int(s.suggestedWeightKg)) kg"
             Text("\(weightLabel) · \(s.suggestedReps) reps")
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.65))
+                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textDim)
 
             Text(s.reasoning)
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.50))
-                .italic()
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Apex.textDim)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(12)
+        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(accentOrange.opacity(0.30), lineWidth: 1)
-        )
+        .apexCard(emphasized: true)
     }
 
     private var thinkingIndicator: some View {
@@ -169,7 +173,7 @@ struct ExerciseSwapView: View {
             HStack(spacing: 5) {
                 ForEach(0..<3) { i in
                     Circle()
-                        .fill(.white.opacity(0.40))
+                        .fill(Apex.accent.opacity(0.80))
                         .frame(width: 7, height: 7)
                         .scaleEffect(viewModel.isProcessing ? 1.0 : 0.5)
                         .animation(
@@ -179,8 +183,15 @@ struct ExerciseSwapView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(bubbleAssistant, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .fill(Apex.surface)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                    .stroke(Apex.hairline, lineWidth: 1)
+            )
             Spacer()
         }
     }
@@ -189,9 +200,9 @@ struct ExerciseSwapView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 0) {
-            Divider().overlay(Color.white.opacity(0.10))
+            Rectangle().fill(Apex.hairline).frame(height: 1)
 
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 // Quick reply chips — hidden once a suggestion is pending
                 if viewModel.pendingSuggestion == nil && !viewModel.isProcessing {
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -201,17 +212,17 @@ struct ExerciseSwapView: View {
                                     viewModel.sendChip(chip)
                                 } label: {
                                     Text(chip)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(.white)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Apex.text)
                                         .padding(.horizontal, 14)
-                                        .padding(.vertical, 8)
-                                        .background(Color.white.opacity(0.10), in: Capsule())
-                                        .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                                        .padding(.vertical, 9)
+                                        .background(Capsule().fill(Apex.surface))
+                                        .overlay(Capsule().stroke(Apex.hairline, lineWidth: 1))
                                 }
                                 .buttonStyle(.plain)
                             }
                         }
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, Apex.pad)
                     }
                 }
 
@@ -220,50 +231,51 @@ struct ExerciseSwapView: View {
                     Button {
                         viewModel.confirmSwap()
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                            Text("Confirm Swap")
-                                .font(.system(size: 17, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(accentOrange, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .foregroundStyle(.white)
+                        ApexButton(title: "Confirm Swap", icon: "arrow.triangle.2.circlepath")
                     }
-                    .padding(.horizontal, 16)
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, Apex.pad)
                 }
 
                 // Text input bar
                 HStack(spacing: 10) {
-                    TextField("Type a message…", text: $viewModel.inputText)
-                        .font(.system(size: 15))
-                        .foregroundStyle(.white)
-                        .tint(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    TextField("", text: $viewModel.inputText, prompt:
+                        Text("Message coach…").foregroundStyle(Apex.textFaint)
+                    )
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Apex.text)
+                        .tint(Apex.accent)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 13)
+                        .background(Capsule().fill(Apex.surface))
+                        .overlay(Capsule().stroke(Apex.hairline, lineWidth: 1))
                         .onSubmit { viewModel.sendMessage() }
 
+                    let canSend = !viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty
+                        && !viewModel.isProcessing
                     Button {
                         viewModel.sendMessage()
                     } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 32))
-                            .foregroundStyle(
-                                viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty
-                                    ? Color.white.opacity(0.20)
-                                    : bubbleUser
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 17, weight: .black))
+                            .foregroundStyle(canSend ? Apex.onAccent : Apex.textFaint)
+                            .frame(width: 46, height: 46)
+                            .background(
+                                Circle().fill(canSend ? Apex.accent : Apex.surface)
+                            )
+                            .overlay(
+                                Circle().stroke(canSend ? Color.clear : Apex.hairline, lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.inputText.trimmingCharacters(in: .whitespaces).isEmpty || viewModel.isProcessing)
+                    .disabled(!canSend)
+                    .accessibilityLabel("Send")
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, Apex.pad)
                 .padding(.bottom, 8)
             }
-            .padding(.top, 10)
+            .padding(.top, 12)
         }
-        .background(bg)
+        .background(Apex.bg)
     }
 }
