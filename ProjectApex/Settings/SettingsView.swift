@@ -84,7 +84,8 @@ struct SettingsView: View {
             developerSection
             aboutSection
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .listSectionSpacing(20)
         .scrollContentBackground(.hidden)
         .background(Apex.bg.ignoresSafeArea())
         .tint(Apex.accent)
@@ -170,8 +171,7 @@ struct SettingsView: View {
                 }
                 .padding(.vertical, 4)
             }
-            .listRowBackground(rowBackground)
-            .listRowSeparatorTint(Apex.hairline)
+            .settingsCardRow(.single)
         } header: {
             ApexSectionLabel(text: "Action Required", color: Apex.amber)
         }
@@ -213,8 +213,7 @@ struct SettingsView: View {
                         }
                     }
                     .padding(.vertical, 4)
-                    .listRowBackground(rowBackground)
-                    .listRowSeparatorTint(Apex.hairline)
+                    .settingsCardRow(equipmentItems.first?.id == item.id ? .first : .middle)
                 }
                 .onDelete { indexSet in
                     deleteEquipment(at: indexSet)
@@ -226,8 +225,7 @@ struct SettingsView: View {
                 } label: {
                     actionRowLabel(icon: "plus.circle", title: "Add Equipment", tint: Apex.accent)
                 }
-                .listRowBackground(rowBackground)
-                .listRowSeparatorTint(Apex.hairline)
+                .settingsCardRow(.middle)
 
                 // Re-scan — neutral / off-accent (opens a destructive confirm).
                 Button {
@@ -235,8 +233,7 @@ struct SettingsView: View {
                 } label: {
                     actionRowLabel(icon: "camera.viewfinder", title: "Re-scan Gym", tint: Apex.text)
                 }
-                .listRowBackground(rowBackground)
-                .listRowSeparatorTint(Apex.hairline)
+                .settingsCardRow(.last)
             } header: {
                 ApexSectionLabel(text: "Equipment · \(equipmentItems.count)")
             } footer: {
@@ -249,8 +246,7 @@ struct SettingsView: View {
                 } label: {
                     actionRowLabel(icon: "camera.viewfinder", title: "Scan Your Gym", tint: Apex.text)
                 }
-                .listRowBackground(rowBackground)
-                .listRowSeparatorTint(Apex.hairline)
+                .settingsCardRow(.single)
             } header: {
                 ApexSectionLabel(text: "Equipment")
             }
@@ -303,21 +299,21 @@ struct SettingsView: View {
     private var profileSection: some View {
         Section {
             // Bodyweight
-            biometricRow(icon: "scalemass", title: "Bodyweight",
+            biometricRow(icon: "scalemass", title: "Bodyweight", pos: .first,
                          text: $bodyweightText, unit: "kg", keyboard: .decimalPad) { v in
                 let kg = Double(v.replacingOccurrences(of: ",", with: "."))
                 UserDefaults.standard.set(kg, forKey: UserProfileConstants.bodyweightKgKey)
             }
 
             // Height
-            biometricRow(icon: "ruler", title: "Height",
+            biometricRow(icon: "ruler", title: "Height", pos: .middle,
                          text: $heightText, unit: "cm", keyboard: .decimalPad) { v in
                 let cm = Double(v.replacingOccurrences(of: ",", with: "."))
                 UserDefaults.standard.set(cm, forKey: UserProfileConstants.heightCmKey)
             }
 
             // Age
-            biometricRow(icon: "person.fill", title: "Age",
+            biometricRow(icon: "person.fill", title: "Age", pos: .middle,
                          text: $ageText, unit: "yrs", keyboard: .numberPad) { v in
                 let age = Int(v)
                 UserDefaults.standard.set(age, forKey: UserProfileConstants.ageKey)
@@ -337,8 +333,7 @@ struct SettingsView: View {
             .onChange(of: trainingAge) { _, v in
                 UserDefaults.standard.set(v.rawValue, forKey: UserProfileConstants.trainingAgeKey)
             }
-            .listRowBackground(rowBackground)
-            .listRowSeparatorTint(Apex.hairline)
+            .settingsCardRow(.last)
         } header: {
             ApexSectionLabel(text: "Training Profile")
         } footer: {
@@ -351,6 +346,7 @@ struct SettingsView: View {
     private func biometricRow(
         icon: String,
         title: String,
+        pos: SettingsCardPos,
         text: Binding<String>,
         unit: String,
         keyboard: UIKeyboardType,
@@ -374,8 +370,7 @@ struct SettingsView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Apex.textFaint)
         }
-        .listRowBackground(rowBackground)
-        .listRowSeparatorTint(Apex.hairline)
+        .settingsCardRow(pos)
     }
 
     private func loadBiometricsFromDefaults() {
@@ -412,8 +407,7 @@ struct SettingsView: View {
                 )
             }
             .disabled(isRegenerating)
-            .listRowBackground(rowBackground)
-            .listRowSeparatorTint(Apex.hairline)
+            .settingsCardRow(.single)
         } header: {
             ApexSectionLabel(text: "Program")
         }
@@ -523,8 +517,7 @@ struct SettingsView: View {
             NavigationLink(destination: DeveloperSettingsView(onResetAll: onResetAll, programViewModel: programViewModel)) {
                 actionRowLabel(icon: "key.fill", title: "Developer Settings", tint: Apex.text)
             }
-            .listRowBackground(rowBackground)
-            .listRowSeparatorTint(Apex.hairline)
+            .settingsCardRow(.single)
         } header: {
             ApexSectionLabel(text: "Developer")
         }
@@ -543,8 +536,7 @@ struct SettingsView: View {
                     .fontWidth(.condensed)
                     .foregroundStyle(Apex.textDim)
             }
-            .listRowBackground(rowBackground)
-            .listRowSeparatorTint(Apex.hairline)
+            .settingsCardRow(.single)
         } header: {
             ApexSectionLabel(text: "About")
         }
@@ -580,11 +572,6 @@ struct SettingsView: View {
     }
 
     // MARK: - Row Atoms
-
-    /// The card-style fill behind each list row.
-    private var rowBackground: some View {
-        Apex.surface
-    }
 
     /// Attribute-row leading icon in a sharp-cornered chip — echoes the 4pt signature.
     private func boxedIcon(_ name: String) -> some View {
@@ -663,6 +650,45 @@ private struct BodyweightModeControl: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Sharp-corner grouped-card rows
+//
+// A `List` gives swipe-to-delete, but `.insetGrouped` forces ~10pt rounded
+// corners. To match the rest of the Brutalist app (sharp ~4pt corners) we use
+// `.plain` and draw each row's grouped-card background ourselves — sharp corners
+// on the first/last row of a section, with an internal hairline between rows.
+private enum SettingsCardPos {
+    case single, first, middle, last
+    var radii: RectangleCornerRadii {
+        let r = Apex.corner
+        switch self {
+        case .single: return .init(topLeading: r, bottomLeading: r, bottomTrailing: r, topTrailing: r)
+        case .first:  return .init(topLeading: r, bottomLeading: 0, bottomTrailing: 0, topTrailing: r)
+        case .middle: return .init(topLeading: 0, bottomLeading: 0, bottomTrailing: 0, topTrailing: 0)
+        case .last:   return .init(topLeading: 0, bottomLeading: r, bottomTrailing: r, topTrailing: 0)
+        }
+    }
+    var hairline: Bool { self == .first || self == .middle }
+}
+
+private extension View {
+    /// Inset + hidden-separator + sharp grouped-card background for one List row.
+    func settingsCardRow(_ pos: SettingsCardPos) -> some View {
+        self
+            .listRowInsets(EdgeInsets(top: 13, leading: Apex.pad + 14, bottom: 13, trailing: Apex.pad + 14))
+            .listRowSeparator(.hidden)
+            .listRowBackground(
+                UnevenRoundedRectangle(cornerRadii: pos.radii, style: .continuous)
+                    .fill(Apex.surface)
+                    .overlay(alignment: .bottom) {
+                        if pos.hairline {
+                            Rectangle().fill(Apex.hairline).frame(height: 1).padding(.leading, 14)
+                        }
+                    }
+                    .padding(.horizontal, Apex.pad)
+            )
     }
 }
 
