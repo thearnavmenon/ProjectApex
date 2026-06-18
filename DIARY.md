@@ -7,6 +7,35 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — Two fixes to the mid-workout flow
+
+**The problem (in plain words):**
+Two annoyances during a workout. First, when you finished a set and the "How
+did that set feel?" popup came up, the "Log set" button was hidden below the
+fold — you had to swipe up every single time just to reach it. Second, when you
+finished an exercise, a "Set Complete" screen flashed up that still used the old
+plain-looking design, out of step with the rest of the app.
+
+**What I changed:**
+- The "How did that set feel?" popup now sizes itself to its contents, so the
+  Log set button is always on screen — no more swiping up. It grows on its own
+  if you open the "Add detail" section.
+- The end-of-exercise moment got a fresh look: a volt-lime "done" stamp that
+  pops in, the exercise name, and a small "next up" line so it feels like you're
+  moving forward instead of hitting a wall. It keeps the same brief timing as
+  before (that pause quietly loads the AI's plan for your next exercise), adds a
+  little success buzz, and respects the "reduce motion" setting.
+
+**How I checked it:**
+Proved the popup-sizing trick in the isolated prototype harness first (the Log
+set button sits fully clear of the home bar), got the new "exercise complete"
+look signed off from a prototype render, then built the real app clean for both.
+
+**Status:** Both merged to main — popup fix (#504), exercise-complete restyle
+(#505). Visual/behaviour only; no workout logic touched.
+
+---
+
 ## 2026-06-19 — Redesign playbook now includes a "what can we improve?" step
 
 **The problem (in plain words):**
