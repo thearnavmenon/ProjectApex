@@ -526,9 +526,15 @@ struct ProgramOverviewView: View {
         }
     }
 
-    // Q6 / B3: pattern name + phase badge only. The digest does not carry
-    // session-counter fields, so the legacy N/M counter + progress bar are
-    // dropped. PatternProgress as a surface stays present.
+    // Q6 / B3: pattern name + phase badge, enriched (#507) with the real
+    // trend + transition state the digest already computes. The digest still
+    // carries no session-counter fields, so the legacy N/M counter + progress
+    // bar stay dropped.
+    //   • transition: `summary.inTransitionMode` (Bool) → a lime "TRANSITIONING"
+    //     hint. The model carries no next-phase target, so we do NOT name a
+    //     destination phase (the prototype's "→ INTENS" was a mock string).
+    //   • trend: `summary.trend` (ProgressionTrend) → a direction glyph; lime
+    //     only when progressing (the one meaningful accent), monochrome else.
     private func patternPhaseRow(_ summary: PatternSummary) -> some View {
         HStack(spacing: 10) {
             // Human-readable pattern name (e.g. "Horizontal Push")
@@ -536,6 +542,15 @@ struct ProgramOverviewView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Apex.text.opacity(0.85))
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Transition hint — only when the pattern is genuinely transitioning.
+            if summary.inTransitionMode {
+                Text("TRANSITIONING")
+                    .font(.system(size: 9, weight: .black))
+                    .fontWidth(.condensed)
+                    .tracking(0.4)
+                    .foregroundStyle(Apex.accent)
+            }
 
             // Phase badge — monochrome, outlined.
             Text(shortPhaseName(summary.currentPhase))
@@ -546,8 +561,42 @@ struct ProgramOverviewView: View {
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
                 .background(Capsule().stroke(Apex.hairline, lineWidth: 1))
+
+            // Trend glyph — the real ProgressionTrend direction.
+            trendGlyph(summary.trend, transitioning: summary.inTransitionMode)
         }
         .padding(.vertical, 11)
+    }
+
+    /// Direction glyph for a pattern's real capability trend. Lime is reserved
+    /// for the meaningful "progressing" signal (and the transition swap);
+    /// plateaued/declining stay monochrome.
+    @ViewBuilder
+    private func trendGlyph(_ trend: ProgressionTrend, transitioning: Bool) -> some View {
+        if transitioning {
+            Image(systemName: "arrow.triangle.swap")
+                .font(.system(size: 12, weight: .black))
+                .foregroundStyle(Apex.accent)
+                .accessibilityLabel("Transitioning")
+        } else {
+            switch trend {
+            case .progressing:
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Apex.accent)
+                    .accessibilityLabel("Progressing")
+            case .plateaued:
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Apex.textFaint)
+                    .accessibilityLabel("Plateaued")
+            case .declining:
+                Image(systemName: "arrow.down.right")
+                    .font(.system(size: 12, weight: .black))
+                    .foregroundStyle(Apex.textDim)
+                    .accessibilityLabel("Declining")
+            }
+        }
     }
 
     private func shortPhaseName(_ phase: MesocyclePhase) -> String {
@@ -702,6 +751,24 @@ private struct WeekRowView: View {
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
+
+            // Deload rationale line (#507). The week model carries no per-week
+            // fatigue data, so this is an HONEST generic planned-deload line
+            // derived from `week.isDeload` — no fabricated RPE / volume numbers.
+            if week.isDeload {
+                HStack(spacing: 6) {
+                    Image(systemName: "moon.zzz.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Apex.textDim)
+                    Text("PLANNED DELOAD · REDUCED VOLUME, INTENSITY MAINTAINED")
+                        .font(.system(size: 9, weight: .bold))
+                        .fontWidth(.condensed)
+                        .tracking(0.4)
+                        .foregroundStyle(Apex.textDim)
+                        .lineLimit(2)
+                }
+                .padding(.horizontal, 14)
+            }
 
             // Day cards scroll row
             ScrollView(.horizontal, showsIndicators: false) {
