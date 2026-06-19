@@ -7,6 +7,32 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — The build-log site now updates itself
+
+**The problem (in plain words):**
+I put the public build-log website online, but it was a frozen snapshot — the
+diary and the green commit-graph on it only showed data up to the day I built
+it. Every time I shipped something new, the site would quietly fall behind
+unless I copied files across by hand.
+
+**What I changed:**
+Added a small robot (a GitHub Action) to this repo. Now every time I push my
+work, it counts up my commits for each day, grabs the latest diary, and sends
+both over to the website's own repo automatically. The website notices and
+rebuilds itself a minute later, so it always shows my newest days without me
+touching it. I also made the commit-graph stretch to the most recent day with
+activity, so brand-new days actually appear instead of stopping at an old date.
+
+**How I checked it:**
+Merged it and watched the first run go green, then looked at the website's repo:
+the robot had pushed today's diary and a fresh commit count that now includes
+today (it didn't a minute before). The whole loop works start to finish.
+
+**Status:** Merged to main (#513). The build-log site lives in its own repo and
+went live on Cloudflare earlier today; this is the piece that keeps it fresh.
+
+---
+
 ## 2026-06-19 — Two fixes to the mid-workout flow
 
 **The problem (in plain words):**
