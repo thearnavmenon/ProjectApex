@@ -1776,6 +1776,36 @@ private struct CompletedExerciseCard: View {
                 }
             }
 
+            // #507: coach reasoning — re-surface the AI's "why this weight/reps" the app
+            // already wrote + already fetched into `SetLog.aiPrescribed.reasoning`. One
+            // block per exercise, sourced from the most relevant logged set's reasoning
+            // (see `coachReasoning`). Omitted entirely when no logged set carries a
+            // non-empty reasoning (graceful omission — never fabricated). The "COACH"
+            // label + sparkles use the lime accent to mark the coach's voice (an allowed
+            // accent use, consistent with the prototype); the body stays monochrome.
+            if let reasoning = coachReasoning {
+                cardDivider
+                HStack(alignment: .top, spacing: 9) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Apex.accent)
+                        .padding(.top, 1)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("COACH")
+                            .font(.system(size: 9, weight: .bold))
+                            .tracking(0.8)
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.accent)
+                        Text(reasoning)
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Apex.textDim)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+            }
+
             // Add Set button — monochrome (secondary editing action, not the live action).
             cardDivider
             Button(action: { showAddSetSheet = true }) {
@@ -1839,6 +1869,26 @@ private struct CompletedExerciseCard: View {
 
     private var cardDivider: some View {
         Rectangle().fill(Apex.hairline).frame(height: 1)
+    }
+
+    /// #507: the single coach-reasoning string shown for this exercise's completed card.
+    /// Sourced from the heaviest working set's `aiPrescribed.reasoning` — the working set
+    /// is the one the prescription most centres on (warmups carry boilerplate), and this
+    /// mirrors the heaviest-working-set rule already used for the "last time" headline.
+    /// Falls back to the first logged set that carries any non-empty reasoning. Returns
+    /// nil — so the block is omitted — when no logged set has reasoning. Real text only.
+    private var coachReasoning: String? {
+        let working = setLogs.filter { $0.intent != .warmup }
+        let pool = working.isEmpty ? setLogs : working
+        let heaviestReasoning = pool
+            .max(by: { $0.weightKg < $1.weightKg })?
+            .aiPrescribed?.reasoning
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let r = heaviestReasoning, !r.isEmpty { return r }
+        // Fall back to the first logged set carrying any non-empty reasoning.
+        return setLogs.lazy
+            .compactMap { $0.aiPrescribed?.reasoning.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
     }
 }
 
