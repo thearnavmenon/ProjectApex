@@ -7,6 +7,42 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — The Progress tab now matches the rest of the app
+
+**The problem (in plain words):**
+Every screen in the app got the new look months ago — pure black, big bold
+condensed numbers, one bright lime colour for the important thing. Every screen
+except one: the Progress tab. It was still wearing its own old outfit — a dark
+mint-green "dashboard" style from an earlier redesign. So jumping to Progress felt
+like walking into a slightly different app.
+
+**What I changed:**
+Gave the Progress tab the same look as everywhere else, without changing a single
+number it shows:
+- The big "strongest lift" number up top is now the giant bold tabular style (the
+  whole number counts up when you've gained, with the decimal and "KG" sitting quietly
+  beside it).
+- The trend chart line, the pulsing "latest" dot, the personal-record dots (gold), and
+  the "you're behind on this muscle" warnings (amber) all use the app's shared colours.
+- Sharp-cornered cards with thin hairline edges instead of the old rounded mint cards.
+- The weekly-volume bar chart keeps a colour per muscle (it's the one place colour
+  actually means something), but I retuned them to muted tones and made sure chest is
+  no longer lime — lime is reserved for the one accent.
+- Deleted the old separate colour file the Progress tab used to carry around.
+
+Nothing about the data or the honesty changed: every insight still hides itself when
+there's nothing real to show.
+
+**How I checked it:**
+Built mock versions in the prototype playground first and got the look signed off,
+then built the whole app clean and took a real screenshot of the live Progress screen
+to confirm it looks right in the actual app (using a throwaway hook that I removed).
+
+**Status:** Shipped to main — PR #525, part of #524 (kept open for a final look on a
+real phone).
+
+---
+
 ## 2026-06-19 — A "how it works" page that explains the coach two ways
 
 **The problem (in plain words):**
