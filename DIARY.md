@@ -7,6 +7,49 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — The Program tab got the full redesign
+
+**The problem (in plain words):**
+The Program tab — the screen that shows your 12-week plan and the screen that
+shows a single day's exercises — was the last part of the app still wearing the
+old look. Everything else (workouts, settings) had moved to the clean black
+"Brutalist" style, so the Program tab stuck out. It was also a bit dumb: it
+listed the plan but never told you what to do next, never showed how you did
+last time, and never explained why a deload week was a deload.
+
+**What I changed:**
+First I rebuilt both screens in fake-data prototypes so I could see the new look
+before touching the real app, and got it signed off. Then a panel of four
+reviewers (a product person, a designer, a serious-lifter, and a "keep it
+simple" skeptic) suggested upgrades and I picked the good ones. The real work
+shipped as six small pieces:
+- Both Program screens restyled to the black/condensed/volt-lime identity.
+- A "NEXT UP" card at the top of the calendar with a big Start button — the
+  screen finally tells you what to train next.
+- Each exercise now shows what you lifted last time (with an up arrow if you're
+  improving) and your floor/stretch targets.
+- Completed days now show the coach's note explaining why it picked each weight
+  (we already wrote that note — we were just throwing it away).
+- A one-line reason on deload weeks, and the per-lift progress strip now shows
+  trend arrows and "transitioning" markers.
+
+Where the data didn't really exist (a fake session-length, a made-up deload
+percentage), I deliberately left it out rather than invent numbers.
+
+**How I checked it:**
+Each piece built green on its own; I scanned every change to confirm it only
+touched the look, not the behaviour, before merging. Then I built the whole app
+together (green) and ran it in the simulator with sample data to photograph both
+real screens — the new calendar and day view look right in the actual app, not
+just the mockups.
+
+**Status:** All six pieces merged (PRs #508, #509, #510, #511, #512, #514) under
+umbrella #507. Holding the umbrella open until I sign off on the look on a real
+device. One tiny follow-up noted: the day-header focus line shows the long
+muscle name instead of the short one.
+
+---
+
 ## 2026-06-19 — The build-log site now updates itself
 
 **The problem (in plain words):**
