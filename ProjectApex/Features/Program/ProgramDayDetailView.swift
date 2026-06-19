@@ -115,6 +115,16 @@ struct ProgramDayDetailView: View {
     /// The set log currently being edited (drives the edit sheet).
     @State private var editingSetLog: SetLog? = nil
 
+    // MARK: - Last-time + targets state (#507 — not-yet-started days)
+
+    /// Most-recent prior result per exercise, derived from a targeted read of this
+    /// day type's previous sessions. Keyed by exerciseId. Empty for exercises with
+    /// no prior history (graceful omission — never fabricated).
+    @State private var lastTimeByExercise: [String: LastTimeInfo] = [:]
+    /// Coach floor/stretch targets per movement pattern, read from the digest
+    /// projections. Empty when no projections exist (graceful omission).
+    @State private var projectionByPattern: [MovementPattern: PatternProjection] = [:]
+
     // DEBUG-only: read the Start Any Day dev mode flag from UserDefaults.
     #if DEBUG
     private var startAnyDayModeActive: Bool {
@@ -282,7 +292,12 @@ struct ProgramDayDetailView: View {
                             }
                         } else {
                             ForEach(Array(currentDay.exercises.enumerated()), id: \.element.id) { index, exercise in
-                                ExerciseDetailCard(exercise: exercise, index: index + 1)
+                                ExerciseDetailCard(
+                                    exercise: exercise,
+                                    index: index + 1,
+                                    lastTime: lastTimeByExercise[exercise.exerciseId],
+                                    projection: projectionForExercise(exercise)
+                                )
                             }
                         }
 
@@ -314,6 +329,10 @@ struct ProgramDayDetailView: View {
         .onAppear {
             if currentDay.status == .completed {
                 Task { await loadHistoricalSetLogs() }
+            } else if !currentDay.exercises.isEmpty {
+                // #507: a not-yet-started day with planned exercises — load last-time
+                // results + coach targets in the background (non-blocking, real data only).
+                Task { await loadLastTimeAndTargets() }
             }
             // Refresh live session state each time the view appears — this fires when the
             // user navigates back from WorkoutView so the exercise cards update immediately.
@@ -920,6 +939,124 @@ struct ProgramDayDetailView: View {
         originalSetLogs.merge(freshSnapshot) { existing, _ in existing }
     }
 
+    // MARK: - #507: Last-time results + coach targets (not-yet-started days)
+
+    /// Resolves the coach floor/stretch projection for a planned exercise by mapping
+    /// exercise → movement pattern → matching `PatternProjection`. Returns nil when the
+    /// exercise has no library entry or no projection exists for its pattern (omission).
+    private func projectionForExercise(_ exercise: PlannedExercise) -> PatternProjection? {
+        guard let pattern = ExerciseLibrary.lookup(exercise.exerciseId)?.movementPattern else { return nil }
+        return projectionByPattern[pattern]
+    }
+
+    /// Targeted, non-blocking read for a not-yet-started day:
+    ///   • Last-time result per planned exercise — the heaviest working set of that
+    ///     exercise's most-recent prior session of this day type, plus an up/flat trend
+    ///     vs. the session before it (by top-set e1RM). Real data only; exercises with
+    ///     no prior history are simply omitted from `lastTimeByExercise`.
+    ///   • Coach floor/stretch — read from the cached digest projections, keyed by pattern.
+    ///
+    /// Modelled on `ProgramViewModel.deepLiftHistory`: pull the recent prior sessions of
+    /// this `day_type` (excluding the current week, which has no session yet) and their
+    /// set logs in one `in (...)` query. Failures degrade to "no last-time element" rather
+    /// than fabricating a number.
+    @MainActor
+    private func loadLastTimeAndTargets() async {
+        // ── Coach targets — read projections from the cached digest (no network when warm) ──
+        let digest = await deps.traineeModelService.digest()
+        let projections = digest?.projections?.patternProjections ?? []
+        projectionByPattern = Dictionary(projections.map { ($0.pattern, $0) }, uniquingKeysWith: { first, _ in first })
+
+        // ── Last-time results — targeted read of this day type's prior sessions ──
+        let supabase = deps.supabaseClient
+        let userId = deps.resolvedUserId
+
+        // Most recent prior sessions of this day type, excluding the current week (no
+        // session exists for it yet, and we never want the in-progress session as "last").
+        let priorSessions: [LastTimeSessionRow]
+        do {
+            priorSessions = try await supabase.fetch(
+                LastTimeSessionRow.self,
+                table: "workout_sessions",
+                filters: [
+                    Filter(column: "user_id",     op: .eq,  value: userId.uuidString),
+                    Filter(column: "day_type",    op: .eq,  value: currentDay.dayLabel),
+                    Filter(column: "week_number", op: .neq, value: "\(week.weekNumber)"),
+                    Filter(column: "status",      op: .neq, value: "abandoned")
+                ],
+                order: "session_date.desc",
+                limit: 8
+            )
+        } catch {
+            print("[ProgramDayDetailView] last-time: session fetch failed: \(error.localizedDescription)")
+            return
+        }
+        guard !priorSessions.isEmpty else { return }
+
+        // Set logs for those sessions in one query.
+        let sessionIds = priorSessions.map(\.id.uuidString)
+        let inValue = "(\(sessionIds.joined(separator: ",")))"
+        let setLogs: [SetLog]
+        do {
+            setLogs = try await supabase.fetch(
+                SetLog.self,
+                table: "set_logs",
+                filters: [Filter(column: "session_id", op: .in, value: inValue)]
+            )
+        } catch {
+            print("[ProgramDayDetailView] last-time: set_logs fetch failed: \(error.localizedDescription)")
+            return
+        }
+
+        lastTimeByExercise = Self.lastTimeMap(
+            forExerciseIds: currentDay.exercises.map(\.exerciseId),
+            setLogs: setLogs
+        )
+    }
+
+    /// Pure derivation of the per-exercise last-time result from a flat list of prior set
+    /// logs. For each requested exercise: group its logs by session, order sessions by the
+    /// latest log timestamp, take the most-recent session's heaviest working set as the
+    /// headline, and set the trend up only when that session's top-set e1RM strictly beat
+    /// the session before it (flat otherwise — never an invented "up"). Static + pure so
+    /// the selection rule is unit-testable.
+    static func lastTimeMap(forExerciseIds exerciseIds: [String], setLogs: [SetLog]) -> [String: LastTimeInfo] {
+        let wanted = Set(exerciseIds)
+        let byExercise = Dictionary(grouping: setLogs.filter { wanted.contains($0.exerciseId) }, by: \.exerciseId)
+
+        var result: [String: LastTimeInfo] = [:]
+        for (exerciseId, logs) in byExercise {
+            // Group this exercise's logs into sessions, newest session first.
+            let sessions = Dictionary(grouping: logs, by: \.sessionId)
+                .map { (id: $0.key, logs: $0.value, latest: $0.value.map(\.loggedAt).max() ?? .distantPast) }
+                .sorted { $0.latest > $1.latest }
+            guard let mostRecent = sessions.first else { continue }
+
+            // Headline = heaviest working set (drop warmups when intent is known).
+            let working = mostRecent.logs.filter { $0.intent != .warmup }
+            let pool = working.isEmpty ? mostRecent.logs : working
+            guard let headline = pool.max(by: { $0.weightKg < $1.weightKg }) else { continue }
+
+            // Trend: top-set e1RM of most-recent session vs. the one before it.
+            let e1rm: ([SetLog]) -> Double = { setList in
+                setList.map { $0.weightKg * (1.0 + Double($0.repsCompleted) / 30.0) }.max() ?? 0
+            }
+            let trendUp: Bool
+            if sessions.count >= 2 {
+                trendUp = e1rm(mostRecent.logs) > e1rm(sessions[1].logs)
+            } else {
+                trendUp = false
+            }
+
+            result[exerciseId] = LastTimeInfo(
+                weightKg: headline.weightKg,
+                reps: headline.repsCompleted,
+                trendUp: trendUp
+            )
+        }
+        return result
+    }
+
     /// Patches the edited set log row in Supabase, deletes any stale embedding for that
     /// session+exercise, then writes a corrected embedding that explicitly describes what
     /// changed — so the AI's next RAG retrieval sees only accurate data.
@@ -1166,6 +1303,10 @@ private struct ExerciseDetailCard: View {
     /// Completed set logs for an in-progress session. Non-empty only when
     /// ProgramDayDetailView.isSessionActiveForThisDay == true.
     var liveSetLogs: [SetLog] = []
+    /// #507: most-recent prior result for this exercise (nil = no history → omit row).
+    var lastTime: LastTimeInfo? = nil
+    /// #507: coach floor/stretch targets for this exercise's pattern (nil = none → omit).
+    var projection: PatternProjection? = nil
 
     @State private var cuesExpanded = false
 
@@ -1208,6 +1349,14 @@ private struct ExerciseDetailCard: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 16)
 
+            // #507: Last-time result + coach floor/stretch — only when real data exists.
+            if lastTime != nil || projection != nil {
+                cardDivider
+                lastTimeAndTargetsRow
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+            }
+
             // Live set logs — shown when a session is in progress for this day
             if !liveSetLogs.isEmpty {
                 cardDivider
@@ -1230,6 +1379,58 @@ private struct ExerciseDetailCard: View {
 
     private var cardDivider: some View {
         Rectangle().fill(Apex.hairline).frame(height: 1)
+    }
+
+    // MARK: Last-Time + Targets (#507 — not-yet-started days)
+
+    /// "LAST TIME 92.5kg × 8 ↗" on the left; "FLOOR / STRETCH" coach targets on the
+    /// right. Each half renders only when its real data exists.
+    @ViewBuilder
+    private var lastTimeAndTargetsRow: some View {
+        HStack(spacing: 0) {
+            if let last = lastTime {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("LAST TIME")
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(0.6)
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
+                    HStack(spacing: 6) {
+                        ApexNumeral(text: last.label, size: 14, color: Apex.text)
+                        Image(systemName: last.trendUp ? "arrow.up.right" : "arrow.right")
+                            .font(.system(size: 11, weight: .black))
+                            .foregroundStyle(last.trendUp ? Apex.accent : Apex.textFaint)
+                    }
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            if let proj = projection {
+                HStack(spacing: 14) {
+                    targetCol(label: "FLOOR", value: formatTarget(proj.floor), color: Apex.text)
+                    targetCol(label: "STRETCH", value: formatTarget(proj.stretch), color: Apex.accent)
+                }
+            }
+        }
+    }
+
+    private func targetCol(label: String, value: String, color: Color) -> some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text(label)
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.6)
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textFaint)
+            ApexNumeral(text: value, size: 15, color: color)
+        }
+    }
+
+    /// Whole-number kg for clean target tiles (floor/stretch are kg projections).
+    private func formatTarget(_ kg: Double) -> String {
+        kg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", kg)
+            : String(format: "%.1f", kg)
     }
 
     // MARK: Live Set Logs (active session)
@@ -1434,6 +1635,36 @@ private struct WorkoutSessionRow: Decodable, Identifiable {
         case dayType     = "day_type"
         case weekNumber  = "week_number"
         case completed
+    }
+}
+
+// MARK: - LastTimeSessionRow (#507 — session id only)
+
+/// Lightweight `workout_sessions` row for the last-time lookup. Only `id` is decoded —
+/// ordering / limit happen server-side via the query parameters, so `session_date`
+/// (a bare-date Postgres `date`) never has to round-trip through the decoder. Same
+/// rationale as `WorkoutSessionRow`.
+private struct LastTimeSessionRow: Decodable, Identifiable {
+    let id: UUID
+}
+
+// MARK: - LastTimeInfo (#507 — most-recent prior result for an exercise)
+
+/// One exercise's most-recent prior result, rendered on a not-yet-started card.
+/// Derived only from real set logs — there is no "empty/placeholder" value: an
+/// exercise with no prior history is simply absent from the map.
+struct LastTimeInfo: Equatable {
+    let weightKg: Double
+    let reps: Int
+    /// True only when the most-recent session's top-set e1RM beat the session before it.
+    let trendUp: Bool
+
+    /// "92.5kg × 8" — drops the trailing ".0" for whole numbers.
+    var label: String {
+        let w = weightKg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", weightKg)
+            : String(format: "%.1f", weightKg)
+        return "\(w)kg × \(reps)"
     }
 }
 
