@@ -293,10 +293,17 @@ struct ProgramOverviewView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 12) {
+                    // NEXT UP hero — the calendar's primary action. Renders only when
+                    // there is a next incomplete day; an in-progress session turns it
+                    // into a Resume card (#507).
+                    nextUpHero(mesocycle: mesocycle)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+
                     // Phase progress bar header
                     phaseProgressBar(mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
                         .padding(.horizontal, 16)
-                        .padding(.top, 16)
+                        .padding(.top, hasNextUp(in: mesocycle) ? 0 : 16)
                         .id("header")
 
                     // Per-pattern phase tracking — collapsed by default
@@ -353,6 +360,121 @@ struct ProgramOverviewView: View {
         guard currentWeekIndex < mesocycle.weeks.count else { return }
         let targetWeek = mesocycle.weeks[currentWeekIndex]
         proxy.scrollTo(targetWeek.id, anchor: .top)
+    }
+
+    // MARK: - NEXT UP hero (#507)
+
+    /// True when there is a next incomplete day to surface a hero for. Drives the
+    /// phase-bar top padding so the bar sits flush when the program is complete and
+    /// no hero renders.
+    private func hasNextUp(in mesocycle: Mesocycle) -> Bool {
+        viewModel.nextIncompleteDay(in: mesocycle) != nil
+    }
+
+    /// The calendar's primary action: a prominent card at the top showing the next
+    /// workout with a one-tap way into it.
+    ///
+    /// • Program complete (no next incomplete day) → renders nothing.
+    /// • A session is live/paused → an "IN PROGRESS" Resume card whose action jumps
+    ///   to the Workout tab (the single live WorkoutView host), reusing `switchToTab`.
+    /// • Otherwise → a "NEXT UP" card that navigates to that day's detail using the
+    ///   SAME NavigationLink → ProgramDayDetailView the week rows use, so the
+    ///   Start/Generate gate logic stays in one place (not re-implemented here).
+    @ViewBuilder
+    private func nextUpHero(mesocycle: Mesocycle) -> some View {
+        if let next = viewModel.nextIncompleteDay(in: mesocycle) {
+            if deps.activeSessionCoordinator.liveTrainingDayId != nil {
+                // In-progress: jump to the live WorkoutView host on the Workout tab.
+                Button { switchToTab(1) } label: {
+                    nextUpHeroCard(day: next.day, week: next.week, isResume: true)
+                }
+                .buttonStyle(.plain)
+            } else {
+                // Not live: navigate to the day's detail; the Start/Generate gate
+                // lives there (same construction as WeekRowView).
+                NavigationLink {
+                    ProgramDayDetailView(
+                        day: next.day,
+                        week: next.week,
+                        mesocycleCreatedAt: mesocycle.createdAt,
+                        programId: mesocycle.id,
+                        viewModel: viewModel,
+                        gymProfile: gymProfile
+                    )
+                } label: {
+                    nextUpHeroCard(day: next.day, week: next.week, isResume: false)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// The hero card body shared by the NEXT UP and Resume variants.
+    private func nextUpHeroCard(day: TrainingDay, week: TrainingWeek, isResume: Bool) -> some View {
+        let muscles = uniqueHeroMuscles(from: day.exercises)
+        let weekday = weekdayLabel(dayOfWeek: day.dayOfWeek)
+        return VStack(alignment: .leading, spacing: 14) {
+            // Label row: NEXT UP / IN PROGRESS + week·weekday locator.
+            HStack {
+                ApexSectionLabel(text: isResume ? "In progress" : "Next up", color: Apex.accent)
+                Spacer()
+                Text("W\(week.weekNumber) · \(weekday)")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.6)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+            }
+
+            // Big day title.
+            Text(day.dayLabel.replacingOccurrences(of: "_", with: " ").uppercased())
+                .font(.system(size: 30, weight: .black))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
+                .lineLimit(1)
+
+            // Muscle chips + exercise count.
+            HStack(spacing: 8) {
+                ForEach(muscles.prefix(2), id: \.self) { muscle in
+                    ApexTagChip(text: muscle)
+                }
+                Text("· \(day.exercises.count) EX")
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(0.4)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+            }
+
+            // Primary action — filled volt-lime.
+            ApexButton(
+                title: isResume ? "Resume workout" : "Start workout",
+                icon: "play.fill"
+            )
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .apexCard(emphasized: true)
+    }
+
+    /// Deduplicated top-muscle labels for the hero, reusing the same shortening
+    /// the day cards use (`formattedShortMuscleName`).
+    private func uniqueHeroMuscles(from exercises: [PlannedExercise]) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for ex in exercises {
+            let muscle = ex.primaryMuscle.formattedShortMuscleName
+            if seen.insert(muscle).inserted {
+                result.append(muscle)
+            }
+            if result.count >= 2 { break }
+        }
+        return result
+    }
+
+    /// Weekday abbreviation from the ISO day-of-week (1 = Monday).
+    private func weekdayLabel(dayOfWeek: Int) -> String {
+        let days = ["", "MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+        guard dayOfWeek >= 1 && dayOfWeek <= 7 else { return "DAY" }
+        return days[dayOfWeek]
     }
 
     // MARK: - Pattern Progress Section
