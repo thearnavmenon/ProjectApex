@@ -7,6 +7,47 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — The build-log website got a polish pass
+
+**The problem (in plain words):**
+The build-log website — the public page where I write up each day's work — had a
+pile of small rough edges. The diary titles still showed my internal shorthand,
+things like "(#423)" or "(Phase 3 UI, commit 1 of 2)", so it read like a task
+tracker instead of a journal. Sharing a link showed no preview card, and there
+was no little icon in the browser tab. The phone screenshots on the homepage
+were about four times bigger than they needed to be, so the page was heavier
+than it should be. And some of the faint grey text was too dim to read.
+
+**What I changed:**
+A batch of small fixes, built in parallel by a handful of agents and shipped
+together:
+- Stripped the internal issue/phase shorthand off the shown titles — but kept
+  the real-words asides like "(the real reason saves were failing)", and the
+  #123 chips still show on the status line.
+- Added a proper share card (a bold "WHAT I'VE BEEN WORKING ON" poster) and a
+  tab icon (a lime grid with a little dumbbell cut out of it). I rendered a few
+  options for each and picked.
+- Made shared day-links friendlier: a real headline, a one-line "what is this
+  app" note at the top, and a proper page description.
+- Shrank the phone screenshots to a modern format (about 980KB down to ~150KB)
+  and told the browser to cache the images for a long time.
+- The commit totals on the heatmap now count up when they scroll into view.
+- Bumped the faint grey text so it's readable, and put a visible outline back on
+  entries when you tab onto them with the keyboard.
+- Added a small footer, a robots file, and a sitemap so search engines find it.
+
+**How I checked it:**
+Built the site (still 14 pages, no errors) and clicked around a local copy — the
+titles are clean, the share card and icon show up, the day pages have headlines,
+and the screenshots are sharp but small. Then pushed it live and checked the real
+site: the preview card, the icon, the sitemap, and the long-cache headers are all
+serving from thearnavmenon.com.
+
+**Status:** Shipped and live at thearnavmenon.com (build-log site repo). No
+separate issue tracker for that repo, so it landed straight on its main.
+
+---
+
 ## 2026-06-19 — The Program tab got the full redesign
 
 **The problem (in plain words):**
