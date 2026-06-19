@@ -7,6 +7,25 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — Tidied the muscle name on the day screen
+
+**The problem (in plain words):**
+On a day's exercise screen, the little summary line at the top spelled out the
+full muscle name — "3 EXERCISES · PECTORALIS MAJOR" — while the calendar showed
+the friendly short version, "CHEST". Small inconsistency, but it looked untidy.
+
+**What I changed:**
+Made that summary line use the same short names the calendar uses, so it now
+reads "3 EXERCISES · CHEST · TRICEPS." (The detailed name under each individual
+exercise is left as-is.)
+
+**How I checked it:**
+Built the app clean and confirmed it compiled.
+
+**Status:** Merged (PR #521, under umbrella #507).
+
+---
+
 ## 2026-06-19 — The Program top card now knows when a workout is paused
 
 **The problem (in plain words):**
