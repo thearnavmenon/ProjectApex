@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — A "how I designed it" page on the build-log site
+
+**The problem (in plain words):**
+The build-log site showed the finished app and the finished site, but not the
+part I find most interesting: all the options I tried and threw away to get
+there. There was nowhere that showed the actual creative process.
+
+**What I changed:**
+Added a new page (reachable from the homepage and the footer) that walks through
+every design decision as a little "here's what I tried, here's what I kept". For
+each one it lays the options out side by side with the version that actually
+shipped marked. It covers both the app and this site:
+- The workout screens, built three different ways (a data-heavy "instrument"
+  one, a stark "brutalist" one, and a calm one). Brutalist won, and then I
+  rolled that look across the whole core flow.
+- Four ways I tried to put my name on the site's front page, then I cut the name
+  entirely and just called it "Build Log".
+- The page layout, the diary section, the share card, and the tab icon, each
+  with the options I weighed.
+I picked the page's own layout the same way I pick everything visual: rendered a
+few versions and chose one. The old option images were just scratch files spread
+across two folders, so I cleaned up and shrank the good ones into the site.
+
+**How I checked it:**
+Built the site (now 15 pages), opened it locally to confirm every image loaded
+and the "shipped" picks were marked right, then pushed it live and checked the
+new page, its images, and the homepage link all work on the real site.
+
+**Status:** Shipped and live at thearnavmenon.com/design.
+
+---
+
 ## 2026-06-19 — The build-log website got a polish pass
 
 **The problem (in plain words):**
