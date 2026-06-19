@@ -4,6 +4,11 @@
 // Single source of truth for muscle group → Color mapping used across the
 // Progress tab. Does not replace the copy-pasted versions in other files;
 // new Progress-tab code references this instead.
+//
+// Palette tuned for the Brutalist Athletic identity (#524): muted, non-rainbow
+// tones that sit inside the pure-black + condensed-slab system. Used only where
+// colour carries data (the volume stacked-bar chart + its legend) — chest is
+// deliberately NOT lime, since volt-lime is reserved for the screen's accent.
 
 import SwiftUI
 
@@ -25,15 +30,15 @@ nonisolated enum MuscleColor {
     /// Typed-switch overload — preferred for new call sites.
     static func color(for muscle: PrimaryMuscle) -> Color {
         switch muscle {
-        case .chest:       return Color(red: 0.96, green: 0.36, blue: 0.36)
-        case .back:        return Color(red: 0.30, green: 0.60, blue: 0.96)
-        case .shoulders:   return Color(red: 0.96, green: 0.60, blue: 0.20)
-        case .quads:       return Color(red: 0.30, green: 0.80, blue: 0.40)
-        case .hamstrings:  return Color(red: 0.20, green: 0.70, blue: 0.65)
-        case .glutes:      return Color(red: 0.90, green: 0.45, blue: 0.70)
-        case .biceps:      return Color(red: 0.65, green: 0.40, blue: 0.90)
-        case .triceps:     return Color(red: 0.96, green: 0.80, blue: 0.20)
-        case .calves:      return Color(red: 0.40, green: 0.45, blue: 0.90)
+        case .chest:       return Color(red: 0.86, green: 0.52, blue: 0.50) // muted coral (NOT lime)
+        case .back:        return Color(red: 0.44, green: 0.58, blue: 0.74) // muted blue
+        case .shoulders:   return Color(red: 0.70, green: 0.52, blue: 0.74) // muted violet
+        case .quads:       return Color(red: 0.85, green: 0.66, blue: 0.30) // muted gold
+        case .hamstrings:  return Color(red: 0.40, green: 0.72, blue: 0.66) // muted teal
+        case .glutes:      return Color(red: 0.80, green: 0.52, blue: 0.64) // muted rose
+        case .biceps:      return Color(red: 0.60, green: 0.56, blue: 0.80) // muted lavender
+        case .triceps:     return Color(red: 0.80, green: 0.72, blue: 0.48) // muted sand
+        case .calves:      return Color(red: 0.52, green: 0.60, blue: 0.74) // muted slate
         }
     }
 }

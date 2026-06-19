@@ -1,21 +1,29 @@
 // ProgressView.swift
 // ProjectApex — Features/Progress
 //
-// Redesigned Progress tab — a premium dark "strength instrument".
-// Direction decided by an independent multi-agent design panel (lens A,
-// double axis-winner on craft + hierarchy), synthesised with grafts from the
-// other lenses. Presentation-only: ProgressViewModel is untouched; every value
-// shown is derived from its existing published arrays.
+// Progress tab, in the shared Brutalist Athletic identity (#524) — the same
+// pure-black + condensed-slab + one-volt-lime-accent system as the rest of the
+// app (DesignSystem/Apex*). Restyle of the former bespoke "premium dark" mint
+// layer; the bespoke ProgressDesignTokens set was retired with this change.
 //
 // Layout, top → bottom:
 //   0. Title + (optional) error line
-//   1. Hero + trend card — count-up e1RM, signed 4-wk delta, range pills,
-//      gradient area trend chart with gold PR markers + pulsing live dot,
-//      tappable exercise chip-rail
-//   2. Key-lift 2×2 grid — muscle-dot, e1RM, sparkline, delta; taps drive the hero
+//   1. Hero + trend card — big tabular signature numeral (whole + de-emphasised
+//      fraction + unit), signed 4-wk delta, range pills, lime area trend chart
+//      with gold PR markers + a pulsing live dot, tappable exercise chip-rail
+//   2. Key-lift 2×2 grid — monochrome lime dot, e1RM, sparkline, delta; taps drive the hero
 //   3. Volume — progressive disclosure (total + sparkline → stacked bars + legend)
 //   4. Consistency — streak caption + 12-week heatmap
 //   5. Coaching signals — calm per-pattern rows
+//
+// Accent discipline: volt-lime is the trend/data accent (chart line + live dot)
+// and the active control; gold = PR markers only; amber = volume deficits + stalls
+// only. Muscle dots are monochrome; the volume stacked bars use the muted muscle
+// palette (MuscleColor) because colour is the only way to read the stack.
+//
+// Presentation-only: ProgressViewModel is untouched; every value shown is
+// derived from its existing published arrays, and each insight hides honestly
+// when its source is empty.
 //
 // Motion: hero count-up (honestly gated on a real positive delta), staggered
 // section entrance, chart left-to-right draw-in, pulsing live dot, pulsing
@@ -28,7 +36,16 @@ import Charts
 import UIKit
 #endif
 
-private typealias DT = ProgressDesignTokens
+// MARK: - Progress-local accents the shared system doesn't carry
+
+private enum PG {
+    /// Decline / negative read — the design system has no red (lime is positive,
+    /// amber is caution); this is the one bespoke accent the Progress tab needs.
+    static let decline = Color(red: 0.95, green: 0.45, blue: 0.45)
+    static let sectionGap: CGFloat = 16
+    static let cardPad: CGFloat = 16
+    static let screenPad: CGFloat = 16
+}
 
 // MARK: - Authoritative-number presentation helper [Tier-1 #1]
 
@@ -81,7 +98,7 @@ struct ProgressScreenContent: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: DT.sectionGap) {
+            VStack(alignment: .leading, spacing: PG.sectionGap) {
                 titleHeader
                     .modifier(SectionEntrance(index: 0, appeared: appeared))
 
@@ -91,6 +108,8 @@ struct ProgressScreenContent: View {
                 } else if let lift = focus {
                     heroCard(lift)
                         .modifier(SectionEntrance(index: 1, appeared: appeared))
+                    ApexSectionLabel(text: "Key lifts")
+                        .modifier(SectionEntrance(index: 2, appeared: appeared))
                     keyLiftGrid
                         .modifier(SectionEntrance(index: 2, appeared: appeared))
                     if hasVolume {
@@ -110,12 +129,12 @@ struct ProgressScreenContent: View {
                         .modifier(SectionEntrance(index: 1, appeared: appeared))
                 }
             }
-            .padding(.horizontal, DT.screenPadding)
+            .padding(.horizontal, PG.screenPad)
             .padding(.top, 8)
             .padding(.bottom, 44)
         }
         .scrollIndicators(.hidden)
-        .background(DT.bg.ignoresSafeArea())
+        .background(Apex.bg.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.35), value: vm.isLoading)
         .onAppear {
             // Flip on the next runloop so the false→true change animates the entrance.
@@ -131,13 +150,15 @@ struct ProgressScreenContent: View {
 
     private var titleHeader: some View {
         VStack(alignment: .leading, spacing: 6) {
+            ApexSectionLabel(text: "Strength · last 90 days", color: Apex.accent)
             Text("Progress")
-                .font(DT.screenTitle)
-                .foregroundStyle(.white)
+                .font(.system(size: 32, weight: .black))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
             if let err = vm.errorMessage {
                 Text(err)
-                    .font(DT.caption)
-                    .foregroundStyle(DT.down)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(PG.decline)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -146,82 +167,94 @@ struct ProgressScreenContent: View {
     // MARK: 1 — Hero + trend card
 
     private func heroCard(_ lift: KeyLiftSummary) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(lift.name.uppercased())
-                        .font(DT.caption)
-                        .tracking(0.6)
-                        .foregroundStyle(DT.neutral)
-                        .lineLimit(1)
-
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        CountingNumber(value: shownE1RM)
-                            .font(DT.hero)
-                            .foregroundStyle(.white)
-                        Text("kg")
-                            .font(DT.heroUnit)
-                            .foregroundStyle(DT.neutral)
-                        // The authoritative headline is a smoothed average of recent
-                        // top sets, so it can sit a touch below the latest chart dot.
-                        // Flag it as smoothed — only when we're actually showing the
-                        // EWMA (not the client-best fallback). [Tier-1 review]
-                        if lift.authoritativeE1RM != nil {
-                            Text("· smoothed")
-                                .font(DT.caption)
-                                .foregroundStyle(DT.neutral)
-                        }
-                    }
-
-                    deltaOrHolding(lift)
-                        .opacity(deltaShown ? 1 : 0)
-                        .offset(y: deltaShown ? 0 : 8)
-
-                    confidenceChip(lift)
-                }
-                Spacer(minLength: 0)
-            }
-
-            HStack {
-                Spacer()
+                Text(lift.name.uppercased())
+                    .font(.system(size: 13, weight: .bold))
+                    .tracking(0.8)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textDim)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
                 rangePills
             }
 
+            // Big tabular signature numeral with the WeightParts truncation fix:
+            // the whole part rolls up on a real gain, the fraction + unit are static.
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                HeroWholeNumber(value: shownE1RM)
+                if let frac = WeightParts(lift.displayE1RM).frac {
+                    Text(frac)
+                        .font(Apex.numeral(40))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textDim)
+                }
+                Text(" KG")
+                    .font(Apex.numeral(24))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+                    .baselineOffset(2)
+            }
+
+            deltaOrHolding(lift)
+                .opacity(deltaShown ? 1 : 0)
+                .offset(y: deltaShown ? 0 : 8)
+
+            confidenceChip(lift)
+
             StrengthTrendChart(points: windowedPoints(lift))
                 .id(lift.exerciseId + range.rawValue)   // re-create → re-run draw-in on focus/range change
-                .frame(height: 190)
+                .frame(height: 180)
+                .padding(.top, 2)
 
             chipRail
         }
-        .padding(DT.heroPadding)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DT.surface1, in: RoundedRectangle(cornerRadius: DT.cardRadius))
+        .apexCard()
     }
 
     @ViewBuilder
     private func deltaOrHolding(_ lift: KeyLiftSummary) -> some View {
-        if let d = lift.deltaVs4WeeksAgo, abs(d) >= 0.05 {
-            let positive = d > 0
-            HStack(spacing: 6) {
+        HStack(spacing: 10) {
+            if let d = lift.deltaVs4WeeksAgo, abs(d) >= 0.05 {
+                let positive = d > 0
+                let c = positive ? Apex.accent : PG.decline
                 HStack(spacing: 4) {
-                    Image(systemName: positive ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 11, weight: .bold))
-                    Text("\(positive ? "+" : "")\(fmt(d)) kg")
-                        .font(DT.caption)
+                    Image(systemName: positive ? "arrow.up" : "arrow.down")
+                        .font(.system(size: 10, weight: .black))
+                    Text("\(positive ? "+" : "")\(fmt(d)) KG")
+                        .font(.system(size: 12, weight: .bold))
+                        .fontWidth(.condensed)
                 }
-                .foregroundStyle(positive ? DT.up : DT.down)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background((positive ? DT.up : DT.down).opacity(0.14), in: Capsule())
+                .foregroundStyle(positive ? Apex.accent.opacity(0.95) : c)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(c.opacity(0.14)))
+                .overlay(Capsule().stroke(c.opacity(0.30), lineWidth: 0.5))
 
-                Text("vs 4 wks")
-                    .font(DT.caption)
-                    .foregroundStyle(DT.neutral)
+                Text("VS 4 WKS")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.4)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+            } else {
+                Text("HOLDING AT \(fmt(lift.displayE1RM)) KG")
+                    .font(.system(size: 12, weight: .bold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
             }
-        } else {
-            Text("Holding at \(fmt(lift.displayE1RM)) kg")
-                .font(DT.caption)
-                .foregroundStyle(DT.neutral)
+
+            // The authoritative headline is a smoothed average of recent top sets,
+            // so it can sit a touch below the latest chart dot. Flag it as smoothed
+            // only when we're actually showing the EWMA (not the fallback). [Tier-1]
+            if lift.authoritativeE1RM != nil {
+                Text("· SMOOTHED")
+                    .font(.system(size: 10, weight: .semibold))
+                    .tracking(0.4)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
+            }
         }
     }
 
@@ -231,12 +264,14 @@ struct ProgressScreenContent: View {
     @ViewBuilder
     private func confidenceChip(_ lift: KeyLiftSummary) -> some View {
         if let summary = vm.exerciseSummaries[lift.exerciseId] {
-            Text(confidenceChipText(summary))
-                .font(DT.caption)
-                .foregroundStyle(DT.neutral)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(DT.surface2, in: Capsule())
+            Text(confidenceChipText(summary).uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .tracking(0.5)
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textDim)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(Capsule().stroke(Apex.hairline, lineWidth: 1))
         }
     }
 
@@ -258,17 +293,22 @@ struct ProgressScreenContent: View {
     }
 
     private var rangePills: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             ForEach(TrendRange.allCases) { r in
                 Button {
                     withAnimation(.snappy) { range = r }
                 } label: {
-                    Text(r.rawValue)
-                        .font(DT.caption)
-                        .foregroundStyle(range == r ? DT.bg : DT.neutral)
-                        .padding(.horizontal, 12)
+                    Text(r.rawValue.uppercased())
+                        .font(.system(size: 11, weight: .bold))
+                        .tracking(0.5)
+                        .fontWidth(.condensed)
+                        .foregroundStyle(range == r ? Apex.onAccent : Apex.textDim)
+                        .padding(.horizontal, 11)
                         .padding(.vertical, 6)
-                        .background(range == r ? DT.accent : DT.surface2, in: Capsule())
+                        .background {
+                            if range == r { Capsule().fill(Apex.accent) }
+                            else { Capsule().stroke(Apex.hairline, lineWidth: 1) }
+                        }
                 }
                 .buttonStyle(PressableStyle())
             }
@@ -277,24 +317,31 @@ struct ProgressScreenContent: View {
 
     private var chipRail: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
                 ForEach(vm.keyLifts) { lift in
                     let selected = focus?.exerciseId == lift.exerciseId
                     Button {
                         withAnimation(.snappy) { vm.selectedTrendExercise = lift.exerciseId }
                     } label: {
                         Text(lift.name)
-                            .font(DT.caption)
-                            .foregroundStyle(selected ? DT.bg : .white.opacity(0.8))
+                            .font(.system(size: 12, weight: .bold))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(selected ? Apex.onAccent : Apex.textDim)
                             .lineLimit(1)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
-                            .background(selected ? DT.accent : DT.surface2, in: Capsule())
+                            .background {
+                                if selected {
+                                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous).fill(Apex.accent)
+                                } else {
+                                    RoundedRectangle(cornerRadius: Apex.corner, style: .continuous).stroke(Apex.hairline, lineWidth: 1)
+                                }
+                            }
                     }
                     .buttonStyle(PressableStyle())
                 }
             }
-            .padding(.horizontal, 2)
+            .padding(.horizontal, 1)
         }
     }
 
@@ -302,8 +349,8 @@ struct ProgressScreenContent: View {
 
     private var keyLiftGrid: some View {
         LazyVGrid(
-            columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)],
-            spacing: 12
+            columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)],
+            spacing: 10
         ) {
             ForEach(vm.keyLifts) { lift in
                 Button {
@@ -331,16 +378,13 @@ struct ProgressScreenContent: View {
             } label: {
                 HStack(alignment: .center) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("VOLUME")
-                            .font(DT.caption).tracking(0.6)
-                            .foregroundStyle(DT.neutral)
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("\(vm.recentSessionsSetCount)")
-                                .font(DT.statNumber)
-                                .foregroundStyle(.white)
-                            Text("sets · last ~7 sessions")
-                                .font(.system(size: 12))
-                                .foregroundStyle(DT.neutral)
+                        ApexSectionLabel(text: "Volume")
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
+                            ApexNumeral(text: "\(vm.recentSessionsSetCount)", size: 30)
+                            Text("SETS · LAST ~7 SESSIONS")
+                                .font(.system(size: 11, weight: .bold))
+                                .fontWidth(.condensed)
+                                .foregroundStyle(Apex.textFaint)
                         }
                     }
                     Spacer()
@@ -350,7 +394,7 @@ struct ProgressScreenContent: View {
                     }
                     Image(systemName: "chevron.down")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DT.neutral)
+                        .foregroundStyle(Apex.textFaint)
                         .rotationEffect(.degrees(volumeExpanded ? 180 : 0))
                 }
             }
@@ -362,9 +406,16 @@ struct ProgressScreenContent: View {
             if !volumeDeficits.isEmpty {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(volumeDeficits, id: \.muscleGroup) { summary in
-                        Text("\(summary.muscleGroup.rawValue.capitalized) · \(summary.volumeDeficit) sets below target")
-                            .font(DT.caption)
-                            .foregroundStyle(DT.amber)
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(Apex.amber)
+                            Text("\(summary.muscleGroup.rawValue.uppercased()) · \(summary.volumeDeficit) SETS BELOW TARGET")
+                                .font(.system(size: 11, weight: .bold))
+                                .tracking(0.3)
+                                .fontWidth(.condensed)
+                                .foregroundStyle(Apex.amber)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -379,42 +430,43 @@ struct ProgressScreenContent: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(DT.cardPadding)
+        .padding(PG.cardPad)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DT.surface2, in: RoundedRectangle(cornerRadius: DT.cardRadius))
+        .apexCard()
     }
 
     // MARK: 4 — Consistency
 
     private var consistencyCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 6) {
+            HStack(spacing: 7) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(DT.prGold)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Apex.gold)
                     .symbolEffect(.pulse, options: .repeating)
-                Text(streakLabel)
-                    .font(DT.cardTitle)
-                    .foregroundStyle(.white)
+                Text(streakLabel.uppercased())
+                    .font(.system(size: 15, weight: .black))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
                 Spacer()
             }
             HeatmapGrid(cells: vm.heatmapData)
             heatmapLegend
         }
-        .padding(DT.cardPadding)
+        .padding(PG.cardPad)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DT.surface2, in: RoundedRectangle(cornerRadius: DT.cardRadius))
+        .apexCard()
     }
 
     private var heatmapLegend: some View {
         HStack(spacing: 14) {
-            legendDot(DT.emptyCell, "None")
-            legendDot(DT.accent.opacity(0.7), "Session")
+            legendDot(Color.white.opacity(0.05), "None")
+            legendDot(Apex.accent.opacity(0.7), "Session")
             HStack(spacing: 4) {
                 RoundedRectangle(cornerRadius: 2)
-                    .strokeBorder(DT.prGold, lineWidth: 1)
+                    .strokeBorder(Apex.gold, lineWidth: 1)
                     .frame(width: 10, height: 10)
-                Text("PR").font(DT.caption).foregroundStyle(DT.neutral)
+                Text("PR").font(.system(size: 10, weight: .bold)).fontWidth(.condensed).foregroundStyle(Apex.textFaint)
             }
             Spacer()
         }
@@ -423,28 +475,28 @@ struct ProgressScreenContent: View {
     private func legendDot(_ color: Color, _ label: String) -> some View {
         HStack(spacing: 4) {
             RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 10)
-            Text(label).font(DT.caption).foregroundStyle(DT.neutral)
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .bold)).fontWidth(.condensed)
+                .foregroundStyle(Apex.textFaint)
         }
     }
 
     // MARK: 5 — Coaching signals
 
     private var patternCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("COACHING SIGNALS")
-                .font(DT.caption).tracking(0.6)
-                .foregroundStyle(DT.neutral)
-                .padding(.bottom, 6)
+        VStack(alignment: .leading, spacing: 0) {
+            ApexSectionLabel(text: "Coaching signals")
+                .padding(.bottom, 10)
             ForEach(Array(vm.patternTrends.enumerated()), id: \.element.pattern) { index, summary in
                 PatternRow(summary: summary)
                 if index < vm.patternTrends.count - 1 {
-                    Divider().overlay(Color.white.opacity(0.06))
+                    Rectangle().fill(Apex.hairline.opacity(0.6)).frame(height: 1)
                 }
             }
         }
-        .padding(DT.cardPadding)
+        .padding(PG.cardPad)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DT.surface2, in: RoundedRectangle(cornerRadius: DT.cardRadius))
+        .apexCard()
     }
 
     // MARK: Empty state
@@ -453,19 +505,20 @@ struct ProgressScreenContent: View {
         VStack(spacing: 12) {
             Image(systemName: "chart.line.uptrend.xyaxis")
                 .font(.system(size: 34, weight: .light))
-                .foregroundStyle(DT.accent)
+                .foregroundStyle(Apex.accent)
             Text("Your progress starts here")
-                .font(DT.cardTitle)
-                .foregroundStyle(.white)
+                .font(.system(size: 20, weight: .black))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
             Text("Complete a few workouts and your strongest lifts, trends, and streak will appear.")
-                .font(DT.bodyText)
-                .foregroundStyle(DT.neutral)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(Apex.textDim)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
         .padding(.horizontal, 24)
-        .background(DT.surface2, in: RoundedRectangle(cornerRadius: DT.cardRadius))
+        .apexCard()
     }
 
     // MARK: - Derived values (presentation-only; VM untouched)
@@ -600,7 +653,7 @@ private struct StrengthTrendChart: View {
                 .interpolationMethod(.catmullRom)
                 .foregroundStyle(
                     LinearGradient(
-                        colors: [DT.accent.opacity(0.28), DT.accent.opacity(0.02)],
+                        colors: [Apex.accent.opacity(0.30), Apex.accent.opacity(0.02)],
                         startPoint: .top, endPoint: .bottom
                     )
                 )
@@ -611,27 +664,27 @@ private struct StrengthTrendChart: View {
                     y: .value("e1RM", p.e1RM)
                 )
                 .interpolationMethod(.catmullRom)
-                .foregroundStyle(DT.accent)
+                .foregroundStyle(Apex.accent)
                 .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
             }
             ForEach(points.filter(\.isAllTimeBest)) { p in
                 PointMark(x: .value("Date", p.date), y: .value("e1RM", p.e1RM))
                     .symbolSize(170)
-                    .foregroundStyle(DT.prGold.opacity(0.22))
+                    .foregroundStyle(Apex.gold.opacity(0.22))
                 PointMark(x: .value("Date", p.date), y: .value("e1RM", p.e1RM))
                     .symbolSize(56)
-                    .foregroundStyle(DT.prGold)
+                    .foregroundStyle(Apex.gold)
             }
         }
         .chartYAxis {
             AxisMarks { _ in
-                AxisGridLine().foregroundStyle(DT.gridLine)
+                AxisGridLine().foregroundStyle(Color.white.opacity(0.06))
             }
         }
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { _ in
                 AxisValueLabel(format: .dateTime.month(.abbreviated))
-                    .foregroundStyle(DT.neutral)
+                    .foregroundStyle(Apex.textFaint)
             }
         }
         .chartPlotStyle { $0.background(Color.clear) }
@@ -642,7 +695,7 @@ private struct StrengthTrendChart: View {
                    let px = proxy.position(forX: last.date),
                    let py = proxy.position(forY: last.e1RM) {
                     let rect = geo[anchor]
-                    PulsingDot(color: DT.accent)
+                    PulsingDot(color: Apex.accent)
                         .position(x: rect.minX + px, y: rect.minY + py)
                         .opacity(reveal >= 1 ? 1 : 0)
                 }
@@ -668,71 +721,60 @@ private struct KeyLiftCard: View {
     let selected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 6) {
-                Circle().fill(muscleColor).frame(width: 8, height: 8)
+                Circle().fill(Apex.accent).frame(width: 6, height: 6)  // monochrome dot
                 Text(lift.name)
-                    .font(DT.caption)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .font(.system(size: 12, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textDim)
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
 
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(fmt(lift.displayE1RM))
-                    .font(DT.statNumber)
-                    .foregroundStyle(.white)
-                Text("kg")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DT.neutral)
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                ApexNumeral(text: fmt(lift.displayE1RM), size: 26)
+                Text("KG")
+                    .font(.system(size: 11, weight: .bold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
             }
 
             if points.count >= 2 {
-                LiftSparkline(points: points).frame(height: 26)
+                LiftSparkline(points: points).frame(height: 24)
             } else {
-                Color.clear.frame(height: 26)
+                Color.clear.frame(height: 24)
             }
 
             HStack(spacing: 4) {
-                Image(systemName: trendIcon).font(.system(size: 11, weight: .bold))
-                Text(deltaText).font(DT.caption)
+                Image(systemName: trendIcon).font(.system(size: 10, weight: .black))
+                Text(deltaText).font(.system(size: 11, weight: .bold)).fontWidth(.condensed)
             }
             .foregroundStyle(trendColor)
         }
-        .padding(14)
+        .padding(13)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DT.surface2, in: RoundedRectangle(cornerRadius: DT.cardRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: DT.cardRadius)
-                .strokeBorder(selected ? DT.accent : .clear, lineWidth: 1.5)
-        }
-    }
-
-    private var muscleColor: Color {
-        if let muscle = ExerciseLibrary.primaryMuscle(for: lift.exerciseId) {
-            return MuscleColor.color(for: muscle)
-        }
-        return DT.neutral
+        .apexCard(emphasized: selected)
     }
 
     private var deltaText: String {
         guard let d = lift.deltaVs4WeeksAgo, abs(d) >= 0.05 else { return "—" }
-        return "\(d > 0 ? "+" : "")\(fmt(d)) kg"
+        return "\(d > 0 ? "+" : "")\(fmt(d)) KG"
     }
 
     private var trendIcon: String {
         switch lift.trend {
-        case .up:   "chevron.up"
-        case .down: "chevron.down"
+        case .up:   "arrow.up"
+        case .down: "arrow.down"
         case .flat: "minus"
         }
     }
 
     private var trendColor: Color {
         switch lift.trend {
-        case .up:   DT.up
-        case .down: DT.down
-        case .flat: DT.neutral
+        case .up:   Apex.accent
+        case .down: PG.decline
+        case .flat: Apex.textFaint
         }
     }
 
@@ -747,7 +789,7 @@ private struct LiftSparkline: View {
         Chart(points) { p in
             LineMark(x: .value("Date", p.date), y: .value("e1RM", p.e1RM))
                 .interpolationMethod(.catmullRom)
-                .foregroundStyle(DT.accent)
+                .foregroundStyle(Apex.accent)
                 .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round))
         }
         .chartXAxis(.hidden)
@@ -762,7 +804,7 @@ private struct VolumeSummarySparkline: View {
         Chart(totals) { t in
             LineMark(x: .value("Week", t.label), y: .value("Sets", t.value))
                 .interpolationMethod(.catmullRom)
-                .foregroundStyle(DT.accent)
+                .foregroundStyle(Apex.accent)
                 .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round))
         }
         .chartXAxis(.hidden)
@@ -787,7 +829,7 @@ private struct VolumeBars: View {
                     BarMark(
                         x: .value("Week", row.weekLabel),
                         y: .value("Sets", row.setsByMuscle[muscle] ?? 0),
-                        width: .ratio(0.62)
+                        width: .ratio(0.6)
                     )
                     .foregroundStyle(MuscleColor.color(for: muscle))
                 }
@@ -795,13 +837,13 @@ private struct VolumeBars: View {
         }
         .chartXAxis {
             AxisMarks { _ in
-                AxisValueLabel().foregroundStyle(DT.neutral)
+                AxisValueLabel().foregroundStyle(Apex.textFaint)
             }
         }
         .chartYAxis {
             AxisMarks(values: .automatic(desiredCount: 3)) { _ in
-                AxisGridLine().foregroundStyle(DT.gridLine)
-                AxisValueLabel().foregroundStyle(DT.neutral)
+                AxisGridLine().foregroundStyle(Color.white.opacity(0.06))
+                AxisValueLabel().foregroundStyle(Apex.textFaint)
             }
         }
         .chartPlotStyle { $0.background(Color.clear) }
@@ -811,13 +853,14 @@ private struct VolumeBars: View {
 private struct MuscleLegend: View {
     let muscles: [String]
     var body: some View {
-        FlowLayout(spacing: 8) {
+        FlowLayout(spacing: 12) {
             ForEach(muscles, id: \.self) { muscle in
-                HStack(spacing: 4) {
-                    Circle().fill(MuscleColor.color(for: muscle)).frame(width: 8, height: 8)
+                HStack(spacing: 5) {
+                    Circle().fill(MuscleColor.color(for: muscle)).frame(width: 7, height: 7)
                     Text(muscle.capitalized)
-                        .font(.caption2)
-                        .foregroundStyle(DT.neutral)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Apex.textDim)
+                        .fixedSize()
                 }
             }
         }
@@ -839,8 +882,8 @@ private struct HeatmapGrid: View {
             VStack(spacing: gap) {
                 ForEach(0..<7, id: \.self) { day in
                     Text(dayLabels[day])
-                        .font(.system(size: 9))
-                        .foregroundStyle(DT.neutral)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(Apex.textFaint)
                         .frame(width: 12, height: size)
                 }
             }
@@ -868,23 +911,23 @@ private struct HeatmapGrid: View {
 
     @ViewBuilder
     private func cellView(_ cell: HeatmapCell?) -> some View {
-        let shape = RoundedRectangle(cornerRadius: DT.cellRadius)
+        let shape = RoundedRectangle(cornerRadius: 2, style: .continuous)
         shape
             .fill(fill(for: cell))
             .frame(width: size, height: size)
             .overlay {
                 if cell?.hasPR == true {
-                    shape.strokeBorder(DT.prGold, lineWidth: 1)
+                    shape.strokeBorder(Apex.gold, lineWidth: 1)
                 }
             }
     }
 
     private func fill(for cell: HeatmapCell?) -> Color {
-        guard let cell, cell.sessionCount > 0 else { return DT.emptyCell }
+        guard let cell, cell.sessionCount > 0 else { return Color.white.opacity(0.05) }
         switch cell.sessionCount {
-        case 1:  return DT.accent.opacity(0.35)
-        case 2:  return DT.accent.opacity(0.70)
-        default: return DT.accent
+        case 1:  return Apex.accent.opacity(0.35)
+        case 2:  return Apex.accent.opacity(0.70)
+        default: return Apex.accent
         }
     }
 }
@@ -896,36 +939,39 @@ private struct PatternRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(summary.pattern.displayName)
-                    .font(DT.bodyText)
-                    .foregroundStyle(.white)
-                Text(summary.currentPhase.rawValue.capitalized)
-                    .font(DT.caption)
-                    .foregroundStyle(DT.neutral)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Apex.text)
+                Text(summary.currentPhase.rawValue.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.5)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
                 // Repeated force-deloads → an actionable next move, not just a
                 // tally. Replaces the old "Deload ×N" chip. [Tier-1 #19, ADR-0011 §d]
                 if summary.consecutiveForceDeloadsOnPattern >= 2 {
                     Text("Keeps stalling — rotate the exercise or rebuild the block")
-                        .font(DT.caption)
-                        .foregroundStyle(DT.amber)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Apex.amber)
                 }
             }
             Spacer(minLength: 0)
 
             if summary.inTransitionMode {
                 Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 12))
-                    .foregroundStyle(DT.neutral)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Apex.textFaint)
             }
-            Text(confidenceLabel)
-                .font(DT.caption)
-                .foregroundStyle(DT.neutral)
+            Text(confidenceLabel.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.textDim)
             Image(systemName: trendIcon)
-                .font(.system(size: 12, weight: .bold))
+                .font(.system(size: 12, weight: .black))
                 .foregroundStyle(trendColor)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 11)
     }
 
     private var confidenceLabel: String {
@@ -939,17 +985,17 @@ private struct PatternRow: View {
 
     private var trendIcon: String {
         switch summary.trend {
-        case .progressing: "chevron.up"
+        case .progressing: "arrow.up"
         case .plateaued:   "minus"
-        case .declining:   "chevron.down"
+        case .declining:   "arrow.down"
         }
     }
 
     private var trendColor: Color {
         switch summary.trend {
-        case .progressing: DT.up
-        case .plateaued:   DT.neutral
-        case .declining:   DT.down
+        case .progressing: Apex.accent
+        case .plateaued:   Apex.textFaint
+        case .declining:   PG.decline
         }
     }
 }
@@ -959,8 +1005,8 @@ private struct PatternRow: View {
 private struct HeroSkeleton: View {
     @State private var shimmer = false
     var body: some View {
-        RoundedRectangle(cornerRadius: DT.cardRadius)
-            .fill(DT.surface1)
+        RoundedRectangle(cornerRadius: Apex.corner)
+            .fill(Apex.surface)
             .frame(height: 320)
             .overlay {
                 LinearGradient(
@@ -970,7 +1016,10 @@ private struct HeroSkeleton: View {
                 .frame(width: 160)
                 .offset(x: shimmer ? 280 : -280)
             }
-            .clipShape(RoundedRectangle(cornerRadius: DT.cardRadius))
+            .clipShape(RoundedRectangle(cornerRadius: Apex.corner))
+            .overlay {
+                RoundedRectangle(cornerRadius: Apex.corner).stroke(Apex.hairline, lineWidth: 1)
+            }
             .onAppear {
                 withAnimation(.linear(duration: 1.25).repeatForever(autoreverses: false)) {
                     shimmer = true
@@ -981,16 +1030,21 @@ private struct HeroSkeleton: View {
 
 // MARK: - Motion primitives
 
-/// A `Text` whose value animates digit-by-digit when changed inside an
-/// animation transaction (true rolling count-up).
-private struct CountingNumber: View, Animatable {
+/// The hero's big whole-number part, rendered in the condensed black tabular
+/// signature face. Animatable so it rolls up digit-by-digit on a real gain;
+/// the fraction + unit are drawn statically alongside it. Truncates toward zero
+/// to match `WeightParts` (so 142.5 reads "142" + ".5", never "143").
+private struct HeroWholeNumber: View, Animatable {
     var value: Double
     var animatableData: Double {
         get { value }
         set { value = newValue }
     }
     var body: some View {
-        Text(String(format: "%.1f", value))
+        Text(String(Int(value)))
+            .font(Apex.numeral(76))
+            .fontWidth(.condensed)
+            .foregroundStyle(Apex.text)
     }
 }
 
@@ -1007,7 +1061,7 @@ private struct PulsingDot: View {
             Circle()
                 .fill(color)
                 .frame(width: 9, height: 9)
-                .overlay(Circle().stroke(DT.bg, lineWidth: 2))
+                .overlay(Circle().stroke(Apex.bg, lineWidth: 2))
         }
         .onAppear {
             withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
@@ -1219,19 +1273,19 @@ extension PatternSummary {
 
 #Preview("Progress — populated") {
     ProgressScreenContent(vm: .makeMock())
-        .background(DT.bg)
+        .background(Apex.bg)
         .preferredColorScheme(.dark)
 }
 
 #Preview("Progress — loading") {
     ProgressScreenContent(vm: .makeMock(loading: true))
-        .background(DT.bg)
+        .background(Apex.bg)
         .preferredColorScheme(.dark)
 }
 
 #Preview("Progress — new user") {
     ProgressScreenContent(vm: .makeMock(newUser: true))
-        .background(DT.bg)
+        .background(Apex.bg)
         .preferredColorScheme(.dark)
 }
 #endif
