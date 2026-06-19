@@ -490,7 +490,8 @@ struct ProgramDayDetailView: View {
         var seen = Set<String>()
         var muscles: [String] = []
         for ex in currentDay.exercises {
-            let name = ex.primaryMuscle.formattedMuscleName.uppercased()
+            // Short form (e.g. "CHEST" not "PECTORALIS MAJOR") to match the calendar.
+            let name = ex.primaryMuscle.formattedShortMuscleName.uppercased()
             if seen.insert(name).inserted {
                 muscles.append(name)
             }
@@ -1613,6 +1614,25 @@ private extension String {
             .split(separator: " ")
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
+    }
+
+    /// Short, display-friendly muscle name from snake_case (e.g. "pectoralis_major"
+    /// → "Chest"). Mirrors the calendar's shortening so the day-header focus line
+    /// reads "CHEST" rather than "PECTORALIS MAJOR".
+    var formattedShortMuscleName: String {
+        let lower = self.lowercased()
+        if lower.contains("pector") { return "Chest" }
+        if lower.contains("lat_") || lower == "latissimus_dorsi" { return "Back" }
+        if lower.contains("deltoid") || lower.contains("delt") { return "Shoulders" }
+        if lower.contains("quadricep") { return "Quads" }
+        if lower.contains("hamstr") { return "Hamstrings" }
+        if lower.contains("glut") { return "Glutes" }
+        if lower.contains("bicep") { return "Biceps" }
+        if lower.contains("tricep") { return "Triceps" }
+        if lower.contains("calf") || lower.contains("gastro") { return "Calves" }
+        if lower.contains("abdom") || lower.contains("core") { return "Core" }
+        // Fallback: Title Case the raw string.
+        return formattedMuscleName
     }
 }
 
