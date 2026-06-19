@@ -1,0 +1,86 @@
+# ============================================================================
+# Publish diary to the build-log site (thearnavmenon/apex-buildlog).
+#
+# In plain words: on every push to main, this
+#   1. Counts how many commits happened on each calendar day -> commits.json
+#   2. Copies the diary file (DIARY.md)
+#   3. Pushes BOTH into the public build-log site repo's data/ folder, which
+#      makes Cloudflare rebuild the public site with fresh data.
+#
+# So this private app repo stays the single source of truth, and the public
+# build-log site picks up new diary + commit data automatically — the site repo
+# is never edited by hand.
+#
+# Requires the repo secret SITE_SYNC_TOKEN: a fine-grained PAT scoped to the
+# apex-buildlog repo only, with "Contents: Read and write".
+# ============================================================================
+
+name: Publish diary to build-log site
+
+on:
+  push:
+    branches: [main]
+  # Lets you re-run it by hand from the Actions tab if a sync is ever missed.
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      # fetch-depth: 0 is CRITICAL — by default only the latest commit is
+      # fetched, so `git log` would see ~1 commit and the heatmap would be empty.
+      - name: Check out ProjectApex (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Count commits per calendar day into the { "YYYY-MM-DD": N, ... } shape
+      # the site's data/commits.json expects.
+      - name: Build commits.json from git history
+        run: |
+          mkdir -p out
+          git log --date=short --pretty=format:'%ad' \
+            | sort \
+            | uniq -c \
+            | awk '
+                BEGIN { print "{" }
+                {
+                  if (NR > 1) printf ",\n"
+                  printf "  \"%s\": %d", $2, $1
+                }
+                END { print "\n}" }
+              ' > out/commits.json
+          echo "----- commits.json preview -----"
+          cat out/commits.json
+
+      - name: Copy DIARY.md
+        run: cp DIARY.md out/DIARY.md
+
+      # Push both files into the site repo's data/ folder using the fine-grained
+      # PAT (Contents: write on apex-buildlog only).
+      - name: Push commits.json into the build-log site repo
+        uses: dmnemec/copy_file_to_another_repo_action@v1.1.1
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.SITE_SYNC_TOKEN }}
+        with:
+          source_file: 'out/commits.json'
+          destination_repo: 'thearnavmenon/apex-buildlog'
+          destination_folder: 'data'
+          destination_branch: 'main'
+          user_email: 'actions@github.com'
+          user_name: 'projectapex-bot'
+          commit_message: 'chore(data): sync commits.json from ProjectApex'
+
+      - name: Push DIARY.md into the build-log site repo
+        uses: dmnemec/copy_file_to_another_repo_action@v1.1.1
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.SITE_SYNC_TOKEN }}
+        with:
+          source_file: 'out/DIARY.md'
+          destination_repo: 'thearnavmenon/apex-buildlog'
+          destination_folder: 'data'
+          destination_branch: 'main'
+          user_email: 'actions@github.com'
+          user_name: 'projectapex-bot'
+          commit_message: 'chore(data): sync DIARY.md from ProjectApex'
