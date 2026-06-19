@@ -7,6 +7,31 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — The Program top card now knows when a workout is paused
+
+**The problem (in plain words):**
+On the new Program screen, the big card at the top always said "NEXT UP — Start
+workout." But if I'd already started a session and paused it part-way (say my
+Pull day), the card still said "Start workout" — as if nothing was going on. It
+ignored the fact that a workout was sitting there paused, waiting to be resumed.
+
+**What I changed:**
+The top card now reads the app's live-session tracker and shows the real state:
+- If a workout is **paused**, it turns amber and says "PAUSED — Resume workout"
+  (taking you straight back into it).
+- If a workout is **live right now**, it says "LIVE NOW" and even shows how many
+  sets you've done.
+- Only when nothing is going on does it fall back to "NEXT UP — Start workout."
+
+**How I checked it:**
+Built the app and ran it in the simulator with a fake paused session for the
+Pull day — the top card correctly showed the amber "PAUSED — Resume workout" for
+Pull A instead of the old "Start workout." Photographed it to confirm.
+
+**Status:** Merged (PR #519, under umbrella #507).
+
+---
+
 ## 2026-06-19 — A "how I designed it" page on the build-log site
 
 **The problem (in plain words):**
