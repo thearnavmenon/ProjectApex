@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-19 — A "how it works" page that explains the coach two ways
+
+**The problem (in plain words):**
+The build-log site showed what the app looks like and how I designed it, but never
+the actually-interesting part: how the coach thinks. How does it decide what weight
+to tell you? How does it learn who you are? People had to take "it's smart" on faith.
+
+**What I changed:**
+Added a new page that explains the coach and its "brain" two ways, with a toggle to
+flip between them:
+- A plain version for anyone: how it learns you instead of using averages, why it
+  picks the exact weight it does, how it remembers the notes you leave it, how it
+  sharpens every session, and the fact that it won't make a number up.
+- A technical version for developers: the real internals. The three-layer memory,
+  the actual formulas (how it estimates your strength, smooths it, sets your
+  targets), how it grades and corrects its own past advice, the architecture, and a
+  "the hard parts" section with the genuine bugs and complications that shaped it.
+  The deepest details tuck behind "go deeper" toggles so it isn't a wall of text.
+All of it pulled from the real code, including the honest caveats (like which model
+it actually runs). I also added my Instagram and LinkedIn to the footer.
+
+**How I checked it:**
+Wrote it off three deep reads of the codebase so the technical claims are accurate,
+built the site (now 16 pages), opened both versions to check the toggle, the
+diagrams, and the formulas all render right, took the em-dashes out to match the
+site style, then pushed it live and confirmed both versions and the new links work
+on the real site.
+
+**Status:** Shipped and live at thearnavmenon.com/how-it-works.
+
+---
+
 ## 2026-06-19 — Tidied the muscle name on the day screen
 
 **The problem (in plain words):**
