@@ -368,55 +368,86 @@ struct ProgramOverviewView: View {
     /// phase-bar top padding so the bar sits flush when the program is complete and
     /// no hero renders.
     private func hasNextUp(in mesocycle: Mesocycle) -> Bool {
-        viewModel.nextIncompleteDay(in: mesocycle) != nil
+        let coord = deps.activeSessionCoordinator
+        // A live/paused session always surfaces a hero, even if every remaining
+        // day is otherwise terminal.
+        if coord.isLive || coord.pausedSessionExists { return true }
+        return viewModel.nextIncompleteDay(in: mesocycle) != nil
     }
 
-    /// The calendar's primary action: a prominent card at the top showing the next
-    /// workout with a one-tap way into it.
+    /// What the hero is currently showing — drives label, accent and action.
+    private enum HeroState { case idle, live, paused }
+
+    /// The calendar's primary action: a prominent card at the top reflecting the
+    /// program's current state.
     ///
-    /// • Program complete (no next incomplete day) → renders nothing.
-    /// • A session is live/paused → an "IN PROGRESS" Resume card whose action jumps
-    ///   to the Workout tab (the single live WorkoutView host), reusing `switchToTab`.
-    /// • Otherwise → a "NEXT UP" card that navigates to that day's detail using the
-    ///   SAME NavigationLink → ProgramDayDetailView the week rows use, so the
-    ///   Start/Generate gate logic stays in one place (not re-implemented here).
+    /// • A session is LIVE → a "LIVE NOW" card (volt-lime) showing set progress,
+    ///   whose action jumps to the Workout tab (the single live WorkoutView host).
+    /// • A session is PAUSED → a "PAUSED" card (amber) whose action jumps to the
+    ///   Workout tab to resume. (This is the state that previously, incorrectly,
+    ///   showed "Start workout".)
+    /// • Otherwise, if a next incomplete day exists → a "NEXT UP" card that
+    ///   navigates to that day's detail using the SAME NavigationLink →
+    ///   ProgramDayDetailView the week rows use, so the Start/Generate gate logic
+    ///   stays in one place (not re-implemented here).
+    /// • Program complete and no session → renders nothing.
     @ViewBuilder
     private func nextUpHero(mesocycle: Mesocycle) -> some View {
-        if let next = viewModel.nextIncompleteDay(in: mesocycle) {
-            if deps.activeSessionCoordinator.liveTrainingDayId != nil {
-                // In-progress: jump to the live WorkoutView host on the Workout tab.
-                Button { switchToTab(1) } label: {
-                    nextUpHeroCard(day: next.day, week: next.week, isResume: true)
-                }
-                .buttonStyle(.plain)
-            } else {
-                // Not live: navigate to the day's detail; the Start/Generate gate
-                // lives there (same construction as WeekRowView).
-                NavigationLink {
-                    ProgramDayDetailView(
-                        day: next.day,
-                        week: next.week,
-                        mesocycleCreatedAt: mesocycle.createdAt,
-                        programId: mesocycle.id,
-                        viewModel: viewModel,
-                        gymProfile: gymProfile
-                    )
-                } label: {
-                    nextUpHeroCard(day: next.day, week: next.week, isResume: false)
-                }
-                .buttonStyle(.plain)
+        let coord = deps.activeSessionCoordinator
+        if let liveId = coord.liveTrainingDayId,
+           let found = viewModel.findTrainingDay(byId: liveId, in: mesocycle) {
+            // Live: jump to the live WorkoutView host on the Workout tab.
+            Button { switchToTab(1) } label: {
+                nextUpHeroCard(day: found.day, week: found.week, state: .live)
             }
+            .buttonStyle(.plain)
+        } else if let pausedId = coord.pausedTrainingDayId,
+                  let found = viewModel.findTrainingDay(byId: pausedId, in: mesocycle) {
+            // Paused: jump to the Workout tab to resume the paused session.
+            Button { switchToTab(1) } label: {
+                nextUpHeroCard(day: found.day, week: found.week, state: .paused)
+            }
+            .buttonStyle(.plain)
+        } else if let next = viewModel.nextIncompleteDay(in: mesocycle) {
+            // Idle: navigate to the day's detail; the Start/Generate gate lives there
+            // (same construction as WeekRowView).
+            NavigationLink {
+                ProgramDayDetailView(
+                    day: next.day,
+                    week: next.week,
+                    mesocycleCreatedAt: mesocycle.createdAt,
+                    programId: mesocycle.id,
+                    viewModel: viewModel,
+                    gymProfile: gymProfile
+                )
+            } label: {
+                nextUpHeroCard(day: next.day, week: next.week, state: .idle)
+            }
+            .buttonStyle(.plain)
         }
     }
 
-    /// The hero card body shared by the NEXT UP and Resume variants.
-    private func nextUpHeroCard(day: TrainingDay, week: TrainingWeek, isResume: Bool) -> some View {
+    /// The hero card body, shared by the idle / live / paused variants. Paused uses
+    /// the amber accent (matching the app's paused convention); idle/live use lime.
+    private func nextUpHeroCard(day: TrainingDay, week: TrainingWeek, state: HeroState) -> some View {
         let muscles = uniqueHeroMuscles(from: day.exercises)
         let weekday = weekdayLabel(dayOfWeek: day.dayOfWeek)
+        let accent: Color = (state == .paused) ? Apex.amber : Apex.accent
+        let label: String = {
+            switch state {
+            case .idle:   return "Next up"
+            case .live:   return "Live now"
+            case .paused: return "Paused"
+            }
+        }()
+        let action = (state == .idle) ? "Start workout" : "Resume workout"
+        // Live set progress, when the live session is reporting it.
+        let liveSummary = (state == .live) ? deps.activeSessionCoordinator.liveSetSummary : nil
+
         return VStack(alignment: .leading, spacing: 14) {
-            // Label row: NEXT UP / IN PROGRESS + week·weekday locator.
+            // Label row: state + week·weekday locator.
             HStack {
-                ApexSectionLabel(text: isResume ? "In progress" : "Next up", color: Apex.accent)
+                ApexSectionLabel(text: label, color: accent)
                 Spacer()
                 Text("W\(week.weekNumber) · \(weekday)")
                     .font(.system(size: 11, weight: .bold))
@@ -432,27 +463,58 @@ struct ProgramOverviewView: View {
                 .foregroundStyle(Apex.text)
                 .lineLimit(1)
 
-            // Muscle chips + exercise count.
-            HStack(spacing: 8) {
-                ForEach(muscles.prefix(2), id: \.self) { muscle in
-                    ApexTagChip(text: muscle)
+            // Live set progress when available; otherwise muscle chips + exercise count.
+            if let s = liveSummary, s.setsCompleted > 0 {
+                HStack(spacing: 8) {
+                    Text("\(s.setsCompleted) SET\(s.setsCompleted == 1 ? "" : "S") DONE")
+                        .font(.system(size: 12, weight: .bold))
+                        .tracking(0.4)
+                        .fontWidth(.condensed)
+                        .foregroundStyle(accent)
+                    if let kg = s.lastWeightKg, let reps = s.lastRepsCompleted {
+                        Text("· \(formatHeroWeight(kg))kg × \(reps)")
+                            .font(.system(size: 12, weight: .bold))
+                            .tracking(0.4)
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.textFaint)
+                    }
                 }
-                Text("· \(day.exercises.count) EX")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(0.4)
-                    .fontWidth(.condensed)
-                    .foregroundStyle(Apex.textFaint)
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(muscles.prefix(2), id: \.self) { muscle in
+                        ApexTagChip(text: muscle)
+                    }
+                    Text("· \(day.exercises.count) EX")
+                        .font(.system(size: 12, weight: .bold))
+                        .tracking(0.4)
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
+                }
             }
 
-            // Primary action — filled volt-lime.
+            // Primary action — filled, accent-tinted (lime for start/resume-live,
+            // amber for resume-paused).
             ApexButton(
-                title: isResume ? "Resume workout" : "Start workout",
-                icon: "play.fill"
+                title: action,
+                icon: "play.fill",
+                tint: (state == .paused) ? Apex.amber : nil
             )
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .apexCard(emphasized: true)
+        .background {
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous).fill(Apex.surface)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(accent.opacity(0.55), lineWidth: 1.5)
+        }
+    }
+
+    private func formatHeroWeight(_ kg: Double) -> String {
+        kg.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", kg)
+            : String(format: "%.1f", kg)
     }
 
     /// Deduplicated top-muscle labels for the hero, reusing the same shortening
