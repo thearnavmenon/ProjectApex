@@ -7,6 +7,36 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-21 — The coach now actually uses your gym machines
+
+**The problem (in plain words):**
+We'd taught the app to *capture* gym machines (even custom ones), but the coach
+still wasn't reliably *using* them. Two gaps: several machines had no matching
+exercises in the coach's catalogue, so they were dead weight; and when the coach
+occasionally picked an exercise needing gear you don't have, the app just shrugged
+and let it through.
+
+**What I changed:**
+Added proper exercises for the machines that were missing them (rear-delt /
+reverse fly, assisted dip and pull-up, hip-thrust machine, calf-raise machine,
+T-bar row), so every machine you can list now maps to at least one real exercise.
+And the coach now strictly sticks to your equipment: if it ever prescribes
+something you can't do, the app drops that exercise — with a firm safety rule that
+it will never hand you an empty workout (bodyweight moves always count). The retry
+message the coach sends itself on a slip-up now uses the same clear equipment names.
+
+**How I checked:**
+Built the whole app and ran the new tests — 6 of them covering the enforcement,
+including the "never empty a session" safety rule and a custom machine being
+allowed. (One note for me: the build agent stalled partway, so I finished and
+verified this slice by hand, including fixing a Swift concurrency error it left.)
+
+**Status:** Shipped — PR #536, the last slice of the onboarding overhaul (#527).
+That completes the whole overhaul: new welcome flow, injuries, manual equipment +
+presets, the camera removed, and the coach now reliably using your machines.
+
+---
+
 ## 2026-06-20 — Out with the camera, in with smarter equipment
 
 **The problem (in plain words):**
