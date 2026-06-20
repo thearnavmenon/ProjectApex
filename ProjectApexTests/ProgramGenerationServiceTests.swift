@@ -550,12 +550,15 @@ final class ProgramGenerationServiceTests: XCTestCase {
         XCTAssertEqual(constraints["periodization_model"] as? String, "linear_periodization")
 
         let gymPayload = try XCTUnwrap(json["gym_profile"] as? [String: Any])
-        let available = try XCTUnwrap(gymPayload["available_equipment"] as? [String])
+        let available = try XCTUnwrap(gymPayload["available_equipment"] as? [[String: Any]])
         XCTAssertFalse(available.isEmpty,
                        "GymProfilePayload must list at least one equipment type.")
-        // mockProfile has a barbell
-        XCTAssertTrue(available.contains("barbell"),
-                      "GymProfilePayload must include barbell from mockProfile.")
+        // Each entry now carries BOTH the canonical key and the display name.
+        let barbell = available.first { $0["key"] as? String == "barbell" }
+        XCTAssertNotNil(barbell,
+                        "GymProfilePayload must include barbell from mockProfile.")
+        XCTAssertEqual(barbell?["name"] as? String, "Barbell",
+                       "available_equipment entries must carry the display name.")
     }
 
     // MARK: ─── 8. GymProfilePayload maps equipment type keys ─────────────────
@@ -571,9 +574,14 @@ final class ProgramGenerationServiceTests: XCTestCase {
         )
 
         for item in gymProfile.equipment {
-            XCTAssertTrue(
-                payload.availableEquipment.contains(item.equipmentType.typeKey),
+            let ref = payload.availableEquipment.first { $0.key == item.equipmentType.typeKey }
+            XCTAssertNotNil(
+                ref,
                 "GymProfilePayload must contain type key '\(item.equipmentType.typeKey)'."
+            )
+            XCTAssertEqual(
+                ref?.name, item.equipmentType.displayName,
+                "GymProfilePayload entry must carry the display name."
             )
         }
     }

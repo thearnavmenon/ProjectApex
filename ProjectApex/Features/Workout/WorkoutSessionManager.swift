@@ -1144,7 +1144,7 @@ actor WorkoutSessionManager {
             .prefix(exerciseIndex)
             .map(\.exerciseId)
 
-        let availableEquipment = cachedGymProfile?.equipment.map { $0.equipmentType.typeKey } ?? []
+        let availableEquipment = cachedGymProfile?.equipmentRefs ?? []
 
         let ragSnippets = cachedRAGMemory.prefix(3).map(\.summary)
 

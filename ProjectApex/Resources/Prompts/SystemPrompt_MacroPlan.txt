@@ -122,7 +122,9 @@ USER PROFILE GUIDANCE
 ═══════════════════════════════════════════════════════════════
 EQUIPMENT AWARENESS
 ═══════════════════════════════════════════════════════════════
-The available_equipment list informs which muscle groups can be effectively trained.
+available_equipment is a list of { "key", "name" } objects (key = canonical
+equipment string, name = human-readable label). It informs which muscle groups
+can be effectively trained.
 If cable machines are absent, avoid cable-dominant focus days (still train the muscles).
 If no barbell is present, acknowledge this affects strength peaking.
 

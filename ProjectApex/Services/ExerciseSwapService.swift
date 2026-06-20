@@ -31,8 +31,8 @@ actor ExerciseSwapService {
         let setsCompleted: Int
         /// Total sets planned for this exercise.
         let totalSets: Int
-        /// Equipment type keys currently in the user's gym.
-        let availableEquipment: [String]
+        /// Equipment currently in the user's gym, as { key, name } refs.
+        let availableEquipment: [EquipmentRef]
         /// Exercise IDs already completed this session (to avoid re-suggesting them).
         let completedExerciseIds: [String]
         /// Optional RAG memory snippets for the current exercise.
@@ -99,7 +99,10 @@ actor ExerciseSwapService {
 
     private let provider: any LLMProvider
 
-    private static let systemPrompt: String = {
+    /// The system prompt WITHOUT the exercise library block. The library block
+    /// is appended per-conversation in `startConversation`, pre-filtered to the
+    /// owned equipment carried by the SwapContext.
+    private static let basePrompt: String = {
         // Resolve via the shared PromptLoader (#220). The graceful fallback is
         // preserved: PromptLoader.load returns nil when the resource is absent
         // and throws on a read failure, so `try?` + `?? nil` collapse BOTH to
@@ -108,13 +111,19 @@ actor ExerciseSwapService {
         guard let raw = (try? PromptLoader.load("SystemPrompt_ExerciseSwap")) ?? nil else {
             return "You are an exercise swap assistant. Return JSON with display_message and optional suggestion."
         }
-        // Strip comment lines, then append the canonical exercise library block
-        let base = raw.split(separator: "\n", omittingEmptySubsequences: false)
+        // Strip comment lines; the library block is appended at conversation start.
+        return raw.split(separator: "\n", omittingEmptySubsequences: false)
             .filter { !$0.hasPrefix("//") }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return base + ExerciseLibrary.promptReferenceBlock()
     }()
+
+    /// The full system prompt for the active conversation: `basePrompt` plus the
+    /// exercise library block pre-filtered to the SwapContext's owned equipment.
+    /// Set in `startConversation`; falls back to the unfiltered block if a
+    /// message is somehow sent before a conversation starts.
+    private var systemPrompt: String = ExerciseSwapService.basePrompt
+        + ExerciseLibrary.promptReferenceBlock()
 
     // MARK: - Init
 
@@ -128,6 +137,12 @@ actor ExerciseSwapService {
     func startConversation(context: SwapContext) async {
         reset()
         swapContext = context
+
+        // Pre-filter the canonical library block to this gym's owned equipment.
+        // Bodyweight exercises are always kept (see promptReferenceBlock docs).
+        let ownedKeys = Set(context.availableEquipment.map(\.key))
+        systemPrompt = Self.basePrompt
+            + ExerciseLibrary.promptReferenceBlock(ownedEquipmentKeys: ownedKeys)
 
         let setsLabel = context.setsCompleted == 1 ? "1 set" : "\(context.setsCompleted) sets"
         let opener = "I see you're on \(context.exerciseName) — \(setsLabel) done. What's the issue?"
@@ -149,7 +164,7 @@ actor ExerciseSwapService {
             let payload = buildPayload(userMessage: text)
             let raw = try await TransientRetryPolicy.execute {
                 try await self.provider.complete(
-                    systemPrompt: Self.systemPrompt,
+                    systemPrompt: self.systemPrompt,
                     userPayload: payload
                 )
             }
@@ -199,6 +214,7 @@ actor ExerciseSwapService {
         conversationHistory = []
         swapContext = nil
         isProcessing = false
+        systemPrompt = Self.basePrompt + ExerciseLibrary.promptReferenceBlock()
     }
 
     // MARK: - Private: error helper

@@ -303,6 +303,66 @@ struct ExerciseLibraryTests {
         // Should not be excessively large (>10KB would be a problem for token budget)
         #expect(block.count < 10_000)
     }
+
+    // MARK: promptReferenceBlock(ownedEquipmentKeys:) — library pre-filter (#527 S5)
+
+    @Test("Filtered block keeps owned-equipment exercises, drops un-owned ones")
+    func filteredBlockKeepsOnlyOwnedEquipment() {
+        // A gym with ONLY a chest press machine.
+        let block = ExerciseLibrary.promptReferenceBlock(
+            ownedEquipmentKeys: ["chest_press_machine"]
+        )
+        // The machine chest press is owned → present.
+        #expect(block.contains("machine_chest_press"))
+        // Barbell bench press needs a barbell (not owned) → absent.
+        #expect(!block.contains("barbell_bench_press"))
+        // A dumbbell exercise (not owned) → absent.
+        #expect(!block.contains("dumbbell_bench_press"))
+    }
+
+    @Test("Filtered block always keeps bodyweight exercises")
+    func filteredBlockKeepsBodyweightExercises() {
+        // A gym with ONLY a chest press machine — no pull-up bar, no bench.
+        let block = ExerciseLibrary.promptReferenceBlock(
+            ownedEquipmentKeys: ["chest_press_machine"]
+        )
+        // Every bodyweightOnly exercise must survive regardless of its nominal
+        // equipmentType tag (e.g. push_ups is tagged "flat_bench" but needs no bench).
+        for ex in ExerciseLibrary.all where ex.bodyweightOnly {
+            #expect(
+                block.contains(ex.id),
+                "Bodyweight exercise '\(ex.id)' must survive the filter."
+            )
+        }
+    }
+
+    @Test("Empty owned set still yields bodyweight exercises only")
+    func filteredBlockEmptyOwnedKeepsBodyweight() {
+        let block = ExerciseLibrary.promptReferenceBlock(ownedEquipmentKeys: [])
+        // push_ups is bodyweightOnly → present even with zero equipment.
+        #expect(block.contains("push_ups"))
+        // barbell_bench_press needs equipment → absent.
+        #expect(!block.contains("barbell_bench_press"))
+    }
+
+    @Test("Custom unknown machine key adds no library exercises")
+    func filteredBlockCustomMachineMatchesNothing() {
+        // A custom machine's typeKey is "unknown:<raw>" — it matches no library row.
+        let owned: Set<String> = ["unknown:Belt squat machine"]
+        let block = ExerciseLibrary.promptReferenceBlock(ownedEquipmentKeys: owned)
+        // No equipment-bearing exercise survives…
+        #expect(!block.contains("barbell_bench_press"))
+        #expect(!block.contains("machine_chest_press"))
+        // …but bodyweight ones still do (the model always needs those).
+        #expect(block.contains("push_ups"))
+    }
+
+    @Test("nil owned set is the full unfiltered library (back-compat)")
+    func filteredBlockNilIsFull() {
+        let full = ExerciseLibrary.promptReferenceBlock()
+        let explicitNil = ExerciseLibrary.promptReferenceBlock(ownedEquipmentKeys: nil)
+        #expect(full == explicitNil)
+    }
 }
 
 // MARK: - Helpers
