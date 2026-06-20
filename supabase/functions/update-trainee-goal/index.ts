@@ -33,6 +33,7 @@ import postgres from "postgres";
 import { MAJOR_PATTERNS } from "../_shared/constants.ts";
 import { checkOwnership } from "../_shared/jwt-owner.ts";
 import type { PatternProjection } from "../_shared/calibration-projection.ts";
+import type { ActiveLimitation } from "../_shared/note-classifier.ts";
 import {
   isRenegotiation,
   rederiveStretchOnRenegotiation,
@@ -49,6 +50,39 @@ const MAJOR_PATTERN_SET: ReadonlySet<string> = new Set(MAJOR_PATTERNS);
 export interface StretchEdit {
   pattern: string;
   stretch: number;
+}
+
+/**
+ * #527 S2: the BodyJoint rawValues a user-confirmed onboarding limitation may
+ * target. Mirrors the Swift `BodyJoint` enum (TraineeModelEnums.swift) — the
+ * onboarding injuries screen offers exactly these eight joints. Onboarding only
+ * ever sends joint-scoped limitations (not pattern / muscle), so this is the
+ * full accepted `subject.value` set for `subject.kind === "joint"`.
+ */
+const BODY_JOINT_SET: ReadonlySet<string> = new Set([
+  "shoulder",
+  "elbow",
+  "wrist",
+  "hip",
+  "knee",
+  "ankle",
+  "lower_back",
+  "neck",
+]);
+
+const SEVERITY_SET: ReadonlySet<string> = new Set(["mild", "moderate", "severe"]);
+
+/**
+ * #527 S2: a single user-confirmed limitation declared during onboarding.
+ * Joint-scoped only (the onboarding "anything to work around?" screen tracks
+ * joints). `subject.value` must be a `BODY_JOINT_SET` member; `severity` must be
+ * a valid `Severity`. The EF stamps `onsetDate`, `evidenceCount`,
+ * `userConfirmed`, and `sessionsWithoutReMention` server-side — the client
+ * never sets those.
+ */
+export interface ConfirmedLimitation {
+  subject: { kind: "joint"; value: string };
+  severity: string;
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -82,6 +116,12 @@ export interface UpdateTraineeGoalRequest {
   // calibration banner does not reappear after a session sync rehydrates the
   // local cache. Absent for onboarding / goal-review saves.
   acknowledge_calibration_review?: boolean;
+  // #527 S2: OPTIONAL. User-confirmed injuries collected at onboarding. When
+  // present, each entry is appended to `model_json.activeLimitations` as a
+  // user-confirmed limitation (the planner avoids programming into it from
+  // session 1). Absent for goal-review / calibration-review saves (only
+  // onboarding sends it, and only when the user tapped at least one area).
+  confirmed_limitations?: ConfirmedLimitation[];
 }
 
 const ISO_DATE_RE =
@@ -99,6 +139,7 @@ export function validateRequest(
     acknowledge_triggering_session_count,
     stretch_edits,
     acknowledge_calibration_review,
+    confirmed_limitations,
   } = body as Record<string, unknown>;
   if (typeof user_id !== "string" || !UUID_RE.test(user_id)) {
     return { error: "user_id must be a UUID string" };
@@ -175,6 +216,51 @@ export function validateRequest(
   ) {
     return { error: "acknowledge_calibration_review must be a boolean" };
   }
+  // #527 S2: OPTIONAL confirmed_limitations. Absent → valid exactly as before
+  // (back-compat: goal-review / calibration saves never send it). Present →
+  // an array of { subject: { kind: "joint", value: <BodyJoint rawValue> },
+  // severity: <Severity> }. The server stamps the remaining ActiveLimitation
+  // fields (onsetDate / evidenceCount / userConfirmed / sessionsWithoutReMention)
+  // at write time — the client cannot set them.
+  let validatedLimitations: ConfirmedLimitation[] | undefined;
+  if (confirmed_limitations !== undefined) {
+    if (!Array.isArray(confirmed_limitations)) {
+      return { error: "confirmed_limitations must be an array" };
+    }
+    validatedLimitations = [];
+    for (let i = 0; i < confirmed_limitations.length; i++) {
+      const lim = confirmed_limitations[i];
+      if (typeof lim !== "object" || lim === null || Array.isArray(lim)) {
+        return { error: `confirmed_limitations[${i}] must be an object` };
+      }
+      const lr = lim as Record<string, unknown>;
+      const subject = lr.subject;
+      if (typeof subject !== "object" || subject === null || Array.isArray(subject)) {
+        return { error: `confirmed_limitations[${i}].subject must be an object` };
+      }
+      const sr = subject as Record<string, unknown>;
+      if (sr.kind !== "joint") {
+        return {
+          error: `confirmed_limitations[${i}].subject.kind must be "joint"`,
+        };
+      }
+      if (typeof sr.value !== "string" || !BODY_JOINT_SET.has(sr.value)) {
+        return {
+          error:
+            `confirmed_limitations[${i}].subject.value must be a body joint`,
+        };
+      }
+      if (typeof lr.severity !== "string" || !SEVERITY_SET.has(lr.severity)) {
+        return {
+          error: `confirmed_limitations[${i}].severity must be a severity`,
+        };
+      }
+      validatedLimitations.push({
+        subject: { kind: "joint", value: sr.value },
+        severity: lr.severity,
+      });
+    }
+  }
   const validated: UpdateTraineeGoalRequest = {
     user_id,
     goal: {
@@ -193,6 +279,9 @@ export function validateRequest(
   if (acknowledge_calibration_review !== undefined) {
     validated.acknowledge_calibration_review =
       acknowledge_calibration_review as boolean;
+  }
+  if (validatedLimitations !== undefined) {
+    validated.confirmed_limitations = validatedLimitations;
   }
   return validated;
 }
@@ -293,9 +382,98 @@ export async function upsertGoal(
         WHERE user_id = ${req.user_id}
       `;
     }
+
+    // #527 S2: append onboarding-declared injuries as user-confirmed
+    // limitations. Runs inside the same transaction so it commits atomically
+    // with the goal write (the INSERT path above always created the row, so the
+    // append has a row to merge into).
+    if (
+      req.confirmed_limitations !== undefined &&
+      req.confirmed_limitations.length > 0
+    ) {
+      await applyConfirmedLimitations(
+        req.user_id,
+        req.confirmed_limitations,
+        tx,
+      );
+    }
   });
 
   return { ok: true, goal: req.goal };
+}
+
+/**
+ * #527 S2: append user-confirmed injuries (from onboarding) to
+ * `model_json.activeLimitations`. Each entry becomes a full `ActiveLimitation`
+ * with `userConfirmed: true` — so the planner treats it at full weight from
+ * session 1, and the session-apply lifecycle (`updateLimitationLifecycle`)
+ * never auto-clears it.
+ *
+ * Idempotent on re-onboarding: subjects already present (matched by
+ * `subject.kind` + `subject.value`) are skipped, so a replayed onboarding write
+ * does not duplicate or reset a limitation the session pipeline has since
+ * accumulated evidence on. The existing entry — including any user clear or
+ * server-side state — is left untouched.
+ *
+ * Runs inside the caller's transaction (`tx`) with a `FOR UPDATE` read so a
+ * concurrent session-apply (which also writes `activeLimitations`) cannot
+ * clobber the append, and so it commits or rolls back atomically with the rest
+ * of the `upsertGoal` sequence.
+ */
+export async function applyConfirmedLimitations(
+  userId: string,
+  limitations: ConfirmedLimitation[],
+  tx: Sql,
+): Promise<void> {
+  if (limitations.length === 0) return;
+  const rows = await tx`
+    SELECT model_json FROM public.trainee_models
+    WHERE user_id = ${userId}
+    FOR UPDATE
+  `;
+  if (rows.length === 0) return;
+  const modelJson = (rows[0].model_json ?? {}) as Record<string, unknown>;
+  const existing = (modelJson.activeLimitations as ActiveLimitation[]) ?? [];
+
+  // Key existing limitations by subject so a re-onboarding replay is a no-op
+  // for already-recorded injuries.
+  const existingKeys = new Set(
+    existing.map((l) => `${l.subject.kind}:${l.subject.value}`),
+  );
+
+  const now = new Date().toISOString();
+  const toAppend: ActiveLimitation[] = [];
+  for (const lim of limitations) {
+    const key = `${lim.subject.kind}:${lim.subject.value}`;
+    if (existingKeys.has(key)) continue;
+    existingKeys.add(key); // dedupe within this batch too
+    toAppend.push({
+      subject: lim.subject,
+      severity: lim.severity as ActiveLimitation["severity"],
+      onsetDate: now,
+      // User confirmation is its own evidence; the AI-inferred ≥2 corroboration
+      // gate does not apply (userConfirmed bypasses the .mild ceiling). 1 = the
+      // single user report.
+      evidenceCount: 1,
+      userConfirmed: true,
+      notes: null,
+      sessionsWithoutReMention: 0,
+    });
+  }
+  if (toAppend.length === 0) return;
+
+  const merged = [...existing, ...toAppend];
+  await tx`
+    UPDATE public.trainee_models
+    SET model_json = jsonb_set(
+      COALESCE(model_json, '{}'::jsonb),
+      '{activeLimitations}',
+      ${tx.json(merged)},
+      true
+    ),
+    updated_at = NOW()
+    WHERE user_id = ${userId}
+  `;
 }
 
 /**

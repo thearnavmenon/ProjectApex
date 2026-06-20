@@ -82,7 +82,8 @@ struct CalibrationReviewView: View {
             goal: goal,
             acknowledgeTriggeringSessionCount: nil,
             stretchEdits: raised.isEmpty ? nil : raised,
-            acknowledgeCalibrationReview: true
+            acknowledgeCalibrationReview: true,
+            confirmedLimitations: nil
         )
     }
 

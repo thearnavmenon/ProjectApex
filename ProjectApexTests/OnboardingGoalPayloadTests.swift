@@ -57,7 +57,8 @@ final class OnboardingGoalPayloadTests: XCTestCase {
             ),
             acknowledgeTriggeringSessionCount: acknowledge,
             stretchEdits: nil,
-            acknowledgeCalibrationReview: nil
+            acknowledgeCalibrationReview: nil,
+            confirmedLimitations: nil
         )
         let data = try JSONEncoder().encode(payload)
         return try XCTUnwrap(
@@ -206,6 +207,132 @@ final class OnboardingGoalPayloadTests: XCTestCase {
         XCTAssertNotNil(
             updatedAt.range(of: Self.efISODateRegex, options: .regularExpression),
             "goal.updatedAt '\(updatedAt)' must match the EF ISO_DATE_RE"
+        )
+    }
+}
+
+// MARK: - Onboarding injury → confirmed-limitation mapping (#527 S2)
+
+/// Locks the contract that the onboarding injuries screen's tapped areas map
+/// to user-confirmed limitations the EF (`update-trainee-goal`,
+/// `confirmed_limitations`) and planner accept:
+///   • every area label maps to a canonical `BodyJoint` rawValue;
+///   • the payload encodes to the EF's `{subject:{kind,value}, severity}` shape;
+///   • the limitation is user-confirmed at full (not `.mild`-capped) severity;
+///   • the wire field is OMITTED when no injury was tapped (onboarding stays
+///     {user_id, goal}).
+final class OnboardingInjuryMappingTests: XCTestCase {
+
+    func test_allEightAreaLabels_mapToCanonicalJoints() {
+        // Every label the injuries screen offers must have a mapping — an
+        // unmapped label would silently drop a declared injury.
+        let expected: [String: String] = [
+            "Shoulders":  "shoulder",
+            "Lower back": "lower_back",
+            "Knees":      "knee",
+            "Elbows":     "elbow",
+            "Wrists":     "wrist",
+            "Hips":       "hip",
+            "Neck":       "neck",
+            "Ankles":     "ankle",
+        ]
+        XCTAssertEqual(
+            OnboardingInjuryMapping.areaToJoint, expected,
+            "the eight injuries-screen labels must map to the canonical BodyJoint rawValues"
+        )
+    }
+
+    func test_confirmedLimitations_buildsUserConfirmedJointEntries() throws {
+        let limitations = OnboardingInjuryMapping.confirmedLimitations(
+            from: ["Shoulders", "Lower back"]
+        )
+        XCTAssertEqual(limitations.count, 2)
+
+        // Deterministic order (sorted by joint rawValue): lower_back, shoulder.
+        XCTAssertEqual(limitations.map(\.subject.value), ["lower_back", "shoulder"])
+        for lim in limitations {
+            XCTAssertEqual(lim.subject.kind, "joint", "onboarding declares joint-scoped limitations")
+            // moderate (not .mild) — user-confirmed is not capped at the
+            // AI-inferred ceiling; the planner substitutes the movement.
+            XCTAssertEqual(lim.severity, "moderate")
+        }
+    }
+
+    func test_confirmedLimitations_emptyAreas_yieldsEmpty() {
+        XCTAssertTrue(
+            OnboardingInjuryMapping.confirmedLimitations(from: []).isEmpty,
+            "no tapped areas → no limitations"
+        )
+    }
+
+    func test_payload_withInjuries_encodesEFConfirmedLimitationsShape() throws {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let limitations = OnboardingInjuryMapping.confirmedLimitations(
+            from: ["Knees"]
+        )
+        let payload = TraineeGoalUpsertPayload(
+            userId: UUID(),
+            goal: GoalUpsertBody(
+                statement: "Hypertrophy",
+                focusAreas: [],
+                updatedAt: isoFormatter.string(from: Date())
+            ),
+            acknowledgeTriggeringSessionCount: nil,
+            stretchEdits: nil,
+            acknowledgeCalibrationReview: nil,
+            confirmedLimitations: limitations
+        )
+        let data = try JSONEncoder().encode(payload)
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+
+        // The EF reads top-level snake_case `confirmed_limitations`.
+        let arr = try XCTUnwrap(
+            json["confirmed_limitations"] as? [[String: Any]],
+            "confirmed_limitations must encode as a top-level array of objects"
+        )
+        XCTAssertNil(
+            json["confirmedLimitations"],
+            "no camelCase `confirmedLimitations` may leak to the wire"
+        )
+        XCTAssertEqual(arr.count, 1)
+        let entry = arr[0]
+        XCTAssertEqual(Set(entry.keys), ["subject", "severity"],
+            "EF validator reads {subject, severity}")
+        XCTAssertEqual(entry["severity"] as? String, "moderate")
+        let subject = try XCTUnwrap(entry["subject"] as? [String: Any])
+        XCTAssertEqual(Set(subject.keys), ["kind", "value"],
+            "EF validator reads subject.{kind, value}")
+        XCTAssertEqual(subject["kind"] as? String, "joint")
+        XCTAssertEqual(subject["value"] as? String, "knee")
+    }
+
+    func test_payload_noInjuries_omitsConfirmedLimitationsKey() throws {
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // The onboarding call site passes nil when no area was tapped, keeping
+        // the wire shape exactly {user_id, goal}.
+        let payload = TraineeGoalUpsertPayload(
+            userId: UUID(),
+            goal: GoalUpsertBody(
+                statement: "Hypertrophy",
+                focusAreas: [],
+                updatedAt: isoFormatter.string(from: Date())
+            ),
+            acknowledgeTriggeringSessionCount: nil,
+            stretchEdits: nil,
+            acknowledgeCalibrationReview: nil,
+            confirmedLimitations: nil
+        )
+        let data = try JSONEncoder().encode(payload)
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(
+            Set(json.keys), ["user_id", "goal"],
+            "nil confirmed_limitations must omit the key (onboarding stays {user_id, goal})"
         )
     }
 }

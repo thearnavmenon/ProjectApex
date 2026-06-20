@@ -79,7 +79,8 @@ struct GoalReviewView: View {
             ),
             acknowledgeTriggeringSessionCount: triggeringSessionCount,
             stretchEdits: nil,
-            acknowledgeCalibrationReview: nil
+            acknowledgeCalibrationReview: nil,
+            confirmedLimitations: nil
         )
     }
 
