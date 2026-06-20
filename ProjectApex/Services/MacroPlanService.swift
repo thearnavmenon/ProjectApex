@@ -92,14 +92,14 @@ nonisolated struct MacroPlanUserProfile: Codable, Sendable {
 }
 
 nonisolated struct MacroPlanGymProfile: Codable, Sendable {
-    let availableEquipment: [String]
+    let availableEquipment: [EquipmentRef]
 
     enum CodingKeys: String, CodingKey {
         case availableEquipment = "available_equipment"
     }
 
     init(from gymProfile: GymProfile) {
-        self.availableEquipment = gymProfile.equipment.map { $0.equipmentType.typeKey }
+        self.availableEquipment = gymProfile.equipmentRefs
     }
 }
 

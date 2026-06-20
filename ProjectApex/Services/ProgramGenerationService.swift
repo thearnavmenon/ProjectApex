@@ -107,14 +107,14 @@ nonisolated struct UserProfile: Codable, Sendable {
 }
 
 nonisolated struct GymProfilePayload: Codable, Sendable {
-    let availableEquipment: [String]
+    let availableEquipment: [EquipmentRef]
 
     enum CodingKeys: String, CodingKey {
         case availableEquipment = "available_equipment"
     }
 
     init(from gymProfile: GymProfile) {
-        self.availableEquipment = gymProfile.equipment.map { $0.equipmentType.typeKey }
+        self.availableEquipment = gymProfile.equipmentRefs
     }
 }
 
@@ -251,7 +251,7 @@ actor ProgramGenerationService {
         isGenerating = true
         defer { isGenerating = false }
 
-        let systemPrompt = try Self.loadSystemPrompt()
+        let systemPrompt = try Self.loadSystemPrompt(gymProfile: gymProfile)
 
         print("[ProgramGenerationService] Generating programme — training_days_per_week: \(trainingDaysPerWeek)")
 
@@ -635,11 +635,13 @@ actor ProgramGenerationService {
 
     // MARK: - Private: System Prompt
 
-    private static func loadSystemPrompt() throws -> String {
+    private static func loadSystemPrompt(gymProfile: GymProfile) throws -> String {
         guard let base = try PromptLoader.load("SystemPrompt_MacroGeneration") else {
             throw ProgramGenerationError.systemPromptNotFound
         }
-        return base + ExerciseLibrary.promptReferenceBlock()
+        return base + ExerciseLibrary.promptReferenceBlock(
+            ownedEquipmentKeys: gymProfile.ownedEquipmentKeys
+        )
     }
 
     // MARK: - Private: LLM JSON repair

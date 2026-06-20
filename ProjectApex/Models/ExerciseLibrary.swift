@@ -867,12 +867,19 @@ nonisolated enum ExerciseLibrary {
 
     /// Generates the canonical exercise reference block appended to LLM system prompts.
     ///
-    /// Produces a pipe-delimited table (~320 tokens) listing all exercises the
+    /// Produces a pipe-delimited table (~320 tokens) listing the exercises the
     /// LLM is permitted to prescribe. Called at runtime by:
-    ///   - SessionPlanService.loadSystemPrompt()
-    ///   - ProgramGenerationService.loadSystemPrompt()
-    ///   - ExerciseSwapService.systemPrompt (static initialiser)
-    static func promptReferenceBlock() -> String {
+    ///   - SessionPlanService.loadSystemPrompt(gymProfile:)
+    ///   - ProgramGenerationService.loadSystemPrompt(gymProfile:)
+    ///   - ExerciseSwapService (per-conversation, from SwapContext)
+    ///
+    /// - Parameter ownedEquipmentKeys: When non-nil, the table is pre-filtered to
+    ///   the user's gym: an exercise is kept only if it is bodyweight (no external
+    ///   weight is ever prescribed — e.g. push-ups, pull-ups, dips) OR its
+    ///   `equipmentType` is in the owned set. Custom `.unknown` machines never
+    ///   match a library row, so they simply add no library exercises (expected).
+    ///   When nil, every exercise is included (the original behaviour).
+    static func promptReferenceBlock(ownedEquipmentKeys: Set<String>? = nil) -> String {
         let separator = String(repeating: "═", count: 63)
         var lines: [String] = [
             "",
@@ -887,11 +894,22 @@ nonisolated enum ExerciseLibrary {
             "exercise_id | name | primary_muscle | equipment_required",
         ]
 
+        // Pre-filter to the user's owned equipment when provided. Bodyweight
+        // exercises are always kept (the model still needs them, and their
+        // nominal equipmentType tag — e.g. push_ups tagged "flat_bench" — does
+        // not reflect a real requirement).
+        let visible: [ExerciseDefinition]
+        if let owned = ownedEquipmentKeys {
+            visible = all.filter { $0.bodyweightOnly || owned.contains($0.equipmentType) }
+        } else {
+            visible = all
+        }
+
         // Group by primaryMuscle for readability in the prompt. Order
         // matches the prior chest→back→shoulders→…→calves layout (core is
         // intentionally excluded — the 4 core exercises were removed in
         // Phase 1 / Slice 1).
-        let grouped = Dictionary(grouping: all, by: \.primaryMuscle)
+        let grouped = Dictionary(grouping: visible, by: \.primaryMuscle)
         let muscleOrder: [PrimaryMuscle] = [
             .chest, .back, .shoulders,
             .quads, .hamstrings, .glutes,

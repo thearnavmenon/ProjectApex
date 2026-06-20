@@ -1232,9 +1232,9 @@ extension EquipmentType {
 /// Tells the AI what equipment is present and what weight corrections are known.
 nonisolated struct GymProfileConstraints: Codable, Sendable {
 
-    /// List of equipment type keys available in this gym.
-    /// e.g. ["dumbbell_set", "barbell", "cable_machine_single"]
-    let availableEquipment: [String]
+    /// Equipment available in this gym, as { key, name } refs.
+    /// e.g. [{ "key": "dumbbell_set", "name": "Dumbbell Set" }, …]
+    let availableEquipment: [EquipmentRef]
 
     /// Confirmed weight facts from GymFactStore, injected per exercise.
     /// e.g. ["16.0kg not available — use 15.0kg instead"]

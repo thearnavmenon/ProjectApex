@@ -366,3 +366,55 @@ final class GymProfileEquipmentHelperTests: XCTestCase {
         XCTAssertEqual(GymProfile.mockProfile().id, GymProfile.mockProfile().id)
     }
 }
+
+// MARK: ─── Part 5: EquipmentRef — LLM payload {key,name} shape (#527 S5) ──────
+
+final class EquipmentRefTests: XCTestCase {
+
+    /// A known equipment type encodes BOTH the canonical key and the display name.
+    func test_knownType_carriesKeyAndName() throws {
+        let ref = EquipmentRef(.chestPressMachine)
+        XCTAssertEqual(ref.key, "chest_press_machine")
+        XCTAssertEqual(ref.name, "Chest Press Machine")
+
+        let data = try JSONEncoder().encode(ref)
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(json["key"] as? String, "chest_press_machine")
+        XCTAssertEqual(json["name"] as? String, "Chest Press Machine")
+    }
+
+    /// A custom .unknown machine's raw label must survive into the name, and the
+    /// key keeps the "unknown:" round-trip prefix (so it never collides with a
+    /// real library row).
+    func test_customUnknownMachine_nameSurvives() throws {
+        let ref = EquipmentRef(.unknown("Belt squat machine"))
+        XCTAssertEqual(ref.key, "unknown:Belt squat machine")
+        XCTAssertEqual(ref.name, "Belt squat machine")
+
+        let data = try JSONEncoder().encode(ref)
+        let decoded = try JSONDecoder().decode(EquipmentRef.self, from: data)
+        XCTAssertEqual(decoded, ref)
+        XCTAssertEqual(decoded.name, "Belt squat machine",
+            "Custom machine name must survive the LLM payload encode/decode")
+    }
+
+    /// GymProfile.equipmentRefs produces one { key, name } ref per item.
+    func test_gymProfile_equipmentRefs_oneRefPerItem() {
+        let profile = GymProfile.mockProfile()
+        let refs = profile.equipmentRefs
+        XCTAssertEqual(refs.count, profile.equipment.count)
+        // mockProfile has a barbell → its ref carries the display name.
+        let barbell = refs.first { $0.key == "barbell" }
+        XCTAssertEqual(barbell?.name, "Barbell")
+    }
+
+    /// ownedEquipmentKeys is the set of typeKeys used to pre-filter the library.
+    func test_gymProfile_ownedEquipmentKeys() {
+        let profile = GymProfile.mockProfile()
+        let keys = profile.ownedEquipmentKeys
+        XCTAssertTrue(keys.contains("barbell"))
+        XCTAssertEqual(keys.count, Set(profile.equipment.map { $0.equipmentType.typeKey }).count)
+    }
+}

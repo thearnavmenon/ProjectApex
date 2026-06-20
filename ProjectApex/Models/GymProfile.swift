@@ -368,6 +368,44 @@ nonisolated struct EquipmentItem: Codable, Identifiable, Equatable, Hashable, Se
     }
 }
 
+// MARK: - EquipmentRef
+
+/// The LLM-facing wire shape for one piece of equipment: both the canonical
+/// snake_case `key` (matching `EquipmentType.typeKey`) and the human-readable
+/// `name` (matching `EquipmentType.displayName`).
+///
+/// Sending both lets the model reason about machines it has never seen as a
+/// bare key — including a custom `.unknown("Belt squat machine")` machine,
+/// whose `key` carries `"unknown:Belt squat machine"` and whose `name` is the
+/// raw label. Used in every generation payload's `available_equipment` list.
+nonisolated struct EquipmentRef: Codable, Equatable, Hashable, Sendable {
+    let key: String
+    let name: String
+
+    init(key: String, name: String) {
+        self.key = key
+        self.name = name
+    }
+
+    init(_ type: EquipmentType) {
+        self.key = type.typeKey
+        self.name = type.displayName
+    }
+}
+
+extension GymProfile {
+    /// The owned equipment as `{ key, name }` refs for LLM payloads.
+    var equipmentRefs: [EquipmentRef] {
+        equipment.map { EquipmentRef($0.equipmentType) }
+    }
+
+    /// The owned equipment `typeKey`s, used to pre-filter the exercise library
+    /// to what this gym can actually train.
+    var ownedEquipmentKeys: Set<String> {
+        Set(equipment.map { $0.equipmentType.typeKey })
+    }
+}
+
 // MARK: - GymProfile
 
 /// The master equipment profile for the user's gym.

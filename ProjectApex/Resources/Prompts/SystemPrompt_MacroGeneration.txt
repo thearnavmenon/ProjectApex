@@ -55,8 +55,14 @@ Each phase object has this exact shape — replicate it for ALL FOUR phases:
 ═══════════════════════════════════════════════════════════════
 VALID equipment_required STRINGS
 ═══════════════════════════════════════════════════════════════
-The equipment_required field MUST be exactly one of the following strings.
-Only use values that appear in gym_profile.available_equipment.
+gym_profile.available_equipment is a list of objects, each with a "key" (the
+canonical equipment string) and a "name" (its human-readable label), e.g.
+[{ "key": "chest_press_machine", "name": "Chest Press Machine" }, …]. A custom
+machine appears with a "key" prefixed "unknown:" and its raw label as "name" —
+reason about it from the name.
+
+The equipment_required field MUST be the "key" of an item that appears in
+gym_profile.available_equipment. Common keys:
 
   dumbbell_set
   barbell

@@ -338,7 +338,7 @@ actor SessionPlanService {
         isGenerating = true
         defer { isGenerating = false }
 
-        let systemPrompt = try Self.loadSystemPrompt()
+        let systemPrompt = try Self.loadSystemPrompt(gymProfile: gymProfile)
 
         // 1. Compute fatigue signals from the 7-day window (time-sensitive)
         let fatigue = WeekFatigueSignals.compute(
@@ -674,11 +674,13 @@ actor SessionPlanService {
         return seen.values.sorted { $0.relevanceScore > $1.relevanceScore }
     }
 
-    private static func loadSystemPrompt() throws -> String {
+    private static func loadSystemPrompt(gymProfile: GymProfile) throws -> String {
         guard let base = try PromptLoader.load("SystemPrompt_SessionPlan") else {
             throw SessionPlanError.systemPromptNotFound
         }
-        return base + ExerciseLibrary.promptReferenceBlock()
+        return base + ExerciseLibrary.promptReferenceBlock(
+            ownedEquipmentKeys: gymProfile.ownedEquipmentKeys
+        )
     }
 
     private static func stripMarkdownFences(_ input: String) -> String {
