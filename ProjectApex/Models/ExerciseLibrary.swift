@@ -177,7 +177,35 @@ nonisolated enum ExerciseLibrary {
             primaryMuscle: .back,
             synergists: ["biceps", "shoulders"],
             movementPattern: .horizontalPull,
-            equipmentType: "barbell",
+            // #527 S6: was shoe-horned onto "barbell" — now mapped to the
+            // dedicated t_bar_row EquipmentType (S4) so a gym whose only row
+            // station is a T-bar machine resolves this exercise.
+            equipmentType: "t_bar_row",
+            bodyweightOnly: false
+        ),
+        ExerciseDefinition(
+            id: "machine_assisted_pull_up",
+            name: "Assisted Pull-Up (Machine)",
+            primaryMuscle: .back,
+            synergists: ["biceps"],
+            // #527 S6: distinct from assisted_pull_up (which uses pull_up_bar +
+            // a band/partner). This is the dedicated assisted dip/pull-up
+            // machine (S4). The stack removes load rather than adding it, so
+            // bodyweightOnly: true — the AI must never prescribe external weight.
+            movementPattern: .verticalPull,
+            equipmentType: "assisted_dip_pull_up",
+            bodyweightOnly: true
+        ),
+        ExerciseDefinition(
+            id: "machine_reverse_fly",
+            name: "Machine Reverse Fly",
+            primaryMuscle: .back,
+            synergists: ["shoulders"],
+            // #527 S6: rear-delt / reverse pec deck machine (S4). Mirrors the
+            // existing cable_rear_delt_fly classification (.back) for the same
+            // movement on a different station.
+            movementPattern: .isolation,
+            equipmentType: "reverse_fly",
             bodyweightOnly: false
         ),
         ExerciseDefinition(
@@ -508,6 +536,17 @@ nonisolated enum ExerciseLibrary {
             bodyweightOnly: false
         ),
         ExerciseDefinition(
+            id: "machine_hip_thrust",
+            name: "Machine Hip Thrust",
+            primaryMuscle: .glutes,
+            synergists: ["hamstrings"],
+            // #527 S6: dedicated hip-thrust machine (S4) — was previously only
+            // expressible as the barbell hip_thrust.
+            movementPattern: .hipHinge,
+            equipmentType: "hip_thrust_machine",
+            bodyweightOnly: false
+        ),
+        ExerciseDefinition(
             id: "cable_pull_through",
             name: "Cable Pull-Through",
             primaryMuscle: .glutes,
@@ -647,6 +686,18 @@ nonisolated enum ExerciseLibrary {
             bodyweightOnly: false
         ),
         ExerciseDefinition(
+            id: "machine_assisted_dip",
+            name: "Assisted Dip (Machine)",
+            primaryMuscle: .triceps,
+            synergists: ["chest", "shoulders"],
+            // #527 S6: assisted dip on the dedicated assisted dip/pull-up
+            // machine (S4). Like machine_assisted_pull_up, the stack removes
+            // load, so bodyweightOnly: true — never prescribe external weight.
+            movementPattern: .verticalPush,
+            equipmentType: "assisted_dip_pull_up",
+            bodyweightOnly: true
+        ),
+        ExerciseDefinition(
             id: "dumbbell_overhead_tricep_extension",
             name: "Dumbbell Overhead Tricep Extension",
             primaryMuscle: .triceps,
@@ -720,6 +771,17 @@ nonisolated enum ExerciseLibrary {
             synergists: [],
             movementPattern: .isolation,
             equipmentType: "smith_machine",
+            bodyweightOnly: false
+        ),
+        ExerciseDefinition(
+            id: "machine_calf_raise",
+            name: "Calf Raise Machine",
+            primaryMuscle: .calves,
+            synergists: [],
+            // #527 S6: dedicated calf-raise machine (S4) — calf work was
+            // previously only on barbell / leg_press / smith_machine.
+            movementPattern: .isolation,
+            equipmentType: "calf_raise_machine",
             bodyweightOnly: false
         ),
 

@@ -36,6 +36,10 @@ private let validEquipmentTypeKeys: Set<String> = [
     "chest_press_machine", "shoulder_press_machine",
     "leg_extension", "leg_curl",
     "pec_deck", "preacher_curl", "cable_crossover",
+    // #527 S4 — new machine EquipmentType cases (this registry drifts from the
+    // enum; kept in sync manually). #527 S6 added library rows for all five.
+    "reverse_fly", "assisted_dip_pull_up", "hip_thrust_machine",
+    "calf_raise_machine", "t_bar_row",
 ]
 
 /// Synergists use a broader vocabulary than PrimaryMuscle — "forearms" is
@@ -271,6 +275,51 @@ struct ExerciseLibraryTests {
             }
         }
         #expect(collisions.isEmpty, "Normalization key/canonical ID collisions:\n\(collisions.joined(separator: "\n"))")
+    }
+
+    // MARK: #527 S6 — new machine library rows resolve for their equipment type
+
+    @Test("Every captured machine EquipmentType maps to at least one library exercise")
+    func everyMachineHasAnExercise() {
+        // The five S4 machine cases that previously had NO matching library row.
+        // Each must now resolve to ≥1 exercise tagged with that exact typeKey.
+        let machineKeys = [
+            "reverse_fly", "assisted_dip_pull_up", "hip_thrust_machine",
+            "calf_raise_machine", "t_bar_row",
+        ]
+        for key in machineKeys {
+            let matches = ExerciseLibrary.all.filter { $0.equipmentType == key }
+            #expect(!matches.isEmpty, "No library exercise maps to machine '\(key)'")
+        }
+    }
+
+    @Test("New S6 machine exercises resolve with the correct equipment + muscle")
+    func newMachineExercisesResolve() {
+        let expectations: [(id: String, equipment: String, muscle: PrimaryMuscle, bodyweight: Bool)] = [
+            ("machine_reverse_fly",      "reverse_fly",          .back,    false),
+            ("machine_assisted_pull_up", "assisted_dip_pull_up", .back,    true),
+            ("machine_assisted_dip",     "assisted_dip_pull_up", .triceps, true),
+            ("machine_hip_thrust",       "hip_thrust_machine",   .glutes,  false),
+            ("machine_calf_raise",       "calf_raise_machine",   .calves,  false),
+            ("t_bar_row",                "t_bar_row",            .back,    false),
+        ]
+        for e in expectations {
+            let def = ExerciseLibrary.lookup(e.id)
+            #expect(def != nil, "Expected new library exercise '\(e.id)' to resolve")
+            #expect(def?.equipmentType == e.equipment, "'\(e.id)' equipment mismatch")
+            #expect(def?.primaryMuscle == e.muscle, "'\(e.id)' muscle mismatch")
+            #expect(def?.bodyweightOnly == e.bodyweight, "'\(e.id)' bodyweightOnly mismatch")
+        }
+    }
+
+    @Test("Filtered block surfaces a calf-machine-only gym's exercise")
+    func filteredBlockSurfacesNewMachine() {
+        // A gym whose only equipment is the dedicated calf-raise machine must now
+        // get a real exercise for it (proves the S6 gap-fill closed the hole).
+        let block = ExerciseLibrary.promptReferenceBlock(
+            ownedEquipmentKeys: ["calf_raise_machine"]
+        )
+        #expect(block.contains("machine_calf_raise"))
     }
 
     // MARK: promptReferenceBlock()

@@ -443,7 +443,8 @@ actor SessionPlanService {
         return buildTrainingDay(
             from: sessionPayload,
             stub: skeletonDay,
-            fatigue: fatigue
+            fatigue: fatigue,
+            ownedEquipmentKeys: gymProfile.ownedEquipmentKeys
         )
     }
 
@@ -500,10 +501,16 @@ actor SessionPlanService {
 
     // #246: relaxed from `private` to internal so SessionPlanServiceTests can drive the
     // payload→TrainingDay mapping directly (the day_label normalization seam). Nothing else touched.
+    //
+    // #527 S6: `ownedEquipmentKeys` (defaulted nil for the day_label-normalization
+    // tests that don't care about equipment) enables hard equipment enforcement —
+    // see `enforceEquipment(...)` for the SAFE drop-the-violator rule that never
+    // empties a session.
     func buildTrainingDay(
         from payload: SessionPlanPayload,
         stub: TrainingDay,
-        fatigue: WeekFatigueSignals
+        fatigue: WeekFatigueSignals,
+        ownedEquipmentKeys: Set<String>? = nil
     ) -> TrainingDay {
         // Validate exercise IDs against canonical library — log warnings for non-canonical IDs.
         // The session is not rejected; primaryMuscle will fall back to the LLM's own value.
@@ -515,7 +522,16 @@ actor SessionPlanService {
             }
         }
 
-        let exercises = payload.exercises.map { ex in
+        // #527 S6: HARD equipment enforcement (safety-first). Drop any exercise
+        // whose required equipment the user does not own — but NEVER ship an
+        // empty session (see enforceEquipment for the rail). Skipped entirely
+        // when `ownedEquipmentKeys` is nil (the pure day_label mapping tests).
+        let acceptedExercises = Self.enforceEquipment(
+            payload.exercises,
+            ownedEquipmentKeys: ownedEquipmentKeys
+        )
+
+        let exercises = acceptedExercises.map { ex in
             PlannedExercise(
                 id: UUID(),
                 exerciseId: ex.exerciseId,
@@ -547,6 +563,57 @@ actor SessionPlanService {
             sessionNotes: notes?.trimmingCharacters(in: .whitespaces),
             status: .generated
         )
+    }
+
+    // MARK: - #527 S6: Equipment enforcement (safety-first)
+
+    /// Drops exercises whose required equipment the user does not own, with a
+    /// hard safety rail: it will NEVER return an empty session.
+    ///
+    /// Rules (mirroring the S5 library pre-filter `bodyweightOnly || owned`):
+    ///   • `ownedEquipmentKeys == nil` → no enforcement (returns input unchanged).
+    ///     Used by the pure day_label-mapping tests that don't model a gym.
+    ///   • Bodyweight exercises ALWAYS pass — identified canonically via the
+    ///     library's `bodyweightOnly` flag, or (for non-library IDs) via the
+    ///     equipment type's natural bodyweight-only status. No external weight is
+    ///     ever prescribed for these, so the nominal equipment tag is irrelevant.
+    ///   • A custom `.unknown:<raw>` machine passes when that exact key is owned.
+    ///   • Otherwise the exercise passes only if its required `typeKey` is owned.
+    ///
+    /// Safety rail: if enforcement would drop EVERY exercise (empty result) while
+    /// the LLM did return some, we keep the original list and log LOUDLY rather
+    /// than ship an empty day. Prescribing equipment the user lacks is bad;
+    /// shipping no workout at all is worse (#527 S6 directive).
+    static func enforceEquipment(
+        _ exercises: [SessionPlanExercise],
+        ownedEquipmentKeys: Set<String>?
+    ) -> [SessionPlanExercise] {
+        guard let owned = ownedEquipmentKeys else { return exercises }
+
+        let accepted = exercises.filter { ex in
+            // Bodyweight always passes — same rule S5 used for the library filter.
+            let isBodyweight = (ExerciseLibrary.lookup(ex.exerciseId)?.bodyweightOnly ?? false)
+                || ex.equipmentRequired.isNaturallyBodyweightOnly
+            if isBodyweight { return true }
+            // Owned equipment (including a matching custom .unknown:<raw> key) passes.
+            return owned.contains(ex.equipmentRequired.typeKey)
+        }
+
+        let dropped = exercises.count - accepted.count
+        if dropped > 0 {
+            let names = exercises
+                .filter { ex in !accepted.contains(where: { $0.exerciseId == ex.exerciseId }) }
+                .map { "\($0.exerciseId) (\($0.equipmentRequired.typeKey))" }
+                .joined(separator: ", ")
+            print("[SessionPlanService] ⚠️ Equipment enforcement dropped \(dropped) off-equipment exercise(s): \(names)")
+        }
+
+        // Safety rail: never empty a session that the LLM actually populated.
+        if accepted.isEmpty && !exercises.isEmpty {
+            print("[SessionPlanService] ⚠️⚠️ Equipment enforcement would have EMPTIED the session — keeping the LLM's original \(exercises.count) exercise(s) to avoid shipping an empty day. The gym profile may be missing equipment the user actually has.")
+            return exercises
+        }
+        return accepted
     }
 
     // MARK: - Private: Build lift history from set logs
