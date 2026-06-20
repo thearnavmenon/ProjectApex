@@ -7,6 +7,35 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-20 — Out with the camera, in with smarter equipment
+
+**The problem (in plain words):**
+The camera "scan your gym" feature had quietly stopped earning its keep, and the
+new setup flow already moved to picking a gym preset and tweaking a list — so the
+camera was dead weight. Separately, the coach only ever saw bare code-words for
+your gear (like "chest_press_machine") and was handed the *entire* exercise
+catalogue on every plan, including exercises you can't even do.
+
+**What I changed:**
+First, deleted all the camera / photo-recognition code and pointed the leftover
+"set up / edit your equipment" spot in Settings at the same simple list the setup
+flow uses. The app no longer asks for camera permission at all. Second, the coach
+now gets proper equipment *names* alongside the codes (so even a custom machine you
+typed in is understood), and it's only shown exercises you can actually do with
+your equipment — bodyweight moves always included. That makes it far more reliable
+at choosing machine exercises for people whose gym is mostly machines.
+
+**How I checked:**
+Built the app, ran the tests, and swept the whole codebase to confirm nothing still
+pointed at the deleted camera code. (Heads-up: removing the camera also removes
+"Camera" from the app's store privacy label.)
+
+**Status:** Shipped — PR #533 (camera removal) and PR #534 (smarter equipment),
+part of #527. One more piece to come: making sure every machine has matching
+exercises and the coach strictly sticks to your equipment.
+
+---
+
 ## 2026-06-20 — Saving your injuries, and letting you add any gym machine
 
 **The problem (in plain words):**
