@@ -5,7 +5,7 @@
 //   • Tab 0 — Program   — 12—week mesocycle calendar (ProgramOverviewView)
 //   • Tab 1 — Workout   — Active workout loop
 //   • Tab 2 — Progress  — Key lifts, trend charts, volume, heatmap
-//   • Tab 3 — Settings  — API keys, gym scanner, developer tools
+//   • Tab 3 — Settings  — API keys, gym equipment, developer tools
 //
 // Onboarding gate (P4-T09):
 //   On first launch (UserDefaults flag absent), OnboardingView is presented as
@@ -22,7 +22,7 @@ struct ContentView: View {
     /// so the profile is available immediately without waiting for a network fetch.
     @State private var confirmedProfile: GymProfile? = GymProfile.loadFromUserDefaults()
 
-    /// When true, a ScannerView sheet is presented over the Settings tab.
+    /// When true, the manual equipment-setup sheet is presented over the Settings tab.
     @State private var isRescanning = false
 
     /// Controls which tab is visible.
@@ -167,7 +167,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $isRescanning) {
             NavigationStack {
-                ScannerView { newProfile in
+                EquipmentSetupView(
+                    initialEquipment: confirmedProfile?.equipment ?? []
+                ) { newProfile in
                     confirmedProfile = newProfile
                     isRescanning = false
                 }

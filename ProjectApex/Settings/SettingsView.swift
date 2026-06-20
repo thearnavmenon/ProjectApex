@@ -4,7 +4,7 @@
 // Top-level Settings screen accessible from the main tab bar.
 // Surfaces:
 //   • Profile section → bodyweight, height, age, training age (FB-003)
-//   • Equipment section → edit/delete items, add new, re-scan gym
+//   • Equipment section → edit/delete items, add new, edit full equipment list
 //   • Program section → "Regenerate Program" (P2-T08)
 //   • Developer row → DeveloperSettingsView (API key management)
 //
@@ -22,13 +22,13 @@ struct SettingsView: View {
     @Environment(AppDependencies.self) private var deps
 
     /// Set to true when the user has an existing GymProfile. Controls
-    /// whether "Re-scan Gym" vs "Scan Your Gym" is shown.
+    /// whether "Edit Equipment" vs "Set Up Equipment" is shown.
     var hasExistingProfile: Bool = false
 
-    /// Called when the user confirms they want to start a fresh re-scan.
+    /// Called when the user wants to open the full manual equipment-setup list.
     var onRescan: (() -> Void)? = nil
 
-    /// Called when the user taps "Scan Your Gym" (no profile yet).
+    /// Called when the user taps "Set Up Equipment" (no profile yet).
     var onScanFirst: (() -> Void)? = nil
 
     /// The confirmed profile, used to show the equipment count chip
@@ -59,7 +59,6 @@ struct SettingsView: View {
     /// Working copy of the equipment list. Seeded from confirmedProfile on appear.
     @State private var equipmentItems: [EquipmentItem] = []
 
-    @State private var showingRescanAlert = false
     @State private var showingRegenerateSheet = false
     @State private var showingBulkPicker = false
     @State private var equipmentChangedSinceLastRegenerate = false
@@ -169,14 +168,6 @@ struct SettingsView: View {
             CalibrationReviewView(projections: calibrationProjections, recalibratedPatterns: [])
                 .presentationDetents([.large])
         }
-        .alert("Re-scan Gym?", isPresented: $showingRescanAlert) {
-            Button("Cancel", role: .cancel) { }
-            Button("Re-scan", role: .destructive) {
-                onRescan?()
-            }
-        } message: {
-            Text("This will replace your current equipment profile. Are you sure?")
-        }
         .alert(
             "Generation Failed",
             isPresented: Binding(
@@ -219,7 +210,7 @@ struct SettingsView: View {
                             .font(.system(size: 16, weight: .bold))
                             .fontWidth(.condensed)
                             .foregroundStyle(Apex.text)
-                        Text("Scan your gym so the AI coach can tailor your program to available equipment.")
+                        Text("Add your gym equipment so the AI coach can tailor your program to what's available.")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Apex.textDim)
                     }
@@ -234,7 +225,7 @@ struct SettingsView: View {
 
     // MARK: - Equipment Section
 
-    /// Full equipment list with add/delete/re-scan controls.
+    /// Full equipment list with add/delete/edit-all controls.
     @ViewBuilder
     private var equipmentSection: some View {
         if hasExistingProfile {
@@ -282,11 +273,11 @@ struct SettingsView: View {
                 }
                 .settingsCardRow(.middle)
 
-                // Re-scan — neutral / off-accent (opens a destructive confirm).
+                // Edit all equipment — opens the full manual setup list.
                 Button {
-                    showingRescanAlert = true
+                    onRescan?()
                 } label: {
-                    actionRowLabel(icon: "camera.viewfinder", title: "Re-scan Gym", tint: Apex.text)
+                    actionRowLabel(icon: "slider.horizontal.3", title: "Edit Equipment", tint: Apex.text)
                 }
                 .settingsCardRow(.last)
             } header: {
@@ -299,7 +290,7 @@ struct SettingsView: View {
                 Button {
                     onScanFirst?()
                 } label: {
-                    actionRowLabel(icon: "camera.viewfinder", title: "Scan Your Gym", tint: Apex.text)
+                    actionRowLabel(icon: "dumbbell.fill", title: "Set Up Equipment", tint: Apex.text)
                 }
                 .settingsCardRow(.single)
             } header: {

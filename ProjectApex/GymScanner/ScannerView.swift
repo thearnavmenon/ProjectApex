@@ -1,35 +1,29 @@
 // ScannerView.swift
 // ProjectApex — GymScanner Feature
 //
-// The main SwiftUI view for the guided gym equipment scanning flow.
+// The manual gym-equipment setup screen. The camera "gym scanner" (Vision API
+// single-item capture) was removed in S3 (#527); equipment is now entered
+// exclusively through the manual BulkEquipmentPickerSheet / EquipmentEditSheet.
 //
 // UX Flow:
-//   1. Idle        — "Start" button with instructional text
-//   2. Previewing  — Live camera + shutter button + item count + "Done" button
-//   3. Analyzing   — Spinner overlay while Vision API runs
-//   4. Reviewed    — Result card (identified equipment) with "Add" / "Discard"
-//   5. Confirming  — Editable equipment list before saving the profile
-//   6. Completed   — Success screen
+//   1. Review list — the editable equipment list (tap a row to edit, swipe to
+//      delete, "Add Equipment Manually" opens the bulk picker).
+//   2. Completed   — the profile has been saved; the parent dismisses.
 //
 // State transitions rendered by this view (driven by ScannerViewModel.state):
-//   .idle              → "Start" button
-//   .requestingPermission → spinner
-//   .previewing        → live feed + shutter + count badge + "Done"
-//   .analyzing         → live feed + centered spinner
-//   .reviewed          → dimmed feed + result card
-//   .confirming        → editable equipment list + "Confirm Profile" button
-//   .completed         → success screen
-//   .permissionDenied  → settings deep-link prompt
-//   .error             → inline error with retry option
+//   .confirming  → editable equipment list + "Save" button
+//   .completed   → success screen
 
 import SwiftUI
-import AVFoundation
 
-// MARK: - ScannerView
+// MARK: - EquipmentSetupView
 
-struct ScannerView: View {
+struct EquipmentSetupView: View {
 
     @State private var viewModel = ScannerViewModel()
+
+    /// Pre-seed the editable list (e.g. an existing profile's equipment).
+    var initialEquipment: [EquipmentItem] = []
 
     /// Callback invoked when a confirmed GymProfile is ready for the parent to persist.
     var onProfileConfirmed: ((GymProfile) -> Void)?
@@ -38,340 +32,32 @@ struct ScannerView: View {
     @State private var showingBulkPickerSheet = false
     @State private var itemBeingEdited: EquipmentItem?
 
-    // For editing the reviewed item before confirming
-    @State private var showingEditBeforeAddSheet = false
-
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             switch viewModel.state {
-            case .idle:
-                #if targetEnvironment(simulator)
-                simulatorIdleView
-                #else
-                idleView
-                #endif
-
-            case .requestingPermission:
-                permissionSpinnerView
-
-            case .previewing:
-                previewingView
-
-            case .analyzing:
-                analyzingView
-
-            case .reviewed(let item):
-                reviewedView(item: item)
-
             case .confirming:
                 confirmingView
 
             case .completed(let profile):
                 completedView(profile: profile)
-
-            case .permissionDenied:
-                permissionDeniedView
-
-            case .error(let error):
-                errorView(error: error)
             }
         }
-        .navigationTitle("Gym Scan")
+        .navigationTitle("Equipment")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.black, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .onAppear {
+            if viewModel.detectedEquipment.isEmpty, !initialEquipment.isEmpty {
+                initialEquipment.forEach { viewModel.addEquipment($0) }
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------
     // MARK: State Views
     // ---------------------------------------------------------------------------
-
-    /// Initial state: instructional prompt + Start button.
-    private var idleView: some View {
-        VStack(spacing: 32) {
-            Spacer()
-
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 80))
-                .foregroundStyle(.white.opacity(0.8))
-
-            VStack(spacing: 12) {
-                Text("Scan Your Gym")
-                    .font(.largeTitle.bold())
-                    .foregroundStyle(.white)
-
-                Text("Take a photo of each piece of equipment,\none at a time, to build your gym profile.")
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-            Spacer()
-
-            Button(action: { viewModel.startCapture() }) {
-                Label("Start Scanning", systemImage: "camera.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.white)
-            .foregroundStyle(.black)
-            .padding(.horizontal, 24)
-
-            // #318 U4: manual path on device too — not just simulator/denied.
-            Button("Enter Equipment Manually") {
-                viewModel.skipToManualEntry()
-            }
-            .foregroundStyle(.white.opacity(0.7))
-            .padding(.bottom, 48)
-        }
-    }
-
-    /// Simulator-specific idle state: camera unavailable, offer manual entry only.
-    private var simulatorIdleView: some View {
-        VStack(spacing: 28) {
-            Spacer()
-
-            Image(systemName: "iphone.slash")
-                .font(.system(size: 72))
-                .foregroundStyle(.white.opacity(0.5))
-
-            VStack(spacing: 10) {
-                Text("Camera Unavailable")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-
-                Text("The iOS Simulator has no camera.\nRun on a physical device to scan equipment,\nor add your gym equipment manually below.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.65))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-            Spacer()
-
-            // Jump straight to confirming state with an empty list for manual entry
-            Button(action: { viewModel.skipToManualEntry() }) {
-                Label("Add Equipment Manually", systemImage: "plus.circle")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.white)
-            .foregroundStyle(.black)
-            .padding(.horizontal, 24)
-            .padding(.bottom, 48)
-        }
-    }
-
-    /// Shown briefly while awaiting the OS permission dialog.
-    private var permissionSpinnerView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .progressViewStyle(.circular)
-                .tint(.white)
-                .scaleEffect(1.5)
-            Text("Requesting Camera Access…")
-                .foregroundStyle(.white)
-                .font(.subheadline)
-        }
-    }
-
-    /// The main guided capture state: live camera preview + shutter button.
-    private var previewingView: some View {
-        ZStack {
-            // Live camera feed fills the screen
-            CameraPreviewView(previewLayer: viewModel.previewLayer)
-                .ignoresSafeArea()
-
-            // Top bar: item count + Done button
-            VStack {
-                HStack {
-                    // Item count badge
-                    if !viewModel.detectedEquipment.isEmpty {
-                        HStack(spacing: 5) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.caption)
-                            Text("\(viewModel.detectedEquipment.count) item\(viewModel.detectedEquipment.count == 1 ? "" : "s") captured")
-                                .font(.caption.bold())
-                                .foregroundStyle(.white)
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(.black.opacity(0.55), in: Capsule())
-                    }
-
-                    Spacer()
-
-                    // Done button (only visible when ≥1 item captured)
-                    if !viewModel.detectedEquipment.isEmpty {
-                        Button(action: { viewModel.doneCapturing() }) {
-                            Text("Done")
-                                .font(.headline)
-                                .foregroundStyle(.black)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(.white, in: Capsule())
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 60)
-
-                Spacer()
-
-                // Instruction label
-                Text("Point at one piece of equipment")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.45), in: Capsule())
-                    .padding(.bottom, 20)
-
-                // Shutter button
-                Button(action: { viewModel.captureAndIdentify() }) {
-                    ZStack {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 72, height: 72)
-                        Circle()
-                            .stroke(.white.opacity(0.4), lineWidth: 3)
-                            .frame(width: 86, height: 86)
-                    }
-                }
-                .padding(.bottom, 52)
-            }
-
-            // "Nothing detected" toast
-            if viewModel.nothingDetectedToast {
-                VStack {
-                    Spacer()
-                    Text("No gym equipment detected — try again")
-                        .font(.subheadline)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 10)
-                        .background(.red.opacity(0.85), in: Capsule())
-                        .padding(.bottom, 160)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                }
-                .animation(.easeInOut(duration: 0.3), value: viewModel.nothingDetectedToast)
-            }
-        }
-    }
-
-    /// Shown while the Vision API is processing the captured photo.
-    private var analyzingView: some View {
-        ZStack {
-            CameraPreviewView(previewLayer: viewModel.previewLayer)
-                .ignoresSafeArea()
-
-            // Frosted overlay
-            Color.black.opacity(0.4).ignoresSafeArea()
-
-            VStack(spacing: 16) {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-                    .scaleEffect(1.8)
-
-                Text("Identifying equipment…")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-            }
-        }
-    }
-
-    /// Shown when the Vision API identified an item. User confirms or discards.
-    private func reviewedView(item: EquipmentItem) -> some View {
-        ZStack {
-            CameraPreviewView(previewLayer: viewModel.previewLayer)
-                .ignoresSafeArea()
-
-            Color.black.opacity(0.55).ignoresSafeArea()
-
-            VStack(spacing: 24) {
-                Spacer()
-
-                // Result card
-                VStack(spacing: 20) {
-                    // Equipment icon (system image) and name
-                    VStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 48))
-                            .foregroundStyle(.green)
-
-                        Text(item.equipmentType.displayName)
-                            .font(.title2.bold())
-                            .foregroundStyle(.primary)
-
-                        Text("×\(item.count) detected")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-
-                    Divider()
-
-                    // Action buttons
-                    HStack(spacing: 12) {
-                        // Discard
-                        Button(action: { viewModel.rejectDetection() }) {
-                            Label("Discard", systemImage: "xmark")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(.red)
-
-                        // Add to list
-                        Button(action: { viewModel.confirmDetection() }) {
-                            Label("Add to List", systemImage: "plus")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                    }
-
-                    // Edit before adding link
-                    Button(action: { showingEditBeforeAddSheet = true }) {
-                        Text("Edit before adding")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(24)
-                .background(
-                    .regularMaterial,
-                    in: RoundedRectangle(cornerRadius: 20, style: .continuous)
-                )
-                .padding(.horizontal, 20)
-                .padding(.bottom, 48)
-            }
-        }
-        .sheet(isPresented: $showingEditBeforeAddSheet) {
-            EquipmentEditSheet(
-                existingItem: item,
-                onSave: { edited in
-                    showingEditBeforeAddSheet = false
-                    // Add the edited item then dismiss the reviewed state.
-                    viewModel.addEquipment(edited)
-                    viewModel.rejectDetection() // Clears the .reviewed state
-                },
-                onCancel: { showingEditBeforeAddSheet = false }
-            )
-        }
-    }
 
     /// Confirmation screen: editable equipment list before profile is saved.
     private var confirmingView: some View {
@@ -389,7 +75,7 @@ struct ScannerView: View {
                         }
                     }
                 } header: {
-                    Text("\(viewModel.detectedEquipment.count) item\(viewModel.detectedEquipment.count == 1 ? "" : "s") detected")
+                    Text("\(viewModel.detectedEquipment.count) item\(viewModel.detectedEquipment.count == 1 ? "" : "s")")
                         .textCase(nil)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -398,22 +84,16 @@ struct ScannerView: View {
 
                 Section {
                     Button(action: { showingBulkPickerSheet = true }) {
-                        Label("Add Equipment Manually", systemImage: "plus.circle")
+                        Label("Add Equipment", systemImage: "plus.circle")
                     }
                 }
                 .listRowBackground(Color(.secondarySystemGroupedBackground))
             }
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
-            .navigationTitle("Confirm Equipment")
+            .navigationTitle("Your Equipment")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Re-scan") {
-                        viewModel.reset()
-                    }
-                    .foregroundStyle(.red)
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: {
                         viewModel.confirmProfile()
@@ -489,104 +169,6 @@ struct ScannerView: View {
             Spacer()
         }
     }
-
-    /// Shown when camera permission has been denied.
-    private var permissionDeniedView: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "camera.slash.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.red)
-
-            VStack(spacing: 8) {
-                Text("Camera Access Required")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                Text("Project Apex needs camera access to scan your gym equipment.\nYou can enable it in Settings.")
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-            Button("Open Settings") {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.white)
-            .foregroundStyle(.black)
-
-            Button("Enter Equipment Manually") {
-                // #318 U4: was reset() — which looped back to the camera idle
-                // screen, a dead end for users who denied camera access.
-                viewModel.skipToManualEntry()
-            }
-            .foregroundStyle(.white.opacity(0.7))
-        }
-    }
-
-    /// Shown for non-permission errors.
-    private func errorView(error: ScannerError) -> some View {
-        VStack(spacing: 24) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(.yellow)
-
-            VStack(spacing: 8) {
-                Text("Scanner Error")
-                    .font(.title2.bold())
-                    .foregroundStyle(.white)
-                Text(error.errorDescription ?? "An unknown error occurred.")
-                    .font(.body)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-
-            Button("Try Again") {
-                viewModel.reset()
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.white)
-            .foregroundStyle(.black)
-        }
-    }
-}
-
-// MARK: - CameraPreviewView
-
-/// `UIViewRepresentable` wrapper that hosts the `AVCaptureVideoPreviewLayer`
-/// in a SwiftUI hierarchy.
-struct CameraPreviewView: UIViewRepresentable {
-
-    let previewLayer: AVCaptureVideoPreviewLayer
-
-    func makeUIView(context: Context) -> PreviewUIView {
-        let view = PreviewUIView()
-        view.backgroundColor = .black
-        return view
-    }
-
-    func updateUIView(_ uiView: PreviewUIView, context: Context) {
-        uiView.setPreviewLayer(previewLayer)
-    }
-
-    class PreviewUIView: UIView {
-        private var currentPreviewLayer: AVCaptureVideoPreviewLayer?
-
-        func setPreviewLayer(_ layer: AVCaptureVideoPreviewLayer) {
-            currentPreviewLayer?.removeFromSuperlayer()
-            currentPreviewLayer = layer
-            self.layer.addSublayer(layer)
-            layer.frame = bounds
-        }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            currentPreviewLayer?.frame = bounds
-        }
-    }
 }
 
 // MARK: - EquipmentRowView (Confirmation Screen)
@@ -617,18 +199,6 @@ struct EquipmentRowView: View {
                 .padding(.vertical, 4)
                 .background(Color(.tertiarySystemFill), in: Capsule())
                 .foregroundStyle(.primary)
-
-            Text(item.detectedByVision ? "AI" : "Manual")
-                .font(.caption2.bold())
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(
-                    item.detectedByVision
-                        ? Color.blue.opacity(0.18)
-                        : Color.orange.opacity(0.18),
-                    in: Capsule()
-                )
-                .foregroundStyle(item.detectedByVision ? Color.blue : Color.orange)
 
             Image(systemName: "chevron.right")
                 .font(.caption)
@@ -733,16 +303,9 @@ struct EquipmentEditSheet: View {
 
 // MARK: - Previews
 
-#Preview("Idle State") {
+#Preview("Equipment Setup") {
     NavigationStack {
-        ScannerView()
-    }
-    .preferredColorScheme(.dark)
-}
-
-#Preview("Confirming State — Mock Data") {
-    NavigationStack {
-        ScannerView()
+        EquipmentSetupView()
     }
     .preferredColorScheme(.dark)
 }

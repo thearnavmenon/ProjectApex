@@ -1,93 +1,58 @@
 // ScannerViewModel.swift
 // ProjectApex — GymScanner Feature
 //
-// The orchestration brain of the guided gym scanning pipeline. Connects:
-//   CameraManager (one-shot capture) → VisionAPIService (single-item identification)
-//   → user review (confirm / discard) → accumulated equipment list → SwiftUI
+// View model for the manual gym-equipment setup flow. The camera "gym scanner"
+// (Vision API single-item capture) was removed in S3 (#527); equipment is now
+// entered exclusively through gym presets + the manual BulkEquipmentPickerSheet /
+// EquipmentEditSheet. This view model owns the editable equipment list and
+// finalises it into a persisted GymProfile.
 //
 // Key responsibilities:
-//   1. Permission gating: requests camera access before starting the session.
-//   2. Guided capture loop: user triggers one photo at a time via the shutter button.
-//      Each photo is sent to the Vision API for single-item identification.
-//   3. Review flow: detected item is shown for user confirmation before being added.
-//   4. Deduplication: mergeItems() collapses duplicates (same type photographed twice).
-//   5. State machine: drives the UI through:
-//      Idle → RequestingPermission → Previewing → Analyzing → Reviewed
-//      → (back to Previewing or Confirming) → Completed
-//   6. GymProfile finalisation: assembles and persists the confirmed profile.
+//   1. Manual equipment management: add / remove / update items.
+//   2. Deduplication: mergeItems() collapses duplicates (same type added twice).
+//   3. GymProfile finalisation: assembles and persists the confirmed profile.
 //
 // Threading:
 //   • `@MainActor` ensures all `@Observable` state mutations land on the main
 //     thread for safe SwiftUI diffing.
-//   • `captureAndIdentify()` uses structured concurrency — awaits the one-shot
-//     frame capture and the Vision API call in sequence.
 
 import Foundation
-import AVFoundation
 
 // MARK: - ScannerState
 
-/// The finite-state machine driving the guided scanner UI.
+/// The finite-state machine driving the manual equipment-setup UI.
 enum ScannerState {
-    /// Initial state before any user interaction.
-    case idle
-
-    /// Awaiting the OS permission dialog response.
-    case requestingPermission
-
-    /// Camera is live; user sees the preview and can tap the shutter button.
-    case previewing
-
-    /// A photo was taken; the Vision API call is in-flight.
-    case analyzing
-
-    /// The Vision API returned a result. User reviews the identified item
-    /// and either confirms (adds to list) or discards it.
-    case reviewed(item: EquipmentItem)
-
-    /// Camera has stopped; user is reviewing and editing the full equipment list.
+    /// Camera was retired; the manual list is the only entry state. Kept as a
+    /// distinct case so the view can still drive a confirm → completed flow.
     case confirming
 
     /// The user has accepted the profile; it has been persisted locally.
     case completed(profile: GymProfile)
-
-    /// Camera permission was denied — graceful degradation path.
-    case permissionDenied
-
-    /// An unrecoverable error occurred during setup or capture.
-    case error(ScannerError)
 }
 
 // MARK: - ScannerViewModel
 
-/// `@Observable` view model for the guided gym equipment scanning flow.
-/// Instantiated as `@State` in `ScannerView` (modern Observation pattern).
+/// `@Observable` view model for the manual gym-equipment setup flow.
+/// Instantiated as `@State` in `EquipmentSetupView` (modern Observation pattern).
 @Observable
 @MainActor
 final class ScannerViewModel {
 
     // ---------------------------------------------------------------------------
-    // MARK: Published State (observed by ScannerView)
+    // MARK: Published State (observed by EquipmentSetupView)
     // ---------------------------------------------------------------------------
 
-    /// Current phase of the scanning state machine.
-    private(set) var state: ScannerState = .idle
+    /// Current phase of the setup state machine.
+    private(set) var state: ScannerState = .confirming
 
     /// The accumulated, deduplicated list of equipment the user has confirmed.
     /// Public setter is intentional: SwiftUI's `@Bindable` wrapping needs write access
     /// for the `ForEach($viewModel.detectedEquipment)` pattern in the confirmation list.
     var detectedEquipment: [EquipmentItem] = []
 
-    /// Brief toast message shown when a capture returns no result (e.g. non-gym image).
-    /// Automatically clears after a short delay.
-    private(set) var nothingDetectedToast: Bool = false
-
     // ---------------------------------------------------------------------------
     // MARK: Dependencies
     // ---------------------------------------------------------------------------
-
-    private let cameraManager: CameraManager
-    private let visionService: any VisionAPIServiceProtocol
 
     /// Optional reference to the app-level DI container. When set,
     /// `confirmProfile()` will also persist to Supabase and reinitialise
@@ -98,140 +63,21 @@ final class ScannerViewModel {
     var userId: UUID?
 
     // ---------------------------------------------------------------------------
-    // MARK: Init
+    // MARK: Public API — called by EquipmentSetupView
     // ---------------------------------------------------------------------------
 
-    init(
-        cameraManager: CameraManager? = nil,
-        visionService: (any VisionAPIServiceProtocol)? = nil
-    ) {
-        self.cameraManager = cameraManager ?? CameraManager()
-
-        if let injectedService = visionService {
-            self.visionService = injectedService
-        } else {
-            let apiKey = (try? KeychainService.shared.retrieve(.anthropicAPIKey)) ?? ""
-            let config = VisionAPIConfiguration(
-                provider: .anthropic,
-                apiKey: apiKey,
-                modelID: "claude-sonnet-4-20250514",
-                timeoutSeconds: 30
-            )
-            self.visionService = VisionAPIService(configuration: config)
-        }
-    }
-
-    // ---------------------------------------------------------------------------
-    // MARK: Public API — called by ScannerView
-    // ---------------------------------------------------------------------------
-
-    /// Entry point: requests camera permission and, on success, starts the live preview.
-    /// Transitions: Idle → RequestingPermission → Previewing.
-    func startCapture() {
-        guard case .idle = state else { return }
-        state = .requestingPermission
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let granted = try await cameraManager.requestAccessAndConfigure()
-                guard granted else {
-                    state = .permissionDenied
-                    return
-                }
-                cameraManager.startSession()
-                state = .previewing
-            } catch let scannerError as ScannerError {
-                state = .error(scannerError)
-            } catch {
-                state = .error(.cameraSetupFailed(underlying: error))
-            }
-        }
-    }
-
-    /// Bypasses the camera and jumps directly to the manual equipment entry list.
-    /// Used on the iOS Simulator where no camera hardware is available.
+    /// Enters the manual equipment-entry list. Kept as the single entry point so
+    /// existing callers continue to compile.
     ///
-    /// Transitions: Idle → Confirming
+    /// Transitions: → Confirming
     func skipToManualEntry() {
         state = .confirming
     }
 
-    /// User tapped the shutter button. Captures one photo, sends it to the Vision API,
-    /// and transitions to `.reviewed` with the identified item, or back to `.previewing`
-    /// with a toast if nothing was detected.
-    ///
-    /// Transitions: Previewing → Analyzing → Reviewed | Previewing
-    func captureAndIdentify() {
-        guard case .previewing = state else { return }
-        state = .analyzing
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let frame = try await cameraManager.captureOneFrame()
-                let items = try await visionService.analyseFrame(frame)
-
-                // Take the first item — the prompt instructs the model to return
-                // exactly one item for a single-equipment photo.
-                let best = items.first
-
-                if let detected = best {
-                    state = .reviewed(item: detected)
-                } else {
-                    // Nothing recognisable — show a brief toast and go back to preview.
-                    state = .previewing
-                    showNothingDetectedToast()
-                }
-            } catch ScannerError.apiResponseEmpty {
-                state = .previewing
-                showNothingDetectedToast()
-            } catch {
-                // Non-fatal: log and return to preview so user can try again.
-                print("[ScannerViewModel] Capture error: \(error.localizedDescription)")
-                state = .previewing
-                showNothingDetectedToast()
-            }
-        }
-    }
-
-    /// User confirmed the reviewed item. Adds it to the accumulated list and
-    /// returns to previewing for the next capture.
-    ///
-    /// Transitions: Reviewed → Previewing
-    func confirmDetection() {
-        guard case .reviewed(let item) = state else { return }
-        mergeItems([item])
-        state = .previewing
-    }
-
-    /// User discarded the reviewed item. Returns to previewing without adding anything.
-    ///
-    /// Transitions: Reviewed → Previewing
-    func rejectDetection() {
-        guard case .reviewed = state else { return }
-        state = .previewing
-    }
-
-    /// User tapped "Done" — stops the camera and moves to the confirmation list.
-    /// If the list is empty, goes back to idle.
-    ///
-    /// Transitions: Previewing → Confirming | Idle
-    func doneCapturing() {
-        cameraManager.stopSession()
-        if !detectedEquipment.isEmpty {
-            state = .confirming
-        } else {
-            state = .idle
-        }
-    }
-
-    /// Resets the scanner to its initial state. Used for the "Re-scan" flow.
+    /// Resets the equipment list back to an empty confirming state.
     func reset() {
-        cameraManager.stopSession()
         detectedEquipment = []
-        nothingDetectedToast = false
-        state = .idle
+        state = .confirming
     }
 
     // ---------------------------------------------------------------------------
@@ -264,7 +110,8 @@ final class ScannerViewModel {
         let now = Date()
         let profile = GymProfile(
             id: UUID(),
-            scanSessionId: UUID().uuidString,
+            // The camera scanner is gone; tag the session as manually entered.
+            scanSessionId: "manual_\(UUID().uuidString)",
             createdAt: now,
             lastUpdatedAt: now,
             equipment: detectedEquipment,
@@ -280,15 +127,6 @@ final class ScannerViewModel {
             guard let self else { return }
             await self.persistProfileToSupabase(profile, userId: uid, deps: deps)
         }
-    }
-
-    // ---------------------------------------------------------------------------
-    // MARK: Convenience
-    // ---------------------------------------------------------------------------
-
-    /// Exposes the camera preview layer for `CameraPreviewView`.
-    var previewLayer: AVCaptureVideoPreviewLayer {
-        cameraManager.previewLayer
     }
 
     // ---------------------------------------------------------------------------
@@ -333,22 +171,8 @@ final class ScannerViewModel {
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // MARK: Private: Toast
-    // ---------------------------------------------------------------------------
-
-    private func showNothingDetectedToast() {
-        nothingDetectedToast = true
-        Task {
-            try? await Task.sleep(nanoseconds: 2_500_000_000) // 2.5 seconds
-            nothingDetectedToast = false
-        }
-    }
-
     // Prevents ___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED
     // when @State releases this @MainActor class from a CFRunLoop layout-pass
     // callback that is not inside a Swift Concurrency Task. See issue #37.
     nonisolated deinit {}
 }
-
-
