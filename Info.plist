@@ -57,8 +57,6 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 
-	<key>NSCameraUsageDescription</key>
-	<string>Project Apex uses the camera to scan gym equipment and build your gym profile.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
