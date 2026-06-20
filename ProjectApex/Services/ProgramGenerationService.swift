@@ -613,8 +613,12 @@ actor ProgramGenerationService {
             "- exerciseId: \($0.exerciseId) (week \($0.weekNumber)) requires \($0.requiredEquipment.typeKey) which is NOT available"
         }.joined(separator: "\n")
 
-        let availableKeys = gymProfile.equipment
-            .map { $0.equipmentType.typeKey }
+        // #527 S6 (S5 follow-up): emit the descriptive { key, name } form S5
+        // introduced for the JSON `available_equipment` payload, instead of bare
+        // keys, so this correction re-prompt is consistent with the rest of the
+        // equipment surface. The LLM emits equipment_required using the "key".
+        let availableEquipment = gymProfile.equipmentRefs
+            .map { "{ \"key\": \"\($0.key)\", \"name\": \"\($0.name)\" }" }
             .joined(separator: ", ")
 
         return """
@@ -628,8 +632,8 @@ actor ProgramGenerationService {
         VIOLATIONS:
         \(violationLines)
 
-        AVAILABLE EQUIPMENT:
-        \(availableKeys)
+        AVAILABLE EQUIPMENT (list of { key, name }; use the "key" in equipment_required):
+        \(availableEquipment)
         """
     }
 

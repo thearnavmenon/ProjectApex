@@ -107,3 +107,148 @@ struct SessionPlanServiceDayLabelNormalizationTests {
         #expect(day.dayLabel == "Chest_Back")
     }
 }
+
+// MARK: - #527 S6 — hard equipment enforcement (safety-first)
+
+@Suite("SessionPlanService — equipment enforcement (#527 S6)")
+struct SessionPlanServiceEquipmentEnforcementTests {
+
+    /// Decodes a full session payload from a list of (id, name, equipmentKey)
+    /// tuples so each exercise flows through the real Codable path
+    /// (SessionPlanExercise has no memberwise init).
+    private func decodeExercises(
+        _ specs: [(id: String, name: String, equipment: String)]
+    ) throws -> [SessionPlanExercise] {
+        let exerciseJSON = specs.map { spec in
+            """
+            {
+              "exercise_id": "\(spec.id)",
+              "name": "\(spec.name)",
+              "primary_muscle": "chest",
+              "synergists": [],
+              "equipment_required": "\(spec.equipment)",
+              "sets": 3,
+              "rep_range": { "min": 8, "max": 12 },
+              "tempo": "3-1-1-0",
+              "rest_seconds": 120,
+              "rir_target": 2,
+              "coaching_cues": []
+            }
+            """
+        }.joined(separator: ",\n")
+
+        let json = """
+        {
+          "session_plan": {
+            "day_label": "Test_Day",
+            "session_notes": null,
+            "is_deload": false,
+            "is_fatigue_management_day": false,
+            "exercises": [\(exerciseJSON)]
+          }
+        }
+        """
+        return try JSONDecoder()
+            .decode(SessionPlanWrapper.self, from: Data(json.utf8))
+            .sessionPlan.exercises
+    }
+
+    @Test("nil owned set skips enforcement entirely (back-compat)")
+    func nilOwnedSkipsEnforcement() throws {
+        let exercises = try decodeExercises([
+            ("barbell_bench_press", "Barbell Bench Press", "barbell"),
+            ("cable_row", "Cable Row", "cable_machine_single"),
+        ])
+        let result = SessionPlanService.enforceEquipment(exercises, ownedEquipmentKeys: nil)
+        #expect(result.count == 2, "nil owned set must not drop anything")
+    }
+
+    @Test("Drops off-equipment exercise but keeps owned + bodyweight ones")
+    func dropsOffEquipmentKeepsOwnedAndBodyweight() throws {
+        // Owned: barbell only.
+        let owned: Set<String> = ["barbell"]
+        let exercises = try decodeExercises([
+            ("barbell_bench_press", "Barbell Bench Press", "barbell"),               // owned → keep
+            ("cable_row", "Cable Row", "cable_machine_single"),                       // NOT owned → drop
+            ("push_ups", "Push-Ups", "flat_bench"),                                   // bodyweight (library) → keep
+        ])
+        let result = SessionPlanService.enforceEquipment(exercises, ownedEquipmentKeys: owned)
+        let ids = Set(result.map(\.exerciseId))
+        #expect(ids.contains("barbell_bench_press"))
+        #expect(ids.contains("push_ups"), "Bodyweight exercise must survive even though its nominal equipment is unowned")
+        #expect(!ids.contains("cable_row"), "Off-equipment exercise must be dropped")
+        #expect(result.count == 2)
+    }
+
+    @Test("Custom .unknown machine matching an owned key is allowed")
+    func unknownMachineMatchingOwnedKeyAllowed() throws {
+        let owned: Set<String> = ["unknown:Belt squat machine"]
+        let exercises = try decodeExercises([
+            ("belt_squat", "Belt Squat", "unknown:Belt squat machine"),  // owned custom → keep
+            ("cable_row", "Cable Row", "cable_machine_single"),          // NOT owned → drop
+        ])
+        let result = SessionPlanService.enforceEquipment(exercises, ownedEquipmentKeys: owned)
+        let ids = Set(result.map(\.exerciseId))
+        #expect(ids.contains("belt_squat"), "A custom .unknown machine whose key is owned must pass")
+        #expect(!ids.contains("cable_row"))
+    }
+
+    @Test("SAFETY RAIL: never empties a populated session")
+    func neverEmptiesSession() throws {
+        // Gym owns NOTHING that matches, and none of the exercises are bodyweight.
+        let owned: Set<String> = ["dumbbell_set"]
+        let exercises = try decodeExercises([
+            ("barbell_bench_press", "Barbell Bench Press", "barbell"),
+            ("cable_row", "Cable Row", "cable_machine_single"),
+        ])
+        let result = SessionPlanService.enforceEquipment(exercises, ownedEquipmentKeys: owned)
+        // All would be dropped → the rail keeps the original list rather than ship empty.
+        #expect(result.count == 2, "Enforcement must NEVER return an empty session")
+        #expect(Set(result.map(\.exerciseId)) == Set(["barbell_bench_press", "cable_row"]))
+    }
+
+    @Test("Empty input stays empty (no rail trigger when nothing to keep)")
+    func emptyInputStaysEmpty() {
+        let result = SessionPlanService.enforceEquipment([], ownedEquipmentKeys: ["barbell"])
+        #expect(result.isEmpty)
+    }
+
+    @Test("buildTrainingDay end-to-end drops off-equipment, keeps the rest, non-empty")
+    @MainActor
+    func buildTrainingDayEnforcesEquipment() async throws {
+        let fakeURL = URL(string: "https://localhost")!
+        let supabase = SupabaseClient(supabaseURL: fakeURL, anonKey: "test")
+        let service = SessionPlanService(
+            provider: NeverCalledProvider(),
+            memoryService: MemoryService(supabase: supabase, embeddingAPIKey: "test"),
+            supabaseClient: supabase
+        )
+        let exercises = try decodeExercises([
+            ("barbell_bench_press", "Barbell Bench Press", "barbell"),         // keep
+            ("cable_row", "Cable Row", "cable_machine_single"),                // drop (unowned)
+            ("push_ups", "Push-Ups", "flat_bench"),                            // keep (bodyweight)
+        ])
+        let payload = SessionPlanPayload(
+            dayLabel: "Test_Day",
+            sessionNotes: nil,
+            isDeload: false,
+            isFatigueManagementDay: false,
+            exercises: exercises
+        )
+        let stub = TrainingDay(
+            id: UUID(), dayOfWeek: 1, dayLabel: "Push_A",
+            exercises: [], sessionNotes: nil, status: .pending
+        )
+        let fatigue = WeekFatigueSignals.compute(from: [], sessionCount: 0)
+
+        let day = await service.buildTrainingDay(
+            from: payload,
+            stub: stub,
+            fatigue: fatigue,
+            ownedEquipmentKeys: ["barbell"]
+        )
+        let ids = Set(day.exercises.map(\.exerciseId))
+        #expect(ids == Set(["barbell_bench_press", "push_ups"]))
+        #expect(!day.exercises.isEmpty)
+    }
+}

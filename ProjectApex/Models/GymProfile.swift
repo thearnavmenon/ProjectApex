@@ -395,13 +395,16 @@ nonisolated struct EquipmentRef: Codable, Equatable, Hashable, Sendable {
 
 extension GymProfile {
     /// The owned equipment as `{ key, name }` refs for LLM payloads.
-    var equipmentRefs: [EquipmentRef] {
+    /// `nonisolated` so the non-isolated session/program generation paths can
+    /// read it (the struct is a `nonisolated Sendable` value type).
+    nonisolated var equipmentRefs: [EquipmentRef] {
         equipment.map { EquipmentRef($0.equipmentType) }
     }
 
     /// The owned equipment `typeKey`s, used to pre-filter the exercise library
-    /// to what this gym can actually train.
-    var ownedEquipmentKeys: Set<String> {
+    /// to what this gym can actually train. `nonisolated` for the same reason as
+    /// `equipmentRefs` — `SessionPlanService.generateSession` reads it off-actor.
+    nonisolated var ownedEquipmentKeys: Set<String> {
         Set(equipment.map { $0.equipmentType.typeKey })
     }
 }
