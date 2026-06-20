@@ -1433,9 +1433,9 @@ struct OnboardingView: View {
         UserDefaults.standard.set(profile.sex, forKey: UserProfileConstants.sexKey)
 
         // #527 S2: the user's injury / "work-around" selection lives in
-        // profile.injuryAreas. Slice 2 owns persisting it as a user-confirmed
-        // limitation (the limitation write-path is out of scope here) — do NOT
-        // write it yet; it would land in the wrong shape without that path.
+        // profile.injuryAreas. It is persisted below, alongside the goal write,
+        // as user-confirmed limitations via the update-trainee-goal EF's
+        // `confirmed_limitations` field (see the goalPayload build).
 
         // #369 slice 3: the `users` row's id MUST be the anonymous-auth
         // `auth.uid()` so slice 5's RLS policy (`id = auth.uid()`) will match.
@@ -1472,6 +1472,10 @@ struct OnboardingView: View {
         // until the next onboarding retry or DeveloperSettingsView reset).
         let isoFormatter = ISO8601DateFormatter()
         isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        // #527 S2: map the injury areas tapped on the "anything to work around?"
+        // screen to user-confirmed limitations carried on the same goal write.
+        let confirmedLimitations = OnboardingInjuryMapping
+            .confirmedLimitations(from: profile.injuryAreas)
         let goalPayload = TraineeGoalUpsertPayload(
             userId: userId,
             goal: GoalUpsertBody(
@@ -1481,7 +1485,8 @@ struct OnboardingView: View {
             ),
             acknowledgeTriggeringSessionCount: nil,
             stretchEdits: nil,
-            acknowledgeCalibrationReview: nil
+            acknowledgeCalibrationReview: nil,
+            confirmedLimitations: confirmedLimitations.isEmpty ? nil : confirmedLimitations
         )
         if let encoded = try? JSONEncoder().encode(goalPayload) {
             _ = try? await deps.supabaseClient.invokeFunction(
@@ -1632,6 +1637,12 @@ struct TraineeGoalUpsertPayload: Codable, Sendable {
     /// calibration banner does not reappear after a session sync. Omitted from
     /// the wire when nil.
     let acknowledgeCalibrationReview: Bool?
+    /// #527 S2: OPTIONAL. User-confirmed injuries from the onboarding "anything
+    /// to work around?" screen. When non-nil the EF appends each as a
+    /// user-confirmed `activeLimitations` entry so the planner avoids
+    /// programming into it from session 1. Synthesized `encodeIfPresent` OMITS
+    /// the key when nil, so other call sites keep their exact wire shape.
+    let confirmedLimitations: [ConfirmedLimitationBody]?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
@@ -1639,6 +1650,74 @@ struct TraineeGoalUpsertPayload: Codable, Sendable {
         case acknowledgeTriggeringSessionCount = "acknowledge_triggering_session_count"
         case stretchEdits = "stretch_edits"
         case acknowledgeCalibrationReview = "acknowledge_calibration_review"
+        case confirmedLimitations = "confirmed_limitations"
+    }
+}
+
+/// #527 S2: a single user-confirmed limitation in the goal-upsert payload.
+/// Mirrors the EF's `ConfirmedLimitation` shape — a joint-scoped `subject`
+/// tagged union (`{kind, value}`) + `severity`. The default member-name
+/// CodingKeys give the validator the `{subject, severity}` wire shape it
+/// expects; the nested `subject` carries `{kind, value}` verbatim.
+struct ConfirmedLimitationBody: Codable, Sendable {
+    let subject: LimitationSubjectBody
+    let severity: String
+}
+
+/// #527 S2: the `subject` tagged union for a confirmed limitation. Onboarding
+/// only ever declares joint-scoped limitations (`kind == "joint"`); `value` is
+/// a `BodyJoint` rawValue (e.g. "shoulder", "lower_back").
+struct LimitationSubjectBody: Codable, Sendable {
+    let kind: String
+    let value: String
+}
+
+// MARK: - Onboarding injury → confirmed-limitation mapping (#527 S2)
+
+/// Maps the human-readable area labels from the onboarding "anything to work
+/// around?" screen onto the `BodyJoint` vocabulary the coach's limitation
+/// system uses, producing user-confirmed `ConfirmedLimitationBody` payloads.
+///
+/// `internal` (not `private`) so the EF-contract / mapping parity test can
+/// exercise it directly.
+enum OnboardingInjuryMapping {
+    /// Area label (as stored in `OnboardingProfile.injuryAreas`) → `BodyJoint`
+    /// rawValue. Keys are the exact `InjuryArea.name` strings the injuries
+    /// screen offers; values are the canonical joint rawValues the planner reads.
+    static let areaToJoint: [String: String] = [
+        "Shoulders":  "shoulder",
+        "Lower back": "lower_back",
+        "Knees":      "knee",
+        "Elbows":     "elbow",
+        "Wrists":     "wrist",
+        "Hips":       "hip",
+        "Neck":       "neck",
+        "Ankles":     "ankle",
+    ]
+
+    /// Severity stamped on a user-declared injury. `moderate` so the planner
+    /// substitutes the affected movement (per SystemPrompt_SessionPlan ACTIVE
+    /// LIMITATIONS) rather than merely lightening it — "avoid programming into"
+    /// a self-reported injury from session 1. User-confirmed entries are NOT
+    /// capped at the AI-inferred `.mild` ceiling (a user report is at least as
+    /// trustworthy as an inference).
+    static let onboardingSeverity = "moderate"
+
+    /// Maps the tapped areas to confirmed-limitation payloads. Unknown labels
+    /// (none expected — the screen is a closed set) are dropped. Output is
+    /// sorted by joint rawValue for deterministic encoding.
+    static func confirmedLimitations(
+        from areas: Set<String>
+    ) -> [ConfirmedLimitationBody] {
+        areas
+            .compactMap { areaToJoint[$0] }
+            .sorted()
+            .map {
+                ConfirmedLimitationBody(
+                    subject: LimitationSubjectBody(kind: "joint", value: $0),
+                    severity: onboardingSeverity
+                )
+            }
     }
 }
 

@@ -266,6 +266,102 @@ Deno.test("validateRequest_ack_calibration_review_nonBoolean_returns_400", () =>
   assertEquals(result.error.includes("acknowledge_calibration_review"), true);
 });
 
+// ─── #527 S2: confirmed_limitations validation ───────────────────────────────
+
+Deno.test("validateRequest_confirmed_limitations_absent_still_valid", () => {
+  // Back-compat: goal-review / calibration saves omit the field; valid as before.
+  const result = validateRequest(baseRequest());
+  assertEquals("error" in result, false);
+  if ("error" in result) return;
+  assertEquals(result.confirmed_limitations, undefined);
+});
+
+Deno.test("validateRequest_confirmed_limitations_valid_accepted", () => {
+  const result = validateRequest(
+    baseRequest({
+      confirmed_limitations: [
+        { subject: { kind: "joint", value: "shoulder" }, severity: "moderate" },
+        { subject: { kind: "joint", value: "lower_back" }, severity: "mild" },
+      ],
+    }),
+  );
+  assertEquals("error" in result, false);
+  if ("error" in result) return;
+  assertEquals(result.confirmed_limitations?.length, 2);
+  assertEquals(result.confirmed_limitations?.[0].subject.value, "shoulder");
+  assertEquals(result.confirmed_limitations?.[0].severity, "moderate");
+});
+
+Deno.test("validateRequest_confirmed_limitations_all_eight_joints_accepted", () => {
+  const joints = [
+    "shoulder", "elbow", "wrist", "hip", "knee", "ankle", "lower_back", "neck",
+  ];
+  const result = validateRequest(
+    baseRequest({
+      confirmed_limitations: joints.map((j) => ({
+        subject: { kind: "joint", value: j },
+        severity: "moderate",
+      })),
+    }),
+  );
+  assertEquals("error" in result, false);
+});
+
+Deno.test("validateRequest_confirmed_limitations_non_array_returns_400", () => {
+  const result = validateRequest(
+    baseRequest({
+      confirmed_limitations: { subject: { kind: "joint", value: "knee" }, severity: "mild" },
+    }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("confirmed_limitations"), true);
+});
+
+Deno.test("validateRequest_confirmed_limitations_non_object_entry_returns_400", () => {
+  const result = validateRequest(
+    baseRequest({ confirmed_limitations: ["knee"] }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("confirmed_limitations[0]"), true);
+});
+
+Deno.test("validateRequest_confirmed_limitations_non_joint_kind_returns_400", () => {
+  // Onboarding only declares joint-scoped limitations; pattern/muscle rejected.
+  const result = validateRequest(
+    baseRequest({
+      confirmed_limitations: [
+        { subject: { kind: "pattern", value: "squat" }, severity: "mild" },
+      ],
+    }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("kind"), true);
+});
+
+Deno.test("validateRequest_confirmed_limitations_unknown_joint_returns_400", () => {
+  const result = validateRequest(
+    baseRequest({
+      confirmed_limitations: [
+        { subject: { kind: "joint", value: "spleen" }, severity: "mild" },
+      ],
+    }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("value"), true);
+});
+
+Deno.test("validateRequest_confirmed_limitations_bad_severity_returns_400", () => {
+  const result = validateRequest(
+    baseRequest({
+      confirmed_limitations: [
+        { subject: { kind: "joint", value: "knee" }, severity: "agony" },
+      ],
+    }),
+  );
+  if (!("error" in result)) throw new Error("expected error");
+  assertEquals(result.error.includes("severity"), true);
+});
+
 // ─── #369 slice 4: handleRequest JWT-`sub` ownership check (closes the IDOR) ──
 //
 // The handler derives the caller from the verified JWT `sub` (decode-only; the

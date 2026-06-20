@@ -699,6 +699,128 @@ goalTest(
   },
 );
 
+// ─── #527 S2: confirmed_limitations write-path — append onboarding injuries as
+// user-confirmed activeLimitations. ─────────────────────────────────────────
+
+const SHOULDER_LIMITATION = {
+  subject: { kind: "joint" as const, value: "shoulder" },
+  severity: "moderate",
+};
+const KNEE_LIMITATION = {
+  subject: { kind: "joint" as const, value: "knee" },
+  severity: "moderate",
+};
+
+goalTest(
+  "#527 S2 (1): goal-save WITH confirmed_limitations → activeLimitations carries a user-confirmed entry AND the goal is written",
+  async () => {
+    const userId = await seedFreshUserWithoutRow();
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, confirmed_limitations: [SHOULDER_LIMITATION] },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const m = rows[0].model_json as Record<string, unknown>;
+    assertEquals(m.goal, GOAL_A);
+    const active = m.activeLimitations as Array<Record<string, unknown>>;
+    assertEquals(active.length, 1);
+    const lim = active[0];
+    assertEquals(lim.subject, { kind: "joint", value: "shoulder" });
+    assertEquals(lim.severity, "moderate");
+    assertEquals(lim.userConfirmed, true, "onboarding injuries are user-confirmed");
+    assertEquals(lim.evidenceCount, 1);
+    assertEquals(lim.sessionsWithoutReMention, 0);
+    assertExists(lim.onsetDate);
+  },
+);
+
+goalTest(
+  "#527 S2 (2): idempotent on re-onboarding → replaying the same injury does NOT duplicate or reset the existing limitation",
+  async () => {
+    // Seed an existing user-confirmed shoulder limitation that the session
+    // pipeline has since accumulated evidence on.
+    const seededLimitation = {
+      subject: { kind: "joint", value: "shoulder" },
+      severity: "moderate",
+      onsetDate: "2026-05-01T00:00:00.000Z",
+      evidenceCount: 4,
+      userConfirmed: true,
+      notes: null,
+      sessionsWithoutReMention: 0,
+    };
+    const userId = await seedFreshUserWithExistingModel({
+      goal: GOAL_A,
+      activeLimitations: [seededLimitation],
+    });
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, confirmed_limitations: [SHOULDER_LIMITATION] },
+      sql,
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const m = rows[0].model_json as Record<string, unknown>;
+    const active = m.activeLimitations as Array<Record<string, unknown>>;
+    // Subject already present → skipped; the accumulated entry is untouched.
+    assertEquals(active.length, 1);
+    assertEquals(active[0], seededLimitation);
+  },
+);
+
+goalTest(
+  "#527 S2 (3): append preserves other top-level model_json keys (re-onboarding must not destroy session state)",
+  async () => {
+    const seed = {
+      goal: GOAL_A,
+      patterns: {
+        squat: { currentPhase: "accumulation", sessionsInPhase: 3, trend: "progressing" },
+      },
+    };
+    const userId = await seedFreshUserWithExistingModel(seed);
+
+    await upsertGoal(
+      { user_id: userId, goal: GOAL_A, confirmed_limitations: [KNEE_LIMITATION] },
+      sql,
+    );
+
+    const cmp = await sql`
+      SELECT (model_json -> 'patterns') = ${sql.json(seed.patterns)}::jsonb AS patterns_equal
+      FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    assertEquals(cmp[0].patterns_equal, true, "patterns subtree must be untouched");
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const m = rows[0].model_json as Record<string, unknown>;
+    const active = m.activeLimitations as Array<Record<string, unknown>>;
+    assertEquals(active.length, 1);
+    assertEquals(active[0].subject, { kind: "joint", value: "knee" });
+  },
+);
+
+goalTest(
+  "#527 S2 (4): goal-save WITHOUT confirmed_limitations → activeLimitations untouched (remains absent)",
+  async () => {
+    const userId = await seedFreshUserWithExistingModel({ goal: GOAL_A });
+
+    await upsertGoal({ user_id: userId, goal: GOAL_A }, sql);
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const m = rows[0].model_json as Record<string, unknown>;
+    // No limitations sent → the conditional write never ran → key stays absent.
+    assertEquals("activeLimitations" in m, false);
+  },
+);
+
 // Sentinel "test" that runs last — closes the shared pool so the connection
 // lifecycle stays local to this file rather than relying on process-exit.
 Deno.test({
