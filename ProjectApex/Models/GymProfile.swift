@@ -72,6 +72,11 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
     case pecDeck
     case preacherCurl
     case cableCrossover
+    case reverseFly            // rear-delt / reverse pec deck
+    case assistedDipPullUp     // assisted dip / pull-up machine (bodyweight-assisted)
+    case hipThrustMachine
+    case calfRaiseMachine
+    case tBarRow               // T-bar / chest-supported row
     case unknown(String)
 
     // ---------------------------------------------------------------------------
@@ -107,7 +112,15 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
         case .pecDeck:                return "pec_deck"
         case .preacherCurl:           return "preacher_curl"
         case .cableCrossover:         return "cable_crossover"
-        case .unknown:                return "unknown"
+        case .reverseFly:             return "reverse_fly"
+        case .assistedDipPullUp:      return "assisted_dip_pull_up"
+        case .hipThrustMachine:       return "hip_thrust_machine"
+        case .calfRaiseMachine:       return "calf_raise_machine"
+        case .tBarRow:                return "t_bar_row"
+        // Preserve the custom string so it survives LLM serialisation. The
+        // Codable persistence path (encode/init(from:)) uses the separate
+        // rawValue key, not this — see init(typeKey:) for the round-trip.
+        case .unknown(let raw):       return "unknown:\(raw)"
         }
     }
 
@@ -140,6 +153,11 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
         case .pecDeck:                return "Pec Deck"
         case .preacherCurl:           return "Preacher Curl"
         case .cableCrossover:         return "Cable Crossover"
+        case .reverseFly:             return "Rear-Delt / Reverse Pec Deck"
+        case .assistedDipPullUp:      return "Assisted Dip / Pull-Up Machine"
+        case .hipThrustMachine:       return "Hip Thrust Machine"
+        case .calfRaiseMachine:       return "Calf Raise Machine"
+        case .tBarRow:                return "T-Bar / Chest-Supported Row"
         case .unknown(let raw):       return raw
         }
     }
@@ -159,10 +177,11 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
         case .cableMachine, .cableMachineDual, .cableCrossover, .latPulldown, .seatedRow:
             return .cable
         case .legPress, .hackSquat, .chestPressMachine, .shoulderPressMachine,
-             .legExtension, .legCurl, .pecDeck, .preacherCurl:
+             .legExtension, .legCurl, .pecDeck, .preacherCurl,
+             .reverseFly, .hipThrustMachine, .calfRaiseMachine, .tBarRow:
             return .machine
         case .adjustableBench, .flatBench, .inclineBench, .pullUpBar,
-             .dipStation, .resistanceBands:
+             .dipStation, .resistanceBands, .assistedDipPullUp:
             return .bodyweightAndRig
         case .unknown:
             return .machine
@@ -173,7 +192,9 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
     /// is ever prescribed by the AI for this equipment.
     var isNaturallyBodyweightOnly: Bool {
         switch self {
-        case .pullUpBar, .dipStation: return true
+        // Assisted dip/pull-up is bodyweight-assisted: the stack removes load
+        // rather than adding it, so the AI must never prescribe external weight.
+        case .pullUpBar, .dipStation, .assistedDipPullUp: return true
         default: return false
         }
     }
@@ -185,10 +206,19 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
         .inclineBench, .pullUpBar, .dipStation, .resistanceBands, .kettlebellSet,
         .powerRack, .sqatRack, .latPulldown, .seatedRow, .chestPressMachine,
         .shoulderPressMachine, .legExtension, .legCurl, .pecDeck, .preacherCurl,
-        .cableCrossover
+        .cableCrossover, .reverseFly, .assistedDipPullUp, .hipThrustMachine,
+        .calfRaiseMachine, .tBarRow
     ]
 
     init(typeKey: String, rawValue: String? = nil) {
+        // Custom machines round-trip through the LLM-serialisation key as
+        // "unknown:<raw>" (see `typeKey`). Strip the prefix back to the raw
+        // string. Codable persistence uses the explicit `rawValue` key instead,
+        // and the bare "unknown" case below still handles that decode path.
+        if let raw = typeKey.dropPrefixIfPresent("unknown:") {
+            self = .unknown(rawValue ?? raw)
+            return
+        }
         switch typeKey {
         case "dumbbell_set":           self = .dumbbellSet
         case "barbell":                self = .barbell
@@ -217,9 +247,21 @@ nonisolated enum EquipmentType: Hashable, Equatable, Sendable {
         case "pec_deck":               self = .pecDeck
         case "preacher_curl":          self = .preacherCurl
         case "cable_crossover":        self = .cableCrossover
+        case "reverse_fly":            self = .reverseFly
+        case "assisted_dip_pull_up":   self = .assistedDipPullUp
+        case "hip_thrust_machine":     self = .hipThrustMachine
+        case "calf_raise_machine":     self = .calfRaiseMachine
+        case "t_bar_row":              self = .tBarRow
         case "unknown":                self = .unknown(rawValue ?? typeKey)
-        default:                       self = .unknown(typeKey)
+        default:                       self = .unknown(rawValue ?? typeKey)
         }
+    }
+}
+
+private extension String {
+    /// Returns the substring after `prefix` if `self` starts with it, else nil.
+    func dropPrefixIfPresent(_ prefix: String) -> String? {
+        hasPrefix(prefix) ? String(dropFirst(prefix.count)) : nil
     }
 }
 
@@ -236,9 +278,14 @@ extension EquipmentType: Codable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(typeKey, forKey: .type)
         if case .unknown(let raw) = self {
+            // Persistence keeps the stable wire format { "type": "unknown",
+            // "rawValue": "..." } unchanged. The "unknown:<raw>" form is only
+            // for the LLM-serialisation `typeKey`, not for stored JSON.
+            try container.encode("unknown", forKey: .type)
             try container.encode(raw, forKey: .rawValue)
+        } else {
+            try container.encode(typeKey, forKey: .type)
         }
     }
 

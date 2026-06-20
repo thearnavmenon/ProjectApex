@@ -82,6 +82,88 @@ final class EquipmentTypeCodableTests: XCTestCase {
             XCTAssertEqual(decoded, equipmentType, "Round-trip failed for \(equipmentType)")
         }
     }
+
+    // MARK: Codable wire-format stability for unknown (Slice 4)
+
+    /// The custom-string `typeKey` change MUST NOT alter the persisted JSON
+    /// `type` field — it stays the bare "unknown" with the raw in `rawValue`.
+    /// This guards already-stored GymProfiles against the typeKey change.
+    func test_unknownCase_persistedTypeField_staysBareUnknown() throws {
+        let data = try encoder.encode(EquipmentType.unknown("Belt squat machine"))
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(json["type"] as? String, "unknown",
+            "Persisted 'type' field must remain the bare 'unknown' (not the unknown:<raw> LLM key)")
+        XCTAssertEqual(json["rawValue"] as? String, "Belt squat machine",
+            "Raw custom name must persist in the separate 'rawValue' key")
+    }
+
+    /// Old-format JSON ({"type":"unknown","rawValue":"..."}) must still decode.
+    func test_unknownCase_legacyWireFormat_stillDecodes() throws {
+        let json = """
+        {"type":"unknown","rawValue":"atlas_stone"}
+        """
+        let decoded = try decoder.decode(
+            EquipmentType.self,
+            from: XCTUnwrap(json.data(using: .utf8))
+        )
+        XCTAssertEqual(decoded, .unknown("atlas_stone"))
+    }
+}
+
+// MARK: ─── Part 1b: EquipmentType.typeKey LLM-serialisation round-trip (Slice 4)
+
+final class EquipmentTypeTypeKeyRoundTripTests: XCTestCase {
+
+    /// Every known case must round-trip through its LLM `typeKey`:
+    /// EquipmentType(typeKey: x.typeKey) == x.
+    func test_allKnownCases_typeKeyRoundTrips() {
+        for equipmentType in EquipmentType.knownCases {
+            let key = equipmentType.typeKey
+            let rebuilt = EquipmentType(typeKey: key)
+            XCTAssertEqual(rebuilt, equipmentType,
+                "typeKey round-trip failed for \(equipmentType): key='\(key)' rebuilt=\(rebuilt)")
+        }
+    }
+
+    /// A custom machine's raw string must survive the typeKey round-trip
+    /// (the whole point of Fix 2 — it previously collapsed to "unknown").
+    func test_unknownCase_typeKeyPreservesRawString() {
+        let custom = EquipmentType.unknown("Belt squat machine")
+        XCTAssertEqual(custom.typeKey, "unknown:Belt squat machine",
+            "typeKey must embed the raw custom name, not discard it")
+        XCTAssertEqual(EquipmentType(typeKey: custom.typeKey), custom,
+            "Custom machine must round-trip via typeKey")
+    }
+
+    /// Raw strings that themselves contain a colon must round-trip intact
+    /// (only the first 'unknown:' prefix is stripped).
+    func test_unknownCase_typeKeyWithColonInRaw_roundTrips() {
+        let custom = EquipmentType.unknown("Hammer Strength: ISO row")
+        XCTAssertEqual(EquipmentType(typeKey: custom.typeKey), custom)
+    }
+
+    /// The new first-class machine cases must each map to a category and be in
+    /// knownCases (i.e. they appear in the picker), and not be `.unknown`.
+    func test_newMachineCases_areKnownAndCategorised() {
+        let newCases: [EquipmentType] = [
+            .reverseFly, .assistedDipPullUp, .hipThrustMachine,
+            .calfRaiseMachine, .tBarRow
+        ]
+        for equipmentType in newCases {
+            XCTAssertTrue(EquipmentType.knownCases.contains(equipmentType),
+                "\(equipmentType) must be in knownCases so it shows in the picker")
+            if case .unknown = equipmentType {
+                XCTFail("\(equipmentType) must not resolve to .unknown")
+            }
+            // category is non-optional; touching it asserts it is wired.
+            _ = equipmentType.category
+        }
+    }
+
+    /// Assisted dip/pull-up is bodyweight-assisted — no external weight prescribed.
+    func test_assistedDipPullUp_isBodyweightOnly() {
+        XCTAssertTrue(EquipmentType.assistedDipPullUp.isNaturallyBodyweightOnly)
+    }
 }
 
 // MARK: ─── Part 2: GymProfile Codable Round-Trip ─────────────────────────────

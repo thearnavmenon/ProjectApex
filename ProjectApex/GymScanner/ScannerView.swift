@@ -647,12 +647,18 @@ struct EquipmentEditSheet: View {
     var onCancel: () -> Void
 
     @State private var selectedType: EquipmentType = .dumbbellSet
+    @State private var customName: String = ""
     @State private var count: Int = 1
     @State private var notes: String = ""
 
     private var isEditing: Bool { existingItem != nil }
     private var title: String { isEditing ? "Edit Equipment" : "Add Equipment" }
     private var saveLabel: String { isEditing ? "Save" : "Add" }
+
+    /// Trimmed custom machine name; non-empty means "use a custom type".
+    private var trimmedCustomName: String {
+        customName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         NavigationStack {
@@ -664,8 +670,17 @@ struct EquipmentEditSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .disabled(!trimmedCustomName.isEmpty)
 
                     Stepper("Count: \(count)", value: $count, in: 1...50)
+                }
+
+                Section {
+                    TextField("e.g. Belt squat machine", text: $customName)
+                } header: {
+                    Text("Custom Name (optional)")
+                } footer: {
+                    Text("Can't find it in the list? Type the machine's name here and we'll add it as a custom item.")
                 }
 
                 Section("Notes (optional)") {
@@ -688,15 +703,26 @@ struct EquipmentEditSheet: View {
 
     private func populateFromExisting() {
         guard let item = existingItem else { return }
-        selectedType = item.equipmentType
         count = item.count
         notes = item.notes ?? ""
+        // A custom (unknown) machine pre-fills the name field; a known type
+        // selects the picker.
+        if case .unknown(let raw) = item.equipmentType {
+            customName = raw
+        } else {
+            selectedType = item.equipmentType
+        }
     }
 
     private func commitSave() {
+        // A non-empty custom name creates a custom EquipmentType.unknown(...);
+        // otherwise the known-type picker selection is used.
+        let type: EquipmentType = trimmedCustomName.isEmpty
+            ? selectedType
+            : .unknown(trimmedCustomName)
         let item = EquipmentItem(
             id: existingItem?.id ?? UUID(),
-            equipmentType: selectedType,
+            equipmentType: type,
             count: count,
             notes: notes.isEmpty ? nil : notes,
             detectedByVision: existingItem?.detectedByVision ?? false

@@ -60,7 +60,11 @@ nonisolated enum DefaultWeightIncrements {
              .legExtension,
              .legCurl,
              .pecDeck,
-             .preacherCurl:             return machineStack
+             .preacherCurl,
+             .reverseFly,
+             .hipThrustMachine,
+             .calfRaiseMachine,
+             .tBarRow:                  return machineStack
         case .kettlebellSet:            return kettlebells
         default:                        return []
         }
