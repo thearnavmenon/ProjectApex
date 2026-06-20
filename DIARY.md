@@ -7,6 +7,37 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-20 — Saving your injuries, and letting you add any gym machine
+
+**The problem (in plain words):**
+Two behind-the-scenes pieces of the setup overhaul. The new "anything to work
+around?" question looked nice but didn't actually do anything yet. And gym
+machines were a mess: lots of gyms have machines we had no name for, and there
+was a hidden bug where even if you added a custom one, its name got thrown away
+before the coach ever saw it.
+
+**What I changed:**
+First, injuries: if you tap "bad shoulder" or "dodgy knee", the coach now records
+it as a confirmed injury and avoids programming straight into it from your very
+first session — instead of slowly piecing it together from your workout notes over
+weeks. It's saved safely on the server and won't overwrite anything the coach has
+already learned. Second, machines: you can now type in any machine we don't list,
+its name actually reaches the coach now, and I added several common machines that
+were missing (reverse-fly / rear-delt, assisted dip/pull-up, hip-thrust,
+calf-raise, T-bar row).
+
+**How I checked:**
+Built the app and ran the tests — including new ones proving custom machine names
+survive saving and loading without corrupting anyone's existing gym list, and that
+re-doing onboarding doesn't duplicate or reset an injury.
+
+**Status:** Shipped — PR #530 (injuries) and PR #531 (machines), part of the
+onboarding overhaul (#527). One reminder: the injuries feature needs the
+"update-trainee-goal" server function redeployed by hand (this project deploys
+those manually, not automatically).
+
+---
+
 ## 2026-06-20 — The setup flow starts its big makeover
 
 **The problem (in plain words):**
