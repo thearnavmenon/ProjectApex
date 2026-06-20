@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-20 — The setup flow starts its big makeover
+
+**The problem (in plain words):**
+The very first thing you see after installing — the setup flow — was the last
+part of the app still wearing the old blue, rounded look. Worse, it was just a
+wall of questions: no welcome, and no explanation of what the app even does or why
+it's different from every other gym app.
+
+**What I changed (this first piece):**
+Rebuilt the whole setup flow in the app's black-and-lime look, and reshaped it.
+Now it opens with a short welcome and a three-card "here's how your coach works"
+explainer (it's a real coach, it learns you, it's honest). It asks one thing per
+screen instead of one big form. It leads with your bodyweight — the number the
+coach actually uses to pick your first weights — while clearly marking height and
+age as optional. It adds a quick "anything to work around?" injury question and a
+sex question (both help the coach calibrate). And it ends on a "your program is
+ready" screen that shows your plan and the loop the coach runs on every set. The
+old camera "scan your gym" step is being replaced by picking a gym preset and
+tweaking a list — this piece wires that up using the equipment picker we already had.
+
+**How I checked:**
+Built the real app and took screenshots of the actual screens (welcome, bodyweight,
+injuries, equipment, the finish screen) — they match the mockups we approved. All
+the behind-the-scenes saving (your program, your profile, the coach setup) was kept
+exactly as before.
+
+**Status:** Shipped as the first slice — PR #528, part of the onboarding overhaul
+(#527). Still to come: saving the injury answers, removing the old camera code, and
+the bigger backend work to make the coach reliably use gym machines.
+
+---
+
 ## 2026-06-19 — The Progress tab now matches the rest of the app
 
 **The problem (in plain words):**
