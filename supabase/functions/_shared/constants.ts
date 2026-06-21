@@ -45,6 +45,19 @@ export const TOP_SET_REP_VALIDITY_MAX = 10;
  */
 export const TOP_SET_RETENTION_COUNT = 10;
 
+/**
+ * Bounded retention for `PatternProfile.recentSessionDates` on the EF write
+ * (#292). Without a cap the array grows unbounded — one entry appended per
+ * session-apply forever, bloating `model_json` JSONB indefinitely. Every
+ * consumer needs only recent entries: cadence (mean of recent inter-session
+ * gaps), `priorSessionLoggedAt` and the prescription-accuracy gap (last two),
+ * and the iOS digest (formatted list + last date). Per-pattern `sessionCount`
+ * is an independent accumulator since #284 (ADR-0020), so trimming does not
+ * affect confidence advancement; its one-time idempotent backfill reads the
+ * pre-update array upstream of the cap. 10 matches TOP_SET_RETENTION_COUNT.
+ */
+export const RECENT_SESSION_DATES_RETENTION_COUNT = 10;
+
 // ─── Recovery curves (ADR-0010) ──────────────────────────────────────────────
 
 /**
