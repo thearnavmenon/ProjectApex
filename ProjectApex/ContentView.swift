@@ -13,6 +13,7 @@
 //   skips through all steps. Subsequent launches skip directly to the Program tab.
 
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
 
@@ -139,6 +140,7 @@ struct ContentView: View {
         }
         .environment(\.switchToTab, { selectedTab = $0 })
         .preferredColorScheme(.dark)
+        .onAppear { Self.applyBrutalistTabBarAppearance() }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView { completedProfile in
                 // Persist the scanned profile so Settings / Program tabs see it immediately.
@@ -470,40 +472,61 @@ struct ContentView: View {
         }
     }
 
+    /// Theme the tab bar to the Brutalist identity: opaque black bar, white
+    /// selected item, dim-white unselected. Applied process-globally (the app
+    /// has no other tab bar). NOTE: the selected/unselected treatment is a design
+    /// call pending real-device QA — there was no prior tab-bar appearance.
+    private static func applyBrutalistTabBarAppearance() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor.black
+        let dim = UIColor.white.withAlphaComponent(0.32)
+        let selected = UIColor.white
+        for layout in [appearance.stackedLayoutAppearance,
+                       appearance.inlineLayoutAppearance,
+                       appearance.compactInlineLayoutAppearance] {
+            layout.normal.iconColor = dim
+            layout.normal.titleTextAttributes = [.foregroundColor: dim]
+            layout.selected.iconColor = selected
+            layout.selected.titleTextAttributes = [.foregroundColor: selected]
+        }
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
+
     private var noWorkoutView: some View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
                 Image(systemName: "figure.strengthtraining.traditional")
                     .font(.system(size: 64))
-                    .foregroundStyle(.white.opacity(0.20))
+                    .foregroundStyle(Apex.textFaint)
                 VStack(spacing: 8) {
                     Text("No Program Yet")
-                        .font(.title2.bold())
-                        .foregroundStyle(.white)
+                        .font(.system(size: 26, weight: .heavy))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
                     Text("Generate a program in the Program tab to start working out.")
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Apex.textDim)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
                 }
                 Button {
                     selectedTab = 0
                 } label: {
-                    Text("Go to Program")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 12)
-                        .background(.white.opacity(0.12), in: Capsule())
+                    ApexButton(title: "Go to Program", icon: "calendar")
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 40)
                 .padding(.top, 8)
                 Spacer()
             }
-            .background(Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea())
+            .frame(maxWidth: .infinity)
+            .background(Apex.bg.ignoresSafeArea())
             .navigationTitle("Workout")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
+            .toolbarBackground(Apex.bg, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
     }
@@ -515,57 +538,49 @@ struct ContentView: View {
                 Spacer()
                 Image(systemName: "trophy.fill")
                     .font(.system(size: 64))
-                    .foregroundStyle(Color(red: 1.0, green: 0.84, blue: 0.0))
+                    .foregroundStyle(Apex.gold)
                 VStack(spacing: 8) {
                     Text("Programme Complete")
-                        .font(.title2.bold())
-                        .foregroundStyle(.white)
+                        .font(.system(size: 26, weight: .heavy))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.text)
                     Text("You've finished every session.")
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Apex.textDim)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
                 }
                 Button {
                     showNextProgrammeConfirmation = true
                 } label: {
-                    Text("Start Your Next Programme")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white.opacity(confirmedProfile != nil ? 1.0 : 0.4))
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 12)
-                        .background(
-                            confirmedProfile != nil
-                                ? Color(red: 0.23, green: 0.56, blue: 1.00)
-                                : Color.white.opacity(0.08),
-                            in: Capsule()
-                        )
+                    ApexButton(title: "Start Your Next Programme")
+                        .opacity(confirmedProfile != nil ? 1.0 : 0.4)
                 }
+                .buttonStyle(.plain)
                 .disabled(confirmedProfile == nil)
+                .padding(.horizontal, 40)
                 .padding(.top, 8)
                 if confirmedProfile == nil {
                     Text("Set up your gym in Settings to start a new programme")
                         .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.45))
+                        .foregroundStyle(Apex.textDim)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 40)
                 }
                 Button {
                     selectedTab = 3
                 } label: {
-                    Text("Go to Settings")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 12)
-                        .background(.white.opacity(0.12), in: Capsule())
+                    ApexButton(title: "Go to Settings", kind: .ghost, icon: "gearshape.fill")
                 }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 40)
                 Spacer()
             }
-            .background(Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea())
+            .frame(maxWidth: .infinity)
+            .background(Apex.bg.ignoresSafeArea())
             .navigationTitle("Workout")
             .navigationBarTitleDisplayMode(.large)
-            .toolbarBackground(Color(red: 0.04, green: 0.04, blue: 0.06), for: .navigationBar)
+            .toolbarBackground(Apex.bg, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .alert("Start Your Next Programme?", isPresented: $showNextProgrammeConfirmation) {
                 Button("Cancel", role: .cancel) { }
