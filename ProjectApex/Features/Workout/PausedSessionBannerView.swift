@@ -15,17 +15,31 @@ struct PausedSessionBannerView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "pause.circle.fill")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(amberColor)
+            Image(systemName: "pause.fill")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(Apex.amber)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Workout paused")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.white)
-                Text("\(dayLabel.replacingOccurrences(of: "_", with: " ").capitalized) · Week \(weekNumber)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(0.60))
+                    .font(.system(size: 14, weight: .heavy))
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .tracking(0.8)
+                    .foregroundStyle(Apex.amber)
+                HStack(spacing: 4) {
+                    Text(dayLabel.replacingOccurrences(of: "_", with: " ").capitalized)
+                        .font(.system(size: 12, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textDim)
+                    Text("· WEEK")
+                        .font(.system(size: 12, weight: .semibold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
+                    Text("\(weekNumber)")
+                        .font(Apex.numeral(12, weight: .bold))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textDim)
+                }
             }
 
             Spacer()
@@ -33,32 +47,31 @@ struct PausedSessionBannerView: View {
             Button(action: onResume) {
                 Text("Resume")
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(amberColor, in: Capsule())
+                    .fontWidth(.condensed)
+                    .textCase(.uppercase)
+                    .tracking(1.0)
+                    .foregroundStyle(Apex.onAccent)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Apex.amber, in: Capsule())
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(
-            amberColor.opacity(0.12),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            Apex.surface,
+            in: RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(amberColor.opacity(0.30), lineWidth: 1)
+            RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                .stroke(Apex.amber.opacity(0.45), lineWidth: 1)
         )
-    }
-
-    private var amberColor: Color {
-        Color(red: 1.0, green: 0.65, blue: 0.0)
     }
 }
 
 #Preview {
     ZStack {
-        Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
+        Apex.bg.ignoresSafeArea()
         PausedSessionBannerView(
             dayLabel: "upper_body_a",
             weekNumber: 2,
