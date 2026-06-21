@@ -16,34 +16,40 @@ import SwiftUI
 struct NeedsSetupView: View {
 
     var body: some View {
-        VStack(spacing: 20) {
-            Spacer()
+        ZStack {
+            Apex.bg.ignoresSafeArea()
 
-            Image(systemName: "wrench.and.screwdriver")
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(.secondary)
+            VStack(spacing: 20) {
+                Spacer()
 
-            Text("This build needs setup")
-                .font(.title2.weight(.semibold))
-                .multilineTextAlignment(.center)
+                Image(systemName: "wrench.and.screwdriver")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(Apex.textFaint)
 
-            Text("""
-            This build is missing its API configuration, so coaching and gym \
-            scanning can't run yet. Nothing is wrong with your device.
+                Text("This build needs setup")
+                    .font(.system(size: 26, weight: .heavy))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
+                    .multilineTextAlignment(.center)
 
-            If you're testing an alpha build, contact the developer for a \
-            configured build. In a debug build you can add a key under \
-            Settings → Developer.
-            """)
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                Text("""
+                This build is missing its API configuration, so coaching and gym \
+                scanning can't run yet. Nothing is wrong with your device.
 
-            Spacer()
+                If you're testing an alpha build, contact the developer for a \
+                configured build. In a debug build you can add a key under \
+                Settings → Developer.
+                """)
+                    .font(.body)
+                    .foregroundStyle(Apex.textDim)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer()
+            }
+            .padding(.horizontal, 32)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(.horizontal, 32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
