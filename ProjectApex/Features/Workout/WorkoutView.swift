@@ -486,17 +486,19 @@ struct WorkoutView: View {
 
     private func errorView(message: String, vm: WorkoutViewModel) -> some View {
         ZStack {
-            apexBackground(tint: .init(red: 0.91, green: 0.28, blue: 0.19))
+            Apex.bg.ignoresSafeArea()
             VStack(spacing: 20) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(Color(red: 1.0, green: 0.75, blue: 0.0))
+                    .font(.system(size: 44, weight: .bold))
+                    .foregroundStyle(Apex.amber)
                 Text("Session Error")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 26, weight: .heavy))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
                 Text(message)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .font(.system(size: 14, weight: .medium))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textDim)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
 
@@ -504,17 +506,9 @@ struct WorkoutView: View {
                     vm.resetSession()
                     onSessionDismissed?()
                 } label: {
-                    Text("Return to Programme")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 60)
-                        .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(.white.opacity(0.25), lineWidth: 0.5)
-                        )
+                    ApexButton(title: "Return to Programme", kind: .ghost)
                 }
+                .buttonStyle(.plain)
                 .padding(.horizontal, 32)
                 .padding(.top, 8)
                 .accessibilityLabel("Return to Programme")
@@ -522,26 +516,11 @@ struct WorkoutView: View {
 
                 if !vm.completedSets.isEmpty {
                     Text("Your completed sets have been saved.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.white.opacity(0.45))
+                        .font(.system(size: 13, weight: .medium))
+                        .fontWidth(.condensed)
+                        .foregroundStyle(Apex.textFaint)
                 }
             }
-        }
-    }
-
-    // MARK: - Background helper
-
-    private func apexBackground(tint: Color) -> some View {
-        ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.06).ignoresSafeArea()
-            RadialGradient(
-                colors: [tint.opacity(0.15), Color.clear],
-                center: UnitPoint(x: 0.5, y: 0.10),
-                startRadius: 0,
-                endRadius: 380
-            )
-            .ignoresSafeArea()
-            .blendMode(.plusLighter)
         }
     }
 
