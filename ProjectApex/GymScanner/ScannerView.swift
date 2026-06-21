@@ -34,7 +34,7 @@ struct EquipmentSetupView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            Apex.bg.ignoresSafeArea()
 
             switch viewModel.state {
             case .confirming:
@@ -46,7 +46,7 @@ struct EquipmentSetupView: View {
         }
         .navigationTitle("Equipment")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(.black, for: .navigationBar)
+        .toolbarBackground(Apex.bg, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .onAppear {
             if viewModel.detectedEquipment.isEmpty, !initialEquipment.isEmpty {
@@ -76,21 +76,24 @@ struct EquipmentSetupView: View {
                     }
                 } header: {
                     Text("\(viewModel.detectedEquipment.count) item\(viewModel.detectedEquipment.count == 1 ? "" : "s")")
-                        .textCase(nil)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                        .tracking(1.5)
+                        .fontWidth(.condensed)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Apex.textDim)
                 }
-                .listRowBackground(Color(.secondarySystemGroupedBackground))
+                .listRowBackground(Apex.surface)
 
                 Section {
                     Button(action: { showingBulkPickerSheet = true }) {
                         Label("Add Equipment", systemImage: "plus.circle")
+                            .foregroundStyle(Apex.accent)
                     }
                 }
-                .listRowBackground(Color(.secondarySystemGroupedBackground))
+                .listRowBackground(Apex.surface)
             }
             .scrollContentBackground(.hidden)
-            .background(Color(.systemGroupedBackground))
+            .background(Apex.bg)
             .navigationTitle("Your Equipment")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -102,8 +105,11 @@ struct EquipmentSetupView: View {
                         }
                     }) {
                         Text("Save")
+                            .fontWidth(.condensed)
+                            .textCase(.uppercase)
                             .bold()
                     }
+                    .tint(Apex.accent)
                     .disabled(viewModel.detectedEquipment.isEmpty)
                 }
             }
@@ -138,16 +144,17 @@ struct EquipmentSetupView: View {
 
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 80))
-                .foregroundStyle(.green)
+                .foregroundStyle(Apex.accent)
                 .symbolEffect(.bounce)
 
             VStack(spacing: 8) {
                 Text("Gym Profile Saved")
-                    .font(.largeTitle.bold())
-                    .foregroundStyle(.white)
+                    .font(.system(size: 34, weight: .heavy))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
                 Text("\(profile.equipment.count) pieces of equipment catalogued.")
                     .font(.body)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(Apex.textDim)
             }
 
             LazyVGrid(
@@ -157,11 +164,16 @@ struct EquipmentSetupView: View {
                 ForEach(profile.equipment.prefix(6)) { item in
                     Text(item.equipmentType.displayName)
                         .font(.caption)
+                        .fontWidth(.condensed)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .frame(maxWidth: .infinity)
-                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                        .foregroundStyle(.white)
+                        .background(Apex.surface, in: RoundedRectangle(cornerRadius: Apex.corner))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Apex.corner)
+                                .stroke(Apex.hairline, lineWidth: 1)
+                        )
+                        .foregroundStyle(Apex.text)
                 }
             }
             .padding(.horizontal, 32)
@@ -183,11 +195,13 @@ struct EquipmentRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.equipmentType.displayName)
                     .font(.body)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text)
 
                 if let notes = item.notes {
                     Text(notes)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Apex.textDim)
                 }
             }
 
@@ -197,12 +211,13 @@ struct EquipmentRowView: View {
                 .font(.caption.monospacedDigit())
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color(.tertiarySystemFill), in: Capsule())
-                .foregroundStyle(.primary)
+                .background(Apex.bg, in: Capsule())
+                .overlay(Capsule().stroke(Apex.hairline, lineWidth: 1))
+                .foregroundStyle(Apex.text)
 
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(Apex.textFaint)
         }
     }
 }
@@ -257,6 +272,9 @@ struct EquipmentEditSheet: View {
                     TextField("e.g. broken cable, limited plates…", text: $notes)
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Apex.bg)
+            .tint(Apex.accent)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -268,6 +286,7 @@ struct EquipmentEditSheet: View {
                 }
             }
         }
+        .preferredColorScheme(.dark)
         .onAppear { populateFromExisting() }
     }
 
