@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-22 — The last few screens now match the rest of the app
+
+**The problem (in plain words):**
+Most of the app already wears the new "Brutalist" look — pure black, bold
+condensed type, one lime highlight for the main action. But a handful of smaller
+screens never got the makeover and still showed the old dark-navy-and-blue style,
+so they stuck out. None of them are screens you see every day, which is why they
+were left for last: the "no program yet" and "all done" messages on the Workout
+tab, the workout error screen, the little amber "workout paused" banner, the
+equipment list you reach from Settings, and the "this build needs setup" notice.
+
+**What I changed:**
+Restyled all of them to the shared look and pulled out the leftover blue. The
+Workout tab's empty and finished screens, the error screen, and the paused banner
+now use the same black background, bold type, and lime/amber accents as everything
+else. The equipment screen (where you add or tweak your gym gear) got the same
+treatment. The tab bar along the bottom also picked up a black, no-more-blue style.
+Nothing about how any of these screens *work* changed — only how they look.
+
+**How I checked:**
+Built the whole app cleanly for each change and once more all together at the end —
+every build passed. Two notes for me: a couple of system pop-ups (the "session
+mismatch" and confirm dialogs) can't be repainted — iOS draws those itself — so
+they're left as-is; and the bottom tab bar's exact selected colour is a judgement
+call I made (white on black) that's worth an eyeball on a real phone.
+
+**Status:** Shipped — PRs #540, #541, #542, #543, #544. Umbrella #538 stays open
+until I've looked at them on a real device. The debug-only developer screen was
+deliberately skipped (it never ships to anyone).
+
+---
+
 ## 2026-06-21 — The coach now actually uses your gym machines
 
 **The problem (in plain words):**
