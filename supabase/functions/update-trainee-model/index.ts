@@ -164,6 +164,14 @@ const VALID_INTENTS = new Set([
   "amrap",
 ]);
 
+// SetCompletionFlag — must mirror the Swift `SetCompletionFlag` enum
+// (SetCompletionFlag.swift) and the `set_logs.completion_flags TEXT[]` column
+// (#43). Optional per set; when present, every element must be one of these.
+const VALID_COMPLETION_FLAGS = new Set([
+  "pain",
+  "form_breakdown",
+]);
+
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -224,6 +232,30 @@ export function validateRequest(
             `session_payload.set_logs[${i}].intent must be one of ` +
             `warmup/top/backoff/technique/amrap (got ${JSON.stringify(intent)})`,
         };
+      }
+      // #43 — completion_flags is optional (absent → no flags raised, the
+      // column's DEFAULT '{}'). When present it must be an array of strings
+      // drawn from pain / form_breakdown — mirrors the intent invariant.
+      const completionFlags = (entry as Record<string, unknown>)
+        .completion_flags;
+      if (completionFlags !== undefined && completionFlags !== null) {
+        if (!Array.isArray(completionFlags)) {
+          return {
+            error:
+              `session_payload.set_logs[${i}].completion_flags must be an array ` +
+              `when present`,
+          };
+        }
+        for (let j = 0; j < completionFlags.length; j++) {
+          const flag = completionFlags[j];
+          if (typeof flag !== "string" || !VALID_COMPLETION_FLAGS.has(flag)) {
+            return {
+              error:
+                `session_payload.set_logs[${i}].completion_flags[${j}] must be ` +
+                `one of pain/form_breakdown (got ${JSON.stringify(flag)})`,
+            };
+          }
+        }
       }
     }
   }

@@ -198,6 +198,91 @@ Deno.test("validateRequest_set_logs_not_array_returns_400", () => {
   assertEquals(result.error, "session_payload.set_logs must be an array");
 });
 
+// ─── D6 (#43): valid completion_flags — passes ───────────────────────────────
+Deno.test("validateRequest_set_log_valid_completion_flags_returns_ok", () => {
+  const setLogs = [
+    {
+      set_number: 1,
+      weight_kg: 80,
+      reps_completed: 8,
+      intent: "top",
+      completion_flags: ["pain", "form_breakdown"],
+    },
+  ];
+  const result = validateRequest(baseRequest({ set_logs: setLogs }));
+  assertEquals("error" in result, false);
+});
+
+// ─── D7 (#43): completion_flags absent — passes (optional, forward-compat) ───
+Deno.test("validateRequest_set_log_completion_flags_absent_returns_ok", () => {
+  const setLogs = [
+    { set_number: 1, weight_kg: 80, reps_completed: 8, intent: "top" },
+  ];
+  const result = validateRequest(baseRequest({ set_logs: setLogs }));
+  assertEquals("error" in result, false);
+});
+
+// ─── D8 (#43): empty completion_flags array — passes (no flags raised) ───────
+Deno.test("validateRequest_set_log_empty_completion_flags_returns_ok", () => {
+  const setLogs = [
+    {
+      set_number: 1,
+      weight_kg: 80,
+      reps_completed: 8,
+      intent: "top",
+      completion_flags: [],
+    },
+  ];
+  const result = validateRequest(baseRequest({ set_logs: setLogs }));
+  assertEquals("error" in result, false);
+});
+
+// ─── D9 (#43): completion_flags not an array — 400 ───────────────────────────
+Deno.test("validateRequest_set_log_completion_flags_not_array_returns_400", () => {
+  const setLogs = [
+    {
+      set_number: 1,
+      weight_kg: 80,
+      reps_completed: 8,
+      intent: "top",
+      completion_flags: "pain",
+    },
+  ];
+  const result = validateRequest(baseRequest({ set_logs: setLogs }));
+  if (!("error" in result)) {
+    throw new Error("expected error response");
+  }
+  assertEquals(
+    result.error.includes("set_logs[0].completion_flags") &&
+      result.error.includes("must be an array"),
+    true,
+    `unexpected error text: ${result.error}`,
+  );
+});
+
+// ─── D10 (#43): invalid completion_flags member — 400 ────────────────────────
+Deno.test("validateRequest_set_log_invalid_completion_flag_returns_400", () => {
+  const setLogs = [
+    {
+      set_number: 1,
+      weight_kg: 80,
+      reps_completed: 8,
+      intent: "top",
+      completion_flags: ["pain", "bogus"],
+    },
+  ];
+  const result = validateRequest(baseRequest({ set_logs: setLogs }));
+  if (!("error" in result)) {
+    throw new Error("expected error response");
+  }
+  assertEquals(
+    result.error.includes("set_logs[0].completion_flags[1]") &&
+      result.error.includes("pain/form_breakdown"),
+    true,
+    `unexpected error text: ${result.error}`,
+  );
+});
+
 // ─── Sanity: still rejects missing user_id (regression cover for the Slice
 //     9b validator behaviour) ───────────────────────────────────────────────
 Deno.test("validateRequest_invalid_user_id_returns_400", () => {
