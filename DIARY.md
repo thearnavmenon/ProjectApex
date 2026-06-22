@@ -7,6 +7,37 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-22 — Stopped a test from failing at random
+
+**The problem (in plain words):**
+One of our automated checks would sometimes fail for no real reason — a
+coin-flip, not a genuine bug. It was the test that makes sure the app handles
+"you're offline" gracefully. Behind the scenes, when the internet is down the
+app quietly retries a few times (waiting 1, then 2, then 4 seconds) before
+giving up, all inside an 8-second budget. The test insisted on one exact
+outcome ("gave up with an error message"), but a tiny bit of random timing
+meant the app would sometimes hit the 8-second budget first and report "timed
+out" instead. Both are perfectly fine ways to say "you're offline" — but the
+over-strict test treated the second one as a failure, so it flaked, especially
+on the busy build server. That red check kept showing up on unrelated changes.
+
+**What I changed:**
+Loosened the test to check what actually matters: when the network fails, the
+app never pretends it worked, and it always shows a real message — accepting
+either "error" or "timed out" as a valid offline outcome. I changed nothing
+about how the app behaves; only the test got more honest. (I left a note that
+the deeper question — whether "no internet" should be retried at all — is a
+separate decision for another day.)
+
+**How I checked:**
+Built and ran the test three times in a row — passed every time, zero failures.
+
+**Status:** Merged to main — PR #548, part of the pre-launch hardening list
+(#369). Clears the recurring random red check that had been appearing on
+unrelated pull requests.
+
+---
+
 ## 2026-06-22 — Two clean-ups: a tidier memory, and choosing how a hand-added set counts
 
 **The problem (in plain words):**
