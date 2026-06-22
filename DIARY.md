@@ -7,6 +7,37 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-22 — The app now remembers when a set hurt (groundwork)
+
+**The problem (in plain words):**
+During a workout you can tap "something hurt" or "my form broke down" after a
+set. Until now the coach only used that in the moment — it was forgotten the
+instant the workout ended. So it could never notice "you've flagged your
+shoulder on bench three weeks running." Genuinely useful information was being
+thrown away.
+
+**What I changed (the groundwork half):**
+Gave those flags a permanent home in the database and started saving them
+against every set you log. This is deliberately just the plumbing: the flags
+are now kept safely, but the coach doesn't yet read your *history* of them or
+change its advice because of it. That next step is held back on purpose —
+deciding how the coach should react to a run of pain flags is a careful,
+safety-related call I want to make properly rather than by default. I also
+taught the server to check the flags so only real ones ("pain", "form broke
+down") can be stored.
+
+**How I checked:**
+Ran the server test suite — 38 checks pass, including five new ones for good
+flags, no flags, and bad flags being turned away — and built the whole app
+clean (no errors). It's backwards-safe: every set saved before today simply
+counts as "no flags".
+
+**Status:** Merged to main — PR #550, part of #43. The "actually use the flag
+history to coach" half stays as its own follow-up. (Carried a small live
+database change, applied on merge.)
+
+---
+
 ## 2026-06-22 — Stopped a test from failing at random
 
 **The problem (in plain words):**
