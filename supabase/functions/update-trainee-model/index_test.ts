@@ -637,6 +637,74 @@ Deno.test("Slice 4 (e): UNTRAINED pattern (wasTrainedThisSession=false) with an 
   assertEquals(result.patterns[SQUAT_PATTERN].transitionModeUntil, null);
 });
 
+// ─── #292: recentSessionDates is bounded to the last N on write ──────────────
+//
+// Without a cap the array grew one entry per session-apply forever. The cap
+// (RECENT_SESSION_DATES_RETENTION_COUNT = 10) is applied to the final written
+// value, so it both bounds new growth and trims any pre-cap historical excess
+// the next time a pattern is written — trained or not.
+
+const twelveDates = () =>
+  Array.from(
+    { length: 12 },
+    (_, i) => `2026-01-${String(i + 1).padStart(2, "0")}T10:00:00Z`,
+  );
+
+Deno.test("#292: a TRAINED pattern with >N prior dates is trimmed to the last N (newest = incoming, oldest dropped)", () => {
+  const result = applyPerPatternRules(
+    squatProfile(twelveDates()),
+    new Set([SQUAT_PATTERN]),
+    INCOMING_FEB16,
+    10,
+    {},
+    [squatSetLog()],
+  );
+  const dates = result.patterns[SQUAT_PATTERN].recentSessionDates as string[];
+  assertEquals(dates.length, 10);
+  // newest entry is the incoming session date
+  assertEquals(dates[dates.length - 1], INCOMING_FEB16.toISOString());
+  // 12 history + 1 incoming = 13 → the three oldest are dropped
+  assertEquals(dates.includes("2026-01-03T10:00:00Z"), false);
+  assertEquals(dates.includes("2026-01-04T10:00:00Z"), true);
+});
+
+Deno.test("#292: a TRAINED pattern at/under N is fully preserved with the incoming date appended", () => {
+  const history = [
+    "2026-01-05T10:00:00Z",
+    "2026-01-08T10:00:00Z",
+    "2026-01-12T10:00:00Z",
+  ];
+  const result = applyPerPatternRules(
+    squatProfile(history),
+    new Set([SQUAT_PATTERN]),
+    INCOMING_FEB16,
+    10,
+    {},
+    [squatSetLog()],
+  );
+  const dates = result.patterns[SQUAT_PATTERN].recentSessionDates as string[];
+  assertEquals(dates, [...history, INCOMING_FEB16.toISOString()]);
+});
+
+Deno.test("#292: an UNTRAINED pattern with >N historical dates is trimmed on write without appending", () => {
+  const result = applyPerPatternRules(
+    squatProfile(twelveDates()),
+    new Set(), // not trained this apply
+    INCOMING_FEB16,
+    10,
+    {},
+    [],
+  );
+  const dates = result.patterns[SQUAT_PATTERN].recentSessionDates as string[];
+  assertEquals(dates.length, 10);
+  // no append: the incoming date is absent and the newest historical is retained
+  assertEquals(dates.includes(INCOMING_FEB16.toISOString()), false);
+  assertEquals(dates[dates.length - 1], "2026-01-12T10:00:00Z");
+  // last 10 of 12 → the two oldest are dropped
+  assertEquals(dates.includes("2026-01-02T10:00:00Z"), false);
+  assertEquals(dates.includes("2026-01-03T10:00:00Z"), true);
+});
+
 Deno.test("Slice 4 (f): deload-end + absence in the SAME apply compose via max-of-untils (absence reads the LOCAL until — no clobber)", () => {
   // currentPhase=deload at/above threshold → phase-advance fires deload-end.
   // PRE-append last date is also >=28d old → absence fires too.

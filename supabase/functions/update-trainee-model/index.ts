@@ -125,6 +125,7 @@ import {
   CLASSIFIER_BOOTSTRAP_MAX_NOTES,
   CLASSIFIER_BOOTSTRAP_MAX_SESSIONS,
   MAJOR_PATTERNS,
+  RECENT_SESSION_DATES_RETENTION_COUNT,
   TOP_SET_RETENTION_COUNT,
 } from "../_shared/constants.ts";
 import {
@@ -926,9 +927,13 @@ export function applyPerPatternRules(
 
     const baseRecentDates =
       (profile.recentSessionDates as string[] | undefined) ?? [];
-    const recentDates = wasTrainedThisSession
+    // #292: bound the stored history to the most recent N. slice(-N) on an
+    // array already ≤N is a no-op, so this is idempotent and also trims any
+    // pre-cap (historically unbounded) entries the next time the pattern is
+    // written. Safe for every consumer — see RECENT_SESSION_DATES_RETENTION_COUNT.
+    const recentDates = (wasTrainedThisSession
       ? [...baseRecentDates, incomingLoggedAt.toISOString()]
-      : baseRecentDates;
+      : baseRecentDates).slice(-RECENT_SESSION_DATES_RETENTION_COUNT);
 
     const cadenceDays = sessionsCadenceDays(recentDates);
     // ADR-0011 Option-B threshold input: derive daysPerWeek from cadence.

@@ -19,6 +19,7 @@ import {
   TOP_SET_REP_VALIDITY_MIN,
   TOP_SET_REP_VALIDITY_MAX,
   TOP_SET_RETENTION_COUNT,
+  RECENT_SESSION_DATES_RETENTION_COUNT,
   // Recovery
   RECOVERY_TAU_NM_HOURS,
   RECOVERY_TAU_METABOLIC_HOURS,
@@ -111,6 +112,10 @@ Deno.test("ADR-0005: top-set rep validity max is 10 not 8 or 12", () => {
 
 Deno.test("ADR-0005: top-set retention count is 10 (upper end of typical 7..10)", () => {
   assertEquals(TOP_SET_RETENTION_COUNT, 10);
+});
+
+Deno.test("#292: recent-session-dates retention count is 10", () => {
+  assertEquals(RECENT_SESSION_DATES_RETENTION_COUNT, 10);
 });
 
 // ─── Recovery curves (ADR-0010) ──────────────────────────────────────────────
