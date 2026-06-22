@@ -273,11 +273,8 @@ struct ProgramDayDetailView: View {
                                         setLogs: historicalSetLogs[exercise.exerciseId] ?? [],
                                         editedIds: editedSetLogIds,
                                         onTapSet: { log in editingSetLog = log },
-                                        // Slice 6 / #60: intent defaults to .backoff for retroactively-added
-                                        // sets. AddSet sheet doesn't yet expose an intent picker — UI
-                                        // follow-up tracked separately. .backoff is the sensible default
-                                        // (typical for extra working sets added after the fact).
-                                        onAddSet: { newLog in Task { await addNewSetLog(newLog, intent: .backoff) } }
+                                        // #65: intent is chosen by the user in the AddSet sheet.
+                                        onAddSet: { newLog, intent in Task { await addNewSetLog(newLog, intent: intent) } }
                                     )
                                 }
                             }
@@ -1735,7 +1732,7 @@ private struct CompletedExerciseCard: View {
     let setLogs: [SetLog]
     let editedIds: Set<UUID>
     let onTapSet: (SetLog) -> Void
-    let onAddSet: (SetLog) -> Void
+    let onAddSet: (SetLog, SetIntent) -> Void
 
     @State private var cuesExpanded = false
     @State private var showAddSetSheet = false
@@ -1840,10 +1837,10 @@ private struct CompletedExerciseCard: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .sheet(isPresented: $showAddSetSheet) {
-                SetLogAddSheet(exerciseId: exercise.exerciseId, setNumber: setLogs.count + 1) { newLog in
-                    onAddSet(newLog)
+                SetLogAddSheet(exerciseId: exercise.exerciseId, setNumber: setLogs.count + 1) { newLog, intent in
+                    onAddSet(newLog, intent)
                 }
-                .presentationDetents([.medium])
+                .presentationDetents([.medium, .large])
             }
 
             // Coaching cues — expandable
@@ -2001,11 +1998,15 @@ private struct SetLogAddSheet: View {
 
     let exerciseId: String
     let setNumber: Int
-    let onConfirm: (SetLog) -> Void
+    let onConfirm: (SetLog, SetIntent) -> Void
 
     @State private var weightText: String = ""
     @State private var repsText: String = ""
     @State private var rpeValue: Int? = nil
+    // #65: intent is now user-selectable. Pre-selects .backoff — the prior
+    // hardcoded default, and the typical set added after the fact — but the
+    // user can change it before logging.
+    @State private var intent: SetIntent = .backoff
 
     @Environment(\.dismiss) private var dismiss
 
@@ -2018,38 +2019,49 @@ private struct SetLogAddSheet: View {
             ZStack {
                 Apex.bg.ignoresSafeArea()
 
-                VStack(alignment: .leading, spacing: 28) {
-                    Text("Add Set \(setNumber)")
-                        .font(.system(size: 24, weight: .black))
-                        .fontWidth(.condensed)
-                        .foregroundStyle(Apex.text)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        Text("Add Set \(setNumber)")
+                            .font(.system(size: 24, weight: .black))
+                            .fontWidth(.condensed)
+                            .foregroundStyle(Apex.text)
 
-                    // Weight field
-                    VStack(alignment: .leading, spacing: 10) {
-                        ApexSectionLabel(text: "Weight", color: Apex.textDim)
-                        HStack(spacing: 8) {
-                            setLogTextField("e.g. 80", text: $weightText, keyboard: .decimalPad)
-                            Text("kg")
-                                .font(.system(size: 18, weight: .semibold))
-                                .fontWidth(.condensed)
-                                .foregroundStyle(Apex.textDim)
+                        // Weight field
+                        VStack(alignment: .leading, spacing: 10) {
+                            ApexSectionLabel(text: "Weight", color: Apex.textDim)
+                            HStack(spacing: 8) {
+                                setLogTextField("e.g. 80", text: $weightText, keyboard: .decimalPad)
+                                Text("kg")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .fontWidth(.condensed)
+                                    .foregroundStyle(Apex.textDim)
+                            }
+                        }
+
+                        // Reps field
+                        VStack(alignment: .leading, spacing: 10) {
+                            ApexSectionLabel(text: "Reps", color: Apex.textDim)
+                            setLogTextField("e.g. 8", text: $repsText, keyboard: .numberPad)
+                        }
+
+                        // Intent picker (#65) — mirrors the live-workout chip affordance.
+                        VStack(alignment: .leading, spacing: 10) {
+                            ApexSectionLabel(text: "Intent", color: Apex.textDim)
+                            intentChipRow
+                        }
+
+                        // RPE stepper
+                        VStack(alignment: .leading, spacing: 10) {
+                            ApexSectionLabel(text: "RPE (optional)", color: Apex.textDim)
+                            SetLogRPEPicker(rpeValue: $rpeValue)
                         }
                     }
-
-                    // Reps field
-                    VStack(alignment: .leading, spacing: 10) {
-                        ApexSectionLabel(text: "Reps", color: Apex.textDim)
-                        setLogTextField("e.g. 8", text: $repsText, keyboard: .numberPad)
-                    }
-
-                    // RPE stepper
-                    VStack(alignment: .leading, spacing: 10) {
-                        ApexSectionLabel(text: "RPE (optional)", color: Apex.textDim)
-                        SetLogRPEPicker(rpeValue: $rpeValue)
-                    }
-
-                    Spacer()
-
+                    .padding(.horizontal, 24)
+                    .padding(.top, 24)
+                    .padding(.bottom, 24)
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .safeAreaInset(edge: .bottom) {
                     Button {
                         guard let weight = confirmedWeight, let reps = confirmedReps else { return }
                         let newLog = SetLog(
@@ -2064,16 +2076,18 @@ private struct SetLogAddSheet: View {
                             aiPrescribed: nil,
                             loggedAt: Date()
                         )
-                        onConfirm(newLog)
+                        onConfirm(newLog, intent)
                         dismiss()
                     } label: {
                         ApexButton(title: "Add Set")
                             .opacity(canConfirm ? 1.0 : 0.35)
                     }
                     .disabled(!canConfirm)
+                    .padding(.horizontal, 24)
+                    .padding(.top, 12)
+                    .padding(.bottom, 12)
+                    .background(Apex.bg)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 24)
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -2082,6 +2096,60 @@ private struct SetLogAddSheet: View {
                         .foregroundStyle(Apex.textDim)
                 }
             }
+        }
+    }
+
+    /// Intent chips — mirror the live-workout `intentChipRow`: ordering
+    /// (warmup → top → backoff, then technique → amrap) and selected/unselected
+    /// styling, for cross-screen consistency. Pre-selected to `.backoff`.
+    @ViewBuilder
+    private var intentChipRow: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                ForEach([SetIntent.warmup, .top, .backoff], id: \.self) { intentChip($0) }
+            }
+            HStack(spacing: 8) {
+                ForEach([SetIntent.technique, .amrap], id: \.self) { intentChip($0) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func intentChip(_ value: SetIntent) -> some View {
+        let isSelected = intent == value
+        Button {
+            intent = value
+        } label: {
+            Text(Self.intentLabel(value))
+                .font(.system(size: 13, weight: isSelected ? .bold : .semibold))
+                .fontWidth(.condensed)
+                .textCase(.uppercase)
+                .tracking(0.8)
+                .foregroundStyle(isSelected ? Apex.onAccent : Apex.text.opacity(0.65))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(
+                    ZStack {
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .fill(isSelected ? Apex.accent : Color.white.opacity(0.06))
+                        RoundedRectangle(cornerRadius: Apex.corner, style: .continuous)
+                            .stroke(isSelected ? Color.clear : Apex.hairline, lineWidth: 1)
+                    }
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Self.intentLabel(value))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .animation(.easeInOut(duration: 0.18), value: intent)
+    }
+
+    private static func intentLabel(_ intent: SetIntent) -> String {
+        switch intent {
+        case .warmup:    return "Warmup"
+        case .top:       return "Top"
+        case .backoff:   return "Backoff"
+        case .technique: return "Technique"
+        case .amrap:     return "AMRAP"
         }
     }
 }
