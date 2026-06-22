@@ -7,6 +7,44 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-22 — Two clean-ups: a tidier memory, and choosing how a hand-added set counts
+
+**The problem (in plain words):**
+Two unrelated loose ends from a backlog pass. First, behind the scenes the
+coach keeps a little list of the dates you trained each movement — and that
+list quietly grew forever, one date added every workout, slowly bloating your
+saved profile. Second, when you add a set by hand to a finished workout, the
+app always filed it as a "backoff" set with no way to say otherwise — even
+though that label changes how the coach reads the set.
+
+**What I changed:**
+- The coach now keeps only the last 10 training dates per movement instead of
+  an ever-growing list. Everything that uses those dates only ever looks at
+  the recent ones, so nothing it does changes — the saved data just stops
+  bloating. Older extra dates get trimmed the next time that movement is
+  trained.
+- The "Add Set" sheet now has an intent picker — the same warmup / top /
+  backoff / technique / AMRAP chips the live workout uses. It still starts on
+  "backoff" (the sensible default for a set added after the fact) but you can
+  change it before saving, and your choice is what the coach actually records.
+  I also made the sheet scroll so the Add button is always reachable.
+
+**How I checked:**
+- The memory trim: ran the server test suite (94 tests green, including new
+  ones proving the trim drops the oldest dates, keeps everything when under
+  the limit, and never touches the separate session counter the coach learns
+  from).
+- The intent picker: built the whole app clean (0 errors, iPhone 17 Pro). Not
+  yet eyeballed on a real device — reaching that sheet needs a finished
+  workout with logged sets — but the chips are a direct reuse of the live
+  workout's, so the look should match.
+
+**Status:** Both shipped to main — PR #539 (#292, memory trim, auto-deployed
+to the server) and PR #545 (#65, intent picker). Part of an "auto mode"
+backlog-cleanup pass.
+
+---
+
 ## 2026-06-22 — The last few screens now match the rest of the app
 
 **The problem (in plain words):**
