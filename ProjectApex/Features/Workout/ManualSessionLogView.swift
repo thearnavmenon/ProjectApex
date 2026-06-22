@@ -805,20 +805,26 @@ struct ManualSetLogPayload: Encodable {
     let primaryMuscle: String?
     let localDate: String
     let intent: String
+    // #43: persist user-reported completion flags. Manual logging captures no
+    // pain / form_breakdown flags today, so this serialises the (empty)
+    // SetLog.completionFlags — explicit and consistent with the live writer,
+    // and equivalent to the column's DEFAULT '{}'.
+    let completionFlags: [String]
 
     enum CodingKeys: String, CodingKey {
         case id
-        case sessionId     = "session_id"
-        case exerciseId    = "exercise_id"
-        case setNumber     = "set_number"
-        case weightKg      = "weight_kg"
-        case repsCompleted = "reps_completed"
-        case rpeFelt       = "rpe_felt"
-        case rirEstimated  = "rir_estimated"
-        case loggedAt      = "logged_at"
-        case primaryMuscle = "primary_muscle"
-        case localDate     = "local_date"
+        case sessionId       = "session_id"
+        case exerciseId      = "exercise_id"
+        case setNumber       = "set_number"
+        case weightKg        = "weight_kg"
+        case repsCompleted   = "reps_completed"
+        case rpeFelt         = "rpe_felt"
+        case rirEstimated    = "rir_estimated"
+        case loggedAt        = "logged_at"
+        case primaryMuscle   = "primary_muscle"
+        case localDate       = "local_date"
         case intent
+        case completionFlags = "completion_flags"
     }
 
     /// Slice 6 / #60 fix: intent and local_date are required by the schema.
@@ -838,6 +844,7 @@ struct ManualSetLogPayload: Encodable {
         self.primaryMuscle = log.primaryMuscle
         self.localDate     = SetLog.formatLocalDate(log.loggedAt)
         self.intent        = intent.rawValue
+        self.completionFlags = log.completionFlags.map(\.rawValue)
     }
 }
 

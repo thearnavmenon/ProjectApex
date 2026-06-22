@@ -2359,20 +2359,25 @@ nonisolated struct SetLogPayload: Encodable {
     let primaryMuscle: String?
     let localDate: String
     let intent: String
+    // #43: persist user-reported completion flags (pain / form_breakdown) so
+    // cross-session AI reasoning is possible. Raw values mirror the
+    // `set_logs.completion_flags TEXT[]` column; empty array = no flags raised.
+    let completionFlags: [String]
 
     enum CodingKeys: String, CodingKey {
         case id
-        case sessionId     = "session_id"
-        case exerciseId    = "exercise_id"
-        case setNumber     = "set_number"
-        case weightKg      = "weight_kg"
-        case repsCompleted = "reps_completed"
-        case rpeFelt       = "rpe_felt"
-        case rirEstimated  = "rir_estimated"
-        case loggedAt      = "logged_at"
-        case primaryMuscle = "primary_muscle"
-        case localDate     = "local_date"
+        case sessionId       = "session_id"
+        case exerciseId      = "exercise_id"
+        case setNumber       = "set_number"
+        case weightKg        = "weight_kg"
+        case repsCompleted   = "reps_completed"
+        case rpeFelt         = "rpe_felt"
+        case rirEstimated    = "rir_estimated"
+        case loggedAt        = "logged_at"
+        case primaryMuscle   = "primary_muscle"
+        case localDate       = "local_date"
         case intent
+        case completionFlags = "completion_flags"
     }
 
     /// Slice 6 / #60 fix: intent is required by the schema (NOT NULL, no
@@ -2395,6 +2400,7 @@ nonisolated struct SetLogPayload: Encodable {
         self.primaryMuscle = log.primaryMuscle
         self.localDate = SetLog.formatLocalDate(log.loggedAt)
         self.intent = intent.rawValue
+        self.completionFlags = log.completionFlags.map(\.rawValue)
     }
 }
 
