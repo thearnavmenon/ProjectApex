@@ -511,8 +511,23 @@ final class AIInferenceServiceTests: XCTestCase {
     // MARK: ─── 4. Network failure test ────────────────────────────────────────
 
     /// NetworkFailProvider throws URLError(.notConnectedToInternet).
-    /// The result must be .fallback(.llmProviderError) with a non-empty message.
-    func test_networkFailure_urlError_returnsFallbackLLMProviderError() async {
+    /// A network failure must surface as a non-`.success` fallback.
+    ///
+    /// #369 flake fix: `.notConnectedToInternet` is classified transient
+    /// (`LLMErrorClassifier.transientURLErrorCodes`), so `prescribe()` retries
+    /// it 3× with jittered 1+2+4 s backoff *inside* the 8 s product timeout.
+    /// Which side wins that race is genuinely non-deterministic — when the
+    /// retries exhaust first the result is `.fallback(.llmProviderError)`; when
+    /// the jittered backoff (up to ~8.5 s) overruns the budget the result is
+    /// `.fallback(.timeout)`. Both are correct network-failure fallbacks, so the
+    /// test asserts the invariant that actually holds (never `.success`; a
+    /// non-empty message when an `llmProviderError` is surfaced) rather than the
+    /// timing-dependent reason. No product behaviour is changed here.
+    ///
+    /// (The ~8 s runtime and the retry-vs-timeout race stem from retrying
+    /// `.notConnectedToInternet` at all; whether that URLError code should be
+    /// transient is an ADR-0007 question, deliberately left out of scope.)
+    func test_networkFailure_urlError_returnsNetworkFallback() async {
         let service = AIInferenceService(
             provider: NetworkFailProvider(),
             gymProfile: GymProfile.mockProfile(),
@@ -523,13 +538,17 @@ final class AIInferenceServiceTests: XCTestCase {
 
         switch result {
         case .fallback(let reason):
-            guard case .llmProviderError(let message) = reason else {
-                return XCTFail("Expected .llmProviderError, got \(reason)")
+            switch reason {
+            case .llmProviderError(let message):
+                XCTAssertFalse(message.isEmpty,
+                               "llmProviderError message must not be empty.")
+            case .timeout:
+                break // acceptable — the 8 s product budget won the retry race
+            default:
+                XCTFail("Expected a network-failure fallback (llmProviderError or timeout), got \(reason)")
             }
-            XCTAssertFalse(message.isEmpty,
-                           "llmProviderError message must not be empty.")
         case .success:
-            XCTFail("Expected .fallback(.llmProviderError) on network failure.")
+            XCTFail("Expected a fallback on network failure, not .success.")
         }
     }
 
