@@ -1,6 +1,6 @@
 # Committed, deterministic program generation: one per-pattern clock, LLM demoted to block-commit selection + per-set weight
 
-**Status**: proposed, 2026-06-29
+**Status**: accepted, 2026-06-29 (build greenlit; implementation tracked under umbrella #558)
 
 **On acceptance** this ADR:
 - **amends** [ADR-0011](0011-per-pattern-phase-advance-plateau-aware-cyclic.md) — the per-pattern phase cycle gains a **goal branch** so hypertrophy-primary patterns are not cycled into a strength peaking taper;
@@ -9,7 +9,7 @@
 - **supersedes in part** [ADR-0007](0007-llm-retry-and-surface-policy.md) — the deterministic per-set weight fallback reverses ADR-0007's explicit rejection of a foreground "synthesised best-effort prescription" *for the transient-failure class only*: a stalled/failed per-set call now degrades silently to a capability-based load instead of surfacing the retry sheet. ADR-0007's surface policy for non-transient failures is otherwise unchanged.
 - **may amend** [ADR-0005](0005-persistent-structured-trainee-model.md) §"Two-level muscle taxonomy" — *conditionally*. Leg disaggregation (quads/hams/glutes/calves) reverses ADR-0005's deliberate legs-collapse lock **only if** the implementing slice chooses the enum-split form. If it instead disaggregates at digest grain while keeping the locked-six `MuscleGroup`, the ADR-0005 lock is preserved and no amendment is needed. The design call is pinned in that slice.
 
-These are stated as the effect of accepting this ADR. While the status is `proposed`, ADR-0011 / ADR-0002 / ADR-0007 / ADR-0005 are unedited and the memo stands; the header links above are the supersession record per the append-only convention, not a claim that those documents have already changed.
+These are the effect of accepting this ADR. The header links above are the supersession record per the append-only convention; the *edits* to the linked ADRs land with their implementing slices, not at acceptance time — ADR-0011's goal branch with #559, ADR-0007's transient-failure carve-out with #321, the conditional ADR-0005 amendment only if #571 takes the enum-split form. Until a slice merges, its target ADR stays unedited and the link is forward-looking.
 
 ## Context
 
