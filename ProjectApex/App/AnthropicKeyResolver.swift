@@ -19,7 +19,7 @@ enum AnthropicKeyResolver {
 
     /// Resolves the Anthropic key using the locked precedence, seeding the bundled
     /// key into the Keychain on the fallback path so every existing consumer
-    /// (AIInferenceService, VisionAPIService, ProgramGenerationService, …) keeps
+    /// (AIInferenceService, VisionAPIService, MacroPlanService, …) keeps
     /// reading `.anthropicAPIKey` from the Keychain exactly as before.
     ///
     /// - Parameters:

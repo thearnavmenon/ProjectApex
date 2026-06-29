@@ -428,3 +428,21 @@ actor MacroPlanService {
         return nil
     }
 }
+
+// MARK: - AnthropicProvider convenience: skeleton (macro) generation
+
+extension AnthropicProvider {
+    /// Sonnet model with 16k token budget and 180s timeout, configured for
+    /// one-shot macro-skeleton generation. (Relocated from the deleted
+    /// ProgramGenerationService in #560; MacroPlanService is now the sole user.)
+    /// Template output observed at 10k–14k tokens for a 4-day program; 16k provides headroom.
+    static func forProgramGeneration(apiKey: String) -> AnthropicProvider {
+        AnthropicProvider(
+            apiKey: apiKey,
+            model: "claude-sonnet-4-5",
+            maxTokens: 16000,
+            requestTimeout: 180,
+            enableCaching: false   // one-shot, never repeats prompt — no cache benefit
+        )
+    }
+}

@@ -1168,7 +1168,6 @@ private extension String {
         ProgramOverviewView(
             viewModel: ProgramViewModel(
                 supabaseClient: supabase,
-                programGenerationService: ProgramGenerationService(provider: provider),
                 macroPlanService: MacroPlanService(provider: provider),
                 sessionPlanService: SessionPlanService(
                     provider: provider,
