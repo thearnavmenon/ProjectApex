@@ -24,6 +24,7 @@ import postgres from "postgres";
 import { applySession } from "./index.ts";
 import type { ApplyCompleteEvent, LateArrivalEvent } from "../_shared/observability.ts";
 import { LLMTransientError } from "../_shared/llm-retry.ts";
+import { cadenceScaledTolerance } from "../_shared/per-muscle-rules.ts";
 
 const DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
@@ -2356,6 +2357,82 @@ orchestratorTest(
     assertEquals(proj.lastRecalibratedPatterns.includes("squat"), true);
     // Patterns that did NOT outgrow their band are not in the list.
     assertEquals(proj.lastRecalibratedPatterns.includes("horizontal_push"), false);
+  },
+);
+
+orchestratorTest(
+  "#164: volumeTolerance cadence-scales from the muscle's own event timestamps; stable across re-apply (no drift)",
+  async () => {
+    const userId = await seedFreshUser();
+    // Three legs sessions spaced exactly 3.5 days apart → mean cadence 3.5
+    // days = 2×/week → scaling factor 2.0 → legs tolerance 18 × 2 = 36.
+    const dates = [
+      "2026-05-08T10:00:00Z",
+      "2026-05-11T22:00:00Z",
+      "2026-05-15T10:00:00Z",
+    ];
+    for (const loggedAt of dates) {
+      await applySession(
+        {
+          user_id: userId,
+          session_id: crypto.randomUUID(),
+          session_payload: {
+            logged_at: loggedAt,
+            set_logs: [
+              { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top" },
+            ],
+          },
+        },
+        sql,
+        { stage2Hook: noopStage2 },
+      );
+    }
+
+    let rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    let legs = (
+      (rows[0].model_json as Record<string, unknown>).muscles as Record<
+        string,
+        Record<string, unknown>
+      >
+    ).legs;
+
+    const expected = cadenceScaledTolerance("legs", 3.5); // = 36
+    assertEquals(legs.volumeTolerance, expected);
+    assertEquals(legs.volumeTolerance, 36);
+    // Proves the scaling actually fired (baseline would have been 18).
+    assertEquals(legs.volumeTolerance !== 18, true);
+
+    // A fourth apply at the same 3.5-day spacing must NOT drift the tolerance
+    // — the orchestrator scales from the locked baseline each time, never from
+    // the persisted (already-scaled) value. This is the end-to-end guard
+    // against the double-scaling bug.
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: {
+          logged_at: "2026-05-18T22:00:00Z",
+          set_logs: [
+            { exercise_id: "barbell_back_squat", set_number: 1, weight_kg: 130, reps_completed: 5, intent: "top" },
+          ],
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    legs = (
+      (rows[0].model_json as Record<string, unknown>).muscles as Record<
+        string,
+        Record<string, unknown>
+      >
+    ).legs;
+    assertEquals(legs.volumeTolerance, 36); // unchanged — no double-scaling
   },
 );
 

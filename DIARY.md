@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-29 — Volume targets now match how often you actually train
+
+**The problem (in plain words):**
+The coach has a target for how many hard sets each muscle should get. That
+target was baked in assuming everyone trains about 4 times a week. But the way
+it's measured is "sets over your last 7 workouts for that muscle" — and 7
+workouts is a different amount of time depending on how often you train. If you
+train a muscle 6×/week, 7 workouts is barely over a week, so the fixed target was
+actually ~145% of what a week should be — too high. If you train it 2×/week, 7
+workouts spans 3+ weeks, so the same target was only ~57% of a week — too low. So
+high-frequency people looked permanently "under target" and low-frequency people
+looked "done" when they weren't.
+
+**What I changed:**
+The target now scales to how often you actually train each muscle (read straight
+from the timestamps of your own sessions for that muscle). Train it more often →
+the per-window target comes down to match a sensible weekly amount; train it less
+often → it goes up. At 4×/week nothing changes. I capped the scaling to a sane
+range so someone training once a week (or twice a day) doesn't get an absurd
+number. Important detail I got right: the target is always recalculated from the
+fixed baseline, never from last time's already-scaled number — otherwise it would
+quietly drift lower and lower every workout.
+
+**How it was checked:**
+19 automated tests on the math (8 new — including one that proves it does NOT
+drift when you train at a steady pace), plus a full end-to-end test that runs in
+CI against a real database. The existing targets tests still pass (a brand-new
+user with one session sees the same baseline as before).
+
+**Heads-up for deploy:** server-side coach change — live only after
+`supabase functions deploy update-trainee-model`. (#164, part of #558 / ADR-0030.)
+
+---
+
 ## 2026-06-29 — Stop pushing muscle-builders into a powerlifter's "peak"
 
 **The problem (in plain words):**

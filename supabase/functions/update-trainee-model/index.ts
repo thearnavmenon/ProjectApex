@@ -114,6 +114,7 @@ import {
   aggregateMuscleSetCounts,
   aggregateStagnationStatus,
   bootstrapMuscleProfile,
+  cadenceScaledTolerance,
   computeFocusWeight,
   computeVolumeDeficit,
   proposeMuscleConfidence,
@@ -1248,8 +1249,21 @@ function applyPerMuscleRules(
       fieldsChanged.push(`muscles.${muscleKey}.weeklyVolumeHistory`);
     }
 
-    // (b) Recompute volumeDeficit from the (possibly updated) history.
-    const tolerance = (profile.volumeTolerance as number) ?? 0;
+    // (b) Cadence-scale volumeTolerance (#164), then recompute volumeDeficit.
+    // The Q1-locked targets assume 4×/week; the muscle's actual frequency comes
+    // from its OWN weeklyVolumeHistory timestamps (each bucket = one training
+    // event for this muscle). <2 events → null cadence → factor 1.0. Always
+    // scaled from the baseline constant inside cadenceScaledTolerance, so the
+    // value cannot drift across applies (no double-scaling).
+    const cadenceDays = sessionsCadenceDays(
+      newHistory.map((bucket) => bucket.loggedAtIso),
+    );
+    const tolerance = cadenceScaledTolerance(muscleGroup, cadenceDays);
+    if (tolerance !== profile.volumeTolerance) {
+      profile.volumeTolerance = tolerance;
+      rulesFired.add("muscle-volume-tolerance");
+      fieldsChanged.push(`muscles.${muscleKey}.volumeTolerance`);
+    }
     const newDeficit = computeVolumeDeficit(newHistory, tolerance);
     if (newDeficit !== profile.volumeDeficit) {
       profile.volumeDeficit = newDeficit;
