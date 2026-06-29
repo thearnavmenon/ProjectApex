@@ -13,7 +13,6 @@
 //   skips through all steps. Subsequent launches skip directly to the Program tab.
 
 import SwiftUI
-import UIKit
 
 struct ContentView: View {
 
@@ -76,7 +75,12 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var mainContent: some View {
+    /// The four primary tabs. Each hides the native tab bar with a PER-TAB
+    /// `.toolbar(.hidden, for: .tabBar)`: container-level hiding does NOT suppress
+    /// the iOS 26 floating tab bar, so without this the system bar collides with the
+    /// bespoke `ApexTabBar` that `mainContent` adds. Tab order matches the `.tag`
+    /// values used by `switchToTab` and the "Now Training" pill everywhere.
+    private var tabContent: some View {
         TabView(selection: $selectedTab) {
 
             // ── Tab 0: Program ─────────────────────────────────────────────
@@ -90,6 +94,7 @@ struct ContentView: View {
                     loadingPlaceholder
                 }
             }
+            .toolbar(.hidden, for: .tabBar)
             .tabItem {
                 Label("Program", systemImage: "calendar")
             }
@@ -97,6 +102,7 @@ struct ContentView: View {
 
             // ── Tab 1: Workout ─────────────────────────────────────────────
             workoutTab
+            .toolbar(.hidden, for: .tabBar)
             .tabItem {
                 Label("Workout", systemImage: "figure.strengthtraining.traditional")
             }
@@ -108,6 +114,7 @@ struct ContentView: View {
                 userId: deps.resolvedUserId,
                 traineeModelService: deps.traineeModelService
             )
+            .toolbar(.hidden, for: .tabBar)
             .tabItem {
                 Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
             }
@@ -117,16 +124,27 @@ struct ContentView: View {
             NavigationStack {
                 settingsRootView
             }
+            .toolbar(.hidden, for: .tabBar)
             .tabItem {
                 Label("Settings", systemImage: "gearshape.fill")
             }
             .tag(3)
         }
-        .overlay(alignment: .bottom) {
-            // #462: "Now Training" pill above the tab bar — replaces the colour-coded
-            // tab badge (iOS strips a Text badge's tint). Hidden on the Workout tab
-            // itself (tab 1), which already shows the full session / paused screen.
-            // .padding(.bottom) clears the tab bar; the exact value needs device QA.
+    }
+
+    private var mainContent: some View {
+        // #538: the native UITabBar is replaced by the bespoke Brutalist ApexTabBar.
+        // The native bar is hidden PER-TAB inside `tabContent` (container-level hiding
+        // does not suppress the iOS 26 floating bar); the custom bar is re-added here as
+        // a VStack sibling so each tab's content sits ABOVE it. (Adding it via a bottom
+        // `.safeAreaInset` instead lets tab content underlap the bar — verified in the
+        // prototype harness.) `.ignoresSafeArea(.bottom)` lets the bar's black fill the
+        // home-indicator zone while its own bottom padding keeps the labels above it.
+        VStack(spacing: 0) {
+            tabContent
+
+            // #462: "Now Training" pill above the tab bar. Hidden on the Workout
+            // tab itself (tab 1), which already shows the full session / paused screen.
             if selectedTab != 1 {
                 NowTrainingBar(
                     state: .resolve(
@@ -135,12 +153,13 @@ struct ContentView: View {
                     ),
                     onTap: { selectedTab = 1 }
                 )
-                .padding(.bottom, 56)
+                .padding(.bottom, 8)
             }
+            ApexTabBar(selection: $selectedTab)
         }
+        .ignoresSafeArea(.container, edges: .bottom)
         .environment(\.switchToTab, { selectedTab = $0 })
         .preferredColorScheme(.dark)
-        .onAppear { Self.applyBrutalistTabBarAppearance() }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView { completedProfile in
                 // Persist the scanned profile so Settings / Program tabs see it immediately.
@@ -470,28 +489,6 @@ struct ContentView: View {
         } else {
             noWorkoutView
         }
-    }
-
-    /// Theme the tab bar to the Brutalist identity: opaque black bar, white
-    /// selected item, dim-white unselected. Applied process-globally (the app
-    /// has no other tab bar). NOTE: the selected/unselected treatment is a design
-    /// call pending real-device QA — there was no prior tab-bar appearance.
-    private static func applyBrutalistTabBarAppearance() {
-        let appearance = UITabBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor.black
-        let dim = UIColor.white.withAlphaComponent(0.32)
-        let selected = UIColor.white
-        for layout in [appearance.stackedLayoutAppearance,
-                       appearance.inlineLayoutAppearance,
-                       appearance.compactInlineLayoutAppearance] {
-            layout.normal.iconColor = dim
-            layout.normal.titleTextAttributes = [.foregroundColor: dim]
-            layout.selected.iconColor = selected
-            layout.selected.titleTextAttributes = [.foregroundColor: selected]
-        }
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
     }
 
     private var noWorkoutView: some View {
