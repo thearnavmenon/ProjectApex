@@ -1,0 +1,92 @@
+# Committed, deterministic program generation: one per-pattern clock, LLM demoted to block-commit selection + per-set weight
+
+**Status**: proposed, 2026-06-29
+
+**On acceptance** this ADR:
+- **amends** [ADR-0011](0011-per-pattern-phase-advance-plateau-aware-cyclic.md) — the per-pattern phase cycle gains a **goal branch** so hypertrophy-primary patterns are not cycled into a strength peaking taper;
+- **reaffirms** [ADR-0002](0002-queue-shape-programme-model.md) — the pure-queue programme model is implemented *in full* here; the calendar machinery that crept back in during macro generation is removed, so ADR-0002 finally describes the shipped behaviour;
+- **retires** the 2026-05-12 "Option 4" per-week-LLM granularity memo (skeleton + per-week + per-set) as **superseded** — the per-week LLM call it reserved stays unbuilt; the week becomes pure arithmetic.
+- **supersedes in part** [ADR-0007](0007-llm-retry-and-surface-policy.md) — the deterministic per-set weight fallback reverses ADR-0007's explicit rejection of a foreground "synthesised best-effort prescription" *for the transient-failure class only*: a stalled/failed per-set call now degrades silently to a capability-based load instead of surfacing the retry sheet. ADR-0007's surface policy for non-transient failures is otherwise unchanged.
+- **may amend** [ADR-0005](0005-persistent-structured-trainee-model.md) §"Two-level muscle taxonomy" — *conditionally*. Leg disaggregation (quads/hams/glutes/calves) reverses ADR-0005's deliberate legs-collapse lock **only if** the implementing slice chooses the enum-split form. If it instead disaggregates at digest grain while keeping the locked-six `MuscleGroup`, the ADR-0005 lock is preserved and no amendment is needed. The design call is pinned in that slice.
+
+These are stated as the effect of accepting this ADR. While the status is `proposed`, ADR-0011 / ADR-0002 / ADR-0007 / ADR-0005 are unedited and the memo stands; the header links above are the supersession record per the append-only convention, not a claim that those documents have already changed.
+
+## Context
+
+Program generation today runs through two competing periodization clocks, one of which is fake.
+
+The **live** generation path is `MacroPlanService.generateSkeleton` (called from `OnboardingView.swift:1386` and `ProgramViewModel.swift:606`). It makes a macro LLM call framed as an "elite periodization architect," then builds a 12-week calendar `Mesocycle`: `buildPendingMesocycle` stamps a hardcoded phase map onto week numbers (`MacroPlanService.swift:305-317` — weeks 1–4 accumulation, 5–8 intensification, 9–11 peaking, 12 deload) and assigns ISO weekday slots via `standardDayOfWeek` (`MacroPlanService.swift:361-373`). Per-session plans are then generated **from scratch** by the session LLM (`SessionPlanService` → `SystemPrompt_SessionPlan.txt`), one day at a time, blind to sibling days (`SessionPlanService.swift:394` collapses a week's day-focus to the single day being generated). Per-set weight is prescribed by a separate call (`AIInferenceService.swift:1201` → `SystemPrompt_Inference.txt`), prefetched during rest.
+
+Underneath all of that, the **per-pattern trainee-model engine** (ADR-0005, ADR-0011) already does honest autoregulation server-side: per-pattern trend/phase, two-dimensional recovery, fatigue interactions, prescription-accuracy self-correction, transfers, limitations, form-degradation. This is the second clock — and it is the one that actually governs prescription.
+
+A multi-hat expert panel reviewed the system end-to-end. The owner chose to **plan** the redesign (this ADR + sliced issues) before building. The panel's findings — each already confirmed against the code, cited here, not re-litigated:
+
+- **Goal-blind peaking (bug).** `supabase/functions/_shared/phase-advance.ts` lines 93-104 define `phaseOrder` as a fixed modular cycle (`accumulation → intensification → peaking → deload`, `nextPhaseInCycle = phaseOrder[(idx+1) % len]`) with **no goal branch**. Every user — hypertrophy-primary included — is cycled into a strength "peaking" taper (3–8 reps, RIR 1–2 per `SystemPrompt_SessionPlan.txt` PHASE PARAMETERS). That is the wrong stimulus for a hypertrophy-primary user.
+- **The macro LLM call is theater.** Its only *consumed* output is the training split. `phase` is overwritten by the hardcoded map (`MacroPlanService.swift:305-317`); `volume_landmark` is recomputed by a Swift formula (`SessionPlanService.swift:717-724`, `weekVolumeLandmark`); `periodization_model` is never read by session generation.
+- **Two periodization clocks, the macro arc already dead.** `SystemPrompt_SessionPlan.txt:270-287` instructs the model to use the per-pattern `current_phase` "NOT the global programme phase." The global macro arc has no live consumer.
+- **Each day is generated blind to its siblings** (`SessionPlanService.swift:394`), so weekly balance and recovery sequencing cannot be reasoned about at generation time.
+- **A dead second macro path is still wired.** `ProgramGenerationService` (loads `SystemPrompt_MacroGeneration.txt`) is instantiated in `AppDependencies.swift:226,364` and `ProgramOverviewView.swift:1171`, but the live path is `MacroPlanService.generateSkeleton`. Two macro surfaces exist; one is never exercised.
+- **Per-set weight is the one LLM call worth keeping**, but a slow/failed call has surfaced as the mid-workout "Coach is offline" incidents (#555/#556). It needs a deterministic fallback so a stalled call degrades silently rather than blocking the set.
+
+The through-line: the calendar clock is decorative (ADR-0002 already said the programme is a queue, not a calendar — the calendar crept back into `MacroPlanService`), the macro LLM's outputs are discarded, and the per-pattern trainee model is doing the real work while being wrapped in theatrical machinery. The redesign collapses this to one clock.
+
+## Decision
+
+**Make the program a deterministic, committed artifact — a repeating queue of day-slots with stable, named exercise identity — driven by the existing per-pattern trainee-model engine. Demote the LLM to exactly two jobs: (1) selecting exercises once per block (cold-start and on rotation triggers), and (2) prescribing live per-set weight (kept as-is, with a deterministic fallback). Everything between those two points becomes deterministic arithmetic on the trainee model. Kill the fake 12-week calendar entirely.**
+
+There is one periodization clock — the per-pattern trainee model — and the program is its committed output, not a parallel LLM-authored plan.
+
+### Grain split
+
+- **BLOCK (mesocycle) — deterministic split + ONE LLM call at commit.** A deterministic split picks the day-slots for the block; a single LLM call at block commit freezes, per day-slot, an **exercise pool** and a **rep-range**. The call sees *all sibling slots at once*, so weekly balance and exercise sequencing are decided up front rather than rediscovered per day. The per-muscle weekly set budget and `≥2×` frequency check (below) are computed first and fed *into* this call as constraints. Injuries / active limitations are part of the request; `enforceEquipment` + the ExerciseLibrary pre-filter still bound the candidate set.
+- **WEEK (microcycle) — PURE ARITHMETIC, no recurring LLM.** Per-muscle weekly **set budget** (MEV floor + soft two-sided ceiling), a `≥2×`-per-week frequency check, and recovery sequencing are computed deterministically from the trainee model and fed into the block-commit call. The never-built "Option 4" per-week LLM call stays unbuilt.
+- **DAY (session) — DETERMINISTIC instantiation.** A session is the frozen slot pulled from the committed program with digest deltas applied **as math**, not regenerated from scratch by an LLM: deload `−50%`, fatigue `−20%` / `RIR +1`, volume-deficit top-up, limitation scaling, return-to-training adjustment. No from-scratch session LLM call.
+- **SET (weight) — LLM (keep) + deterministic fallback.** The per-set weight call (`AIInferenceService` + `SystemPrompt_Inference.txt`) and its prefetch-during-rest + calibration rule are kept. A deterministic fallback (capability-based target from the trainee model) makes a slow or failed call degrade silently instead of stalling the set (#555/#556).
+
+### Key design calls
+
+- **Freeze identity + rep-range, let dose progress.** The block-commit freezes the exercise *identity* and *rep-range* per slot for the life of the block, but **set-count and RIR progress deterministically** within it. This gives a stable overload target (the user trains the same lifts and can chase them) while leaving room to progress (the per-pattern engine moves the dose). Exercise rotation happens between blocks, on commit, not mid-block.
+- **Real per-user curation comes from editability + narration, not the generator.** Ten friends who onboard identically would otherwise receive byte-identical programs. The personalization surface is therefore (a) **editability** — swap / ban an exercise, "this hurts here," change training days — routed into `activeLimitations` / RAG memory so the trainee model and the next block-commit absorb it; and (b) **narration** that quotes the user's own lifts back to them. The generator stays deterministic; the user's history and choices are what diverge.
+
+### Keep / Kill / Build
+
+**Keep** (unchanged, load-bearing): the trainee-model autoregulation engine (per-pattern trend/phase, 2D recovery, fatigue interactions, prescription-accuracy self-correction, transfers, limitations, form-degradation); the per-set weight call (`AIInferenceService` + `SystemPrompt_Inference.txt`) + prefetch-during-rest + calibration rule; the day-label history join (ADR-0017); `enforceEquipment` + ExerciseLibrary pre-filter; `programs.mesocycle_json` JSONB + client-generated id + `deactivate_and_insert_program` RPC (ADR-0018) + RLS (ADR-0027); the per-axis confidence lifecycle (ADR-0020); the `ActiveSessionCoordinator` one-owner live/paused model + crash-resume (#440/#441).
+
+**Kill**: the global 12-week calendar clock — `Mesocycle.totalWeeks`, `TrainingWeek.weekNumber` as a *calendar* index, the `buildPendingMesocycle` phase map (`MacroPlanService.swift:305-317`), `standardDayOfWeek` (`MacroPlanService.swift:361-373`), `weekVolumeLandmark` (`SessionPlanService.swift:717-724`), `globalProgrammePhase`/`globalProgrammeWeek` in `TemporalContext`, and the PHASE STRUCTURE + PHASE PARAMETERS blocks in `SystemPrompt_SessionPlan.txt`; the "elite periodization architect" framing and the discarded macro outputs (`phase`, `volume_landmark`, `periodization_model`); per-day from-scratch session generation; goal-blind peaking; `SessionPlanService.computeTrend` (line 705, a crude duplicate of the digest hybrid verdict); the hardcoded `trainingDaysPerWeek: 4`; and the dead `ProgramGenerationService` + `SystemPrompt_MacroGeneration` path (consolidate to one macro surface).
+
+**Build**: a queue-native `SlotTemplate` / `Program` model with an in-Swift flatten decoder (decode-with-default; **no SQL migration**); `SessionAutoregulator.swift` (deterministic day instantiation + digest-delta math); the block-commit LLM call (fold `MacroPlanService` down to split selection + a committed, sibling-aware exercise pool with injuries in the request); the goal branch in `phase-advance.ts`; pre-rendered narration + the per-set deterministic fallback; the editability surface (swap / ban / "hurts here" / change days → `activeLimitations` / `rag_memory`); and cadence-scaling + leg disaggregation in `per-muscle-rules.ts`.
+
+### Goal branch in `phase-advance.ts` (amends ADR-0011)
+
+ADR-0011 pinned a single cyclic phase order for all patterns. This ADR adds a **goal branch**: the phase progression a pattern cycles through depends on the user's primary goal, so a hypertrophy-primary pattern is **not** routed through the strength peaking taper (3–8 reps, RIR 1–2). The cyclic, plateau-aware, force-advance-to-deload mechanics of ADR-0011 are otherwise preserved; only the phase *set* (and its rep/RIR parameters) becomes goal-aware. The exact per-goal phase mapping is pinned in the implementing slice. This is an Edge Function change.
+
+## Considered Options
+
+- **Committed deterministic template, one per-pattern clock (chosen).** The program is frozen at block commit (exercise identity + rep-range per slot); the week is arithmetic; the day is deterministic instantiation; the LLM does block-commit selection and per-set weight only. Chosen because it removes the dead clock rather than papering over it, makes the program a stable artifact the user can train against and edit, and lets the already-trusted per-pattern engine drive prescription end-to-end. It also makes per-set weight failure non-blocking via the deterministic fallback. Cost: real per-user variety must come from editability + narration, not the generator — accepted, because day-1 generator "personalization" with no history was pseudo-variety anyway, and identical-onboarding users diverging only as their logs diverge is the honest model.
+
+- **Recurring weekly-LLM ("Option 4", the 2026-05-12 memo).** Keep a per-week LLM call that re-plans the microcycle each week (skeleton + per-week + per-set). Rejected: it reintroduces a second authoring clock competing with the per-pattern engine, costs an LLM call per week per user for output the deterministic set-budget math already produces, and is exactly the layer whose macro analogue we found to be theater. The per-week LLM was reserved but never built; this ADR retires the reservation and makes the week pure arithmetic.
+
+- **Status quo + point-fix the goal-blind bug only.** Leave the calendar clock, the from-scratch session generation, and the discarded macro outputs in place; just add a goal branch to `phase-advance.ts` so hypertrophy users stop getting strength peaking. Rejected: it fixes the most visible symptom while leaving the root cause — two clocks, one fake — in place. The session LLM is already told to ignore the global phase, the macro call's outputs are already discarded, and each day is still generated blind to its siblings. Patching one bug inside a dead subsystem spends effort on machinery slated for deletion.
+
+## Consequences
+
+- **One periodization clock.** After this lands, prescription is governed solely by the per-pattern trainee model; the global mesocycle calendar (`totalWeeks`, calendar `weekNumber`, the phase map, `standardDayOfWeek`, `weekVolumeLandmark`, `globalProgrammePhase`/`Week`) is removed. ADR-0002's pure-queue model is, for the first time, the actual shipped shape.
+
+- **The program becomes a committed artifact with stable named exercise identity.** A `SlotTemplate` / `Program` queue-native model replaces the 12-week mesocycle. The ~10 live 12-week `mesocycle_json` JSONB rows are read forward via an **in-Swift decode-with-default flatten decoder** — **no SQL migration**. `programs.mesocycle_json` JSONB + client-generated id + the `deactivate_and_insert_program` RPC (ADR-0018) + RLS (ADR-0027) persistence path is preserved; the JSONB *payload shape* changes, the storage/atomicity/idempotency contract does not.
+
+- **The session layer becomes deterministic.** A new `SessionAutoregulator.swift` instantiates a session by pulling the frozen slot and applying digest deltas as arithmetic (deload `−50%`, fatigue `−20%`/`RIR +1`, deficit top-up, limitation scaling, return-to-training). The from-scratch session LLM call and `SystemPrompt_SessionPlan.txt`'s PHASE blocks are removed. `SessionPlanService.computeTrend` (the crude duplicate verdict) is deleted in favour of the digest hybrid verdict.
+
+- **The macro surface consolidates to one.** `MacroPlanService` folds down to split selection + the sibling-aware block-commit exercise-pool call; the dead `ProgramGenerationService` + `SystemPrompt_MacroGeneration` path and the "elite periodization architect" framing are removed. The block-commit call carries the per-muscle set budget, `≥2×` frequency, recovery sequencing, and active limitations as constraints.
+
+- **Per-set weight failure stops blocking the workout.** The kept per-set call gains a deterministic capability-based fallback, addressing the "Coach is offline" mid-workout stalls (#555/#556). Prefetch-during-rest and the calibration rule are unchanged. This partially supersedes ADR-0007 (see header): the foreground deterministic fallback that ADR-0007 rejected is now adopted for the transient-failure class only, and ADR-0007 should gain the reciprocal "superseded in part by ADR-0030" backlink on acceptance.
+
+- **Edge Function deploys are owner actions.** The goal branch in `phase-advance.ts` (and any other `supabase/functions/**` change) deploys **manually** — it does not ship with an app build. Any slice touching an Edge Function must call this out as a pre-merge / pre-release owner reminder.
+
+- **Invariants preserved.** The day-label join (ADR-0017) — `day_type = dayLabel` per-day history lookup — must keep resolving across block commits; slot identity must carry the user's established day-label convention. Atomic program persistence (ADR-0018), RLS (ADR-0027), and the `ActiveSessionCoordinator` one-owner live/paused model + crash-resume (#440/#441) are unchanged and must be verified intact after the model swap.
+
+- **Personalization moves to editability + narration.** Because the generator is deterministic, identical-onboarding users get identical first programs. The product's per-user feel is delivered by the editability surface (swap / ban / "hurts here" / change days → `activeLimitations` / RAG memory) and by narration that quotes the user's own lifts — both of which diverge as the user's history diverges. This is a deliberate trade recorded here so a future reader does not "fix" the determinism.
+
+- **Sliced delivery.** This ADR is the plan of record; the work ships as tracer-bullet vertical slices, each its own branch + PR closing its issue via `Closes #N`. Slice ordering is tracked on the issue tracker; the in-Swift flatten decode (the model migration with no SQL) is sequenced deliberately so the ~10 live rows decode forward before any writer emits the new shape.
+
+- **CONTEXT.md updates on acceptance.** "Mesocycle skeleton" / "Mesocycle phase" entries need rewording away from the calendar/global framing (phase is per-pattern and goal-aware; the program is a committed slot queue, not a 12-week calendar). New terms (block commit, slot template, session autoregulator) are PRD-internal until they recur in user-facing copy.
+
