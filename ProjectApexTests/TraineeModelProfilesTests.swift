@@ -98,6 +98,50 @@ struct MuscleProfileTests {
         let data = try JSONEncoder().encode(original)
         #expect(try JSONDecoder().decode(MuscleProfile.self, from: data) == original)
     }
+
+    @Test("Round-trip preserves volumeCeiling/volumeSurplus (#570)")
+    func roundTripCeilingSurplus() throws {
+        let original = MuscleProfile(
+            muscleGroup: .chest,
+            volumeTolerance: 18,
+            volumeDeficit: 2,
+            volumeCeiling: 24,
+            volumeSurplus: 6,
+            confidence: .calibrating
+        )
+        let data = try JSONEncoder().encode(original)
+        #expect(try JSONDecoder().decode(MuscleProfile.self, from: data) == original)
+    }
+
+    @Test("Legacy decode (#570): rows missing volumeCeiling/volumeSurplus default to 0")
+    func legacyDecodeDefaultsCeilingSurplus() throws {
+        // Simulate a pre-#570 model_json row (the ~10 live rows): encode a
+        // modern profile, strip the two new keys, then decode. The additive
+        // decoder must default both to 0 without throwing.
+        let modern = MuscleProfile(
+            muscleGroup: .back,
+            volumeTolerance: 28,
+            volumeDeficit: 3,
+            volumeCeiling: 28,
+            volumeSurplus: 5,
+            confidence: .established
+        )
+        var dict = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(modern)
+        ) as! [String: Any]
+        dict.removeValue(forKey: "volumeCeiling")
+        dict.removeValue(forKey: "volumeSurplus")
+        let legacyData = try JSONSerialization.data(withJSONObject: dict)
+
+        let decoded = try JSONDecoder().decode(MuscleProfile.self, from: legacyData)
+        #expect(decoded.volumeCeiling == 0)
+        #expect(decoded.volumeSurplus == 0)
+        // Pre-existing fields are still decoded normally.
+        #expect(decoded.muscleGroup == .back)
+        #expect(decoded.volumeTolerance == 28)
+        #expect(decoded.volumeDeficit == 3)
+        #expect(decoded.confidence == .established)
+    }
 }
 
 @Suite("PatternProfile.recentSessionDays")

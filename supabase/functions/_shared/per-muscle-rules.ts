@@ -72,6 +72,24 @@ export const MUSCLE_VOLUME_TARGETS: Record<MuscleGroup, number> = {
 };
 
 /**
+ * Q1-companion per-muscle volume CEILINGS (#570). MRV/MAV-midpoint priors in the
+ * same per-7-events @4×/week units as MUSCLE_VOLUME_TARGETS, so they cadence-scale
+ * by the same factor (`cadenceScaledCeiling`). These are *fixed priors* (≈1.3×
+ * the MEV midpoints), NOT learned values, and are **advisory only** — nothing
+ * hard-caps prescribed sets from them. They exist so the model can surface an
+ * over-volume signal (`volumeSurplus`) distinct from the per-pattern fatigue
+ * axis. Subject to tuning once alpha data accrues.
+ */
+export const MUSCLE_VOLUME_CEILING: Record<MuscleGroup, number> = {
+  back: 28,
+  chest: 24,
+  shoulders: 24,
+  biceps: 20,
+  triceps: 16,
+  legs: 24,
+};
+
+/**
  * Cadence-scaling factor for the per-muscle volume model (#164).
  *
  * `MUSCLE_VOLUME_TARGETS` are locked as per-7-events targets at a **4×/week**
@@ -113,6 +131,21 @@ export function cadenceScaledTolerance(
 }
 
 /**
+ * Cadence-scaled `volumeCeiling` for a muscle (#570). Mirrors
+ * `cadenceScaledTolerance` — scales the fixed `MUSCLE_VOLUME_CEILING` prior by
+ * the same cadence factor so the over-volume signal stays in per-week terms.
+ * Scales from the baseline constant (no double-scaling); rounded to an integer.
+ */
+export function cadenceScaledCeiling(
+  muscleGroup: MuscleGroup,
+  cadenceDays: number | null,
+): number {
+  return Math.round(
+    MUSCLE_VOLUME_CEILING[muscleGroup] * computeCadenceScalingFactor(cadenceDays),
+  );
+}
+
+/**
  * Bootstrap shape of a `MuscleProfile` JSONB entry. Mirrors
  * `ProjectApex/Models/TraineeModelProfiles.swift::MuscleProfile`. Keys are
  * camelCase to match the Swift decoder's default CodingKeys (no rename).
@@ -125,6 +158,10 @@ export interface BootstrapMuscleProfile {
   volumeTolerance: number;
   observedSweetSpot: number | null;
   volumeDeficit: number;
+  /** #570: MRV/MAV-midpoint ceiling prior (per-7-events @4×/week; cadence-scaled on apply). */
+  volumeCeiling: number;
+  /** #570: over-volume signal = max(0, sum − ceiling); 0 on cold-start. */
+  volumeSurplus: number;
   focusWeight: number;
   stagnationStatus: "progressing" | "plateaued" | "declining";
   confidence: "bootstrapping" | "calibrating" | "established";
@@ -151,6 +188,10 @@ export function bootstrapMuscleProfile(
     volumeTolerance: MUSCLE_VOLUME_TARGETS[muscleGroup],
     observedSweetSpot: null,
     volumeDeficit: 0,
+    // #570: baseline ceiling prior; the orchestrator recomputes it cadence-
+    // scaled on each apply (cold-start cadence = null → factor 1.0 → baseline).
+    volumeCeiling: MUSCLE_VOLUME_CEILING[muscleGroup],
+    volumeSurplus: 0,
     focusWeight: 0,
     stagnationStatus: "progressing",
     confidence: "bootstrapping",
@@ -226,6 +267,23 @@ export function computeVolumeDeficit(
   const recent = history.slice(-MUSCLE_VOLUME_WINDOW);
   const sum = recent.reduce((acc, bucket) => acc + bucket.sets, 0);
   return Math.max(0, volumeTolerance - sum);
+}
+
+/**
+ * `volumeSurplus = max(0, Σ sets in last MUSCLE_VOLUME_WINDOW buckets −
+ * volumeCeiling)` (#570). The upper-bound companion to `computeVolumeDeficit`:
+ * a positive surplus means the user is training this muscle *past* its
+ * productive ceiling (a real over-volume / overreaching signal, distinct from
+ * the per-pattern fatigue axis). 0 at/under the ceiling; 0 on cold-start
+ * (empty history). Advisory only — no code path hard-caps prescribed sets.
+ */
+export function computeVolumeSurplus(
+  history: WeeklyVolumeBucket[],
+  volumeCeiling: number,
+): number {
+  const recent = history.slice(-MUSCLE_VOLUME_WINDOW);
+  const sum = recent.reduce((acc, bucket) => acc + bucket.sets, 0);
+  return Math.max(0, sum - volumeCeiling);
 }
 
 /**

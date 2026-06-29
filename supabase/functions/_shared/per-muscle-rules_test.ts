@@ -17,11 +17,15 @@ import {
   aggregateMuscleSetCounts,
   aggregateStagnationStatus,
   bootstrapMuscleProfile,
+  cadenceScaledCeiling,
   cadenceScaledTolerance,
   computeCadenceScalingFactor,
   computeFocusWeight,
   computeVolumeDeficit,
+  computeVolumeSurplus,
+  MUSCLE_VOLUME_CEILING,
   proposeMuscleConfidence,
+  type MuscleGroup,
 } from "./per-muscle-rules.ts";
 
 Deno.test("bootstrapMuscleProfile: legs returns ADR-0005 defaults + Q1-locked MEV threshold", () => {
@@ -298,4 +302,65 @@ Deno.test("#164 cadenceScaledTolerance: NO double-scaling — repeated calls der
   assertEquals(first, second);
   assertEquals(second, third);
   assertEquals(first, 24); // chest 18 × 1.333 rounded
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// #570: soft two-sided volume ceiling. MUSCLE_VOLUME_CEILING is an MRV/MAV
+// prior in the same per-7-events @4×/week units, cadence-scaled by the SAME
+// factor as tolerance. volumeSurplus = max(0, sum − ceiling), advisory only.
+// ─────────────────────────────────────────────────────────────────────────
+
+Deno.test("#570 bootstrapMuscleProfile: includes baseline volumeCeiling + 0 volumeSurplus for all six muscles", () => {
+  const expectedCeilings: Record<MuscleGroup, number> = {
+    back: 28,
+    chest: 24,
+    shoulders: 24,
+    biceps: 20,
+    triceps: 16,
+    legs: 24,
+  };
+  for (const muscle of Object.keys(expectedCeilings) as MuscleGroup[]) {
+    const profile = bootstrapMuscleProfile(muscle);
+    assertEquals(profile.volumeCeiling, expectedCeilings[muscle]);
+    assertEquals(profile.volumeCeiling, MUSCLE_VOLUME_CEILING[muscle]);
+    assertEquals(profile.volumeSurplus, 0);
+  }
+});
+
+Deno.test("#570 computeVolumeSurplus: max(0, sum − ceiling) over last-7 buckets", () => {
+  const bucket = (sets: number) => ({ loggedAtIso: "2026-05-01T00:00:00Z", sets });
+  // Under ceiling → 0.
+  assertEquals(computeVolumeSurplus([bucket(10)], 24), 0);
+  // At ceiling exactly → 0.
+  assertEquals(computeVolumeSurplus([bucket(12), bucket(12)], 24), 0);
+  // Over ceiling → positive surplus.
+  assertEquals(computeVolumeSurplus([bucket(15), bucket(15)], 24), 6); // 30 − 24
+  // Cold-start (empty history) → 0.
+  assertEquals(computeVolumeSurplus([], 24), 0);
+  // Only the last 7 buckets contribute (8th-oldest dropped).
+  const eight = [9, 1, 1, 1, 1, 1, 1, 1].map(bucket); // first (9) is outside last-7
+  assertEquals(computeVolumeSurplus(eight, 5), 2); // last-7 sum = 7 → 7 − 5
+});
+
+Deno.test("#570 computeVolumeSurplus + computeVolumeDeficit are independent (both directions)", () => {
+  const bucket = (sets: number) => ({ loggedAtIso: "2026-05-01T00:00:00Z", sets });
+  // 15 sets, tolerance 18, ceiling 24 → deficit 3, surplus 0.
+  assertEquals(computeVolumeDeficit([bucket(15)], 18), 3);
+  assertEquals(computeVolumeSurplus([bucket(15)], 24), 0);
+  // 25 sets, tolerance 18, ceiling 24 → deficit 0, surplus 1.
+  assertEquals(computeVolumeDeficit([bucket(25)], 18), 0);
+  assertEquals(computeVolumeSurplus([bucket(25)], 24), 1);
+});
+
+Deno.test("#570 cadenceScaledCeiling: scales the ceiling baseline by the shared cadence factor; null → baseline", () => {
+  // legs ceiling baseline = 24.
+  assertEquals(cadenceScaledCeiling("legs", 1.75), 24); // 4×/week → ×1.0
+  assertEquals(cadenceScaledCeiling("legs", 3.5), 48); // 2×/week → ×2.0
+  assertEquals(cadenceScaledCeiling("legs", 7 / 6), 16); // 6×/week → round(24×0.667)
+  assertEquals(cadenceScaledCeiling("legs", null), 24); // cold-start → baseline
+  // Uses the same factor as tolerance: factor = scaledCeiling/baseline.
+  assertEquals(
+    cadenceScaledCeiling("legs", 3.5) / MUSCLE_VOLUME_CEILING["legs"],
+    computeCadenceScalingFactor(3.5),
+  );
 });

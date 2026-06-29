@@ -78,6 +78,11 @@ struct MuscleProfile: Codable, Sendable, Hashable {
     var volumeTolerance: Double
     var observedSweetSpot: Int?
     var volumeDeficit: Int
+    /// #570: MRV/MAV-midpoint ceiling prior (cadence-scaled, per-7-events).
+    /// Advisory only — pairs with `volumeSurplus` to surface over-volume.
+    var volumeCeiling: Double
+    /// #570: over-volume signal = max(0, recent sets − ceiling); 0 at/under.
+    var volumeSurplus: Int
     var focusWeight: Double
     var stagnationStatus: ProgressionTrend
     var confidence: AxisConfidence
@@ -87,6 +92,8 @@ struct MuscleProfile: Codable, Sendable, Hashable {
         volumeTolerance: Double = 0,
         observedSweetSpot: Int? = nil,
         volumeDeficit: Int = 0,
+        volumeCeiling: Double = 0,
+        volumeSurplus: Int = 0,
         focusWeight: Double = 0,
         stagnationStatus: ProgressionTrend = .progressing,
         confidence: AxisConfidence = .bootstrapping
@@ -95,9 +102,28 @@ struct MuscleProfile: Codable, Sendable, Hashable {
         self.volumeTolerance = volumeTolerance
         self.observedSweetSpot = observedSweetSpot
         self.volumeDeficit = volumeDeficit
+        self.volumeCeiling = volumeCeiling
+        self.volumeSurplus = volumeSurplus
         self.focusWeight = focusWeight
         self.stagnationStatus = stagnationStatus
         self.confidence = confidence
+    }
+
+    // Custom decoder so `volumeCeiling` / `volumeSurplus` (#570, additive)
+    // default cleanly on legacy `model_json` rows written before this field
+    // existed — mirrors the RecoveryProfile / PatternProfile additive-decode
+    // idiom. The synthesized encoder still writes all fields.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.muscleGroup = try c.decode(MuscleGroup.self, forKey: .muscleGroup)
+        self.volumeTolerance = try c.decode(Double.self, forKey: .volumeTolerance)
+        self.observedSweetSpot = try c.decodeIfPresent(Int.self, forKey: .observedSweetSpot)
+        self.volumeDeficit = try c.decode(Int.self, forKey: .volumeDeficit)
+        self.volumeCeiling = try c.decodeIfPresent(Double.self, forKey: .volumeCeiling) ?? 0
+        self.volumeSurplus = try c.decodeIfPresent(Int.self, forKey: .volumeSurplus) ?? 0
+        self.focusWeight = try c.decode(Double.self, forKey: .focusWeight)
+        self.stagnationStatus = try c.decode(ProgressionTrend.self, forKey: .stagnationStatus)
+        self.confidence = try c.decode(AxisConfidence.self, forKey: .confidence)
     }
 }
 
