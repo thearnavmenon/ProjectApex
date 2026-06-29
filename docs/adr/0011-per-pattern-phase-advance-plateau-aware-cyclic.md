@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-05-07
 
+> **Amended by [ADR-0030](0030-committed-deterministic-program-generation.md) (#559, 2026-06-29):** the phase cycle is now **goal-aware**. A `strength` goal keeps the arc pinned here (`accumulation → intensification → peaking → deload`); every other goal (hypertrophy, endurance, general, absent) uses a **volume arc** that skips `peaking` (`accumulation → intensification → deload`) so non-strength users are never cycled into a strength taper. The deload-end cyclic rule §(c) and the force-deload safety valve §(b) are unchanged — only the natural progressing-advance §(a) is goal-branched. The goal arc is a computed input classified from `model_json.goal.statement`, not a persisted field.
+
 ## Context
 
 ADR-0005 specifies that phase storage moves from the legacy `PatternPhaseService` to `PatternProfile.currentPhase` + `sessionsInPhase`, and that "advance logic gains plateau-awareness." It does not pin (a) the composition rule for plateau-aware blocking, (b) what happens when an advance is blocked indefinitely, or (c) whether the deload phase remains terminal as in legacy `PatternPhaseService.swift` line 126 ("Already at deload — no further transition") or rolls forward into a new mesocycle.

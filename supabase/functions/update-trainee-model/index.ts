@@ -65,9 +65,11 @@ import {
 } from "../_shared/observability.ts";
 import {
   advancePhase,
-  sessionsRequiredFor,
+  goalArc,
+  type GoalArc,
   type MesocyclePhase,
   type PerPatternState,
+  sessionsRequiredFor,
 } from "../_shared/phase-advance.ts";
 import { computeTransitionModeUntil } from "../_shared/transition-mode-expiry.ts";
 import {
@@ -880,6 +882,12 @@ export function applyPerPatternRules(
   newSessionCount: number,
   exercises: Record<string, Record<string, unknown>>,
   setLogs: Array<Record<string, unknown>>,
+  // ADR-0030: resolved goal arc, classified once by the orchestrator from
+  // model_json.goal.statement. Drives the goal-aware natural-advance branch in
+  // advancePhase. The rule module stays pure — no goal-object parsing here.
+  // Defaults to "volume" (fail-safe): a caller that forgets to inject the arc
+  // never wrongly peaks a user — the asymmetric-error bias locked in #559.
+  resolvedGoalArc: GoalArc = "volume",
 ): {
   patterns: Record<string, Record<string, unknown>>;
   rulesFired: Set<string>;
@@ -987,6 +995,9 @@ export function applyPerPatternRules(
         (profile.consecutiveForceDeloadsOnPattern as number) ?? 0,
       lastPhaseTransitionAtSessionCount:
         (profile.lastPhaseTransitionAtSessionCount as number) ?? 0,
+      // ADR-0030: goal arc injected by the orchestrator (same arc for every
+      // pattern in this apply — it is a user-level goal classification).
+      goalArc: resolvedGoalArc,
     };
 
     const advanced = advancePhase(advanceState, newSessionCount);
@@ -1899,6 +1910,17 @@ export async function applySession(
         );
       }
 
+      // ADR-0030: classify the goal arc once, here, from the freeform goal
+      // statement, and inject the resolved arc into the per-pattern phase
+      // advance. Hoisted above applyPerPatternRules (the per-muscle path below
+      // reuses goalIn). Absent/empty goal → volume arc (never peaks).
+      const goalIn = modelJson.goal as Record<string, unknown> | undefined;
+      const resolvedGoalArc = goalArc(
+        typeof goalIn?.statement === "string"
+          ? (goalIn.statement as string)
+          : null,
+      );
+
       const ruled = applyPerPatternRules(
         sessionCountBackfilled.patterns,
         trainedSets.patterns,
@@ -1906,6 +1928,7 @@ export async function applySession(
         newSessionCount,
         exerciseRuled.exercises,
         setLogsArr,
+        resolvedGoalArc,
       );
       newModelJson = { ...newModelJson, patterns: ruled.patterns };
       rulesFired.push(...ruled.rulesFired);
@@ -1918,7 +1941,7 @@ export async function applySession(
       // primary_muscle strings at the boundary.
       const musclesIn =
         (modelJson.muscles as Record<string, Record<string, unknown>> | undefined) ?? {};
-      const goalIn = modelJson.goal as Record<string, unknown> | undefined;
+      // goalIn is declared above (hoisted for the ADR-0030 goal-arc classification).
       const muscleRuled = applyPerMuscleRules(
         musclesIn,
         setLogsArr,

@@ -12,12 +12,17 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   advancePhase,
+  goalArc,
   type PerPatternState,
   sessionsRequiredFor,
 } from "./phase-advance.ts";
 
 // daysPerWeek=4 → sessionsRequiredFor('accumulation', 4) = max(3, 4 × max(1, 4/2)) = 8.
 // Tests use 8 as the canonical accumulation threshold; force-deload at 2× = 16.
+//
+// goalArc defaults to "strength" so the legacy ADR-0011 arc
+// (accumulation→intensification→peaking→deload) is the baseline these tests
+// assert. Volume-arc behaviour (ADR-0030) is pinned by explicit overrides below.
 const baseState = (overrides: Partial<PerPatternState> = {}): PerPatternState => ({
   currentPhase: "accumulation",
   sessionsInPhase: 0,
@@ -25,6 +30,7 @@ const baseState = (overrides: Partial<PerPatternState> = {}): PerPatternState =>
   trend: "progressing",
   consecutiveForceDeloadsOnPattern: 0,
   lastPhaseTransitionAtSessionCount: 0,
+  goalArc: "strength",
   ...overrides,
 });
 
@@ -123,6 +129,7 @@ Deno.test("ADR-0011 §(c): cyclic deload→accumulation at threshold fires deloa
     trend: "progressing",
     consecutiveForceDeloadsOnPattern: 0,
     lastPhaseTransitionAtSessionCount: 5,
+    goalArc: "strength", // arc-agnostic fixture (deload→accumulation cycle)
   };
   const outcome = advancePhase(state, /* sessionCount */ 8);
 
@@ -148,6 +155,7 @@ Deno.test("ADR-0011 §(c): cyclic deload→accumulation regardless of trend — 
     trend: "plateaued",
     consecutiveForceDeloadsOnPattern: 1,
     lastPhaseTransitionAtSessionCount: 5,
+    goalArc: "strength", // arc-agnostic fixture (deload→accumulation cycle)
   };
   const outcome = advancePhase(state, /* sessionCount */ 8);
 
@@ -205,6 +213,7 @@ Deno.test("ADR-0011 §Consequences migration: legacy v1 terminal-deload pattern 
     trend: "plateaued", // any trend; cyclic rule fires regardless
     consecutiveForceDeloadsOnPattern: 0, // additive default on decode
     lastPhaseTransitionAtSessionCount: 0, // legacy v1 didn't track this
+    goalArc: "strength", // arc-agnostic fixture (deload transitions)
   };
 
   // Step 1 — under threshold, ratchets normally (no-op).
@@ -248,6 +257,7 @@ Deno.test("ADR-0011 §(d): deload-end-cycle does NOT reset consecutiveForceDeloa
     trend: "progressing",
     consecutiveForceDeloadsOnPattern: 3,
     lastPhaseTransitionAtSessionCount: 10,
+    goalArc: "strength", // arc-agnostic fixture (deload-end cycle)
   };
   const outcome = advancePhase(state, /* sessionCount */ 13);
 
@@ -281,6 +291,7 @@ Deno.test("ADR-0011 §(b)+(c): force-deload-trigger condition met while in deloa
     trend: "plateaued",
     consecutiveForceDeloadsOnPattern: 2, // pre-set non-zero to verify preservation
     lastPhaseTransitionAtSessionCount: 8,
+    goalArc: "strength", // arc-agnostic fixture (§(b)+(c) composition)
   };
   const outcome = advancePhase(state, /* sessionCount */ 14);
 
@@ -350,4 +361,131 @@ Deno.test("ADR-0011: plateau blocks natural advance — sessionsInPhase keeps ac
   assertEquals(outcome.newConsecutiveForceDeloads, 0);
   assertEquals(outcome.newLastPhaseTransitionAtSessionCount, 0); // unchanged
   assertEquals(outcome.firesDeloadEndTransitionMode, false);
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-0030: goal-aware phase cycle. Strength keeps peaking; everything else
+// uses the volume arc (skip peaking). The classifier is asymmetric-error-safe:
+// only an explicit strength signal yields "strength"; absent/empty → "volume".
+// ─────────────────────────────────────────────────────────────────────────
+
+Deno.test("ADR-0030 goalArc: explicit strength signals → strength (case-insensitive); everything else → volume", () => {
+  // Strength signals.
+  assertEquals(goalArc("Strength (max weight)"), "strength");
+  assertEquals(goalArc("build STRENGTH"), "strength"); // case-insensitive
+  assertEquals(goalArc("powerlifting meet prep"), "strength");
+  assertEquals(goalArc("improve my 1RM"), "strength");
+  assertEquals(goalArc("hit a new max weight squat"), "strength");
+
+  // Non-strength → volume.
+  assertEquals(goalArc("Hypertrophy (muscle size)"), "volume");
+  assertEquals(goalArc("Muscular endurance"), "volume");
+  assertEquals(goalArc("General fitness"), "volume");
+
+  // Absent / empty / whitespace → volume (asymmetric-error-safe default).
+  assertEquals(goalArc(""), "volume");
+  assertEquals(goalArc("   "), "volume");
+  assertEquals(goalArc(null), "volume");
+  assertEquals(goalArc(undefined), "volume");
+});
+
+Deno.test("ADR-0030 strength arc UNCHANGED: intensification + progressing + threshold → peaking, natural-advance, counter reset", () => {
+  const state = baseState({
+    currentPhase: "intensification",
+    sessionsInPhase: 8,
+    trend: "progressing",
+    consecutiveForceDeloadsOnPattern: 2,
+    goalArc: "strength",
+  });
+  const outcome = advancePhase(state, /* sessionCount */ 20);
+
+  assertEquals(outcome.fired, "natural-advance");
+  assertEquals(outcome.newPhase, "peaking");
+  assertEquals(outcome.newSessionsInPhase, 0);
+  assertEquals(outcome.newConsecutiveForceDeloads, 0); // natural-advance resets
+  assertEquals(outcome.newLastPhaseTransitionAtSessionCount, 20);
+  assertEquals(outcome.firesDeloadEndTransitionMode, false);
+});
+
+Deno.test("ADR-0030 volume arc SKIPS peaking: intensification + progressing + threshold → deload (not peaking), natural-advance", () => {
+  const state = baseState({
+    currentPhase: "intensification",
+    sessionsInPhase: 8,
+    trend: "progressing",
+    goalArc: "volume",
+  });
+  const outcome = advancePhase(state, /* sessionCount */ 20);
+
+  assertEquals(outcome.fired, "natural-advance");
+  assertEquals(outcome.newPhase, "deload"); // skipped peaking
+  assertEquals(outcome.newSessionsInPhase, 0);
+  assertEquals(outcome.newConsecutiveForceDeloads, 0);
+  assertEquals(outcome.newLastPhaseTransitionAtSessionCount, 20);
+  // Volume natural-advance into deload is NOT a deload-end cycle, so it does
+  // NOT fire the transition-mode trigger (that fires only on deload→accumulation).
+  assertEquals(outcome.firesDeloadEndTransitionMode, false);
+});
+
+Deno.test("ADR-0030 volume off-arc peaking: a peaking pattern under volume arc → deload (NOT accumulation via modulo accident)", () => {
+  // Legacy data or a strength→hypertrophy goal switch can leave a pattern
+  // sitting in `peaking` under a volume arc. On natural advance it must go to
+  // deload (the slot it is owed), not jump to accumulation.
+  const state = baseState({
+    currentPhase: "peaking",
+    sessionsInPhase: 6, // sessionsRequiredFor("peaking", 4) = 6
+    sessionsRequiredForPhase: 6,
+    trend: "progressing",
+    goalArc: "volume",
+  });
+  const outcome = advancePhase(state, /* sessionCount */ 22);
+
+  assertEquals(outcome.fired, "natural-advance");
+  assertEquals(outcome.newPhase, "deload"); // NOT accumulation
+  assertEquals(outcome.newSessionsInPhase, 0);
+  assertEquals(outcome.newLastPhaseTransitionAtSessionCount, 22);
+});
+
+Deno.test("ADR-0030 accumulation→intensification identical for BOTH arcs", () => {
+  const strength = advancePhase(
+    baseState({ currentPhase: "accumulation", sessionsInPhase: 8, goalArc: "strength" }),
+    12,
+  );
+  const volume = advancePhase(
+    baseState({ currentPhase: "accumulation", sessionsInPhase: 8, goalArc: "volume" }),
+    12,
+  );
+  assertEquals(strength.fired, "natural-advance");
+  assertEquals(strength.newPhase, "intensification");
+  assertEquals(volume.fired, "natural-advance");
+  assertEquals(volume.newPhase, "intensification");
+});
+
+Deno.test("ADR-0030 force-deload UNCHANGED for volume arc: plateaued at 2× threshold → deload, force-deload, counter += 1", () => {
+  const state = baseState({
+    sessionsInPhase: 16, // 2× threshold
+    trend: "plateaued",
+    consecutiveForceDeloadsOnPattern: 0,
+    goalArc: "volume",
+  });
+  const outcome = advancePhase(state, /* sessionCount */ 20);
+
+  assertEquals(outcome.fired, "force-deload");
+  assertEquals(outcome.newPhase, "deload");
+  assertEquals(outcome.newConsecutiveForceDeloads, 1);
+  assertEquals(outcome.firesDeloadEndTransitionMode, false);
+});
+
+Deno.test("ADR-0030 deload-end cyclic UNCHANGED for volume arc: deload at threshold → accumulation, deload-end-cycle, transition-mode fires", () => {
+  const state = baseState({
+    currentPhase: "deload",
+    sessionsInPhase: 3,
+    sessionsRequiredForPhase: 3,
+    trend: "progressing",
+    goalArc: "volume",
+  });
+  const outcome = advancePhase(state, /* sessionCount */ 25);
+
+  assertEquals(outcome.fired, "deload-end-cycle");
+  assertEquals(outcome.newPhase, "accumulation");
+  assertEquals(outcome.firesDeloadEndTransitionMode, true);
 });
