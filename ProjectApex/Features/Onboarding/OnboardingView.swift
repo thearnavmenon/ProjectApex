@@ -29,7 +29,7 @@ import UserNotifications
 
 // MARK: - Training Profile Input Model
 
-/// Collected during the profile steps. Passed into ProgramGenerationService.
+/// Collected during the profile steps. Passed into program/session generation.
 struct OnboardingProfile: Sendable {
     var displayName: String = ""
     var trainingAge: TrainingAge = .beginner

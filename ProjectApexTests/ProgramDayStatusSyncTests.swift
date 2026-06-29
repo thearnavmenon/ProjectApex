@@ -137,7 +137,6 @@ final class ProgramDayStatusSyncTests: XCTestCase {
         let memory = MemoryService(supabase: client, embeddingAPIKey: "test")
         return ProgramViewModel(
             supabaseClient: client,
-            programGenerationService: ProgramGenerationService(provider: provider),
             macroPlanService: MacroPlanService(provider: provider),
             sessionPlanService: SessionPlanService(
                 provider: provider,

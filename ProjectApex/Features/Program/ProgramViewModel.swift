@@ -38,8 +38,8 @@ private struct SessionMetaRow: Decodable {
 
 /// Profile payload assembled from the user's persisted onboarding answers for
 /// program/session generation. Extracted as a pure value + static assembler so
-/// the assembly rules are unit-testable and shared by all three generation
-/// paths (generateProgram, generateMacroSkeleton, generateDaySession).
+/// the assembly rules are unit-testable and shared by the generation
+/// paths (generateMacroSkeleton, generateDaySession).
 struct GenerationUserProfile: Equatable {
     let bodyweightKg: Double?
     let ageYears: Int?
@@ -148,7 +148,6 @@ final class ProgramViewModel {
     // MARK: Private
 
     private let supabaseClient: SupabaseClient
-    private let programGenerationService: ProgramGenerationService
     private let macroPlanService: MacroPlanService
     private let sessionPlanService: SessionPlanService
     private let traineeModelService: TraineeModelService?
@@ -175,7 +174,6 @@ final class ProgramViewModel {
 
     init(
         supabaseClient: SupabaseClient,
-        programGenerationService: ProgramGenerationService,
         macroPlanService: MacroPlanService,
         sessionPlanService: SessionPlanService,
         userId: UUID,
@@ -183,7 +181,6 @@ final class ProgramViewModel {
         traineeModelService: TraineeModelService? = nil
     ) {
         self.supabaseClient = supabaseClient
-        self.programGenerationService = programGenerationService
         self.macroPlanService = macroPlanService
         self.sessionPlanService = sessionPlanService
         self.traineeModelService = traineeModelService
@@ -522,57 +519,6 @@ final class ProgramViewModel {
     func dismissPersistError() {
         persistError = nil
         persistRetryAction = nil
-    }
-
-    // MARK: - Generate (legacy static path — ProgramGenerationService)
-
-    /// Triggers full static program generation from a GymProfile and UserProfile.
-    /// Called from the empty state CTA and from regenerateProgram().
-    ///
-    /// - Parameter persistToSupabase: When false, skips the Supabase write so the
-    ///   caller (e.g. regenerateProgram) can write after applying its own post-processing.
-    func generateProgram(gymProfile: GymProfile, persistToSupabase: Bool = true) async {
-        guard await !programGenerationService.isGenerating else { return }
-        viewState = .generating
-
-        // Read user profile from UserDefaults for consistent generation across paths (#318 U4).
-        let profile = GenerationUserProfile.assemble(
-            digestGoalStatement: await traineeModelService?.digest()?.goal.statement
-        )
-        let daysPerWeek: Int = {
-            let v = UserDefaults.standard.integer(forKey: UserProfileConstants.daysPerWeekKey)
-            return v > 0 ? v : 4
-        }()
-
-        print("[ProgramViewModel] generateProgram — training_days_per_week: \(daysPerWeek)")
-
-        let userProfile = UserProfile(
-            userId: userId.uuidString,
-            experienceLevel: profile.experienceLevel,
-            goals: profile.goals,
-            bodyweightKg: profile.bodyweightKg,
-            ageYears: profile.ageYears
-        )
-
-        do {
-            let mesocycle = try await programGenerationService.generate(
-                userProfile: userProfile,
-                gymProfile: gymProfile,
-                trainingDaysPerWeek: daysPerWeek
-            )
-            if persistToSupabase {
-                // Persist to Supabase in the background. Failure surfaces via
-                // persistError banner (#188) — local-first design.
-                Task { await self.persistProgram(mesocycle, context: "generateProgram") }
-            }
-            mesocycle.saveToUserDefaults()
-            currentMesocycle = mesocycle
-            viewState = .loaded(mesocycle)
-        } catch ProgramGenerationError.equipmentConstraintViolation(let violations) {
-            viewState = .error("Could not satisfy equipment constraints for \(violations.count) exercise(s). Please re-scan your gym.")
-        } catch {
-            viewState = .error(error.localizedDescription)
-        }
     }
 
     // MARK: - FB-008: Generate Macro Skeleton

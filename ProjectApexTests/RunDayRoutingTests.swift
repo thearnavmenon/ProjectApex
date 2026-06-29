@@ -136,7 +136,6 @@ private func makeProgramViewModel() -> ProgramViewModel {
     let memory = MemoryService(supabase: supabase, embeddingAPIKey: "test")
     return ProgramViewModel(
         supabaseClient: supabase,
-        programGenerationService: ProgramGenerationService(provider: provider),
         macroPlanService: MacroPlanService(provider: provider),
         sessionPlanService: SessionPlanService(
             provider: provider,

@@ -19,9 +19,7 @@
 		478DD9F12F9928C6001D3636 /* SkipFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */; };
 		AAAA111100000000437438B2 /* ProgramDayDetailStartGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA111100000000437438A1 /* ProgramDayDetailStartGateTests.swift */; };
 		47BB8E5A2F626C900082C53F /* WorkoutProgramTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */; };
-		47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */; };
 		47BB8E622F626D430082C53F /* SessionPlanServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E612F626D430082C53F /* SessionPlanServiceTests.swift */; };
-		47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */; };
 		47BB8E662F6273F30082C53F /* ProgramPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */; };
 		47BB8E712F6273F30082C53F /* OnboardingProgramPersistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */; };
 		47BB8E712F6273F30082C5F1 /* GymProfileSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */; };
@@ -102,9 +100,7 @@
 		478DD9F02F9928C5001D3636 /* SkipFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkipFeatureTests.swift; sourceTree = "<group>"; };
 		AAAA111100000000437438A1 /* ProgramDayDetailStartGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramDayDetailStartGateTests.swift; sourceTree = "<group>"; };
 		47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutProgramTests.swift; sourceTree = "<group>"; };
-		47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramGenerationServiceTests.swift; sourceTree = "<group>"; };
 		47BB8E612F626D430082C53F /* SessionPlanServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPlanServiceTests.swift; sourceTree = "<group>"; };
-		47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EquipmentConstraintValidationTests.swift; sourceTree = "<group>"; };
 		47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramPersistenceTests.swift; sourceTree = "<group>"; };
 		47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingProgramPersistTests.swift; sourceTree = "<group>"; };
 		47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymProfileSyncTests.swift; sourceTree = "<group>"; };
@@ -247,9 +243,7 @@
 				47E356D92F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift */,
 				47E356DB2F61D07B00C69CD6 /* GymFactStoreTests.swift */,
 				47BB8E592F626C900082C53F /* WorkoutProgramTests.swift */,
-				47BB8E5F2F626D430082C53F /* ProgramGenerationServiceTests.swift */,
 				47BB8E612F626D430082C53F /* SessionPlanServiceTests.swift */,
-				47BB8E612F6273750082C53F /* EquipmentConstraintValidationTests.swift */,
 				47BB8E652F6273F30082C53F /* ProgramPersistenceTests.swift */,
 				47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */,
 				47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */,
@@ -410,13 +404,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				47BB8E622F6273750082C53F /* EquipmentConstraintValidationTests.swift in Sources */,
 				47D91CB12F619817007B3B34 /* AIInferenceSpikeTests.swift in Sources */,
 				47D91CC32F61AADC007B3B34 /* AIInferenceServiceTests.swift in Sources */,
 				47DFED092F99B001006F4B62 /* AnthropicProviderCachingTests.swift in Sources */,
 				47BB8E752F6294B00082C53F /* WorkoutSessionManagerTests.swift in Sources */,
 				47C5C1BC2F62C08E0005F99E /* MemoryServiceTests.swift in Sources */,
-				47BB8E602F626D430082C53F /* ProgramGenerationServiceTests.swift in Sources */,
 				47BB8E622F626D430082C53F /* SessionPlanServiceTests.swift in Sources */,
 				47BB8E5A2F626C900082C53F /* WorkoutProgramTests.swift in Sources */,
 				47E356DA2F61D06100C69CD6 /* DefaultWeightIncrementsTests.swift in Sources */,

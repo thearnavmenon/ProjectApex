@@ -7,6 +7,33 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-29 — Removed an old, unused program-builder (cleanup)
+
+**The problem (in plain words):**
+The app had *two* pieces of code for building your training program. Only one
+is actually used (the newer "skeleton" builder). The other, older one was still
+sitting in the codebase, wired up enough to compile but never actually run — dead
+weight that made the next round of program-generation work harder to reason
+about. Time to delete it before building on top.
+
+**What I changed:**
+Deleted the old unused builder, its prompt file, and its tests, plus every
+leftover wire connecting it (a handful of setup spots and seven test files that
+constructed it but didn't need it). One small useful helper that lived inside the
+old file — the bit that sets up the AI connection for building programs — was
+still needed by the new builder, so I moved it over rather than losing it. No
+behavior change: nothing that runs today changed, because the deleted code never
+ran.
+
+**How it was checked:**
+Searched the whole codebase to confirm nothing real still called the old builder
+(only stale code comments mention it by name now — flagged those for a later
+tidy-up). The app and all tests build clean.
+
+**Status:** pure cleanup, no user-facing change. (#560, part of #558 / ADR-0030.)
+
+---
+
 ## 2026-06-29 — The coach can now notice when a muscle is getting *too much*
 
 **The problem (in plain words):**

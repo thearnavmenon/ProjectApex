@@ -173,7 +173,6 @@ struct ContentView: View {
                 // onboarding, then load the freshly generated program from UserDefaults cache.
                 programViewModel = ProgramViewModel(
                     supabaseClient: deps.supabaseClient,
-                    programGenerationService: deps.programGenerationService,
                     macroPlanService: deps.macroPlanService,
                     sessionPlanService: deps.sessionPlanService,
                     userId: deps.resolvedUserId,
@@ -202,7 +201,6 @@ struct ContentView: View {
             if programViewModel == nil {
                 programViewModel = ProgramViewModel(
                     supabaseClient: deps.supabaseClient,
-                    programGenerationService: deps.programGenerationService,
                     macroPlanService: deps.macroPlanService,
                     sessionPlanService: deps.sessionPlanService,
                     userId: deps.resolvedUserId,
