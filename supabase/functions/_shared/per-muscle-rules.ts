@@ -6,9 +6,9 @@
 //
 // Q1 threshold-semantic lock (2026-05-13): MEV interpretation, per-7-events
 // targets scaled at 4×/week alpha-cohort cadence. Bootstrap-only — EWMA-update
-// of tolerance is deferred to a follow-up issue. Cadence-scaling per user's
-// actual sessionsPerWeek is also deferred (alpha cohort ≈ 4×/week makes this
-// adequate).
+// of tolerance is deferred to a follow-up issue. Cadence-scaling per the
+// user's actual training frequency is implemented per #164 (see
+// `computeCadenceScalingFactor` / `cadenceScaledTolerance`).
 
 import {
   canonicalizeExerciseId,
@@ -58,9 +58,9 @@ export const MUSCLE_GROUPS: ReadonlySet<MuscleGroup> = new Set<MuscleGroup>([
 /**
  * Q1-locked per-muscle volume targets (MEV midpoints, per-7-events at
  * 4×/week cadence). volumeTolerance is bootstrapped from this table per
- * 2026-05-13 prep-prompt lock. Follow-up: EWMA-update of tolerance from
- * observed RPE/recovery signals; cadence-scaling for users away from
- * 4×/week.
+ * 2026-05-13 prep-prompt lock, then cadence-scaled per #164
+ * (`cadenceScaledTolerance`). Follow-up: EWMA-update of tolerance from
+ * observed RPE/recovery signals.
  */
 export const MUSCLE_VOLUME_TARGETS: Record<MuscleGroup, number> = {
   back: 21,
@@ -70,6 +70,47 @@ export const MUSCLE_VOLUME_TARGETS: Record<MuscleGroup, number> = {
   triceps: 12,
   legs: 18,
 };
+
+/**
+ * Cadence-scaling factor for the per-muscle volume model (#164).
+ *
+ * `MUSCLE_VOLUME_TARGETS` are locked as per-7-events targets at a **4×/week**
+ * cadence: `locked = MEV_per_week × (7 / 4)`. The 7-event window spans a
+ * different number of weeks at other cadences, so a fixed per-7-events target
+ * drifts from the intended per-week MEV semantic — a 6×/week trainee's window
+ * is only ~1.2 weeks (target effectively ~145% of MEV/week, too high), a
+ * 2×/week trainee's is ~3.5 weeks (~57% of MEV/week, too low).
+ *
+ * The cadence-correct per-7-events target is `MEV_per_week × (7 / cadence)`;
+ * dividing by the locked `MEV × 7/4` gives the factor `4 / cadence_per_week`
+ * = `4 × cadenceDays / 7`. So higher frequency → smaller factor, lower
+ * frequency → larger factor. Clamped to `[0.5, 2.0]` (≈2×–8×/week) so extreme
+ * cadences can't produce degenerate tolerances. `null` cadence (<2 events,
+ * cold-start) → `1.0` (the 4×/week alpha-cohort assumption).
+ *
+ * Exported so the volume-ceiling prior (#570) scales by the same factor.
+ */
+export function computeCadenceScalingFactor(cadenceDays: number | null): number {
+  if (cadenceDays === null || cadenceDays <= 0) return 1.0;
+  const factor = (4 * cadenceDays) / 7;
+  return Math.min(2.0, Math.max(0.5, factor));
+}
+
+/**
+ * Cadence-scaled `volumeTolerance` for a muscle (#164). Always scales the
+ * Q1-locked **baseline constant** `MUSCLE_VOLUME_TARGETS[muscleGroup]` — never
+ * a persisted (already-scaled) value, which would double-scale on every apply.
+ * Rounded to an integer so the downstream `volumeDeficit` (an `Int` on the
+ * Swift side) stays integral.
+ */
+export function cadenceScaledTolerance(
+  muscleGroup: MuscleGroup,
+  cadenceDays: number | null,
+): number {
+  return Math.round(
+    MUSCLE_VOLUME_TARGETS[muscleGroup] * computeCadenceScalingFactor(cadenceDays),
+  );
+}
 
 /**
  * Bootstrap shape of a `MuscleProfile` JSONB entry. Mirrors

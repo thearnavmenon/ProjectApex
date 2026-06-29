@@ -9,11 +9,16 @@
 // Run locally:
 //   deno test --allow-all supabase/functions/_shared/per-muscle-rules_test.ts
 
-import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
+import {
+  assertAlmostEquals,
+  assertEquals,
+} from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   aggregateMuscleSetCounts,
   aggregateStagnationStatus,
   bootstrapMuscleProfile,
+  cadenceScaledTolerance,
+  computeCadenceScalingFactor,
   computeFocusWeight,
   computeVolumeDeficit,
   proposeMuscleConfidence,
@@ -233,4 +238,64 @@ Deno.test("proposeMuscleConfidence: biceps (zero major patterns; isolation only)
     }),
     "established",
   );
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// #164: cadence-scaling of volumeTolerance. Locked targets are per-7-events at
+// 4×/week (locked = MEV × 7/4); the cadence-correct factor is 4/cadence_per_week
+// = 4 × cadenceDays / 7, clamped to [0.5, 2.0]. Higher frequency → smaller
+// factor; lower frequency → larger factor (the 7-event window spans fewer/more
+// weeks). null cadence (cold-start) → 1.0.
+// ─────────────────────────────────────────────────────────────────────────
+
+Deno.test("#164 computeCadenceScalingFactor: 4×/week (cadenceDays=1.75) → 1.0 (baseline unchanged)", () => {
+  assertEquals(computeCadenceScalingFactor(1.75), 1.0);
+});
+
+Deno.test("#164 computeCadenceScalingFactor: 6×/week (cadenceDays=7/6) → ~0.667 (scale DOWN for high frequency)", () => {
+  assertAlmostEquals(computeCadenceScalingFactor(7 / 6), 4 / 6, 1e-9);
+});
+
+Deno.test("#164 computeCadenceScalingFactor: 3×/week (cadenceDays=7/3) → ~1.333 (scale UP for low frequency)", () => {
+  assertAlmostEquals(computeCadenceScalingFactor(7 / 3), 4 / 3, 1e-9);
+});
+
+Deno.test("#164 computeCadenceScalingFactor: 2×/week (cadenceDays=3.5) → 2.0 (clamp ceiling)", () => {
+  assertEquals(computeCadenceScalingFactor(3.5), 2.0);
+});
+
+Deno.test("#164 computeCadenceScalingFactor: null cadence (cold-start, <2 events) → 1.0", () => {
+  assertEquals(computeCadenceScalingFactor(null), 1.0);
+});
+
+Deno.test("#164 computeCadenceScalingFactor: extreme cadences clamp to [0.5, 2.0]", () => {
+  // ~14×/week (cadenceDays=0.5) → raw 0.286 → clamped to 0.5 floor.
+  assertEquals(computeCadenceScalingFactor(0.5), 0.5);
+  // 1×/week (cadenceDays=7) → raw 4.0 → clamped to 2.0 ceiling.
+  assertEquals(computeCadenceScalingFactor(7), 2.0);
+  // zero/negative guarded → 1.0.
+  assertEquals(computeCadenceScalingFactor(0), 1.0);
+});
+
+Deno.test("#164 cadenceScaledTolerance: scales the locked baseline by cadence (rounded), null → baseline", () => {
+  // legs baseline = 18.
+  assertEquals(cadenceScaledTolerance("legs", 1.75), 18); // 4×/week → ×1.0
+  assertEquals(cadenceScaledTolerance("legs", 3.5), 36); // 2×/week → ×2.0
+  assertEquals(cadenceScaledTolerance("legs", 7 / 6), 12); // 6×/week → round(18×0.667)
+  assertEquals(cadenceScaledTolerance("legs", 7 / 3), 24); // 3×/week → round(18×1.333)
+  assertEquals(cadenceScaledTolerance("legs", null), 18); // cold-start → baseline
+  // back baseline = 21.
+  assertEquals(cadenceScaledTolerance("back", 3.5), 42); // ×2.0
+});
+
+Deno.test("#164 cadenceScaledTolerance: NO double-scaling — repeated calls derive from the constant baseline, never a prior result", () => {
+  // The function takes only (muscleGroup, cadenceDays) — it cannot read a
+  // persisted/already-scaled value, so re-applying at the same cadence is
+  // idempotent. This is the structural guard against tolerance drift.
+  const first = cadenceScaledTolerance("chest", 7 / 3); // 3×/week
+  const second = cadenceScaledTolerance("chest", 7 / 3);
+  const third = cadenceScaledTolerance("chest", 7 / 3);
+  assertEquals(first, second);
+  assertEquals(second, third);
+  assertEquals(first, 24); // chest 18 × 1.333 rounded
 });
