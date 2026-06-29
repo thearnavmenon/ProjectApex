@@ -7,6 +7,35 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-29 — The coach can now notice when a muscle is getting *too much*
+
+**The problem (in plain words):**
+The coach tracked a *floor* for each muscle — "you're below the amount of work
+that grows this muscle, do more." But it had no *ceiling*. So it could never
+notice the opposite problem: hammering one muscle past the point where more sets
+actually help (and just dig a recovery hole). There was simply no signal for
+"this is too much volume."
+
+**What I changed:**
+Added a sensible upper limit per muscle (a research-style "you probably shouldn't
+exceed this" number, scaled to your training frequency the same way the floor is)
+and an "over-volume" reading: how far past that limit your recent sets are, zero
+if you're under it. It's **advisory only** — it does NOT cap or cut your sets;
+it just gives the coach an honest signal so its advice can reflect reality. The
+new numbers also show up in the summary the coach reasons over. Older saved
+profiles that don't have these fields yet just read as zero — nothing breaks.
+
+**How it was checked:**
+23 server-side tests pass (4 new for the ceiling + over-volume math), an
+end-to-end database test proves the signal shows up after a heavy session, and
+the iOS app builds clean with two new tests proving old saved data still loads
+and the new fields survive a save/load round-trip.
+
+**Heads-up for deploy:** server-side coach change — live only after
+`supabase functions deploy update-trainee-model`. (#570, part of #558 / ADR-0030.)
+
+---
+
 ## 2026-06-29 — Volume targets now match how often you actually train
 
 **The problem (in plain words):**

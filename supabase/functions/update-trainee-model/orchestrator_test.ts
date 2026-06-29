@@ -24,7 +24,10 @@ import postgres from "postgres";
 import { applySession } from "./index.ts";
 import type { ApplyCompleteEvent, LateArrivalEvent } from "../_shared/observability.ts";
 import { LLMTransientError } from "../_shared/llm-retry.ts";
-import { cadenceScaledTolerance } from "../_shared/per-muscle-rules.ts";
+import {
+  cadenceScaledCeiling,
+  cadenceScaledTolerance,
+} from "../_shared/per-muscle-rules.ts";
 
 const DB_URL = "postgresql://postgres:postgres@127.0.0.1:54322/postgres";
 
@@ -2433,6 +2436,53 @@ orchestratorTest(
       >
     ).legs;
     assertEquals(legs.volumeTolerance, 36); // unchanged — no double-scaling
+  },
+);
+
+orchestratorTest(
+  "#570: over-volume surplus surfaces end-to-end + volumeCeiling is set on the muscle profile",
+  async () => {
+    const userId = await seedFreshUser();
+    // One session with 30 contributing legs sets — above the legs ceiling.
+    // Single event → null cadence → factor 1.0 → ceiling = baseline 24.
+    await applySession(
+      {
+        user_id: userId,
+        session_id: crypto.randomUUID(),
+        session_payload: {
+          logged_at: "2026-05-10T10:00:00Z",
+          set_logs: Array.from({ length: 30 }, (_, i) => ({
+            exercise_id: "barbell_back_squat",
+            set_number: i + 1,
+            weight_kg: 130,
+            reps_completed: 5,
+            intent: "top",
+          })),
+        },
+      },
+      sql,
+      { stage2Hook: noopStage2 },
+    );
+
+    const rows = await sql`
+      SELECT model_json FROM public.trainee_models WHERE user_id = ${userId}
+    `;
+    const legs = (
+      (rows[0].model_json as Record<string, unknown>).muscles as Record<
+        string,
+        Record<string, unknown>
+      >
+    ).legs;
+
+    const expectedCeiling = cadenceScaledCeiling("legs", null); // 24
+    assertEquals(legs.volumeCeiling, expectedCeiling);
+    assertEquals(legs.volumeCeiling, 24);
+    // 30 sets − 24 ceiling = 6 surplus (advisory over-volume signal).
+    assertEquals(legs.volumeSurplus, 6);
+    // Deficit is 0 in the same apply — the two signals are independent.
+    assertEquals(legs.volumeDeficit, 0);
+    // Tolerance is the cold-start baseline.
+    assertEquals(legs.volumeTolerance, cadenceScaledTolerance("legs", null)); // 18
   },
 );
 

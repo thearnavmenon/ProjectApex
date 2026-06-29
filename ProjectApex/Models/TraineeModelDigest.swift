@@ -379,6 +379,9 @@ struct MuscleSummary: Codable, Sendable, Hashable {
     var muscleGroup: MuscleGroup
     var volumeTolerance: Double
     var volumeDeficit: Int
+    /// #570: over-volume ceiling + surplus signal, surfaced to coaching prompts.
+    var volumeCeiling: Double
+    var volumeSurplus: Int
     var focusWeight: Double
     var stagnationStatus: ProgressionTrend
     var confidence: AxisConfidence
@@ -387,6 +390,8 @@ struct MuscleSummary: Codable, Sendable, Hashable {
         self.muscleGroup       = profile.muscleGroup
         self.volumeTolerance   = profile.volumeTolerance
         self.volumeDeficit     = profile.volumeDeficit
+        self.volumeCeiling     = profile.volumeCeiling
+        self.volumeSurplus     = profile.volumeSurplus
         self.focusWeight       = profile.focusWeight
         self.stagnationStatus  = profile.stagnationStatus
         self.confidence        = profile.confidence
@@ -396,6 +401,8 @@ struct MuscleSummary: Codable, Sendable, Hashable {
         case muscleGroup       = "muscle_group"
         case volumeTolerance   = "volume_tolerance"
         case volumeDeficit     = "volume_deficit"
+        case volumeCeiling     = "volume_ceiling"
+        case volumeSurplus     = "volume_surplus"
         case focusWeight       = "focus_weight"
         case stagnationStatus  = "stagnation_status"
         case confidence

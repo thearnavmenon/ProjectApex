@@ -114,9 +114,11 @@ import {
   aggregateMuscleSetCounts,
   aggregateStagnationStatus,
   bootstrapMuscleProfile,
+  cadenceScaledCeiling,
   cadenceScaledTolerance,
   computeFocusWeight,
   computeVolumeDeficit,
+  computeVolumeSurplus,
   proposeMuscleConfidence,
   MUSCLE_GROUPS,
   MUSCLE_VOLUME_WINDOW,
@@ -1269,6 +1271,23 @@ function applyPerMuscleRules(
       profile.volumeDeficit = newDeficit;
       rulesFired.add("muscle-volume-deficit");
       fieldsChanged.push(`muscles.${muscleKey}.volumeDeficit`);
+    }
+
+    // (b') Cadence-scaled volume CEILING + over-volume surplus (#570). Same
+    // cadence factor as tolerance; the ceiling is an MRV/MAV-midpoint prior,
+    // ADVISORY ONLY (nothing hard-caps prescribed sets). volumeSurplus =
+    // max(0, Σ sets in last-7 − ceiling), 0 at/under ceiling and on cold-start.
+    const ceiling = cadenceScaledCeiling(muscleGroup, cadenceDays);
+    if (ceiling !== profile.volumeCeiling) {
+      profile.volumeCeiling = ceiling;
+      rulesFired.add("muscle-volume-ceiling");
+      fieldsChanged.push(`muscles.${muscleKey}.volumeCeiling`);
+    }
+    const newSurplus = computeVolumeSurplus(newHistory, ceiling);
+    if (newSurplus !== profile.volumeSurplus) {
+      profile.volumeSurplus = newSurplus;
+      rulesFired.add("muscle-volume-surplus");
+      fieldsChanged.push(`muscles.${muscleKey}.volumeSurplus`);
     }
 
     // (c) Recompute stagnationStatus per ADR-0009's worst-across-patterns
