@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-29 — New bottom tab bar (the black one with the white block)
+
+**The problem (in plain words):**
+The bar at the bottom of the app — the one that switches between Program,
+Workout, Progress and Settings — was still Apple's standard bar with a coat of
+black paint over it. It couldn't do the look we wanted: a clean white block
+sitting over whichever tab you're on. So I built our own bar from scratch to
+match the rest of the app's blunt black-and-white style. The white block marks
+the active tab; the lime-green colour stays reserved for buttons you press, not
+for navigation.
+
+**What I changed:**
+Replaced the built-in bar with a custom one. The hard part was a surprise from
+the latest iPhone software: the new floating "glass" bar Apple added simply
+*won't go away* when you ask the normal way — it just hides behind your own bar
+and pops back out the moment the layout shifts. I figured out the trick that
+actually banishes it, and a second one so your screen's content always sits
+neatly *above* the bar instead of sliding underneath it. I tested both in a
+throwaway sandbox app with the real moving parts before touching the actual app,
+so I wasn't guessing.
+
+**How I checked:**
+Built the whole app clean (no errors) on the iPhone 17 Pro simulator, and proved
+the bar behaves — no ghost bar, content sits above it, white block on the right
+tab — with real screenshots in the sandbox. Nothing about how the app *works*
+changed: tabs switch the same, sessions and the paused banner are untouched.
+It's purely how it looks.
+
+**Status:** Merged to main — PR #553, part of #538. This is the first of three
+linked pieces; next up are the consistent bottom action button and the
+redesigned pre-workout screen.
+
+---
+
 ## 2026-06-22 — The app now remembers when a set hurt (groundwork)
 
 **The problem (in plain words):**
