@@ -6,7 +6,7 @@
 //
 // Key design decisions:
 //   • Swift actor for safe concurrent LLM calls (no data races on callCount, etc.)
-//   • 8-second per-call timeout enforced via Task.detached + withTaskCancellationHandler
+//   • 30-second per-call timeout enforced via Task.detached + withTaskCancellationHandler
 //   • Decode / validation failures are PERMANENT (ADR-0007 §1): they return
 //     `.fallback` immediately and surface the retry sheet — no same-prompt retry.
 //     Only transient HTTP errors are retried, inside `TransientRetryPolicy`.
@@ -865,7 +865,7 @@ actor AIInferenceService {
     /// Produces a `SetPrescription` for the given `WorkoutContext`.
     /// Decode / validation failures are permanent (ADR-0007 §1): this returns
     /// `.fallback` immediately without retrying. Only transient HTTP errors are
-    /// retried, inside the 8-second timeout via `TransientRetryPolicy`.
+    /// retried, inside the 30-second timeout via `TransientRetryPolicy`.
     func prescribe(context: WorkoutContext) async -> PrescriptionResult {
 
         // 1. Encode context to JSON (user payload for the LLM)
@@ -900,13 +900,13 @@ actor AIInferenceService {
         // re-ran. Sometimes worked for malformed JSON; ADR-0007 §1 nevertheless
         // classes malformed responses as permanent because the same prompt is
         // unlikely to yield a different shape, and a fail-fast surface gives
-        // the user agency rather than burning the 8-second budget on a
+        // the user agency rather than burning the 30-second budget on a
         // probably-doomed retry. See spinoff issue for the broader audit.
-        // 2. Call LLM with 8-second timeout (transient HTTP retries happen
+        // 2. Call LLM with 30-second timeout (transient HTTP retries happen
         //    inside the timeout per ADR-0007 §2).
         let rawResponse: String
         do {
-            rawResponse = try await withTimeout(seconds: 8.0) {
+            rawResponse = try await withTimeout(seconds: 30.0) {
                 try await TransientRetryPolicy.execute {
                     try await self.provider.complete(
                         systemPrompt: systemPrompt,
@@ -917,7 +917,7 @@ actor AIInferenceService {
         } catch is TimeoutError {
             FallbackLogRecord(
                 callSite: FallbackLogRecord.prescribeCallSite,
-                reason: "timeout (8s)",
+                reason: "timeout (30s)",
                 sessionId: context.sessionMetadata.sessionId
             ).emit()
             return .fallback(reason: .timeout)
@@ -1039,7 +1039,7 @@ actor AIInferenceService {
         }
 
         do {
-            let rawResponse = try await withTimeout(seconds: 8.0) {
+            let rawResponse = try await withTimeout(seconds: 30.0) {
                 try await TransientRetryPolicy.execute {
                     try await self.provider.complete(
                         systemPrompt: systemPrompt,
@@ -1106,7 +1106,7 @@ actor AIInferenceService {
         } catch is TimeoutError {
             FallbackLogRecord(
                 callSite: FallbackLogRecord.prescribeAdaptationCallSite,
-                reason: "timeout (8s)"
+                reason: "timeout (30s)"
             ).emit()
             return .fallback(reason: .timeout)
         } catch {
