@@ -7,6 +7,39 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-29 — Stop pushing muscle-builders into a powerlifter's "peak"
+
+**The problem (in plain words):**
+The app runs a little engine that decides, for each lift you do, what "phase" of
+training you're in — building volume, pushing intensity, peaking (going very heavy
+for a few reps), or deloading (an easy week). The catch: it cycled *everyone*
+through that same loop, including the "peaking" phase, no matter what their actual
+goal was. Peaking is a powerlifting idea — very heavy, very few reps. If your goal
+is just to build muscle, getting shoved into a heavy low-rep peak is the wrong
+training. So a muscle-building user could quietly end up doing a strength-peaking
+block they never wanted.
+
+**What I changed:**
+The engine now looks at your goal first. If your goal actually says strength (or
+"max weight", "powerlifting", "1RM"), nothing changes — you still get the full
+loop with peaking. For everyone else — muscle size, endurance, general fitness, or
+if no goal is set — the loop now skips peaking entirely and goes building → harder
+→ easy week → repeat. I deliberately made "skip the peak" the safe default: if the
+app is ever unsure, it will NOT peak you, because wrongly peaking someone is the
+bug we're fixing.
+
+**How it was checked:**
+Twenty automated tests on the engine pass (the seven new ones cover both the
+strength loop staying the same and the new "skip peaking" loop), plus the 38 tests
+on the code that feeds the engine. This is the first piece of a larger
+program-generation overhaul (decision write-up ADR-0030, now accepted).
+
+**Heads-up for deploy:** this is a server-side coach change — it goes live only
+after `supabase functions deploy update-trainee-model` is run. Until then nothing
+changes for anyone. (#559, part of #558; ADR-0030 accepted via #557.)
+
+---
+
 ## 2026-06-29 — Stop the coach from going "offline" mid-workout
 
 **The problem (in plain words):**

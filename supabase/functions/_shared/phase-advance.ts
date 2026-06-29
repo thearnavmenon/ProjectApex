@@ -33,6 +33,17 @@ export type MesocyclePhase =
   | "peaking"
   | "deload";
 
+/**
+ * Goal arc per ADR-0030 (goal-branch amendment to ADR-0011). The per-pattern
+ * phase cycle is goal-aware: a `strength` arc keeps the peaking taper; a
+ * `volume` arc skips `peaking` entirely so hypertrophy/endurance/general users
+ * are never cycled into a powerlifting peak (low reps, RIR 1–2). This is a
+ * computed *input* — it is NOT a persisted field on the wire (the goal lives in
+ * `model_json.goal.statement`; the orchestrator classifies it once and injects
+ * the resolved arc, keeping this module pure).
+ */
+export type GoalArc = "strength" | "volume";
+
 export interface PerPatternState {
   currentPhase: MesocyclePhase;
   sessionsInPhase: number;
@@ -40,6 +51,8 @@ export interface PerPatternState {
   trend: ProgressionTrend;
   consecutiveForceDeloadsOnPattern: number;
   lastPhaseTransitionAtSessionCount: number;
+  /** Resolved goal arc (ADR-0030). Computed input, not persisted. */
+  goalArc: GoalArc;
 }
 
 export interface PhaseAdvanceOutcome {
@@ -87,20 +100,60 @@ export function sessionsRequiredFor(
 }
 
 /**
- * Phase order per ADR-0011 §(c). Cyclic: deload (index 3) → accumulation
- * (index 0). Indexed-and-modulo on advance.
+ * Goal-aware phase cycle per ADR-0011 §(c) as amended by ADR-0030.
+ *   - strength arc (unchanged): accumulation → intensification → peaking → deload → accumulation
+ *   - volume arc:               accumulation → intensification → deload → accumulation  (skips peaking)
+ *
+ * `intensification` is kept for volume — progressive overload by load is fine
+ * for hypertrophy; only the strength *taper* (peaking) is wrong. The cycle is
+ * indexed-and-modulo on advance, so deload wraps back to accumulation in both
+ * arcs.
  */
-const phaseOrder: readonly MesocyclePhase[] = [
+const STRENGTH_ARC: readonly MesocyclePhase[] = [
   "accumulation",
   "intensification",
   "peaking",
   "deload",
 ];
 
-const nextPhaseInCycle = (current: MesocyclePhase): MesocyclePhase => {
-  const idx = phaseOrder.indexOf(current);
-  return phaseOrder[(idx + 1) % phaseOrder.length];
+const VOLUME_ARC: readonly MesocyclePhase[] = [
+  "accumulation",
+  "intensification",
+  "deload",
+];
+
+const phaseOrderFor = (arc: GoalArc): readonly MesocyclePhase[] =>
+  arc === "strength" ? STRENGTH_ARC : VOLUME_ARC;
+
+const nextPhaseInCycle = (
+  current: MesocyclePhase,
+  arc: GoalArc,
+): MesocyclePhase => {
+  const order = phaseOrderFor(arc);
+  const idx = order.indexOf(current);
+  // Off-arc current phase (a volume-arc pattern sitting in `peaking` from
+  // legacy data or a strength→hypertrophy goal switch): treat `peaking` as the
+  // pre-deload slot and advance explicitly to `deload`. Do NOT lean on the
+  // modulo accident (indexOf === -1 → order[0] → accumulation), which would
+  // skip the deload the pattern is owed.
+  if (idx === -1) return "deload";
+  return order[(idx + 1) % order.length];
 };
+
+/**
+ * Classify a freeform goal statement into a goal arc (ADR-0030). Returns
+ * `"strength"` iff the statement carries an explicit strength signal;
+ * everything else — including absent / empty / whitespace-only — resolves to
+ * `"volume"`. The asymmetry is deliberate and error-safe: the bug being fixed
+ * is non-strength users getting peaked, so default-no-peak fixes the majority
+ * and never wrongly peaks a user.
+ */
+export function goalArc(statement: string | null | undefined): GoalArc {
+  if (!statement || !statement.trim()) return "volume";
+  const s = statement.toLowerCase();
+  const strengthSignals = ["strength", "max weight", "powerlift", "1rm"];
+  return strengthSignals.some((sig) => s.includes(sig)) ? "strength" : "volume";
+}
 
 /**
  * Per-pattern phase advance per ADR-0011.
@@ -186,7 +239,11 @@ export function advancePhase(
     state.trend === "progressing"
   ) {
     return {
-      newPhase: nextPhaseInCycle(state.currentPhase),
+      // ADR-0030: goal-aware next phase. Strength keeps the peaking taper;
+      // volume skips it. The deload-end cyclic branch (above) and the
+      // force-deload safety valve stay goal-agnostic — only the natural
+      // progressing-advance is goal-branched.
+      newPhase: nextPhaseInCycle(state.currentPhase, state.goalArc),
       newSessionsInPhase: 0,
       newConsecutiveForceDeloads: 0,
       newLastPhaseTransitionAtSessionCount: currentSessionCount,
