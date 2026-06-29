@@ -211,10 +211,13 @@ final class AppDependencies {
         // 6b. GymStreakService — training consistency for AI intensity modulation (P4-E1)
         self.gymStreakService = GymStreakService(supabase: supabaseClient)
 
-        // 7. AI Inference — needs Anthropic key (sonnet model, 8-second timeout)
+        // 7. AI Inference — needs Anthropic key (sonnet model). Gets a dedicated
+        // QUIC-safe URLSession (see makeInferenceURLSession): per-attempt 8s budget
+        // with auto-retry under a 30s overall ceiling, so a stalled mid-workout
+        // coach call recovers on its own instead of forcing the user to tap retry.
         self.anthropicKey = anthropicKey
         let inferenceService = AIInferenceService(
-            provider: AnthropicProvider(apiKey: anthropicKey)
+            provider: AnthropicProvider(apiKey: anthropicKey, urlSession: Self.makeInferenceURLSession())
         )
         self.aiInferenceService = inferenceService
 
@@ -332,13 +335,31 @@ final class AppDependencies {
         self.activeSessionCoordinator = ActiveSessionCoordinator(manager: manager)
     }
 
+    // MARK: - Inference transport
+
+    /// Dedicated URLSession for the set-inference coach (mid-workout `prescribe`
+    /// and `prescribeAdaptation` calls). Mirrors the GoTrue auth fix above:
+    /// `.ephemeral` carries no cached Alt-Svc, so it negotiates HTTP/2 over TCP
+    /// rather than inheriting the stale "try QUIC first" preference that stalls
+    /// coach calls on some networks across launches; `waitsForConnectivity` rides
+    /// out a brief connectivity drop. The 8s per-request timeout is the per-attempt
+    /// budget — a stuck connection fails fast so `AIInferenceService`'s retry loop
+    /// opens a fresh one (bounded by the 30s overall ceiling in `prescribe`).
+    private static func makeInferenceURLSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 660
+        return URLSession(configuration: config)
+    }
+
     // MARK: - Re-initialisation
 
     /// Replaces AI services with fresh instances using the current Anthropic key.
     /// Call this if the API key changes (e.g. after re-login via Developer Settings).
     func reinitialiseAIInference() {
         aiInferenceService = AIInferenceService(
-            provider: AnthropicProvider(apiKey: anthropicKey)
+            provider: AnthropicProvider(apiKey: anthropicKey, urlSession: Self.makeInferenceURLSession())
         )
         programGenerationService = ProgramGenerationService(
             provider: AnthropicProvider.forProgramGeneration(apiKey: anthropicKey)
