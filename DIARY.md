@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-29 — The workout no longer stops when the coach can't be reached
+
+**The problem (in plain words):**
+Every set waited on the AI coach to tell you the weight and reps. If the
+connection hiccuped (which happens — see the earlier "Coach offline" fixes), you
+got a pop-up asking you to tap "Try again," sometimes more than once, before you
+could do your next set. Mid-workout, that's exactly the wrong moment to be poking
+at a retry button. The set was effectively held hostage by the network.
+
+**What I changed:**
+When the coach can't be reached because of a connection problem (a timeout, a
+dropped request, a server hiccup), the app now just keeps you moving: it
+instantly fills in a sensible set — your last logged weight for that exercise
+(or last session's, if it's your first set) with the program's rep and rest
+targets — and shows a small "Coach offline" note. No pop-up, no waiting. The AI
+becomes a bonus when it's reachable, not a gate when it isn't. The pop-up is kept
+ONLY for the rare cases where retrying actually can't help (the app sent a broken
+request, the coach replied with gibberish, or a setup file is missing) — there
+you still get a choice, as before.
+
+**How it was checked:**
+The app builds clean and the workout-engine tests pass, including new ones: a
+connection failure now auto-fills the set (no pop-up), the failure-type
+classification is pinned (connection issues vs. broken-request), and a genuinely
+broken response still shows the pop-up. The existing "Continue with last weights"
+button and the tricky concurrency safeguards were kept intact.
+
+**Status:** iOS-only change, no server deploy needed. (#321, part of #558 /
+ADR-0030; pairs with the earlier "Coach offline" reliability fixes #555/#556.)
+
+---
+
 ## 2026-06-29 — Removed an old, unused program-builder (cleanup)
 
 **The problem (in plain words):**
