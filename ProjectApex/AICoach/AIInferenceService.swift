@@ -681,6 +681,36 @@ nonisolated enum FallbackReason: Sendable {
     case systemPromptUnavailable(String)
 }
 
+extension FallbackReason {
+    /// ADR-0030 / #321: split per-set failures into a *transient* class (the
+    /// network/service didn't return a usable answer this time) and a
+    /// *permanent* class (something structural is wrong).
+    ///
+    /// - `.transient` failures degrade silently to a deterministic, capability-
+    ///   based prescription (plan targets + last logged weight) with a "Coach
+    ///   offline" notice — the live loop is never gated on the LLM (#555/#556).
+    /// - `.permanent` failures keep ADR-0007's surface policy: the retry sheet,
+    ///   so the user gets agency (`malformedResponse`) or is directed to support
+    ///   (`encodingFailed` / `systemPromptUnavailable`) rather than silently
+    ///   training on a best-effort guess for a structurally broken call.
+    nonisolated enum Classification: Sendable, Equatable {
+        case transient
+        case permanent
+    }
+
+    // nonisolated so the WorkoutSessionManager actor (not MainActor) can read it;
+    // the project default-isolates to MainActor, and extension members don't
+    // inherit the enum's `nonisolated` automatically.
+    nonisolated var classification: Classification {
+        switch self {
+        case .timeout, .maxRetriesExceeded, .llmProviderError:
+            return .transient
+        case .encodingFailed, .malformedResponse, .systemPromptUnavailable:
+            return .permanent
+        }
+    }
+}
+
 nonisolated enum PrescriptionResult: Sendable {
     case success(SetPrescription)
     case fallback(reason: FallbackReason)

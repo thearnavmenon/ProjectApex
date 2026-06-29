@@ -2,6 +2,8 @@
 
 **Status**: accepted, 2026-05-04
 
+> **Superseded in part by [ADR-0030](0030-committed-deterministic-program-generation.md) (#321, 2026-06-29) — transient class only.** For the *per-set live-loop prescription*, a **transient** failure (timeout / retries-exhausted / provider error) no longer surfaces the retry sheet; it degrades silently to a deterministic, capability-based prescription (plan targets + last logged weight) with a "Coach offline" notice, so the workout is never gated on the LLM (#555/#556). ADR-0007's retry-sheet surface policy is unchanged for the **permanent** class (malformed response / encoding failure / system-prompt-unavailable) and for all non-per-set call sites.
+
 ## Context
 
 Phase 3's mid-session resilience work (P3-MR-F01 — `TransientRetryPolicy`, P3-T07 — `InferenceRetrySheet`, P3-MR-F05 — `FallbackLogRecord`) introduced retry behaviour for LLM provider calls in response to FB-012, the Anthropic 529 outage on 22 Apr 2026. The work shipped as a hot-patch and was documented in `ARCHITECTURE.md §7.5` but never formalised as an ADR. As a result the rules were scattered: which HTTP codes count as transient lived in `TransientRetryPolicy.transientCodes`, retry orchestration lived in `AIInferenceService.prescribe`, the foreground UI surface lived in `InferenceRetrySheet`, and what happens to the work-ahead queue on permanent failure was implicit.

@@ -892,46 +892,55 @@ actor WorkoutSessionManager {
         print("[WorkoutSessionManager] Session-only weight override — \(confirmedWeight)kg (GymFactStore NOT updated)")
     }
 
-    /// Called when the user taps "Continue with last weights" on InferenceRetrySheet.
-    /// Builds a prescription from the most recently logged set for this exercise in the
-    /// current session, falling back to program defaults if no prior set exists.
-    func applyManualFallbackPrescription(for exercise: PlannedExercise) {
+    /// Builds a deterministic, capability-based prescription for an exercise:
+    /// the most recently logged set for this exercise this session, else the
+    /// last-session history anchor (`historySeedWeight`), else 0.0 (genuine
+    /// bodyweight / no history). Reps inherit the last set or fall back to the
+    /// plan's `repRange.min`; rest/tempo/RIR come from the plan. Marked
+    /// `isManualFallback` with `confidence: nil` so the UI renders it distinctly
+    /// from an AI prescription. Shared by the manual "Continue with last weights"
+    /// path and the #321 automatic transient-failure fallback.
+    private func deterministicPrescription(
+        for exercise: PlannedExercise,
+        coachingCue: String,
+        reasoning: String,
+        setFraming: String
+    ) -> SetPrescription {
         let lastSet = completedSets
             .filter { $0.exerciseId == exercise.exerciseId }
             .max(by: { $0.setNumber < $1.setNumber })
-
-        // Intent carry-over: when the user opts into the manual fallback
-        // ("Continue with last weights"), inherit the prior set's intent as a
-        // *suggestion* for the picker to prefill. Stays `nil` when there's no
-        // prior set in the session — the picker then has no prefill and the
-        // user must pick explicitly per Slice 6's no-silent-default rule.
-
-        // #318 U7 / G-F1: with no in-session set, seed the weight from the
-        // last-session history (cachedLastPerformance top set) instead of
-        // 0.0 — no more "BW" shown on a loaded movement. 0.0 survives ONLY
-        // for genuine bodyweight history (all sets 0 kg) or no history at all.
+        // #318 U7 / G-F1: seed from last in-session set, else last-session
+        // history (cachedLastPerformance top set), else 0.0 — no phantom "BW"
+        // on a loaded movement; 0.0 survives only for genuine bodyweight / none.
         let seedWeight = lastSet?.weightKg
             ?? historySeedWeight(for: exercise.exerciseId)
             ?? 0.0
-
-        let prescription = SetPrescription(
+        return SetPrescription(
             weightKg:          seedWeight,
             reps:              lastSet?.repsCompleted ?? exercise.repRange.min,
             tempo:             exercise.tempo,
             rirTarget:         exercise.rirTarget,
             restSeconds:       exercise.restSeconds,
-            coachingCue:       "Using last session weights",
-            reasoning:         "Manual fallback — AI unavailable.",
+            coachingCue:       coachingCue,
+            reasoning:         reasoning,
             safetyFlags:       [],
             confidence:        nil,
             userCorrectedWeight: nil,
             isManualFallback:  true,
             intent:            lastSet?.intent,
-            // Manual-fallback path uses a generic framing — there's no AI
-            // call to produce one. Inherits intent from last set; framing
-            // mirrors that. No silent default at the AI layer; this is
-            // the explicit fallback shape.
-            setFraming:        "Using last session weights. No AI guidance."
+            setFraming:        setFraming
+        )
+    }
+
+    /// Called when the user taps "Continue with last weights" on InferenceRetrySheet.
+    /// Builds a prescription from the most recently logged set for this exercise in the
+    /// current session, falling back to program defaults if no prior set exists.
+    func applyManualFallbackPrescription(for exercise: PlannedExercise) {
+        let prescription = deterministicPrescription(
+            for: exercise,
+            coachingCue: "Using last session weights",
+            reasoning: "Manual fallback — AI unavailable.",
+            setFraming: "Using last session weights. No AI guidance."
         )
         currentPrescription = prescription
         inferenceRetryNeeded = false
@@ -1413,12 +1422,39 @@ actor WorkoutSessionManager {
             pendingRetrySetNumber = 0
 
         case .fallback(let reason):
-            // No silent fallback — store failure state and let the user choose.
-            currentFallbackReason = reason
-            inferenceRetryReason = reason
-            pendingRetryExercise = targetExercise
-            pendingRetrySetNumber = targetSetNumber
-            // currentPrescription stays nil — the retry sheet will be shown.
+            switch reason.classification {
+            case .transient:
+                // #321 / ADR-0030: a transient failure (timeout / retries
+                // exhausted / provider error) degrades silently to a
+                // deterministic prescription instead of gating the set on the
+                // retry sheet — the live loop must survive a dead connection
+                // (#555/#556). The "Coach offline" banner is driven by
+                // currentFallbackReason; the shared state-transition switch
+                // below advances preflight/resting/active off currentPrescription
+                // exactly as the success path does. No await here, so the
+                // function-top generation guard still covers staleness.
+                currentPrescription = deterministicPrescription(
+                    for: targetExercise,
+                    coachingCue: "Using your last weights",
+                    reasoning: "Coach offline — auto-applied your last weights and the program's targets.",
+                    setFraming: "Coach offline. Using last weights + program targets."
+                )
+                currentFallbackReason = reason
+                inferenceRetryNeeded = false
+                inferenceRetryReason = nil
+                pendingRetryExercise = nil
+                pendingRetrySetNumber = 0
+            case .permanent:
+                // ADR-0007 surface policy (unchanged): a structural failure
+                // (our bug / malformed LLM output / deploy misconfig) is NOT
+                // silently defaulted — store the failure and let the user choose
+                // via the retry sheet.
+                currentFallbackReason = reason
+                inferenceRetryReason = reason
+                pendingRetryExercise = targetExercise
+                pendingRetrySetNumber = targetSetNumber
+                // currentPrescription stays nil — the retry sheet will be shown.
+            }
         }
 
         // Transition .preflight → .active (first set) or

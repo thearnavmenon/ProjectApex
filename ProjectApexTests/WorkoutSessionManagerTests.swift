@@ -97,8 +97,12 @@ private final class GatedRetryProvider: LLMProvider, @unchecked Sendable {
         lock.unlock()
 
         if n == 1 {
-            // startSession inference — fail fast so we land in pending-retry.
-            throw LLMProviderError.httpError(statusCode: 401, body: "Invalid API key")
+            // startSession inference — return malformed output so it classifies
+            // as a PERMANENT failure (#321) and lands in pending-retry (the
+            // transient class now auto-applies a deterministic fallback and would
+            // not arm a retry). This keeps the #369 [19] retry-generation-guard
+            // premise intact: retryInference (call #2) has something to retry.
+            return "not a valid prescription"
         }
 
         // ONLY the retry call (#2) is gated — park until the test releases it. Every
@@ -514,32 +518,70 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertEqual(logs[0].exerciseId, day.exercises[0].exerciseId)
     }
 
-    // MARK: Test 3: Fallback path (smart retry — no silent fallback)
+    // MARK: Test 3: Transient failure → deterministic fallback (#321 / ADR-0030)
 
-    func testCompleteSet_fallbackPath_setsFallbackReason() async throws {
-        // Use a failing provider so prescribe() always returns .fallback
+    func testCompleteSet_transientFailure_appliesDeterministicFallback() async throws {
+        // FailingLLMProvider throws an HTTP error → prescribe() returns
+        // .fallback(.llmProviderError), a TRANSIENT class. Per #321 the live
+        // loop must NOT gate on the LLM: a deterministic prescription is applied
+        // with a "Coach offline" notice, and NO retry sheet is shown.
         let manager = makeManager(provider: FailingLLMProvider())
         let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 2)
 
         await manager.startSession(trainingDay: day, programId: UUID())
         try await Task.sleep(nanoseconds: 300_000_000)
 
-        // After startSession with a failing provider, inference fails →
-        // state stays in .preflight (no silent fallback), retry is needed.
+        // "Coach offline" notice is armed (currentFallbackReason drives the banner).
         let fallbackReason = await manager.currentFallbackReason
-        XCTAssertNotNil(fallbackReason, "Fallback reason should be set when AI fails")
+        XCTAssertNotNil(fallbackReason, "Transient failure should set currentFallbackReason for the offline banner")
 
+        // No retry sheet — the deterministic fallback was auto-applied.
         let retryNeeded = await manager.inferenceRetryNeeded
-        XCTAssertTrue(retryNeeded, "inferenceRetryNeeded should be true when inference fails during preflight")
+        XCTAssertFalse(retryNeeded, "Transient failure must NOT surface the retry sheet (#321)")
 
-        // No silent fallback prescription — user must choose retry or pause
+        // A deterministic prescription IS present and marked as a fallback.
         let prescription = await manager.currentPrescription
-        XCTAssertNil(prescription, "No silent fallback: prescription should be nil when inference fails")
+        XCTAssertNotNil(prescription, "Transient failure must auto-apply a deterministic prescription (#321)")
+        XCTAssertEqual(prescription?.isManualFallback, true, "Deterministic fallback is flagged isManualFallback")
+        XCTAssertNil(prescription?.confidence, "Deterministic fallback carries no AI confidence")
 
-        // State should stay in .preflight (not advance to .active without a prescription)
+        // Session advances to .active (the set card appears) rather than blocking.
+        let state = await manager.sessionState
+        guard case .active = state else {
+            XCTFail("Transient fallback should advance preflight → .active, got \(state)")
+            return
+        }
+    }
+
+    func testFallbackReason_classification_transientVsPermanent() {
+        // Transient class → deterministic fallback (live loop never gated).
+        XCTAssertEqual(FallbackReason.timeout.classification, .transient)
+        XCTAssertEqual(FallbackReason.maxRetriesExceeded(lastError: "x").classification, .transient)
+        XCTAssertEqual(FallbackReason.llmProviderError("x").classification, .transient)
+        // Permanent class → retry sheet (ADR-0007 surface preserved).
+        XCTAssertEqual(FallbackReason.malformedResponse("x").classification, .permanent)
+        XCTAssertEqual(FallbackReason.encodingFailed("x").classification, .permanent)
+        XCTAssertEqual(FallbackReason.systemPromptUnavailable("x").classification, .permanent)
+    }
+
+    func testCompleteSet_permanentFailure_surfacesRetrySheet() async throws {
+        // A malformed LLM response is a PERMANENT failure → ADR-0007 surface
+        // policy is preserved: no silent prescription, the retry sheet is shown.
+        let manager = makeManager(provider: MockLLMProvider(response: "not valid prescription json"))
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 2)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let fallbackReason = await manager.currentFallbackReason
+        XCTAssertNotNil(fallbackReason, "Permanent failure should set currentFallbackReason")
+        let retryNeeded = await manager.inferenceRetryNeeded
+        XCTAssertTrue(retryNeeded, "Permanent failure must surface the retry sheet (ADR-0007 preserved)")
+        let prescription = await manager.currentPrescription
+        XCTAssertNil(prescription, "Permanent failure: no silent prescription")
         let state = await manager.sessionState
         guard case .preflight = state else {
-            XCTFail("Expected .preflight (retry needed) when AI fails, got \(state)")
+            XCTFail("Permanent failure should stay .preflight (retry needed), got \(state)")
             return
         }
     }
@@ -1953,7 +1995,11 @@ final class PrescriptionGuardrailTests: XCTestCase {
         WSMHistoryURLProtocol.setLogRowsJSON = historySetLogRowsJSON(
             exerciseId: "exercise_0", weightKg: 80.0, reps: [8, 8, 7]
         )
-        let manager = makeHistoryManager(provider: FailingLLMProvider())
+        // Permanent failure (malformed) so the retry sheet arms and the manual
+        // "Continue with last weights" path is what seeds the prescription —
+        // a transient failure would now auto-apply the deterministic fallback
+        // first (#321), which is covered separately.
+        let manager = makeHistoryManager(provider: MockLLMProvider(response: "not valid prescription json"))
         let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
         await manager.startSession(trainingDay: day, programId: UUID())
         try await Task.sleep(nanoseconds: 400_000_000)
@@ -1984,7 +2030,11 @@ final class PrescriptionGuardrailTests: XCTestCase {
         WSMHistoryURLProtocol.setLogRowsJSON = historySetLogRowsJSON(
             exerciseId: "exercise_0", weightKg: 0.0, reps: [12, 10]
         )
-        let manager = makeHistoryManager(provider: FailingLLMProvider())
+        // Permanent failure (malformed) so the retry sheet arms and the manual
+        // "Continue with last weights" path is what seeds the prescription —
+        // a transient failure would now auto-apply the deterministic fallback
+        // first (#321), which is covered separately.
+        let manager = makeHistoryManager(provider: MockLLMProvider(response: "not valid prescription json"))
         let day = makeTrainingDay(exerciseCount: 1, setsPerExercise: 2)
         await manager.startSession(trainingDay: day, programId: UUID())
         try await Task.sleep(nanoseconds: 400_000_000)
