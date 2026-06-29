@@ -7,6 +7,42 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-29 — Stop the coach from going "offline" mid-workout
+
+**The problem (in plain words):**
+Too many times in the middle of a workout, the app would say "Coach is offline"
+and you'd have to tap "Try again" two or three times before your next set finally
+came through. Really annoying. I dug in and found two reasons. First, the coach
+was talking to the internet using the phone's default settings, which try a newer
+fast connection method (called QUIC) that some Wi-Fi and phone networks choke on —
+the connection just hangs. We'd already hit this exact thing on the login screen
+months ago and fixed it there, but the coach never got the same fix. Second, the
+app *was* supposed to quietly retry on its own, but it was wired so all the retries
+had to finish inside an 8-second window — and the waiting between tries alone ate
+up those 8 seconds, so the automatic retry basically never got a real shot. That's
+why *you* ended up doing the retrying by hand: every tap opened a brand-new
+connection, and eventually one wasn't stuck.
+
+**What I changed:**
+Gave the coach the same reliable connection the login screen already uses — one
+that avoids the flaky QUIC method and rides out brief network blips. And I rewired
+the timing so the app now gets up to about 30 seconds to quietly retry on its own,
+opening a fresh connection each time, before it ever bothers you with the "offline"
+message. I picked the patient setting on purpose so it tries hard before giving up.
+
+**How I checked:**
+Built the whole app clean (no errors) on the iPhone 17 Pro simulator. I left the
+safety net in place: if the network is genuinely dead, it still falls back to your
+program's planned weights rather than guessing. I only touched the coach's
+connection and its retry timing — nothing about how your sets or weights are
+decided changed.
+
+**Status:** Merged to main — PR #555. Note for later: the "Start Workout" screen
+and the exercise-swap chat use the same old flaky connection and could stall the
+same way; I left those alone for now and flagged them as a follow-up.
+
+---
+
 ## 2026-06-29 — New bottom tab bar (the black one with the white block)
 
 **The problem (in plain words):**
