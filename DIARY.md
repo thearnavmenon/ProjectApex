@@ -7,6 +7,42 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-30 — The coach now commits your exercises once per block (groundwork)
+
+**The problem (in plain words):**
+Until now the AI picked your exercises from scratch *every single session*, and it
+only ever saw one day at a time — so it couldn't balance the whole week, and your
+"Push day" might have different lifts each time, making it hard to actually track
+whether you're getting stronger on a given lift. The right model: pick a solid set
+of exercises for each day ONCE when a training block starts, looking at the whole
+week together, and freeze them so you can chase progress on the same lifts.
+
+**What I changed:**
+Rebuilt the program-builder into a single "block commit" call. In one pass it now
+sees every training day at once and, for each day, picks a fixed, ordered list of
+exercises (compounds first) with a frozen rep-range per exercise. It avoids
+anything your equipment can't do (a safety filter drops stragglers) and can take
+your injuries into account as a hard "don't program this" rule. It only chooses
+*which* movements and *what rep-range* — how many sets and how hard stays with the
+deterministic engine (that part lands next). Per your call: same lifts each time
+within a block, separate rep-ranges for compounds vs. isolations, and when a new
+block starts it keeps the core lifts and rotates a couple of accessories.
+
+**Important:** this is groundwork — the committed exercises are now produced and
+stored, but the workout screen doesn't *use* them yet (the next change wires that
+in). So nothing visible changes for you today; existing programs are untouched.
+
+**How it was checked:**
+14 tests pass — including new ones proving the committed exercises flow through
+with frozen rep-ranges and repeat across the block, the equipment filter drops a
+lift you can't do, and your limitations ride along in the request. Full build green.
+
+**Status:** iOS-only, groundwork, no server deploy. Injuries are carried *when
+provided* — wiring the injury source into the live path is a small follow-up (that
+data isn't persisted yet). (#563, part of #558 / ADR-0030.)
+
+---
+
 ## 2026-06-30 — New "queue" shape for programs (groundwork, nothing visible yet)
 
 **The problem (in plain words):**
