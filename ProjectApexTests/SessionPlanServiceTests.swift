@@ -252,3 +252,84 @@ struct SessionPlanServiceEquipmentEnforcementTests {
         #expect(!day.exercises.isEmpty)
     }
 }
+
+// MARK: - #564: SessionAutoregulator (deterministic instantiation)
+
+@Suite("SessionAutoregulator — deterministic instantiation (#564)")
+struct SessionAutoregulatorTests {
+
+    @Test("no deltas → frozen accumulation baseline (4 sets, RIR 3)")
+    func noDeltas() {
+        let p = SessionAutoregulator.prescription(
+            phase: .accumulation, trend: .progressing, volumeDeficit: 0, requiresReturnOverride: false)
+        #expect(p.sets == 4)
+        #expect(p.rir == 3)
+    }
+
+    @Test("deload phase → ~50% volume (2 sets) + high RIR")
+    func deload() {
+        let p = SessionAutoregulator.prescription(
+            phase: .deload, trend: .progressing, volumeDeficit: 0, requiresReturnOverride: false)
+        #expect(p.sets == 2)  // 4 → 2 = -50%
+        #expect(p.rir == 4)
+    }
+
+    @Test("declining trend (fatigue/regression) → back off one set + RIR +1")
+    func decliningBacksOff() {
+        let base = SessionAutoregulator.prescription(
+            phase: .accumulation, trend: .progressing, volumeDeficit: 0, requiresReturnOverride: false)
+        let p = SessionAutoregulator.prescription(
+            phase: .accumulation, trend: .declining, volumeDeficit: 0, requiresReturnOverride: false)
+        #expect(p.sets == base.sets - 1)
+        #expect(p.rir == base.rir + 1)
+    }
+
+    @Test("volume-deficit → +1 working set (top-up)")
+    func volumeDeficitTopUp() {
+        let base = SessionAutoregulator.prescription(
+            phase: .accumulation, trend: .progressing, volumeDeficit: 0, requiresReturnOverride: false)
+        let p = SessionAutoregulator.prescription(
+            phase: .accumulation, trend: .progressing, volumeDeficit: 6, requiresReturnOverride: false)
+        #expect(p.sets == base.sets + 1)
+    }
+
+    @Test("return-to-training → reduced volume + RIR +1")
+    func returnReduced() {
+        let base = SessionAutoregulator.prescription(
+            phase: .accumulation, trend: .progressing, volumeDeficit: 0, requiresReturnOverride: false)
+        let p = SessionAutoregulator.prescription(
+            phase: .accumulation, trend: .progressing, volumeDeficit: 0, requiresReturnOverride: true)
+        #expect(p.sets == base.sets - 1)
+        #expect(p.rir == base.rir + 1)
+    }
+
+    @Test("deltas clamp: sets ≥ 1, RIR ≤ 5")
+    func clamps() {
+        // deload (2,4) + return (-1,+1) + declining (-1,+1) → pre-clamp (0,6) → (1,5).
+        let p = SessionAutoregulator.prescription(
+            phase: .deload, trend: .declining, volumeDeficit: 0, requiresReturnOverride: true)
+        #expect(p.sets >= 1)
+        #expect(p.rir <= 5)
+    }
+
+    @Test("instantiate keeps frozen identity + rep-range; no digest → accumulation baseline; status .generated")
+    func instantiatePreservesFrozenSlot() {
+        let committed = PlannedExercise(
+            id: UUID(), exerciseId: "barbell_bench_press", name: "Bench",
+            primaryMuscle: "chest", synergists: [], equipmentRequired: .barbell,
+            sets: 99, repRange: RepRange(min: 5, max: 8), tempo: "", restSeconds: 120,
+            rirTarget: 99, coachingCues: []
+        )
+        let day = TrainingDay(
+            id: UUID(), dayOfWeek: 1, dayLabel: "Push_A",
+            exercises: [committed], sessionNotes: nil, status: .pending)
+
+        let out = SessionAutoregulator.instantiate(day: day, digest: nil, requiresReturnOverride: false)
+        let ex = out.exercises[0]
+        #expect(ex.exerciseId == "barbell_bench_press")   // frozen identity
+        #expect(ex.repRange == RepRange(min: 5, max: 8))   // frozen rep-range
+        #expect(ex.sets == 4)                              // deterministic accumulation baseline
+        #expect(ex.rirTarget == 3)
+        #expect(out.status == .generated)
+    }
+}
