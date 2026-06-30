@@ -308,4 +308,83 @@ final class WorkoutProgramTests: XCTestCase {
         XCTAssertEqual(mock.completedDayCount, 2,
                        "completedDayCount must count .completed + .skipped only (1 + 1)")
     }
+
+    // MARK: ─── #562: Mesocycle.flatten() → queue-native Program ──────────────
+
+    private func flattenDay(_ label: String, _ status: TrainingDayStatus,
+                            exercises: [PlannedExercise] = []) -> TrainingDay {
+        TrainingDay(id: UUID(), dayOfWeek: 1, dayLabel: label,
+                    exercises: exercises, sessionNotes: nil, status: status)
+    }
+
+    private func flattenWeek(_ n: Int, _ days: [TrainingDay]) -> TrainingWeek {
+        TrainingWeek(id: UUID(), weekNumber: n, phase: .accumulation, trainingDays: days)
+    }
+
+    /// flatten concatenates every training day across weeks into one ordered
+    /// `split`, preserving each `dayLabel` verbatim in week-then-day order (ADR-0017).
+    func test_flatten_preservesDayLabelsInWeekThenDayOrder() {
+        var meso = Mesocycle.mockMesocycle()
+        meso.weeks = [
+            flattenWeek(1, [flattenDay("Push_A", .pending), flattenDay("Pull_A", .pending)]),
+            flattenWeek(2, [flattenDay("Push_B", .pending), flattenDay("Pull_B", .pending)])
+        ]
+        let program = meso.flatten()
+        XCTAssertEqual(program.split.count, 4)
+        XCTAssertEqual(program.split.map(\.dayLabel),
+                       ["Push_A", "Pull_A", "Push_B", "Pull_B"],
+                       "split must preserve every dayLabel in week-then-day order")
+    }
+
+    func test_flatten_allNonTerminal_queuePositionZero() {
+        var meso = Mesocycle.mockMesocycle()
+        meso.weeks = [flattenWeek(1, [flattenDay("A", .pending), flattenDay("B", .generated)])]
+        XCTAssertEqual(meso.flatten().queuePosition, 0)
+    }
+
+    /// queuePosition is the first NON-terminal slot (.completed / .skipped are terminal).
+    func test_flatten_partiallyCompleted_queuePositionAtFirstNonTerminal() {
+        var meso = Mesocycle.mockMesocycle()
+        meso.weeks = [flattenWeek(1, [
+            flattenDay("A", .completed), flattenDay("B", .skipped),
+            flattenDay("C", .pending), flattenDay("D", .paused)
+        ])]
+        let program = meso.flatten()
+        XCTAssertEqual(program.split.count, 4)
+        XCTAssertEqual(program.queuePosition, 2,
+                       "queue head is the first non-terminal slot (.pending at index 2)")
+    }
+
+    func test_flatten_allTerminal_queuePositionAtEnd() {
+        var meso = Mesocycle.mockMesocycle()
+        meso.weeks = [flattenWeek(1, [flattenDay("A", .completed), flattenDay("B", .skipped)])]
+        let program = meso.flatten()
+        XCTAssertEqual(program.queuePosition, program.split.count,
+                       "all-terminal program: queue head is past the end")
+    }
+
+    func test_flatten_freezesRepRangeFromPrimaryExercise() {
+        // mockMesocycle's first day (Push_A) leads with a 6–10 rep-range exercise.
+        let program = Mesocycle.mockMesocycle().flatten()
+        XCTAssertEqual(program.split.first?.repRange, RepRange(min: 6, max: 10),
+                       "slot rep-range is frozen from its primary (first) exercise")
+        // An empty (pending, not-yet-generated) slot has no frozen rep-range.
+        var empty = Mesocycle.mockMesocycle()
+        empty.weeks = [flattenWeek(1, [flattenDay("Empty", .pending)])]
+        XCTAssertNil(empty.flatten().split.first?.repRange)
+    }
+
+    /// Golden decode guard: a real-shaped Mesocycle JSON decodes (existing,
+    /// unchanged decoder) and flattens without throwing or dropping a dayLabel —
+    /// a failure here would strand a live program.
+    func test_flatten_afterJSONRoundTrip_neverThrows_andPreservesDayLabels() throws {
+        let original = Mesocycle.mockMesocycle()
+        let data = try JSONEncoder.workoutProgram.encode(original)
+        let decoded = try JSONDecoder.workoutProgram.decode(Mesocycle.self, from: data)
+        let program = decoded.flatten()
+        XCTAssertFalse(program.split.isEmpty)
+        XCTAssertEqual(program.split.map(\.dayLabel),
+                       original.weeks.flatMap { $0.trainingDays.map(\.dayLabel) },
+                       "every original dayLabel preserved in order after decode→flatten")
+    }
 }

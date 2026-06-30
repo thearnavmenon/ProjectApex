@@ -7,6 +7,36 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-30 — New "queue" shape for programs (groundwork, nothing visible yet)
+
+**The problem (in plain words):**
+Now that the fake calendar is gone, a program is really just an ordered list of
+workout "slots" you work through one at a time — not a 12-week grid. But the code
+still stored it as the old week-by-week grid. Before the next steps (committing a
+fixed set of exercises per slot, and building each day's session without the AI),
+the app needs a clean "queue of slots" way to look at a program.
+
+**What I changed:**
+Added a new queue-shaped program model (an ordered list of day-slots + a pointer
+to the next one you haven't done) and a converter that turns the existing stored
+program into it. Crucially, the converter works on the *already-loaded* program
+object — it doesn't re-read the saved data a new way — so there's zero chance it
+trips over a real saved program and breaks it. Everyone's existing day labels are
+carried over exactly (those are the key the app uses to match your lift history).
+Nothing in the app reads this new shape yet — it's pure groundwork.
+
+**How it was checked:**
+Six new tests prove the converter keeps every slot in the right order, carries
+every day label across, points at the right "next" slot whether the program is
+fresh / partly done / finished, and survives a full save→load→convert round-trip
+without error (the guard against stranding a live program). Full build + the
+program-model test suite pass.
+
+**Status:** iOS-only, additive, no server deploy, no data migration — saved
+programs are untouched. (#562, part of #558 / ADR-0030.)
+
+---
+
 ## 2026-06-30 — Removed the fake "12-week calendar" from the program
 
 **The problem (in plain words):**
