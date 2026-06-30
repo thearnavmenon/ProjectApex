@@ -624,21 +624,9 @@ final class ProgramViewModel {
 
         viewState = .generatingSession(dayId: day.id)
 
-        // Read user profile (#318 U4: was reading dead keys nothing writes —
-        // "bodyweight_kg"/"user_age"/"training_age" — and hardcoding
-        // experienceLevel + goals; now shares the real onboarding answers).
-        let profile = GenerationUserProfile.assemble(
-            digestGoalStatement: await traineeModelService?.digest()?.goal.statement
-        )
-
-        let userProfile = MacroPlanUserProfile(
-            userId: userId.uuidString,
-            experienceLevel: profile.experienceLevel,
-            goals: profile.goals,
-            bodyweightKg: profile.bodyweightKg,
-            ageYears: profile.ageYears,
-            trainingAge: profile.trainingAge
-        )
+        // #564: the user profile that fed the from-scratch session LLM is no
+        // longer needed — the deterministic autoregulator instantiates from the
+        // frozen committed slot + the digest below.
 
         // ── Step 1: Fetch recent session metadata (last 7 days) for fatigue signals ──
         // Uses a lightweight SessionMetaRow instead of the full WorkoutSession, avoiding
@@ -792,39 +780,30 @@ final class ProgramViewModel {
             )
         }()
 
-        do {
-            let generatedDay = try await sessionPlanService.generateSession(
-                for: day,
-                week: week,
-                userId: userId,
-                gymProfile: gymProfile,
-                userProfile: userProfile,
-                recentSetLogs: recentSetLogs,
-                deepLiftHistory: deepLiftHistory,
-                weekSessionCount: weekSessionCount,
-                temporalContext: temporalContext
-            )
+        // #564 (ADR-0030): deterministic instantiation — pull the frozen committed
+        // slot (its exercises were committed by the block-commit call, #563) and
+        // apply digest deltas as arithmetic. No LLM / no network call (replaces the
+        // from-scratch SessionPlanService.generateSession on the live start path —
+        // the root of the "Coach is offline" mid-flow stalls, #555/#556). The
+        // trend is sourced from the digest hybrid verdict, not a local Epley dup.
+        let digest = await traineeModelService?.digest()
+        let generatedDay = SessionAutoregulator.instantiate(
+            day: day,
+            digest: digest,
+            requiresReturnOverride: temporalContext.requiresReturnPhaseOverride
+        )
 
-            // Mutate mesocycle in-place
-            if var mesocycle = currentMesocycle {
-                if let wIdx = mesocycle.weeks.firstIndex(where: { $0.id == week.id }),
-                   let dIdx = mesocycle.weeks[wIdx].trainingDays.firstIndex(where: { $0.id == day.id }) {
-                    mesocycle.weeks[wIdx].trainingDays[dIdx] = generatedDay
-                    mesocycle.saveToUserDefaults()
-                    currentMesocycle = mesocycle
-                    viewState = .loaded(mesocycle)
-                }
+        // Mutate mesocycle in-place.
+        if var mesocycle = currentMesocycle {
+            if let wIdx = mesocycle.weeks.firstIndex(where: { $0.id == week.id }),
+               let dIdx = mesocycle.weeks[wIdx].trainingDays.firstIndex(where: { $0.id == day.id }) {
+                mesocycle.weeks[wIdx].trainingDays[dIdx] = generatedDay
+                mesocycle.saveToUserDefaults()
+                currentMesocycle = mesocycle
+                viewState = .loaded(mesocycle)
             }
-            return generatedDay
-        } catch {
-            // Restore to loaded state; caller shows error
-            if let m = currentMesocycle {
-                viewState = .loaded(m)
-            } else {
-                viewState = .empty
-            }
-            return nil
         }
+        return generatedDay
     }
 
     // MARK: - FB-010: Mark Day Completed (manual log & live session)

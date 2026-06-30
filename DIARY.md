@@ -7,6 +7,39 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-30 — Your daily workout is now built instantly, no internet needed
+
+**The problem (in plain words):**
+Until now, every time you started a workout the app had to call the AI to build
+that day's session from scratch — which meant a network round-trip you had to wait
+on, and the exact thing behind the "Coach is offline" stalls (#555/#556): if the
+call hung, your workout was stuck. And it re-decided your exercises each session,
+so nothing was stable.
+
+**What I changed:**
+Wired in the deterministic session builder. When you start a day, the app now takes
+your *already-committed* exercises for that slot (chosen once per block, last
+change) and figures out the sets, reps-target, and how-hard (RIR) by simple math
+from your training data — instantly, with no AI call and no internet. The rules:
+if a lift's in a recovery (deload) phase it cuts the volume ~in half; if you're
+regressing or coming back from a break it backs off a bit and leaves more in the
+tank; if a muscle's under its weekly target it adds a set. Your exercises and their
+rep-ranges stay exactly as committed — only the sets/effort flex. The per-set weight
+suggestion still uses the AI when reachable (with the offline fallback from earlier).
+
+**How it was checked:**
+7 new tests prove the math: recovery week halves volume, regression/return back
+off + raise RIR, an under-target muscle gets an extra set, "nothing special" gives
+the plain target, the numbers stay in sane bounds, and a built day keeps the frozen
+exercises + rep-ranges. Full build + test suite green.
+
+**Heads-up:** this changes how the live workout screen builds your session, so it
+wants a real on-device check (start a workout, pause/resume, force-quit and reopen).
+The old from-scratch builder is now unused and will be deleted in a follow-up
+cleanup. (#564, completes the program-generation spine — #558 / ADR-0030.)
+
+---
+
 ## 2026-06-30 — The coach now commits your exercises once per block (groundwork)
 
 **The problem (in plain words):**
