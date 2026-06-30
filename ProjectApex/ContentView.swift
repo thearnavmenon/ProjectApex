@@ -425,7 +425,7 @@ struct ContentView: View {
                             Task { @MainActor in
                                 await programViewModel?.loadProgram()
                                 selectedTab = 0
-                                programViewModel?.scrollToCurrentWeekTrigger += 1
+                                // #561: auto-scroll-to-current-week removed (calendar fiction).
                             }
                         },
                         onSkipSession: { runDayId in

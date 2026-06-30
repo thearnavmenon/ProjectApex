@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-06-30 — Removed the fake "12-week calendar" from the program
+
+**The problem (in plain words):**
+The app pretended your program ran on a fixed 12-week calendar with named blocks
+(weeks 1–4 "accumulation", 5–8 "intensification", 9–11 "peaking", week 12
+"deload") and even guessed which weekdays you'd train (Mon/Wed/Thu/Sat). None of
+that was real — the coach actually decides intensity per lift based on how that
+lift is progressing, not on a calendar. The fake calendar showed up in three
+places: the data the coach was handed, the coach's instructions, and the Program
+tab ("WEEK 3 / 12" with a phase progress bar). It was confusing scaffolding that
+the next round of work needs gone before building on top.
+
+**What I changed:**
+Stripped the calendar fiction everywhere: no more hardcoded week→phase table, no
+more invented weekday slots (days are just numbered slots now), no fake "where
+this week sits" volume ramp, and the coach's instructions no longer mention a
+global phase or 12-week framework — each lift uses its own phase, which is the
+only real clock. On the Program tab the "WEEK X / 12" hero and the
+ACCUM→INTENS→PEAK→DL bar are replaced with a plain "PROGRAM" title (I kept the
+honest "X / Y sessions, Z% complete" progress), and the date-driven
+"current week" highlight + auto-scroll are gone. The per-lift coaching engine and
+all saved programs are untouched — this only removes a display/labeling layer.
+
+**How it was checked:**
+App + tests build clean. Searched the whole codebase to confirm none of the
+removed pieces are referenced anywhere. Updated the tests that checked the old
+calendar fields (and added guards that the removed fields no longer ship). The
+program still generates and the existing day-labels are preserved.
+
+**Status:** iOS-only; no server deploy. First piece of the deeper
+program-generation rework. (#561, part of #558 / ADR-0030.)
+
+---
+
 ## 2026-06-29 — The workout no longer stops when the coach can't be reached
 
 **The problem (in plain words):**

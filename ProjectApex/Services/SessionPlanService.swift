@@ -65,11 +65,6 @@ nonisolated struct TemporalContext: Codable, Sendable {
     /// Number of sessions explicitly skipped by the user in the last 30 days.
     let skippedSessionCountLast30Days: Int
 
-    /// The programme's global phase at the time of this session (MesocyclePhase raw value).
-    /// Nil when not yet available (pre-migration or test contexts).
-    let globalProgrammePhase: String?
-    /// The programme's global week number (1-based).
-    let globalProgrammeWeek: Int?
     /// True when daysSinceLastSession >= 28 — signals a significant return-to-training gap.
     /// When true the LLM ignores the pattern phase label and generates a reduced-volume
     /// accumulation baseline session instead.
@@ -79,23 +74,18 @@ nonisolated struct TemporalContext: Codable, Sendable {
         case daysSinceLastSession             = "days_since_last_session"
         case daysSinceLastTrainedByPattern    = "days_since_last_trained_by_pattern"
         case skippedSessionCountLast30Days    = "skipped_session_count_last_30_days"
-        case globalProgrammePhase             = "global_programme_phase"
-        case globalProgrammeWeek              = "global_programme_week"
         case requiresReturnPhaseOverride      = "requires_return_phase_override"
     }
 
-    /// Custom encoder:
-    /// • `daysSinceLastSession` encodes as JSON `null` (not absent) when nil so the LLM
-    ///   can distinguish "first-ever session" from "field missing from payload".
-    /// • `globalProgrammePhase` and `globalProgrammeWeek` also encode as null when nil
-    ///   so the LLM sees them explicitly rather than treating absence as an unknown.
+    /// Custom encoder: `daysSinceLastSession` encodes as JSON `null` (not absent)
+    /// when nil so the LLM can distinguish "first-ever session" from "field
+    /// missing from payload". (#561: the global calendar phase/week fields are
+    /// gone — the per-pattern engine is the sole clock.)
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(daysSinceLastSession, forKey: .daysSinceLastSession)
         try container.encode(daysSinceLastTrainedByPattern, forKey: .daysSinceLastTrainedByPattern)
         try container.encode(skippedSessionCountLast30Days, forKey: .skippedSessionCountLast30Days)
-        try container.encode(globalProgrammePhase, forKey: .globalProgrammePhase)
-        try container.encode(globalProgrammeWeek, forKey: .globalProgrammeWeek)
         try container.encode(requiresReturnPhaseOverride, forKey: .requiresReturnPhaseOverride)
     }
 
@@ -106,8 +96,6 @@ nonisolated struct TemporalContext: Codable, Sendable {
         daysSinceLastSession          = try c.decodeIfPresent(Int.self, forKey: .daysSinceLastSession)
         daysSinceLastTrainedByPattern = try c.decode([String: Int].self, forKey: .daysSinceLastTrainedByPattern)
         skippedSessionCountLast30Days = try c.decode(Int.self, forKey: .skippedSessionCountLast30Days)
-        globalProgrammePhase          = try c.decodeIfPresent(String.self, forKey: .globalProgrammePhase)
-        globalProgrammeWeek           = try c.decodeIfPresent(Int.self, forKey: .globalProgrammeWeek)
         requiresReturnPhaseOverride   = try c.decodeIfPresent(Bool.self, forKey: .requiresReturnPhaseOverride) ?? false
     }
 
@@ -116,15 +104,11 @@ nonisolated struct TemporalContext: Codable, Sendable {
         daysSinceLastSession: Int?,
         daysSinceLastTrainedByPattern: [String: Int],
         skippedSessionCountLast30Days: Int,
-        globalProgrammePhase: String? = nil,
-        globalProgrammeWeek: Int? = nil,
         requiresReturnPhaseOverride: Bool = false
     ) {
         self.daysSinceLastSession           = daysSinceLastSession
         self.daysSinceLastTrainedByPattern  = daysSinceLastTrainedByPattern
         self.skippedSessionCountLast30Days  = skippedSessionCountLast30Days
-        self.globalProgrammePhase           = globalProgrammePhase
-        self.globalProgrammeWeek            = globalProgrammeWeek
         self.requiresReturnPhaseOverride    = requiresReturnPhaseOverride
     }
 }
@@ -391,12 +375,12 @@ actor SessionPlanService {
             WeekIntent(
                 weekLabel: label,
                 dayFocus: [skeletonDay.dayLabel],
-                volumeLandmark: weekVolumeLandmark(for: week.phase, weekNumber: week.weekNumber)
+                volumeLandmark: 0.0   // #561: calendar volume ramp removed; session volume now comes from the digest
             )
         } ?? WeekIntent(
             weekLabel: "\(week.phase.displayTitle) Week \(week.weekNumber)",
             dayFocus: [skeletonDay.dayLabel],
-            volumeLandmark: weekVolumeLandmark(for: week.phase, weekNumber: week.weekNumber)
+            volumeLandmark: 0.0   // #561: calendar volume ramp removed; session volume now comes from the digest
         )
 
         // Plateau/decline + volume-deficit signals come from the digest
@@ -711,16 +695,6 @@ actor SessionPlanService {
         if newer > older * 1.03 { return "improving" }
         if newer < older * 0.97 { return "declining" }
         return "stalling"
-    }
-
-    /// Rough volume landmark for prompt context (0.0–1.0).
-    private func weekVolumeLandmark(for phase: MesocyclePhase, weekNumber: Int) -> Double {
-        switch phase {
-        case .accumulation:    return 0.4 + Double(weekNumber - 1) * 0.075
-        case .intensification: return 0.7 + Double(weekNumber - 5) * 0.05
-        case .peaking:         return 0.85 + Double(weekNumber - 9) * 0.05
-        case .deload:          return 0.3
-        }
     }
 
     // MARK: - Private: Helpers

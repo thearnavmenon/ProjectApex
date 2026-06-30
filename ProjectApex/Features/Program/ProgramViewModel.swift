@@ -123,8 +123,6 @@ final class ProgramViewModel {
     /// Internal (not private) so test targets can inject a mesocycle directly
     /// without going through the UserDefaults fast-path in loadProgram().
     var currentMesocycle: Mesocycle?
-    /// Incremented by ContentView to tell ProgramOverviewView to scroll to the current week.
-    var scrollToCurrentWeekTrigger: Int = 0
 
     /// #439 (Q3 = refuse-and-prompt): set true when `regenerateProgram` was asked to
     /// run while a live/paused session sentinel (`PausedSessionState`) still exists.
@@ -789,8 +787,7 @@ final class ProgramViewModel {
                 daysSinceLastSession: daysSinceLastSession,
                 daysSinceLastTrainedByPattern: daysSinceByPattern,
                 skippedSessionCountLast30Days: skippedCount,
-                globalProgrammePhase: week.phase.rawValue,
-                globalProgrammeWeek: week.weekNumber,
+                // #561: no global calendar phase/week — the per-pattern engine is the sole clock.
                 requiresReturnPhaseOverride: (daysSinceLastSession ?? 0) >= 28
             )
         }()
