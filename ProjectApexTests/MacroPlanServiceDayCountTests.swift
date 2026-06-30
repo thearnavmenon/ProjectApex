@@ -30,10 +30,23 @@ private final class CapturingMockProvider: LLMProvider, @unchecked Sendable {
     }
 }
 
+/// Returns a fixed response (for asserting on the committed-split decode + rail).
+private final class StaticMockProvider: LLMProvider, @unchecked Sendable {
+    private(set) var lastUserPayload: String = ""
+    private let response: String
+    init(response: String) { self.response = response }
+    func complete(systemPrompt: String, userPayload: String) async throws -> String {
+        lastUserPayload = userPayload
+        return response
+    }
+}
+
 // MARK: - JSON factory
 
-/// Builds a minimal valid macro_plan skeleton with exactly `daysPerWeek`
-/// entries in every day_focus array and sensible structural labels.
+/// Builds a minimal valid block-commit response (#563) with exactly `daysPerWeek`
+/// committed slots, each with a couple of owned-equipment exercises + frozen
+/// rep-ranges. The day-count threading tests only assert on the captured REQUEST,
+/// so the response just needs to decode into the program.split shape.
 private func makeMockSkeletonJSON(daysPerWeek: Int) -> String {
     let dayLabels: [Int: [String]] = [
         3: ["Full Body A", "Full Body B", "Full Body C"],
@@ -42,36 +55,26 @@ private func makeMockSkeletonJSON(daysPerWeek: Int) -> String {
         6: ["Push A", "Pull A", "Legs A", "Push B", "Pull B", "Legs B"]
     ]
     let labels = dayLabels[daysPerWeek] ?? Array(repeating: "Training Day", count: daysPerWeek)
-    let dayFocusJSON = labels.map { "\"\($0)\"" }.joined(separator: ", ")
 
-    var weeks: [String] = []
-    let phaseMap: [(phase: String, range: ClosedRange<Int>)] = [
-        ("accumulation",    1...4),
-        ("intensification", 5...8),
-        ("peaking",         9...11),
-        ("deload",          12...12)
-    ]
-    for weekNum in 1...12 {
-        let phase = phaseMap.first { $0.range.contains(weekNum) }?.phase ?? "accumulation"
-        let landmark = 0.40 + Double(weekNum - 1) * 0.05
-        weeks.append("""
+    let slots = labels.map { label in
+        """
           {
-            "week_number": \(weekNum),
-            "phase": "\(phase)",
-            "week_label": "Week \(weekNum) Block",
-            "day_focus": [\(dayFocusJSON)],
-            "volume_landmark": \(String(format: "%.2f", min(landmark, 0.95)))
+            "day_label": "\(label)",
+            "exercises": [
+              { "exercise_id": "barbell_bench_press", "name": "Barbell Bench Press", "primary_muscle": "chest", "equipment_required": "barbell", "rep_min": 5, "rep_max": 8 },
+              { "exercise_id": "barbell_back_squat", "name": "Barbell Back Squat", "primary_muscle": "quads", "equipment_required": "barbell", "rep_min": 6, "rep_max": 10 }
+            ]
           }
-        """)
+        """
     }
 
     return """
     {
-      "macro_plan": {
-        "periodization_model": "linear_periodization",
+      "program": {
+        "periodization_model": "undulating",
         "training_days_per_week": \(daysPerWeek),
-        "weeks": [
-    \(weeks.joined(separator: ",\n"))
+        "split": [
+    \(slots.joined(separator: ",\n"))
         ]
       }
     }
@@ -408,5 +411,65 @@ struct MacroPlanServiceHistoricalLabelsTests {
         let root = try parseMacroPlanPayload(provider.lastUserPayload)
         #expect(root["history"] == nil,
                 "history must be omitted (not null) when the user has no established labels")
+    }
+}
+
+// MARK: - #563 block-commit
+
+@Suite("MacroPlanService — block-commit (#563)")
+struct MacroPlanBlockCommitTests {
+
+    @Test("#563: the user's limitations are sent in the block-commit request payload")
+    func blockCommit_sendsLimitations() async throws {
+        let provider = CapturingMockProvider(daysPerWeek: 4)
+        let service = MacroPlanService(provider: provider)
+        _ = try await service.generateSkeleton(
+            userId: UUID(),
+            gymProfile: makeGymProfile(),
+            trainingDaysPerWeek: 4,
+            limitations: ["left knee pain"]
+        )
+        #expect(provider.lastUserPayload.contains("left knee pain"),
+                "request must carry limitations for hard-exclusion")
+        #expect(provider.lastUserPayload.contains("limitations"))
+    }
+
+    @Test("#563: committed exercises flow into the mesocycle with frozen per-exercise rep-ranges, repeated across the block")
+    func blockCommit_committedExercisesIntoMesocycle() async throws {
+        let provider = CapturingMockProvider(daysPerWeek: 4)
+        let service = MacroPlanService(provider: provider)
+        let userId = UUID()
+        let skeleton = try await service.generateSkeleton(
+            userId: userId, gymProfile: makeGymProfile(), trainingDaysPerWeek: 4
+        )
+        #expect(skeleton.committedSlots.count == 4, "one committed slot per distinct day")
+
+        let meso = MacroPlanService.buildPendingMesocycle(from: skeleton, userId: userId)
+        let firstDay = meso.weeks[0].trainingDays[0]
+        #expect(!firstDay.exercises.isEmpty, "committed exercises fill the day")
+        #expect(firstDay.exercises.first?.repRange == RepRange(min: 5, max: 8),
+                "rep-range is frozen per exercise from the block-commit")
+        // Frozen identity: the same committed exercises repeat across the block's weeks.
+        #expect(meso.weeks[0].trainingDays[0].exercises.map(\.exerciseId)
+            == meso.weeks[5].trainingDays[0].exercises.map(\.exerciseId))
+    }
+
+    @Test("#563: equipment safety rail drops a committed exercise the user can't equip")
+    func blockCommit_equipmentRailDropsUnowned() async throws {
+        // Commit a barbell lift (owned) + a cable lift (the test gym has no cable).
+        let json = """
+        { "program": { "periodization_model": "undulating", "training_days_per_week": 1,
+          "split": [ { "day_label": "Full_Body", "exercises": [
+            { "exercise_id": "barbell_bench_press", "name": "Bench", "primary_muscle": "chest", "equipment_required": "barbell", "rep_min": 5, "rep_max": 8 },
+            { "exercise_id": "cable_tricep_pushdown", "name": "Pushdown", "primary_muscle": "triceps", "equipment_required": "cable_machine", "rep_min": 12, "rep_max": 15 }
+          ] } ] } }
+        """
+        let service = MacroPlanService(provider: StaticMockProvider(response: json))
+        let skeleton = try await service.generateSkeleton(
+            userId: UUID(), gymProfile: makeGymProfile(), trainingDaysPerWeek: 1
+        )
+        let ids = skeleton.committedSlots.first?.exercises.map(\.exerciseId) ?? []
+        #expect(ids.contains("barbell_bench_press"), "owned-equipment exercise kept")
+        #expect(!ids.contains("cable_tricep_pushdown"), "unowned cable exercise dropped by the rail")
     }
 }

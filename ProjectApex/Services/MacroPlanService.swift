@@ -52,12 +52,28 @@ nonisolated struct MacroPlanRequest: Codable, Sendable {
     /// it instead of inventing a fresh one (#172). Optional → the key is omitted
     /// (encodeIfPresent) for a user with no training history (first program).
     let history: MacroPlanHistory?
+    /// #563: active injuries / limitations — a HARD exclusion for exercise
+    /// selection. Omitted from the payload when empty.
+    let limitations: [String]?
 
     enum CodingKeys: String, CodingKey {
         case userProfile  = "user_profile"
         case gymProfile   = "gym_profile"
         case constraints
         case history
+        case limitations
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(userProfile, forKey: .userProfile)
+        try c.encode(gymProfile, forKey: .gymProfile)
+        try c.encode(constraints, forKey: .constraints)
+        try c.encodeIfPresent(history, forKey: .history)
+        // Omit the key entirely when there are no limitations.
+        if let limitations, !limitations.isEmpty {
+            try c.encode(limitations, forKey: .limitations)
+        }
     }
 }
 
@@ -115,42 +131,54 @@ nonisolated struct MacroPlanConstraints: Codable, Sendable {
     static let `default` = MacroPlanConstraints(trainingDaysPerWeek: 4, totalWeeks: 12)
 }
 
-// MARK: - Response DTOs
+// MARK: - Response DTOs (#563: block-commit committed split)
 
-/// One week in the skeleton response from the LLM.
-nonisolated struct SkeletonWeek: Codable, Sendable {
-    let weekNumber: Int
-    let phase: MesocyclePhase
-    let weekLabel: String
-    let dayFocus: [String]
-    let volumeLandmark: Double
+/// One committed exercise in a slot, as returned by the block-commit LLM call.
+/// Identity + frozen rep-range only — sets/RIR/weight are deterministic (#564).
+nonisolated struct CommittedExerciseDTO: Codable, Sendable {
+    let exerciseId: String
+    let name: String
+    let primaryMuscle: String?
+    let equipmentRequired: String?
+    let repMin: Int
+    let repMax: Int
 
     enum CodingKeys: String, CodingKey {
-        case weekNumber     = "week_number"
-        case phase
-        case weekLabel      = "week_label"
-        case dayFocus       = "day_focus"
-        case volumeLandmark = "volume_landmark"
+        case exerciseId        = "exercise_id"
+        case name
+        case primaryMuscle     = "primary_muscle"
+        case equipmentRequired = "equipment_required"
+        case repMin            = "rep_min"
+        case repMax            = "rep_max"
     }
 }
 
-nonisolated struct MacroPlanSkeletonWrapper: Codable, Sendable {
-    let macroPlan: MacroPlanSkeletonPayload
+/// One committed day-slot: a frozen ordered exercise list for the block.
+nonisolated struct CommittedSlotDTO: Codable, Sendable {
+    let dayLabel: String
+    let exercises: [CommittedExerciseDTO]
 
     enum CodingKeys: String, CodingKey {
-        case macroPlan = "macro_plan"
+        case dayLabel  = "day_label"
+        case exercises
     }
 }
 
-nonisolated struct MacroPlanSkeletonPayload: Codable, Sendable {
+nonisolated struct MacroPlanProgramWrapper: Codable, Sendable {
+    let program: MacroPlanProgramPayload
+}
+
+nonisolated struct MacroPlanProgramPayload: Codable, Sendable {
     let periodizationModel: String
     let trainingDaysPerWeek: Int
-    let weeks: [SkeletonWeek]
+    /// One entry per DISTINCT day-slot (phases gone; the split is identical
+    /// across weeks, so the LLM commits each slot once — #561/#562).
+    let split: [CommittedSlotDTO]
 
     enum CodingKeys: String, CodingKey {
         case periodizationModel  = "periodization_model"
         case trainingDaysPerWeek = "training_days_per_week"
-        case weeks
+        case split
     }
 }
 
@@ -182,12 +210,17 @@ actor MacroPlanService {
         ageYears: Int? = nil,
         trainingAge: String? = nil,
         trainingDaysPerWeek: Int = 4,
-        historicalDayLabels: [String] = []
+        historicalDayLabels: [String] = [],
+        limitations: [String] = []
     ) async throws -> MesocycleSkeleton {
         isGenerating = true
         defer { isGenerating = false }
 
+        // #563: the block-commit call selects exercises, so the prompt must carry
+        // the equipment-filtered canonical exercise library (the candidate set).
+        let ownedKeys = Set(gymProfile.equipmentRefs.map { $0.key })
         let systemPrompt = try Self.loadSystemPrompt()
+            + ExerciseLibrary.promptReferenceBlock(ownedEquipmentKeys: ownedKeys)
 
         #if DEBUG
         print("[MacroPlanService] Generating macro skeleton — training_days_per_week: \(trainingDaysPerWeek), historical_day_labels: \(historicalDayLabels)")
@@ -211,7 +244,8 @@ actor MacroPlanService {
             // (#172); omit the block entirely for a user with no history.
             history: historicalDayLabels.isEmpty
                 ? nil
-                : MacroPlanHistory(recentDayLabels: historicalDayLabels)
+                : MacroPlanHistory(recentDayLabels: historicalDayLabels),
+            limitations: limitations
         )
 
         let encoder = JSONEncoder()
@@ -222,20 +256,20 @@ actor MacroPlanService {
             throw MacroPlanError.encodingFailed("Failed to encode MacroPlanRequest.")
         }
 
-        let payload = try await callAndDecodeSkeleton(
+        let payload = try await callAndDecodeProgram(
             systemPrompt: systemPrompt,
             userPayload: requestJSON
         )
 
-        return buildSkeleton(from: payload, userId: userId)
+        return buildSkeleton(from: payload, userId: userId, ownedKeys: ownedKeys)
     }
 
     // MARK: - Private: LLM call
 
-    private func callAndDecodeSkeleton(
+    private func callAndDecodeProgram(
         systemPrompt: String,
         userPayload: String
-    ) async throws -> MacroPlanSkeletonPayload {
+    ) async throws -> MacroPlanProgramPayload {
         let rawResponse: String
         do {
             rawResponse = try await provider.complete(
@@ -254,30 +288,64 @@ actor MacroPlanService {
         }
 
         do {
-            let wrapper = try JSONDecoder().decode(MacroPlanSkeletonWrapper.self, from: data)
-            return wrapper.macroPlan
+            let wrapper = try JSONDecoder().decode(MacroPlanProgramWrapper.self, from: data)
+            return wrapper.program
         } catch let err {
             #if DEBUG
             print("[MacroPlanService] Decode failure. Raw response:\n\(rawResponse)")
             #endif
             throw MacroPlanError.decodingFailed(
-                "Skeleton decode failed: \(err.localizedDescription). Raw: \(String(extracted.prefix(400)))"
+                "Block-commit decode failed: \(err.localizedDescription). Raw: \(String(extracted.prefix(400)))"
             )
         }
     }
 
-    // MARK: - Private: Build MesocycleSkeleton
+    // MARK: - Private: Build MesocycleSkeleton (#563: committed split)
 
+    /// Map the block-commit response into a MesocycleSkeleton: 12 weeks of the
+    /// same slot structure (no calendar phase arc — #561) plus the committed
+    /// per-slot exercise pools (frozen identity + rep-range). The equipment
+    /// safety rail drops any exercise whose required equipment isn't owned (the
+    /// candidate library was pre-filtered, but this is the belt-and-braces rail).
     private func buildSkeleton(
-        from payload: MacroPlanSkeletonPayload,
-        userId: UUID
+        from payload: MacroPlanProgramPayload,
+        userId: UUID,
+        ownedKeys: Set<String>
     ) -> MesocycleSkeleton {
-        let weekIntents = payload.weeks.map { sw in
-            WeekIntent(
-                weekLabel: sw.weekLabel,
-                dayFocus: sw.dayFocus,
-                volumeLandmark: sw.volumeLandmark
-            )
+        let committedSlots: [CommittedSlot] = payload.split.map { slotDTO in
+            let exercises: [PlannedExercise] = slotDTO.exercises.compactMap { dto in
+                let equipment = EquipmentType(typeKey: dto.equipmentRequired ?? "")
+                let ex = PlannedExercise(
+                    id: UUID(),
+                    exerciseId: dto.exerciseId,
+                    name: dto.name,
+                    primaryMuscle: ExerciseLibrary.primaryMuscle(for: dto.exerciseId)?.rawValue
+                        ?? (dto.primaryMuscle ?? "unknown"),
+                    synergists: [],
+                    equipmentRequired: equipment,
+                    sets: 3,                                  // #564 (autoregulator) overrides
+                    repRange: RepRange(min: dto.repMin, max: dto.repMax),  // FROZEN per slot
+                    tempo: "",
+                    restSeconds: 120,                         // #564 overrides
+                    rirTarget: 2,                             // #564 overrides
+                    coachingCues: []
+                )
+                // Equipment safety rail: bodyweight always passes; otherwise the
+                // required equipment must be owned (mirrors SessionPlanService).
+                let bodyweight = (ExerciseLibrary.lookup(ex.exerciseId)?.bodyweightOnly ?? false)
+                    || equipment.isNaturallyBodyweightOnly
+                return (bodyweight || ownedKeys.contains(equipment.typeKey)) ? ex : nil
+            }
+            return CommittedSlot(dayLabel: Self.normalizeDayLabel(slotDTO.dayLabel), exercises: exercises)
+        }
+
+        // weekIntents carry the RAW slot labels (buildPendingMesocycle normalizes
+        // them, and that normalized label matches each CommittedSlot.dayLabel for
+        // the committed-exercise lookup). Keeping them raw preserves the day-focus
+        // strings the rest of the pipeline + tests expect.
+        let rawDayLabels = payload.split.map(\.dayLabel)
+        let weekIntents = (1...12).map { _ in
+            WeekIntent(weekLabel: "", dayFocus: rawDayLabels, volumeLandmark: 0.0)
         }
 
         return MesocycleSkeleton(
@@ -287,7 +355,8 @@ actor MacroPlanService {
             isActive: true,
             trainingDaysPerWeek: payload.trainingDaysPerWeek,
             periodizationModel: payload.periodizationModel,
-            weekIntents: weekIntents
+            weekIntents: weekIntents,
+            committedSlots: committedSlots
         )
     }
 
@@ -312,14 +381,19 @@ actor MacroPlanService {
         for (index, intent) in skeleton.weekIntents.enumerated() {
             let weekNumber = index + 1
 
-            // Build placeholder training days from day-focus strings.
+            // Build training days from day-focus labels, filling each with its
+            // committed exercise pool (#563) matched by dayLabel. Status stays
+            // .pending — the committed pool is the frozen identity; the
+            // deterministic instantiator (#564) reads it at session start. Empty
+            // committedSlots (legacy/skeleton-only callers) → empty days as before.
             let days: [TrainingDay] = intent.dayFocus.enumerated().map { dayIndex, focus in
                 let label = normalizeDayLabel(focus)
+                let committed = skeleton.committedSlots.first { $0.dayLabel == label }?.exercises ?? []
                 return TrainingDay(
                     id: UUID(),
                     dayOfWeek: dayIndex + 1,   // sequential slot position, not an ISO weekday
                     dayLabel: label,
-                    exercises: [],
+                    exercises: committed,
                     sessionNotes: nil,
                     status: .pending
                 )

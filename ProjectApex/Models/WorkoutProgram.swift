@@ -288,8 +288,21 @@ nonisolated struct WeekIntent: Codable, Sendable {
     }
 }
 
+/// #563: a committed day-slot — the frozen exercise pool for one distinct slot,
+/// chosen once at block commit and repeated across the block's weeks.
+nonisolated struct CommittedSlot: Codable, Sendable {
+    let dayLabel: String
+    let exercises: [PlannedExercise]
+
+    enum CodingKeys: String, CodingKey {
+        case dayLabel  = "day_label"
+        case exercises
+    }
+}
+
 /// A 12-week macro skeleton produced by MacroPlanService.
-/// Contains phase names, weekly intent, and day-focus strings — no exercises or weights.
+/// Carries weekly intent + day-focus labels, and (#563) the committed per-slot
+/// exercise pools (frozen identity + rep-range) the block-commit call returns.
 nonisolated struct MesocycleSkeleton: Codable, Sendable {
     let id: UUID
     let userId: UUID
@@ -299,6 +312,9 @@ nonisolated struct MesocycleSkeleton: Codable, Sendable {
     let periodizationModel: String
     /// Ordered list of 12 week intents (index 0 = week 1).
     let weekIntents: [WeekIntent]
+    /// #563: committed exercise pools, one per distinct day-slot (keyed by dayLabel).
+    /// Empty for legacy callers that only built the skeleton structure.
+    var committedSlots: [CommittedSlot] = []
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -308,6 +324,7 @@ nonisolated struct MesocycleSkeleton: Codable, Sendable {
         case trainingDaysPerWeek = "training_days_per_week"
         case periodizationModel  = "periodization_model"
         case weekIntents         = "week_intents"
+        case committedSlots      = "committed_slots"
     }
 }
 
