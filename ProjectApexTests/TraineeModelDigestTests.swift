@@ -837,19 +837,21 @@ final class TraineeModelDigestTests: XCTestCase {
                       "SessionPlan must surface ADR-0005's cadence-relative semantic (current absence > 2× typical cadence)")
     }
 
-    func test_sessionPlanPrompt_b3_teachesPatternOverGlobalDivergence_whenPatternPhaseLagsGlobalPhase() throws {
+    func test_sessionPlanPrompt_561_teachesPerPatternPhaseAsSoleClock_noGlobalPhase() throws {
         let prompt = try loadSessionPlanPrompt()
 
-        // Earlier-than-global and later-than-global divergence rules — preserved
-        // from the legacy PER-PATTERN PHASE TRACKING block, restated against the
-        // new digest contract.
-        XCTAssertTrue(prompt.contains("EARLIER phase than the global"),
-                      "SessionPlan must teach that a pattern in an EARLIER phase than global is undertrained")
-        XCTAssertTrue(prompt.contains("LATER phase than the global"),
-                      "SessionPlan must teach that a pattern in a LATER phase than global is ahead")
-        // Session-notes divergence threshold — keep noisy notes off when divergence is small.
-        XCTAssertTrue(prompt.contains("2 or more phases behind"),
-                      "SessionPlan must include the 2-phase-divergence session_notes threshold")
+        // #561 / ADR-0030: the per-pattern phase is the ONLY periodization clock —
+        // there is no global programme phase or calendar week. Patterns sit in
+        // different phases independently (the old earlier/later-than-global
+        // comparison + 2-phase divergence threshold are removed).
+        XCTAssertTrue(prompt.contains("ONLY periodization clock"),
+                      "SessionPlan must teach the per-pattern phase is the sole clock (#561)")
+        XCTAssertTrue(prompt.contains("apply each pattern's own phase parameters independently"),
+                      "SessionPlan must teach independent per-pattern phase application (#561)")
+        XCTAssertFalse(prompt.contains("EARLIER phase than the global"),
+                       "SessionPlan must NOT compare a pattern phase to a global phase (#561)")
+        XCTAssertFalse(prompt.contains("2 or more phases behind"),
+                       "SessionPlan must NOT carry the old global-divergence session-notes threshold (#561)")
     }
 
     func test_sessionPlanPrompt_b3_versionHeaderRecordsB3CumulativeChange() throws {
@@ -1566,9 +1568,7 @@ final class TraineeModelDigestTests: XCTestCase {
         let ctx = TemporalContext(
             daysSinceLastSession: 4,
             daysSinceLastTrainedByPattern: ["squat": 7],
-            skippedSessionCountLast30Days: 0,
-            globalProgrammePhase: "intensification",
-            globalProgrammeWeek: 5
+            skippedSessionCountLast30Days: 0
         )
         let data = try JSONEncoder().encode(ctx)
         let json = String(data: data, encoding: .utf8) ?? ""

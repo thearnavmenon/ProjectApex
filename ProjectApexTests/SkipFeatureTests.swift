@@ -11,7 +11,7 @@
 //   5. nextIncompleteDay — skips both .completed and .skipped days
 //   6. markDaySkipped — sets .skipped + non-nil skippedAt, persists via UserDefaults fast path
 //   7. Golden prompt — SystemPrompt_SessionPlan.txt contains all temporal_context field names
-//   8. TemporalContext Phase 2 fields — globalProgrammePhase/Week + patternPhases round-trip
+//   8. TemporalContext round-trip — remaining temporal fields; no global calendar phase/week (#561)
 
 import Testing
 import Foundation
@@ -390,24 +390,27 @@ struct SkipFeatureTests {
         #expect(content.contains("current_phase"),            "Missing current_phase key in pattern phase schema")
     }
 
-    // MARK: 8. TemporalContext Phase 2 fields
+    // MARK: 8. TemporalContext round-trip (#561: global calendar phase/week removed)
 
-    @Test("TemporalContext with Phase 2 fields survives JSON round-trip")
-    func temporalContextPhase2FieldsRoundTrip() throws {
+    @Test("TemporalContext survives JSON round-trip; carries no global calendar phase/week (#561)")
+    func temporalContextRoundTrip_noGlobalCalendarFields() throws {
         let ctx = TemporalContext(
             daysSinceLastSession: 4,
             daysSinceLastTrainedByPattern: ["horizontal_push": 4, "squat": 7],
             skippedSessionCountLast30Days: 0,
-            globalProgrammePhase: "intensification",
-            globalProgrammeWeek: 5
+            requiresReturnPhaseOverride: true
         )
         let data = try JSONEncoder().encode(ctx)
         let decoded = try JSONDecoder().decode(TemporalContext.self, from: data)
 
-        #expect(decoded.globalProgrammePhase == "intensification")
-        #expect(decoded.globalProgrammeWeek == 5)
+        #expect(decoded.daysSinceLastSession == 4)
         #expect(decoded.daysSinceLastTrainedByPattern["horizontal_push"] == 4)
         #expect(decoded.daysSinceLastTrainedByPattern["squat"] == 7)
+        #expect(decoded.requiresReturnPhaseOverride == true)
+        // #561: the killed global calendar phase/week keys must be gone from the wire.
+        let json = String(data: data, encoding: .utf8) ?? ""
+        #expect(!json.contains("global_programme_phase"))
+        #expect(!json.contains("global_programme_week"))
     }
 
     // MARK: 9. resetDayToPending — regenerate-session eligibility (#318 U4)

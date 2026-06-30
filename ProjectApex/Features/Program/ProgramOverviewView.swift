@@ -289,77 +289,46 @@ struct ProgramOverviewView: View {
     // MARK: - Loaded: 12-Week Grid
 
     private func loadedView(mesocycle: Mesocycle) -> some View {
-        let currentWeekIndex = viewModel.currentWeekIndex(in: mesocycle)
-        return ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    // NEXT UP hero — the calendar's primary action. Renders only when
-                    // there is a next incomplete day; an in-progress session turns it
-                    // into a Resume card (#507).
-                    nextUpHero(mesocycle: mesocycle)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
+        // #561 (Decision 4): the date-driven current-week highlight + auto-scroll
+        // were calendar fiction — removed. The program is a plain ordered list of
+        // day slots; no week is "current".
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                // NEXT UP hero — the program's primary action. Renders only when
+                // there is a next incomplete day; an in-progress session turns it
+                // into a Resume card (#507).
+                nextUpHero(mesocycle: mesocycle)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
 
-                    // Phase progress bar header
-                    phaseProgressBar(mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
-                        .padding(.horizontal, 16)
-                        .padding(.top, hasNextUp(in: mesocycle) ? 0 : 16)
-                        .id("header")
+                // #561 (Decision 3): plain "PROGRAM" header (+ honest session
+                // progress) replaces the fictional WEEK X/12 + phase-arc hero.
+                programHeader(mesocycle: mesocycle)
+                    .padding(.horizontal, 16)
+                    .padding(.top, hasNextUp(in: mesocycle) ? 0 : 16)
 
-                    // Per-pattern phase tracking — collapsed by default
-                    patternProgressSection
+                // Per-pattern phase tracking — collapsed by default
+                patternProgressSection
 
-                    // Phase ranges (0-based week indices), matching phaseProgressBar above.
-                    let phaseRanges: [(phase: MesocyclePhase, range: ClosedRange<Int>)] = [
-                        (.accumulation,    0...3),
-                        (.intensification, 4...7),
-                        (.peaking,         8...10),
-                        (.deload,          11...11)
-                    ]
-
-                    // Week rows
-                    ForEach(Array(mesocycle.weeks.enumerated()), id: \.element.id) { index, week in
-                        // Compute phase-relative week position for the row label
-                        let phaseInfo = phaseRanges.first { $0.range.contains(index) }
-                        let phaseStart     = phaseInfo?.range.lowerBound ?? 0
-                        let phaseEnd       = phaseInfo?.range.upperBound ?? 0
-                        let phaseWeekNum   = index - phaseStart + 1
-                        let phaseWeekTot   = phaseEnd - phaseStart + 1
-
-                        WeekRowView(
-                            week: week,
-                            isCurrent: index == currentWeekIndex,
-                            weekIndex: index,
-                            mesocycleCreatedAt: mesocycle.createdAt,
-                            mesocycleId: mesocycle.id,
-                            viewModel: viewModel,
-                            gymProfile: gymProfile,
-                            phaseWeekNumber: phaseWeekNum,
-                            phaseWeekTotal: phaseWeekTot,
-                            liveTrainingDayId: deps.activeSessionCoordinator.liveTrainingDayId,
-                            liveSetSummary: deps.activeSessionCoordinator.liveSetSummary
-                        )
-                        .padding(.horizontal, 16)
-                        .id(week.id)
-                    }
-                }
-                .padding(.bottom, 32)
-            }
-            .onAppear {
-                scrollToCurrentWeek(proxy: proxy, mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
-            }
-            .onChange(of: viewModel.scrollToCurrentWeekTrigger) { _, _ in
-                withAnimation(.easeInOut(duration: 0.5)) {
-                    scrollToCurrentWeek(proxy: proxy, mesocycle: mesocycle, currentWeekIndex: currentWeekIndex)
+                // Week rows
+                ForEach(Array(mesocycle.weeks.enumerated()), id: \.element.id) { index, week in
+                    WeekRowView(
+                        week: week,
+                        isCurrent: false,
+                        weekIndex: index,
+                        mesocycleCreatedAt: mesocycle.createdAt,
+                        mesocycleId: mesocycle.id,
+                        viewModel: viewModel,
+                        gymProfile: gymProfile,
+                        liveTrainingDayId: deps.activeSessionCoordinator.liveTrainingDayId,
+                        liveSetSummary: deps.activeSessionCoordinator.liveSetSummary
+                    )
+                    .padding(.horizontal, 16)
+                    .id(week.id)
                 }
             }
+            .padding(.bottom, 32)
         }
-    }
-
-    private func scrollToCurrentWeek(proxy: ScrollViewProxy, mesocycle: Mesocycle, currentWeekIndex: Int) {
-        guard currentWeekIndex < mesocycle.weeks.count else { return }
-        let targetWeek = mesocycle.weeks[currentWeekIndex]
-        proxy.scrollTo(targetWeek.id, anchor: .top)
     }
 
     // MARK: - NEXT UP hero (#507)
@@ -670,88 +639,43 @@ struct ProgramOverviewView: View {
         }
     }
 
-    // MARK: - Phase Progress Bar
+    // MARK: - Program Header (#561)
 
-    private func phaseProgressBar(mesocycle: Mesocycle, currentWeekIndex: Int) -> some View {
-        let phases: [(phase: MesocyclePhase, label: String, weeks: ClosedRange<Int>)] = [
-            (.accumulation, "ACCUM", 0...3),
-            (.intensification, "INTENS", 4...7),
-            (.peaking, "PEAK", 8...10),
-            (.deload, "DL", 11...11)
-        ]
-
-        // Count completed+skipped sessions across all days for the progress label.
-        // Skipped sessions advance the programme pointer, so they count toward progress (#445).
+    /// Plain "PROGRAM" header + honest session-progress (completed/total + %).
+    /// Replaces the fictional WEEK X/12 hero and the ACCUM→INTENS→PEAK→DL phase
+    /// arc (ADR-0030 / #561 Decision 3) — there is no global calendar phase.
+    private func programHeader(mesocycle: Mesocycle) -> some View {
+        // Completed + skipped sessions count toward progress (skips advance the
+        // programme pointer, #445). This is real progress, not calendar fiction.
         let allDays = mesocycle.weeks.flatMap { $0.trainingDays }
         let completedCount = mesocycle.completedDayCount
         let totalDays = allDays.count
-        // Session-based completion fraction — updates immediately when a day is marked done.
         let sessionProgress = totalDays > 0 ? Double(completedCount) / Double(totalDays) : 0.0
 
-        return VStack(alignment: .leading, spacing: 14) {
-            // Week count (hero) + sessions/percent
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("WEEK")
-                        .font(.system(size: 12, weight: .bold))
+        return HStack(alignment: .firstTextBaseline) {
+            Text("PROGRAM")
+                .font(.system(size: 22, weight: .black))
+                .fontWidth(.condensed)
+                .foregroundStyle(Apex.text)
+            Spacer()
+            VStack(alignment: .trailing, spacing: 1) {
+                HStack(spacing: 4) {
+                    ApexNumeral(text: "\(completedCount)", size: 17, color: Apex.accent)
+                    Text("/ \(totalDays) SESSIONS")
+                        .font(.system(size: 11, weight: .bold))
                         .fontWidth(.condensed)
                         .foregroundStyle(Apex.textDim)
-                        .baselineOffset(2)
-                    ApexNumeral(text: "\(currentWeekIndex + 1)", size: 34)
-                    Text("/ \(mesocycle.weeks.count)")
-                        .font(.system(size: 15, weight: .bold))
-                        .fontWidth(.condensed)
-                        .foregroundStyle(Apex.textDim)
                 }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 1) {
-                    HStack(spacing: 4) {
-                        ApexNumeral(text: "\(completedCount)", size: 17, color: Apex.accent)
-                        Text("/ \(totalDays) SESSIONS")
-                            .font(.system(size: 11, weight: .bold))
-                            .fontWidth(.condensed)
-                            .foregroundStyle(Apex.textDim)
-                    }
-                    Text("\(Int(sessionProgress * 100))% COMPLETE")
-                        .font(.system(size: 9, weight: .semibold))
-                        .tracking(0.5)
-                        .fontWidth(.condensed)
-                        .foregroundStyle(Apex.textFaint)
-                }
-            }
-
-            // Phase segments — active segment is the one lime accent.
-            HStack(spacing: 4) {
-                ForEach(phases, id: \.phase) { item in
-                    let isActive = item.weeks.contains(currentWeekIndex)
-                    Rectangle()
-                        .fill(isActive ? Apex.accent : Color.white.opacity(0.16))
-                        .frame(height: 5)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-
-            // Phase labels
-            HStack(spacing: 0) {
-                phaseTick("ACCUM", active: phases[0].weeks.contains(currentWeekIndex))
-                phaseTick("INTENS", active: phases[1].weeks.contains(currentWeekIndex))
-                phaseTick("PEAK", active: phases[2].weeks.contains(currentWeekIndex))
-                phaseTick("DL", active: phases[3].weeks.contains(currentWeekIndex), width: 26)
+                Text("\(Int(sessionProgress * 100))% COMPLETE")
+                    .font(.system(size: 9, weight: .semibold))
+                    .tracking(0.5)
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.textFaint)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .apexCard()
-    }
-
-    private func phaseTick(_ t: String, active: Bool, width: CGFloat? = nil) -> some View {
-        Text(t)
-            .font(.system(size: 9, weight: .bold))
-            .tracking(0.6)
-            .fontWidth(.condensed)
-            .foregroundStyle(active ? Apex.accent : Apex.textFaint)
-            .frame(maxWidth: width == nil ? .infinity : nil, alignment: width == nil ? .leading : .trailing)
-            .frame(width: width)
     }
 }
 
@@ -766,10 +690,6 @@ private struct WeekRowView: View {
     let mesocycleId: UUID
     let viewModel: ProgramViewModel
     let gymProfile: GymProfile?
-    /// 1-based position of this week within its phase (e.g. 2 for the 2nd accumulation week).
-    let phaseWeekNumber: Int
-    /// Total weeks in this week's phase (e.g. 4 for accumulation).
-    let phaseWeekTotal: Int
     /// The training day ID that currently has a live session, nil when idle.
     var liveTrainingDayId: UUID? = nil
     /// Aggregated set progress for the live session (nil when no session active).
@@ -804,12 +724,6 @@ private struct WeekRowView: View {
                 }
 
                 Spacer()
-
-                // Phase-relative progress: "WK 2/4"
-                Text("WK \(phaseWeekNumber)/\(phaseWeekTotal)")
-                    .font(.system(size: 10, weight: .semibold))
-                    .fontWidth(.condensed)
-                    .foregroundStyle(Apex.textFaint)
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)

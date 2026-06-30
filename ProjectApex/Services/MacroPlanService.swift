@@ -302,33 +302,22 @@ actor MacroPlanService {
         from skeleton: MesocycleSkeleton,
         userId: UUID
     ) -> Mesocycle {
-        let phaseMap: [(MesocyclePhase, ClosedRange<Int>)] = [
-            (.accumulation,    1...4),
-            (.intensification, 5...8),
-            (.peaking,         9...11),
-            (.deload,          12...12)
-        ]
-
-        func phase(for weekNumber: Int) -> MesocyclePhase {
-            for (p, range) in phaseMap {
-                if range.contains(weekNumber) { return p }
-            }
-            return .accumulation
-        }
-
+        // ADR-0030 / #561: no calendar→phase map and no ISO-weekday slots. The
+        // global periodization arc is fiction nothing honest consumes — the
+        // per-pattern trainee-model engine is the sole clock. Every week is
+        // bootstrapped to .accumulation (vestigial until #562's queue model
+        // removes weeks entirely; Decision 1), and dayOfWeek is the slot's
+        // sequential position within the week, NOT a Mon/Wed/Thu/Sat calendar slot.
         var weeks: [TrainingWeek] = []
         for (index, intent) in skeleton.weekIntents.enumerated() {
             let weekNumber = index + 1
-            let currentPhase = phase(for: weekNumber)
 
             // Build placeholder training days from day-focus strings.
             let days: [TrainingDay] = intent.dayFocus.enumerated().map { dayIndex, focus in
-                // Assign standard ISO-weekday slots: Mon=1, Tue=2, Wed=3, Thu=4, ...
-                let dayOfWeek = standardDayOfWeek(for: dayIndex, daysPerWeek: skeleton.trainingDaysPerWeek)
                 let label = normalizeDayLabel(focus)
                 return TrainingDay(
                     id: UUID(),
-                    dayOfWeek: dayOfWeek,
+                    dayOfWeek: dayIndex + 1,   // sequential slot position, not an ISO weekday
                     dayLabel: label,
                     exercises: [],
                     sessionNotes: nil,
@@ -339,7 +328,7 @@ actor MacroPlanService {
             weeks.append(TrainingWeek(
                 id: UUID(),
                 weekNumber: weekNumber,
-                phase: currentPhase,
+                phase: .accumulation,   // #561 Decision 1: vestigial default (no calendar phase arc)
                 trainingDays: days,
                 weekLabel: intent.weekLabel
             ))
@@ -354,22 +343,6 @@ actor MacroPlanService {
             totalWeeks: 12,
             periodizationModel: skeleton.periodizationModel
         )
-    }
-
-    /// Maps a 0-based day index to an ISO-8601 weekday integer (Mon=1..Sun=7)
-    /// for common training frequencies.
-    private static func standardDayOfWeek(for dayIndex: Int, daysPerWeek: Int) -> Int {
-        // Common slots: Mon, Wed, Thu, Sat for 4-day; Mon, Wed, Fri for 3-day, etc.
-        let slots4: [Int] = [1, 3, 4, 6]   // Mon, Wed, Thu, Sat
-        let slots3: [Int] = [1, 3, 5]       // Mon, Wed, Fri
-        let slots5: [Int] = [1, 2, 3, 5, 6] // Mon-Wed, Fri, Sat
-        let slots6: [Int] = [1, 2, 3, 4, 5, 6]
-        let slots2: [Int] = [1, 4]           // Mon, Thu
-
-        let table: [Int: [Int]] = [2: slots2, 3: slots3, 4: slots4, 5: slots5, 6: slots6]
-        let slots = table[daysPerWeek] ?? slots4
-        guard dayIndex < slots.count else { return dayIndex + 1 }
-        return slots[dayIndex]
     }
 
     /// Normalize a free-text day-focus string into a clean snake_case
