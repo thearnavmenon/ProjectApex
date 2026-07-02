@@ -121,6 +121,20 @@ enum LimitationSubject: Sendable, Hashable {
     case joint(BodyJoint)
 }
 
+extension LimitationSubject {
+    /// Human-readable body-region phrase for the macro-plan HARD EXCLUSION prompt
+    /// (#582). The prompt reasons in plain terms ("a knee issue → avoid deep-knee
+    /// loading"), so joint/muscle names are un-snake-cased and patterns use their
+    /// display name.
+    var promptDescriptor: String {
+        switch self {
+        case .pattern(let p): return p.displayName
+        case .muscle(let m):  return m.rawValue.replacingOccurrences(of: "_", with: " ")
+        case .joint(let j):   return j.rawValue.replacingOccurrences(of: "_", with: " ")
+        }
+    }
+}
+
 extension LimitationSubject: Codable {
     private enum CodingKeys: String, CodingKey { case kind, value }
     private enum Kind: String, Codable { case pattern, muscle, joint }

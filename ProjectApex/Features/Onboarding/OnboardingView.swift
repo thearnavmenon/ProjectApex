@@ -1391,7 +1391,12 @@ struct OnboardingView: View {
                 bodyweightKg: profile.bodyweightKg,
                 ageYears: profile.age,
                 trainingAge: profile.trainingAge.rawValue,
-                trainingDaysPerWeek: profile.daysPerWeek
+                trainingDaysPerWeek: profile.daysPerWeek,
+                // #582: the injuries tapped on the "anything to work around?" screen
+                // become a HARD EXCLUSION at block-commit selection. The digest isn't
+                // populated yet at first generation, so read the just-captured areas
+                // directly (same set persisted as confirmed_limitations below).
+                limitations: profile.injuryAreas.sorted()
             )
             let mesocycle = MacroPlanService.buildPendingMesocycle(from: skeleton, userId: userId)
             // Cache immediately so ProgramViewModel.loadProgram() finds it on the fast path.

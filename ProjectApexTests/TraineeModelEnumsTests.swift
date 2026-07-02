@@ -144,3 +144,36 @@ struct LimitationSubjectTests {
         #expect(try JSONDecoder().decode(LimitationSubject.self, from: data) == original)
     }
 }
+
+// MARK: - #582: limitation → macro-plan prompt descriptor
+
+@Suite("LimitationSubject.promptDescriptor (#582)")
+struct LimitationPromptDescriptorTests {
+
+    @Test("joint/muscle un-snake-cased; pattern uses its displayName")
+    func subjectDescriptors() {
+        #expect(LimitationSubject.joint(.knee).promptDescriptor == "knee")
+        #expect(LimitationSubject.joint(.lowerBack).promptDescriptor == "lower back")
+        #expect(LimitationSubject.muscle(.legs).promptDescriptor == "legs")
+        #expect(LimitationSubject.pattern(.squat).promptDescriptor
+                == MovementPattern.squat.displayName)
+    }
+
+    @Test("digest descriptor prefers the user's note, else the subject region")
+    func digestPrefersNote() {
+        let withNote = ActiveLimitationDigest(from: ActiveLimitation(
+            subject: .joint(.knee), severity: .moderate, onsetDate: Date(),
+            evidenceCount: 1, userConfirmed: true, notes: "left knee ACL"))
+        #expect(withNote.promptDescriptor == "left knee ACL")
+
+        let noNote = ActiveLimitationDigest(from: ActiveLimitation(
+            subject: .joint(.shoulder), severity: .mild, onsetDate: Date(),
+            evidenceCount: 1, userConfirmed: true, notes: nil))
+        #expect(noNote.promptDescriptor == "shoulder")
+
+        let blankNote = ActiveLimitationDigest(from: ActiveLimitation(
+            subject: .joint(.hip), severity: .mild, onsetDate: Date(),
+            evidenceCount: 1, userConfirmed: true, notes: "   "))
+        #expect(blankNote.promptDescriptor == "hip", "whitespace-only note falls back to subject")
+    }
+}
