@@ -69,6 +69,51 @@ nonisolated enum SessionState: Sendable, Equatable {
 /// instants. `lastPerformance` is the cached last-session set logs for the *live*
 /// exercise, resolved inside the actor so the liveExercise derivation is part of the
 /// same consistent snapshot.
+// MARK: - SetNarration (#565)
+
+/// Pure, deterministic pre-set narration that quotes the user's own lifts back:
+/// joins last-time → today's floor/stretch target → why, in one line shown on the
+/// prescription card BEFORE the user lifts. No network, no fabrication — every
+/// clause omits independently and the whole line is nil without a last-session
+/// anchor (parity with `lastPerformanceSummary == nil`). See #565 / ADR-0030.
+enum SetNarration {
+    static func render(
+        lastTopWeightKg: Double?,
+        lastTopReps: Int?,
+        floor: Double?,
+        stretch: Double?,
+        trend: ProgressionTrend?
+    ) -> String? {
+        // Anchor: the last session's top set. No history → omit the whole line.
+        guard let reps = lastTopReps, let weight = lastTopWeightKg, reps > 0 else {
+            return nil
+        }
+        var line = "LAST TIME \(weightToken(weight))×\(reps)"
+
+        // Target clause — only when the projection carries both legs.
+        if let floor, let stretch {
+            line += " → today FLOOR \(numToken(floor)) / STRETCH \(numToken(stretch))"
+        }
+
+        // Why clause — ONLY on a progressing trend (never a false "climbing").
+        if trend == .progressing {
+            line += ", because this lift is trending up"
+        }
+        return line
+    }
+
+    /// 0 kg → "BW"; otherwise a tabular-friendly integer or one-decimal token.
+    private static func weightToken(_ kg: Double) -> String {
+        kg <= 0 ? "BW" : numToken(kg)
+    }
+
+    private static func numToken(_ v: Double) -> String {
+        v.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", v)
+            : String(format: "%.1f", v)
+    }
+}
+
 nonisolated struct WorkoutUISnapshot: Sendable {
     let sessionState: SessionState
     /// The training day the actor is currently running (nil when idle). Persists
@@ -88,6 +133,10 @@ nonisolated struct WorkoutUISnapshot: Sendable {
     let inferenceRetryReason: FallbackReason?
     let pendingRetryExercise: PlannedExercise?
     let lastPerformanceSets: [SetLog]?
+    /// Pre-rendered set narration for the live exercise (#565). Nil when there is
+    /// no last-session anchor; clauses degrade independently. Computed inside the
+    /// actor so it reads the same consistent instant as the rest of the snapshot.
+    let setNarration: String?
 }
 
 // MARK: - WorkoutSessionManager
@@ -198,6 +247,11 @@ actor WorkoutSessionManager {
     /// exercise, swap, resume). Powers the runaway-clamp anchor (G-F3), the
     /// "Last time" line (G-F6), and the manual-fallback weight seed (G-F1).
     private var cachedLastPerformance: [String: [SetLog]] = [:]
+    /// Most recent trainee-model digest, cached each time a prescription context is
+    /// assembled (#565). Read only for the pre-set narration (floor/stretch + trend
+    /// keyed by the live exercise's movement pattern); nil until the first
+    /// prescription fetch, which is exactly when the card first needs it.
+    private var cachedDigest: TraineeModelDigest? = nil
     /// Records of any mid-session exercise swaps (P3-T10).
     private var swapRecords: [SwapRecord] = []
 
@@ -1339,6 +1393,9 @@ actor WorkoutSessionManager {
         let traineeModelDigest = await traineeModelService?.digest(
             weeklyFatigue: cachedWeeklyFatigue
         )
+        // #565: retain the digest so uiSnapshot() can render pre-set narration
+        // (floor/stretch + trend) without a second async fetch.
+        self.cachedDigest = traineeModelDigest
 
         return WorkoutContext(
             requestType: "set_prescription",
@@ -1728,6 +1785,20 @@ actor WorkoutSessionManager {
         }
         let lastPerformanceSets: [SetLog]? = liveExercise.flatMap { cachedLastPerformance[$0.exerciseId] }
 
+        // #565: pre-render the set narration. Floor/stretch + trend are keyed by the
+        // live exercise's movement pattern (same mapping as ProgramDayDetailView),
+        // read from the cached digest. Each clause omits independently; the whole
+        // line is nil without a last-session top set.
+        let narrationTopSet = lastPerformanceSets?.max(by: { $0.weightKg < $1.weightKg })
+        let narrationProj = narrationProjection(for: liveExercise)
+        let setNarration = SetNarration.render(
+            lastTopWeightKg: narrationTopSet?.weightKg,
+            lastTopReps: narrationTopSet?.repsCompleted,
+            floor: narrationProj?.floor,
+            stretch: narrationProj?.stretch,
+            trend: narrationTrend(for: liveExercise)
+        )
+
         return WorkoutUISnapshot(
             sessionState: sessionState,
             currentTrainingDayId: currentTrainingDayId,
@@ -1740,8 +1811,28 @@ actor WorkoutSessionManager {
             inferenceRetryNeeded: inferenceRetryNeeded,
             inferenceRetryReason: inferenceRetryReason,
             pendingRetryExercise: pendingRetryExercise,
-            lastPerformanceSets: lastPerformanceSets
+            lastPerformanceSets: lastPerformanceSets,
+            setNarration: setNarration
         )
+    }
+
+    /// #565: the cached digest's floor/stretch projection for `exercise`, keyed by
+    /// its movement pattern (same mapping as `ProgramDayDetailView.projectionForExercise`).
+    /// Nil when there is no library entry, no digest, or no projection for the pattern.
+    private func narrationProjection(for exercise: PlannedExercise?) -> PatternProjection? {
+        guard let exercise,
+              let pattern = ExerciseLibrary.lookup(exercise.exerciseId)?.movementPattern,
+              let projections = cachedDigest?.projections?.patternProjections
+        else { return nil }
+        return projections.first { $0.pattern == pattern }
+    }
+
+    /// #565: the cached digest's per-pattern trend for `exercise`'s movement pattern.
+    private func narrationTrend(for exercise: PlannedExercise?) -> ProgressionTrend? {
+        guard let exercise,
+              let pattern = ExerciseLibrary.lookup(exercise.exerciseId)?.movementPattern
+        else { return nil }
+        return cachedDigest?.perPatternSummary.first { $0.pattern == pattern }?.trend
     }
 
     /// Refreshes `cachedLastPerformance` for `exercise`. Called at session
