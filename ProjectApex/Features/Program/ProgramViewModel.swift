@@ -134,6 +134,13 @@ final class ProgramViewModel {
     /// regenerate attempt that is allowed to proceed.
     var regenerationBlockedBySession: Bool = false
 
+    /// #568: set true when a durable exercise swap was requested while a live/paused
+    /// session sentinel still exists. Same rationale as `regenerationBlockedBySession`
+    /// — a persistent swap re-persists the program (new row) and must never mutate
+    /// under a live/paused session (#440/#441). The UI prompts the user to finish or
+    /// abandon the session first.
+    var swapBlockedBySession: Bool = false
+
     // MARK: Sync-error state (#188)
     /// Non-nil when a background Supabase persist failed. The view renders a
     /// non-blocking banner so the user is aware the sync failed. Local-first
@@ -441,6 +448,59 @@ final class ProgramViewModel {
         // Persist to Supabase in the background. Failure surfaces via persistError
         // banner (#188) — local-first design; local state is already updated above.
         Task { await self.persistProgram(mesocycle, context: "regenerateProgram") }
+    }
+
+    /// #568: durable exercise swap. Replaces `originalExercise` with `suggestion`
+    /// in every non-terminal day-slot that shares its `dayLabel` — so the swap
+    /// sticks across the block (frozen identity) and every future deterministic
+    /// instantiation of the current program, not just the live session. The new
+    /// exercise inherits the slot's frozen structure (sets / rep-range / rest / RIR)
+    /// and takes its `primaryMuscle` from the library when known. Persists atomically
+    /// via `deactivate_and_insert_program` (ADR-0018); refuses under a live/paused
+    /// session (#440/#441).
+    func persistDurableSwap(
+        dayLabel: String,
+        originalExercise: PlannedExercise,
+        suggestion: ExerciseSwapService.ExerciseSuggestion
+    ) async {
+        guard PausedSessionState.load() == nil else {
+            swapBlockedBySession = true
+            return
+        }
+        swapBlockedBySession = false
+
+        guard let mesocycle = currentMesocycle else { return }
+
+        let replacement = PlannedExercise(
+            id: UUID(),
+            exerciseId: suggestion.exerciseId,
+            name: suggestion.name,
+            // Inherit the slot's muscle/synergist framing (parity with the existing
+            // in-session swap, WorkoutSessionManager.swapExercise).
+            primaryMuscle: originalExercise.primaryMuscle,
+            synergists: originalExercise.synergists,
+            equipmentRequired: EquipmentType(typeKey: suggestion.equipmentRequired),
+            sets: originalExercise.sets,
+            repRange: originalExercise.repRange,   // frozen rep-range preserved (ADR-0030)
+            tempo: originalExercise.tempo,
+            restSeconds: originalExercise.restSeconds,
+            rirTarget: originalExercise.rirTarget,
+            coachingCues: []
+        )
+
+        let updated = mesocycle.swappingExercise(
+            inDayLabel: dayLabel,
+            originalExerciseId: originalExercise.exerciseId,
+            with: replacement
+        )
+
+        updated.saveToUserDefaults()
+        currentMesocycle = updated
+        viewState = .loaded(updated)
+
+        // Persist atomically in the background; failure surfaces via the persistError
+        // banner (#188). Local-first — local state is already updated above.
+        Task { await self.persistProgram(updated, context: "persistDurableSwap") }
     }
 
     /// Returns a flat list of all terminal TrainingDays (`.completed` or `.skipped`) in the

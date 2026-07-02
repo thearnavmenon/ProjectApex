@@ -125,6 +125,12 @@ struct ProgramDayDetailView: View {
     /// projections. Empty when no projections exist (graceful omission).
     @State private var projectionByPattern: [MovementPattern: PatternProjection] = [:]
 
+    /// #568: durable swap. The exercise the user chose to permanently swap out (drives
+    /// the swap sheet), and the reused ExerciseSwap chat VM. Confirmation routes to
+    /// `ProgramViewModel.persistDurableSwap` — NOT the ephemeral in-session swap.
+    @State private var durableSwapExercise: PlannedExercise? = nil
+    @State private var durableSwapVM: ExerciseSwapViewModel? = nil
+
     // DEBUG-only: read the Start Any Day dev mode flag from UserDefaults.
     #if DEBUG
     private var startAnyDayModeActive: Bool {
@@ -295,6 +301,15 @@ struct ProgramDayDetailView: View {
                                     lastTime: lastTimeByExercise[exercise.exerciseId],
                                     projection: projectionForExercise(exercise)
                                 )
+                                // #568: durable swap — long-press an upcoming
+                                // exercise to permanently replace it for this slot.
+                                .contextMenu {
+                                    Button {
+                                        startDurableSwap(for: exercise)
+                                    } label: {
+                                        Label("Swap exercise", systemImage: "arrow.triangle.2.circlepath")
+                                    }
+                                }
                             }
                         }
 
@@ -618,6 +633,56 @@ struct ProgramDayDetailView: View {
         } message: {
             Text("You have a paused session in progress. Discard it and start a new workout?")
         }
+        // #568: durable swap sheet — reuses the ExerciseSwap chat, but confirmation
+        // edits the program's frozen slot (persistDurableSwap), not the live session.
+        .sheet(isPresented: Binding(
+            get: { durableSwapVM != nil },
+            set: { if !$0 { durableSwapVM = nil; durableSwapExercise = nil } }
+        )) {
+            if let vm = durableSwapVM {
+                ExerciseSwapView(viewModel: vm)
+            }
+        }
+        .alert("Finish your workout first",
+               isPresented: Binding(
+                get: { viewModel?.swapBlockedBySession ?? false },
+                set: { if !$0 { viewModel?.swapBlockedBySession = false } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("You have a session in progress. Finish or discard it before permanently swapping an exercise.")
+        }
+    }
+
+    /// #568: opens the durable-swap chat for `exercise`. Reuses `ExerciseSwapService`
+    /// to suggest a same-muscle alternative; on confirm, routes to
+    /// `ProgramViewModel.persistDurableSwap` (edits the frozen slot + persists),
+    /// NOT the ephemeral in-session swap.
+    private func startDurableSwap(for exercise: PlannedExercise) {
+        guard let viewModel, let gymProfile else { return }
+        let dayLabel = currentDay.dayLabel
+        durableSwapExercise = exercise
+
+        let vm = ExerciseSwapViewModel(service: deps.exerciseSwapService)
+        vm.onConfirmSwap = { suggestion, _ in
+            Task { await viewModel.persistDurableSwap(
+                dayLabel: dayLabel, originalExercise: exercise, suggestion: suggestion) }
+            durableSwapVM = nil
+            durableSwapExercise = nil
+        }
+        vm.onDismiss = { durableSwapVM = nil; durableSwapExercise = nil }
+        durableSwapVM = vm
+
+        let context = ExerciseSwapService.SwapContext(
+            exerciseName: exercise.name,
+            equipmentTypeKey: exercise.equipmentRequired.typeKey,
+            primaryMuscle: exercise.primaryMuscle,
+            setsCompleted: 0,
+            totalSets: exercise.sets,
+            availableEquipment: gymProfile.equipmentRefs,
+            completedExerciseIds: [],
+            ragMemory: []
+        )
+        Task { await vm.startConversation(context: context) }
     }
 
     /// Bottom action content — read-only badge for completed days, action buttons otherwise.

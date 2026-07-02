@@ -94,4 +94,29 @@ extension Mesocycle {
             periodizationModel: periodizationModel
         )
     }
+
+    /// #568: durable exercise swap. Returns a copy with `originalExerciseId` replaced
+    /// by `replacement` in every NON-terminal day-slot whose `dayLabel` matches —
+    /// preserving the slot's frozen identity across the block's weeks and its
+    /// `dayLabel` join (ADR-0017). Terminal (`.completed` / `.skipped`) days are left
+    /// untouched so completed history keeps its original exercise. Pure — the caller
+    /// persists the result atomically via `deactivate_and_insert_program` (ADR-0018).
+    func swappingExercise(
+        inDayLabel dayLabel: String,
+        originalExerciseId: String,
+        with replacement: PlannedExercise
+    ) -> Mesocycle {
+        var copy = self
+        for wIdx in copy.weeks.indices {
+            for dIdx in copy.weeks[wIdx].trainingDays.indices where
+                copy.weeks[wIdx].trainingDays[dIdx].dayLabel == dayLabel &&
+                !copy.weeks[wIdx].trainingDays[dIdx].isTerminal {
+                if let eIdx = copy.weeks[wIdx].trainingDays[dIdx].exercises
+                    .firstIndex(where: { $0.exerciseId == originalExerciseId }) {
+                    copy.weeks[wIdx].trainingDays[dIdx].exercises[eIdx] = replacement
+                }
+            }
+        }
+        return copy
+    }
 }

@@ -7,6 +7,30 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-02 — Swapping an exercise can now stick for good, not just for one workout
+
+**The problem (in plain words):**
+Until now, if you swapped an exercise mid-workout, it only changed that one session —
+next time, the old exercise was back. There was no way to say "I never want to do
+this one; always give me that one instead" and have it stick.
+
+**What I changed:**
+Added a permanent swap. Long-press an upcoming exercise in your program and pick
+"Swap exercise" — the coach suggests a same-muscle alternative (the same chat you
+already know from mid-workout), and when you confirm, it replaces that exercise
+everywhere it appears in your current program, keeping the same sets and rep target.
+Your finished workouts keep their original exercise (history stays honest), and it
+won't let you do this while a workout is paused or running. The change saves the
+whole program in one safe write.
+
+**How it was checked:**
+Tests prove the swap replaces the exercise across every upcoming week of that day,
+leaves completed days alone, keeps the day's name (so your history stays linked), and
+does nothing if the exercise isn't there. Full build green.
+
+**Status:** shipped. The trigger is a long-press menu for now — worth an on-device
+look to decide if it wants a more obvious button. (#568, part of #558 / ADR-0030)
+
 ## 2026-07-02 — Removed the last "assume 4 days a week" leftover
 
 **The problem (in plain words):**
