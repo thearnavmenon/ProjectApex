@@ -119,3 +119,47 @@ export interface ApplyCompleteEvent {
 export function emitApplyComplete(event: ApplyCompleteEvent): void {
   emit("trainee_model.apply_complete", event);
 }
+
+// ─── Twin shadow (ADR-0031, Phase 1) ─────────────────────────────────────────
+//
+// The Athlete-Twin dual-write is SHADOW-ONLY: these events are its entire
+// output surface. `twin_shadow.applied` logs each pattern's posterior
+// update + twin-vs-legacy divergence (logged, never acted on);
+// `twin_shadow.failed` logs a contained per-pattern failure (the legacy
+// pipeline is unaffected by construction — see _shared/twin/shadow.ts).
+
+export interface TwinShadowAppliedEvent {
+  user_id: string;
+  pattern: string;
+  anchor_exercise_id: string;
+  observations_applied: number;
+  sets_skipped: number;
+  /** True when this apply created the pattern's twin state (first touch). */
+  bootstrapped: boolean;
+  /** Twin anchor e1RM — TRUE-capability scale (includes reported RIR). */
+  twin_anchor_e1rm: number;
+  /** Legacy EWMA e1RM — performed-rep scale; null when absent. */
+  legacy_anchor_e1rm: number | null;
+  /** (twin − legacy)/legacy × 100. Nonzero by construction (scales
+   * differ); its STABILITY over applies is the signal. Null when no
+   * legacy comparator exists. */
+  divergence_pct: number | null;
+  /** Mean normalized innovation squared this apply (≈1 when calibrated). */
+  mean_nis: number | null;
+  jitter_incidents: number;
+}
+
+export function emitTwinShadowApplied(event: TwinShadowAppliedEvent): void {
+  emit("twin_shadow.applied", event);
+}
+
+export interface TwinShadowFailedEvent {
+  user_id: string;
+  pattern: string;
+  /** e.g. 'no_usable_sets', or the numerical error message (truncated). */
+  error_class: string;
+}
+
+export function emitTwinShadowFailed(event: TwinShadowFailedEvent): void {
+  emit("twin_shadow.failed", event);
+}
