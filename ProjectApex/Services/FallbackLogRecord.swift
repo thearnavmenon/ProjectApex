@@ -36,7 +36,6 @@ nonisolated struct FallbackLogRecord: Codable, Sendable {
 
     static let prescribeCallSite           = "AIInferenceService.prescribe"
     static let prescribeAdaptationCallSite = "AIInferenceService.prescribeAdaptation"
-    static let sessionPlanCallSite         = "SessionPlanService.generateSession"
     static let exerciseSwapCallSite        = "ExerciseSwapService.sendMessage"
     static let memoryClassifyCallSite      = "MemoryService.classifyTags"
 
