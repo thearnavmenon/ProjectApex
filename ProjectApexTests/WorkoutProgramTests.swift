@@ -388,3 +388,78 @@ final class WorkoutProgramTests: XCTestCase {
                        "every original dayLabel preserved in order after decode→flatten")
     }
 }
+
+// MARK: - #568: durable exercise swap (Mesocycle.swappingExercise)
+
+final class DurableSwapTests: XCTestCase {
+
+    private func ex(_ id: String, _ name: String) -> PlannedExercise {
+        PlannedExercise(
+            id: UUID(), exerciseId: id, name: name,
+            primaryMuscle: "chest", synergists: ["triceps"],
+            equipmentRequired: .barbell, sets: 4,
+            repRange: RepRange(min: 6, max: 10), tempo: "3-1-1-0",
+            restSeconds: 150, rirTarget: 2, coachingCues: []
+        )
+    }
+
+    private func day(_ label: String, _ exercises: [PlannedExercise],
+                     status: TrainingDayStatus = .pending, dow: Int = 1) -> TrainingDay {
+        var d = TrainingDay(id: UUID(), dayOfWeek: dow, dayLabel: label,
+                            exercises: exercises, sessionNotes: nil)
+        d.status = status
+        return d
+    }
+
+    private func meso(_ weeks: [TrainingWeek]) -> Mesocycle {
+        Mesocycle(id: UUID(), userId: UUID(), createdAt: Date(timeIntervalSince1970: 0),
+                  isActive: true, weeks: weeks, totalWeeks: 12,
+                  periodizationModel: "linear")
+    }
+
+    func test_swap_replacesAcrossAllNonTerminalMatchingSlots_preservesDayLabel() {
+        let pushW1 = day("Push_A", [ex("barbell_bench_press", "Bench"), ex("overhead_press", "OHP")])
+        let pushW2 = day("Push_A", [ex("barbell_bench_press", "Bench"), ex("overhead_press", "OHP")])
+        let pull   = day("Pull_A", [ex("barbell_row", "Row")])
+        let w1 = TrainingWeek(id: UUID(), weekNumber: 1, phase: .accumulation, trainingDays: [pushW1, pull])
+        let w2 = TrainingWeek(id: UUID(), weekNumber: 2, phase: .accumulation, trainingDays: [pushW2])
+        let m = meso([w1, w2])
+
+        let replacement = ex("dumbbell_press", "DB Press")
+        let out = m.swappingExercise(inDayLabel: "Push_A",
+                                     originalExerciseId: "barbell_bench_press",
+                                     with: replacement)
+
+        // Both Push_A slots (across weeks) now carry the replacement, position kept.
+        XCTAssertEqual(out.weeks[0].trainingDays[0].exercises.map(\.exerciseId),
+                       ["dumbbell_press", "overhead_press"])
+        XCTAssertEqual(out.weeks[1].trainingDays[0].exercises.map(\.exerciseId),
+                       ["dumbbell_press", "overhead_press"])
+        // dayLabel preserved (ADR-0017 join key).
+        XCTAssertEqual(out.weeks[0].trainingDays[0].dayLabel, "Push_A")
+        // A different day-label slot is untouched.
+        XCTAssertEqual(out.weeks[0].trainingDays[1].exercises.map(\.exerciseId), ["barbell_row"])
+    }
+
+    func test_swap_leavesTerminalDaysUntouched() {
+        let done = day("Push_A", [ex("barbell_bench_press", "Bench")], status: .completed)
+        let pending = day("Push_A", [ex("barbell_bench_press", "Bench")], status: .pending)
+        let w1 = TrainingWeek(id: UUID(), weekNumber: 1, phase: .accumulation, trainingDays: [done, pending])
+        let out = meso([w1]).swappingExercise(inDayLabel: "Push_A",
+                                              originalExerciseId: "barbell_bench_press",
+                                              with: ex("dumbbell_press", "DB Press"))
+        // Completed history keeps the original exercise.
+        XCTAssertEqual(out.weeks[0].trainingDays[0].exercises.map(\.exerciseId), ["barbell_bench_press"])
+        // The pending slot gets the swap.
+        XCTAssertEqual(out.weeks[0].trainingDays[1].exercises.map(\.exerciseId), ["dumbbell_press"])
+    }
+
+    func test_swap_noMatchingExercise_isNoOp() {
+        let d = day("Push_A", [ex("overhead_press", "OHP")])
+        let w1 = TrainingWeek(id: UUID(), weekNumber: 1, phase: .accumulation, trainingDays: [d])
+        let out = meso([w1]).swappingExercise(inDayLabel: "Push_A",
+                                              originalExerciseId: "barbell_bench_press",
+                                              with: ex("dumbbell_press", "DB Press"))
+        XCTAssertEqual(out.weeks[0].trainingDays[0].exercises.map(\.exerciseId), ["overhead_press"])
+    }
+}
