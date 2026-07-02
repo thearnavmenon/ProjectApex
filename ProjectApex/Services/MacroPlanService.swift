@@ -127,8 +127,6 @@ nonisolated struct MacroPlanConstraints: Codable, Sendable {
         case trainingDaysPerWeek = "training_days_per_week"
         case totalWeeks          = "total_weeks"
     }
-
-    static let `default` = MacroPlanConstraints(trainingDaysPerWeek: 4, totalWeeks: 12)
 }
 
 // MARK: - Response DTOs (#563: block-commit committed split)
@@ -209,7 +207,10 @@ actor MacroPlanService {
         bodyweightKg: Double? = nil,
         ageYears: Int? = nil,
         trainingAge: String? = nil,
-        trainingDaysPerWeek: Int = 4,
+        // #569: required (no default) — every live path threads the user's real
+        // cadence from `UserProfileConstants.daysPerWeekKey`, so no call can
+        // silently fall back to a hardcoded 4.
+        trainingDaysPerWeek: Int,
         historicalDayLabels: [String] = [],
         limitations: [String] = []
     ) async throws -> MesocycleSkeleton {
