@@ -4,6 +4,20 @@
 3. **Slice completion tracking:** When I confirm a tracer-bullet slice is complete and working, close the corresponding GitHub issue with a completion comment summarising what shipped, any pre-deploy reminders, and links to spinoff issues. (The Slice 1 closure pattern in #2 is the precedent — issue closure happens via a merged PR's Closes #N keyword per Process commitment rule 1, not before.) `BACKLOG.md` is the long-form work log: append phase/slice entries to it when a phase or major slice closes, and mark the things-to-do in §2D when the dispatch surfaces new follow-ups. Sweep cadence applies (re-read on phase boundary, prune what reality has moved past). The pre-2026-06-01 prohibition on touching `BACKLOG.md` is retired — reality moved past it.
 4. **Wait for Commands:** After completing a coding task or closing the slice issue, simply tell me it is done and wait for my next instruction. Do not proceed on your own.
 
+## Autonomy modes
+
+The default above (rules 1 & 4) is **non-autonomous**. In practice it gets suspended by hand almost every campaign, so name the modes instead of renegotiating each time.
+
+- **Autopilot** — when I say "autopilot", "autocomplete it", "autopilot this campaign", or set a `/goal`, that unlocks, for the stated task/campaign: proceeding through its slices and follow-ups without a per-step check-in; making ordinary implementation decisions and continuing; and committing → PR → `--admin` squash-merge on green (merge autonomy is already granted — memory `feedback_merge_autonomy`). You do **not** need to stop and ask "what next?" between slices of the agreed scope.
+- **Still gated even under autopilot — ask first:** scope changes beyond the stated goal; destructive or irreversible ops (deleting data, force-pushing `main`, prod DB migrations, rotating/altering secrets, publishing anything to an external service); and anything a memory file or issue marks OWNER-only.
+- **Orchestration is announced, not silent.** Before spawning a multi-agent fan-out (worktree agents, a Workflow), state the shape and rough cost first; once I say go, run it without further asking. (Rejected once for auto-spawning a team without announcing — c8f89cf3.)
+- Autopilot ends when the task/campaign is done, or when I say "stop autopilot".
+
+## Asking the user
+
+- **Taste is open-ended, not multiple-choice.** For aesthetic / subjective / design-feel decisions, ask in plain text and let me answer free-form — don't force it through `AskUserQuestion`'s options (I kept breaking out of that UI to type real answers — ee75633c). Reserve `AskUserQuestion` for genuine either/or forks (the kind grill-me uses well).
+- **Investigate before asking.** On an investigation/debugging task, look first and only ask when actually blocked — don't open with a question you could answer by reading the code.
+
 ## Doc map — where each kind of information lives
 
 Each doc has one job. When you need an answer, go to the doc whose job covers it; when you change reality, update only that doc.
@@ -31,7 +45,29 @@ When the fix is to a *pattern* rather than a single call site (test-harness bugs
 
 Practical form: after writing the fix, grep for the pattern that motivated it (e.g. `request.httpBody` for URLProtocol mocks, `static var.*Handler` for shared mock state, `weightKg >=` for validation predicates) and confirm every hit either uses the fix or has a documented reason to differ. Report the grep result alongside the fix, not after the user notices the second site.
 
+## Shell & harness gotchas
+
+Small, identical mistakes that burned turns in nearly every session. Internalize these; the fix is one habit each.
+
+- **Read before Edit.** The Edit tool refuses a file you haven't Read this session ("File has not been read yet"). If a build/screenshot hook or another process may have rewritten the file since you read it, Read it again before editing ("File has been modified since read" — hit 8× on one file).
+- **Quote globs — this shell is zsh, not bash.** Unquoted `--include=*.swift` / `*.swift` → "no matches found" (zsh globs before the command sees it). Quote it (`'*.swift'`) or just use `rg`. Same family: no `declare -a`, avoid `$(( ))` arithmetic on UUID-looking strings, watch for `bad substitution`.
+- **No foreground `sleep`.** The harness blocks it. Run long-running commands as a **background Bash job** and poll the log, or use Monitor / an `until`-loop.
+- **`timeout`, `sed -i`, `rg`, `curl` may be missing** in a fresh sandbox PATH (macOS has no GNU `timeout`; BSD `sed -i` needs `-i ''`). Check the command exists before relying on it.
+- **Workflow scripts are plain JavaScript** — no TypeScript type annotations/interfaces/generics (rejected 4× in one session). Also no `Date.now()`/`Math.random()`.
+- **Prefer the checked-in build scripts** (`scripts/apex-*.sh`, see below) over hand-typing `xcodebuild`/`simctl`/`gh` — that recipe is where the destination/UDID/stale-`.app` mistakes come from.
+
 ## Agent skills
+
+### Build / render / test / ship
+
+Use the checked-in `scripts/apex-*.sh` helpers instead of re-deriving the xcodebuild/simctl/`gh` recipe by hand (the single biggest recurring cost):
+- `scripts/apex-build.sh [build|test] [--only-testing X]` — pins scheme/UDID/derivedDataPath, copies `APIKeys.xcconfig`, disk-preflight; runs in the background, prints `LOG:` first.
+- `scripts/apex-render.sh <app|PROTO_SCREEN> [--out DIR]` — build → install freshest `.app` → launch → screenshot → `sips -Z 1400`.
+- `scripts/ship-pr.sh [<branch>|<worktree>]` — push → PR → wait on checks (ignoring the flaky `iOS Build & Test`) → `--admin` squash-merge → prune worktree.
+- `scripts/deploy-efs.sh [names|--all]` — deploy the Edge Functions changed vs `origin/main`.
+- `scripts/apex-status.sh` — "what's left?" rollup (open PRs+checks, issues, BACKLOG §2D).
+
+Full recipe, env overrides, and the hard-won constants: **`docs/agents/build-and-render.md`**.
 
 ### Issue tracker
 
