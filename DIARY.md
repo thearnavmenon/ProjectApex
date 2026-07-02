@@ -7,6 +7,47 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-02 — Deleted the old workout builder we stopped using
+
+**The problem (in plain words):**
+Last week we switched the app to build your daily workout with fast, offline math
+instead of an AI call. That left the *old* AI-based builder sitting in the code,
+dead — nothing called it anymore, but it was still there, cluttering things and
+making the code look like it does something it no longer does.
+
+**What I changed:**
+Removed the whole dead builder: the function that asked the AI to invent a session,
+its lift-history/trend/RAG-lookup helpers, and the request/response scaffolding that
+only it used (~340 lines gone). I kept the parts that are still doing real work —
+the piece that cleans up day names and enforces "only exercises you have equipment
+for" — plus the prompt file and its data-shape, because our tests still check those.
+Updated the file's description so it matches what the file actually does now.
+
+**How it was checked:**
+Full build + test suite green. The kept pieces (day-name cleanup, equipment
+enforcement) still have all their tests passing.
+
+**Status:** shipped, cleanup only — no behaviour change. (#581, follows #564 / #558)
+
+## 2026-07-02 — Fixed a test that was checking an old, wrong number
+
+**The problem (in plain words):**
+One of our automated tests was stuck in the past. It checked that if the AI takes
+too long, the app gives up and falls back to a safe default. But it assumed "too
+long" meant 9 seconds — a number from before we raised the real cutoff to 30 seconds
+(the "Coach is offline" fix). So the test's fake slow-AI (9 seconds) no longer
+counted as slow, and the test failed even though the app works fine.
+
+**What I changed:**
+Made the cutoff adjustable so the test can dial it down to 2 seconds and prove the
+give-up-and-fall-back behaviour still works — in about 2 seconds instead of a 30
+second wait. The real app is untouched: it still uses the 30 second cutoff.
+
+**How it was checked:**
+The timeout test passes in ~2 seconds, and the full test suite is green.
+
+**Status:** shipped. (#583)
+
 ## 2026-06-30 — Your daily workout is now built instantly, no internet needed
 
 **The problem (in plain words):**
