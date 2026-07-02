@@ -7,6 +7,30 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-02 — The app now quotes your own lifts back to you before a set
+
+**The problem (in plain words):**
+Because the coach now builds programs with fixed math, ten people who sign up the
+same way would get near-identical plans. The thing that makes it feel like *yours*
+is the app talking to you about *your* numbers. We had the pieces — last session's
+result, your floor/stretch targets, whether you're trending up — but nothing joined
+them into a single sentence right before you lift.
+
+**What I changed:**
+Added one narration line on the set card, shown before you start:
+"LAST TIME 92.5×8 → today FLOOR 95 / STRETCH 100, because this lift is trending up."
+It only uses real data — if there's no target yet it just shows last time, if you're
+not actually climbing it drops the "because", and if there's no history at all the
+line doesn't appear. It never makes a number up and never calls the internet.
+
+**How it was checked:**
+Table tests cover every combination — full line, missing target, no history,
+flat/declining trend (no false "climbing"), and bodyweight moves (shows "BW"). Full
+build + test suite green.
+
+**Status:** shipped, adds a line to the live set screen — worth an on-device look to
+see it reads well in context. (#565, part of #558 / ADR-0030)
+
 ## 2026-07-02 — Your injuries now actually shape the exercises you're given
 
 **The problem (in plain words):**

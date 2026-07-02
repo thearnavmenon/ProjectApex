@@ -401,6 +401,22 @@ struct ActiveSetView: View {
                 .accessibilityLabel("Last session: \(lastTime)")
             }
 
+            // Set narration (#565) — the "quote your own lifts back" line: joins
+            // last-time → today's floor/stretch → why, in one condensed line. Pure,
+            // deterministic, no network; distinct from setFraming (italic) and the
+            // form cue (below the metrics). Omitted when there's no last-session anchor.
+            if let narration = viewModel.setNarration {
+                Text(narration)
+                    .font(.system(size: 12, weight: .semibold))
+                    .fontWidth(.condensed)
+                    .foregroundStyle(Apex.text.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("Coach note: \(narration)")
+            }
+
             // "Adjusted" badge — shown after user overrides weight (FB-001)
             if prescription.userCorrectedWeight == true {
                 HStack(spacing: 5) {

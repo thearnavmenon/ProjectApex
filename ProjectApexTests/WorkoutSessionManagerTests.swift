@@ -2205,3 +2205,63 @@ final class WorkoutDayIdentityGuardTests: XCTestCase {
             "a WorkoutView for day A sees a mismatch and must refuse to mark A complete")
     }
 }
+
+// MARK: - #565: SetNarration pure renderer
+
+/// Table tests for the deterministic pre-set narration renderer. Offline; no
+/// APEX_INTEGRATION_TESTS. Asserts exact strings + per-clause graceful omission.
+final class SetNarrationTests: XCTestCase {
+
+    func test_fullLine_lastSet_projection_progressingTrend() {
+        let line = SetNarration.render(
+            lastTopWeightKg: 92.5, lastTopReps: 8,
+            floor: 95, stretch: 100, trend: .progressing)
+        XCTAssertEqual(line,
+            "LAST TIME 92.5×8 → today FLOOR 95 / STRETCH 100, because this lift is trending up")
+    }
+
+    func test_missingProjection_degradesToLastTimeClauseOnly() {
+        let line = SetNarration.render(
+            lastTopWeightKg: 80, lastTopReps: 8,
+            floor: nil, stretch: nil, trend: .progressing)
+        XCTAssertEqual(line, "LAST TIME 80×8, because this lift is trending up")
+    }
+
+    func test_noHistory_omitsNarrationEntirely() {
+        XCTAssertNil(SetNarration.render(
+            lastTopWeightKg: nil, lastTopReps: nil,
+            floor: 95, stretch: 100, trend: .progressing))
+        // Zero reps is not a real anchor either.
+        XCTAssertNil(SetNarration.render(
+            lastTopWeightKg: 80, lastTopReps: 0,
+            floor: 95, stretch: 100, trend: .progressing))
+    }
+
+    func test_nonProgressingTrend_dropsWhyClause() {
+        for trend in [ProgressionTrend.plateaued, .declining] {
+            let line = SetNarration.render(
+                lastTopWeightKg: 100, lastTopReps: 5,
+                floor: 100, stretch: 105, trend: trend)
+            XCTAssertEqual(line, "LAST TIME 100×5 → today FLOOR 100 / STRETCH 105")
+        }
+        // Nil trend also drops the clause.
+        XCTAssertEqual(
+            SetNarration.render(lastTopWeightKg: 100, lastTopReps: 5,
+                                floor: 100, stretch: 105, trend: nil),
+            "LAST TIME 100×5 → today FLOOR 100 / STRETCH 105")
+    }
+
+    func test_bodyweight_rendersBW() {
+        let line = SetNarration.render(
+            lastTopWeightKg: 0, lastTopReps: 12,
+            floor: nil, stretch: nil, trend: .plateaued)
+        XCTAssertEqual(line, "LAST TIME BW×12")
+    }
+
+    func test_fractionalWeights_useOneDecimal() {
+        let line = SetNarration.render(
+            lastTopWeightKg: 17.5, lastTopReps: 10,
+            floor: 17.5, stretch: 22.5, trend: nil)
+        XCTAssertEqual(line, "LAST TIME 17.5×10 → today FLOOR 17.5 / STRETCH 22.5")
+    }
+}

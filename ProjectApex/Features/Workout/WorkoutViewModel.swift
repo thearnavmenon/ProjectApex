@@ -57,6 +57,11 @@ class WorkoutViewModel {
     /// from the manager's cachedLastPerformance; nil when no history exists.
     var lastPerformanceSets: [SetLog]? = nil
 
+    /// Pre-rendered set narration for the live exercise (#565) — joins last-time →
+    /// today's floor/stretch → why. Deterministic, no network; nil when there is no
+    /// last-session anchor. Rendered inside the manager's snapshot.
+    var setNarration: String? = nil
+
     /// The exercise awaiting a prescription retry (#318 U7 / 7.6). Non-nil
     /// while the retry sheet is up; used to gate and target the manual
     /// fallback during .preflight, where currentExercise is nil.
@@ -292,6 +297,7 @@ class WorkoutViewModel {
         retryFailureDescription = snapshot.inferenceRetryReason.map { Self.retryDescription(for: $0) }
         retryExercise = snapshot.pendingRetryExercise
         lastPerformanceSets = snapshot.lastPerformanceSets
+        setNarration = snapshot.setNarration
     }
 
     /// Token for the currently-running polling task, so a second caller (e.g.
