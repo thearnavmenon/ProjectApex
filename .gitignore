@@ -7,6 +7,12 @@ xcuserdata/
 build/
 DerivedData/
 
+# Local derivedDataPath + logs used by scripts/apex-build.sh & apex-render.sh,
+# and their screenshot output dir. Rebuildable caches — never commit.
+.build/
+.build-proto/
+renders/
+
 # Bundled alpha API key (#329). The real key lives in APIKeys.local.xcconfig,
 # which is NEVER committed. The committed APIKeys.xcconfig holds only the
 # placeholder default and optionally includes the local file; APIKeys.xcconfig.example
