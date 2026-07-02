@@ -877,17 +877,24 @@ actor AIInferenceService {
     /// Stored for future use in payload construction; currently included in
     /// the WorkoutContext via the caller.
     let gymProfile: GymProfile?
+    /// Per-call watchdog budget (seconds) enforced around the provider call.
+    /// Defaults to the production 30 s (ADR-0007 / #555–#556); injectable so a
+    /// timeout-path test can trip the watchdog with a modest sleep instead of a
+    /// real ~30 s wall-clock wait.
+    let timeoutSeconds: Double
 
     // MARK: Init
 
     init(
         provider: any LLMProvider,
         gymProfile: GymProfile? = nil,
-        maxRetries: Int = 2
+        maxRetries: Int = 2,
+        timeoutSeconds: Double = 30.0
     ) {
         self.provider = provider
         self.gymProfile = gymProfile
         self.maxRetries = maxRetries
+        self.timeoutSeconds = timeoutSeconds
     }
 
     // MARK: Public API
@@ -936,7 +943,7 @@ actor AIInferenceService {
         //    inside the timeout per ADR-0007 §2).
         let rawResponse: String
         do {
-            rawResponse = try await withTimeout(seconds: 30.0) {
+            rawResponse = try await withTimeout(seconds: timeoutSeconds) {
                 try await TransientRetryPolicy.execute {
                     try await self.provider.complete(
                         systemPrompt: systemPrompt,
@@ -1069,7 +1076,7 @@ actor AIInferenceService {
         }
 
         do {
-            let rawResponse = try await withTimeout(seconds: 30.0) {
+            let rawResponse = try await withTimeout(seconds: timeoutSeconds) {
                 try await TransientRetryPolicy.execute {
                     try await self.provider.complete(
                         systemPrompt: systemPrompt,
