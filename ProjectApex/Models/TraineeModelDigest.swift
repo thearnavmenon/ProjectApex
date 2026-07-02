@@ -575,6 +575,16 @@ struct ActiveLimitationDigest: Codable, Sendable, Hashable {
         case userConfirmed            = "user_confirmed"
         case sessionsWithoutReMention = "sessions_without_re_mention"
     }
+
+    /// Human-readable limitation phrase fed into the macro-plan HARD EXCLUSION
+    /// prompt (#582). Prefers the user's own note (their words), else the subject
+    /// region ("knee", "shoulder", "lower back").
+    var promptDescriptor: String {
+        if let notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return notes
+        }
+        return subject.promptDescriptor
+    }
 }
 
 // MARK: - FatigueInteractionDigest

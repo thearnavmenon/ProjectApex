@@ -530,10 +530,18 @@ final class ProgramViewModel {
         guard await !macroPlanService.isGenerating else { return }
         viewState = .generating
 
+        // Fetch the digest once — feeds both the goal statement and the injury/
+        // limitation HARD-EXCLUSION list threaded into the block-commit call (#582).
+        let digest = await traineeModelService?.digest()
+
         // Read onboarding profile from UserDefaults if available (#318 U4).
         let profile = GenerationUserProfile.assemble(
-            digestGoalStatement: await traineeModelService?.digest()?.goal.statement
+            digestGoalStatement: digest?.goal.statement
         )
+
+        // #582: the user's active limitations become a HARD EXCLUSION at block-commit
+        // exercise selection (SystemPrompt_MacroPlan.txt HARD CONSTRAINTS).
+        let limitations = (digest?.activeLimitations ?? []).map(\.promptDescriptor)
         let daysPerWeek: Int = {
             let v = UserDefaults.standard.integer(forKey: UserProfileConstants.daysPerWeekKey)
             return v > 0 ? v : 4
@@ -556,7 +564,8 @@ final class ProgramViewModel {
                 ageYears: profile.ageYears,
                 trainingAge: profile.trainingAge,
                 trainingDaysPerWeek: daysPerWeek,
-                historicalDayLabels: historicalDayLabels
+                historicalDayLabels: historicalDayLabels,
+                limitations: limitations
             )
 
             // Build pending mesocycle from skeleton

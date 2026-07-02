@@ -7,6 +7,31 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-02 — Your injuries now actually shape the exercises you're given
+
+**The problem (in plain words):**
+When you set up the app you can tap the body areas you want to work around (knees,
+shoulders, lower back, and so on). We'd built the coach to treat those as a hard
+"don't pick exercises that hurt this" rule when it chooses your movements — but
+nothing was actually handing your injuries to that rule. So the switch was wired up
+but never flipped: your injuries were saved, and then ignored when building the plan.
+
+**What I changed:**
+Connected the two ends. When your first program is built, the areas you tapped in
+onboarding are passed straight into the exercise picker as hard exclusions. When the
+program is later rebuilt, the same thing happens from your saved injury list — and
+if you'd added a note in your own words ("left knee ACL"), it quotes that back
+instead of a generic label. So a bad knee actually keeps deep-knee exercises out of
+your plan now.
+
+**How it was checked:**
+New tests prove an injury reaches the plan request, that an empty injury list stays
+empty (no noise), and that the wording is right (your note wins over the generic
+body-part name). Full build + test suite green.
+
+**Status:** shipped. Note: this rule only bites once the plan is (re)built — it
+doesn't change a workout you've already got. (#582, part of #558 / ADR-0030)
+
 ## 2026-07-02 — Deleted the old workout builder we stopped using
 
 **The problem (in plain words):**

@@ -472,4 +472,41 @@ struct MacroPlanBlockCommitTests {
         #expect(ids.contains("barbell_bench_press"), "owned-equipment exercise kept")
         #expect(!ids.contains("cable_tricep_pushdown"), "unowned cable exercise dropped by the rail")
     }
+
+    // MARK: - #582: limitations threading
+
+    @Test("#582: limitations thread into the block-commit request payload")
+    func limitationsThreadIntoPayload() async throws {
+        let provider = CapturingMockProvider(daysPerWeek: 4)
+        let service = MacroPlanService(provider: provider)
+
+        _ = try await service.generateSkeleton(
+            userId: UUID(),
+            gymProfile: makeGymProfile(),
+            trainingDaysPerWeek: 4,
+            limitations: ["Knees", "Shoulders"]
+        )
+
+        let data = try #require(provider.lastUserPayload.data(using: .utf8))
+        let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let lims = try #require(root["limitations"] as? [String],
+                                "MacroPlanRequest must carry the user's limitations")
+        #expect(Set(lims) == ["Knees", "Shoulders"])
+    }
+
+    @Test("#582: no limitations → the key is omitted from the payload")
+    func noLimitationsOmitsKey() async throws {
+        let provider = CapturingMockProvider(daysPerWeek: 4)
+        let service = MacroPlanService(provider: provider)
+
+        _ = try await service.generateSkeleton(
+            userId: UUID(),
+            gymProfile: makeGymProfile(),
+            trainingDaysPerWeek: 4
+        )
+
+        let data = try #require(provider.lastUserPayload.data(using: .utf8))
+        let root = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(root["limitations"] == nil, "empty limitations must omit the key entirely")
+    }
 }
