@@ -412,6 +412,32 @@ struct MacroPlanServiceHistoricalLabelsTests {
         #expect(root["history"] == nil,
                 "history must be omitted (not null) when the user has no established labels")
     }
+
+    // #569: changing the training days/week re-deals under the NEW count while
+    // carrying the user's established labels so the overlapping days keep their
+    // identity (ADR-0017 day-label join). Asserted at the payload boundary.
+    @Test("#569: a changed day count threads the new count AND the prior labels")
+    func changedDayCountCarriesLabels() async throws {
+        let provider = CapturingMockProvider(daysPerWeek: 3)
+        let service = MacroPlanService(provider: provider)
+        // The user was on a 4-day split; they drop to 3 days.
+        let priorLabels = ["Upper_Push", "Lower", "Upper_Pull", "Full_Body"]
+
+        _ = try await service.generateSkeleton(
+            userId: UUID(),
+            gymProfile: makeGymProfile(),
+            trainingDaysPerWeek: 3,
+            historicalDayLabels: priorLabels
+        )
+
+        let root = try parseMacroPlanPayload(provider.lastUserPayload)
+        let constraints = try #require(root["constraints"] as? [String: Any])
+        #expect(constraints["training_days_per_week"] as? Int == 3,
+                "the re-deal must carry the NEW day count, not a hardcoded 4")
+        let history = try #require(root["history"] as? [String: Any])
+        #expect(history["recent_day_labels"] as? [String] == priorLabels,
+                "prior labels must be threaded so overlapping days keep their identity")
+    }
 }
 
 // MARK: - #563 block-commit

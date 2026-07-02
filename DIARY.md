@@ -7,6 +7,29 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-02 — Removed the last "assume 4 days a week" leftover
+
+**The problem (in plain words):**
+You can already change how many days a week you train (the stepper in Settings), and
+rebuilding your program picks that up. But buried in the code were two leftover spots
+that still assumed "4 days" as a fallback. They weren't actually reached on the real
+path, but leaving them there is how a future change quietly ends up giving someone a
+4-day plan they never asked for.
+
+**What I changed:**
+Deleted the dead "default = 4 days" constant, and made the day count a required input
+to the program builder so nothing can ever silently assume 4 — every path now has to
+pass your real number. No behaviour change: the Settings control and the rebuild flow
+already did the right thing.
+
+**How it was checked:**
+Added a test proving that when you switch from 4 days to 3, the builder uses 3 and
+still keeps your existing day names where they overlap (so your history stays
+attached). Full build + test suite green.
+
+**Status:** shipped. The days-per-week control itself already existed (Settings
+redesign). (#569, part of #558 / ADR-0030)
+
 ## 2026-07-02 — The app now quotes your own lifts back to you before a set
 
 **The problem (in plain words):**
