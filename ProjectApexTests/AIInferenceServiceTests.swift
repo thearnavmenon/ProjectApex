@@ -44,11 +44,13 @@ private final class RetryOnceProvider: LLMProvider, @unchecked Sendable {
     }
 }
 
-/// Always sleeps longer than the service's 8-second timeout window.
+/// Sleeps 9 s — longer than the short watchdog the timeout test injects, so the
+/// watchdog always wins the race. (Production timeout is 30 s per #555/#556; the
+/// test injects a short budget rather than sleeping past 30 s of wall-clock.)
 private struct SleepyProvider: LLMProvider {
     func complete(systemPrompt: String, userPayload: String) async throws -> String {
         try await Task.sleep(nanoseconds: 9_000_000_000) // 9 seconds
-        return "{}" // never reached
+        return "{}" // never reached — watchdog fires first
     }
 }
 
@@ -481,16 +483,19 @@ final class AIInferenceServiceTests: XCTestCase {
 
     // MARK: ─── 3. Timeout path test ───────────────────────────────────────────
 
-    /// SleepyProvider sleeps 9 seconds — longer than the 8-second watchdog.
-    /// The result must be .fallback(.timeout).
-    func test_timeout_providerSleeps9s_returnsFallbackTimeout() async {
+    /// A provider that hangs past the watchdog budget must yield
+    /// `.fallback(.timeout)`. The production budget is 30 s (#555/#556); the test
+    /// injects a short 2 s budget so a 9 s provider sleep reliably trips the
+    /// watchdog without a ~30 s wall-clock wait.
+    func test_timeout_providerExceedsWatchdog_returnsFallbackTimeout() async {
         let service = AIInferenceService(
             provider: SleepyProvider(),
             gymProfile: GymProfile.mockProfile(),
-            maxRetries: 0
+            maxRetries: 0,
+            timeoutSeconds: 2.0
         )
 
-        // Grant 12-second budget for this test: 9s provider sleep + headroom.
+        // Budget: 2 s watchdog + headroom.
         let expectation = XCTestExpectation(description: "timeout fallback received")
         Task {
             let result = await service.prescribe(context: WorkoutContext.mockContext())
@@ -505,7 +510,7 @@ final class AIInferenceServiceTests: XCTestCase {
                 XCTFail("Expected .fallback(.timeout) but got .success")
             }
         }
-        await fulfillment(of: [expectation], timeout: 12.0)
+        await fulfillment(of: [expectation], timeout: 6.0)
     }
 
     // MARK: ─── 4. Network failure test ────────────────────────────────────────
