@@ -161,16 +161,17 @@ struct RestTimerView: View {
         } message: {
             Text("No sets logged — this session will not be saved. Exit anyway?")
         }
-        .alert("End Workout Early?", isPresented: Binding(
+        .confirmationDialog("End workout early?", isPresented: Binding(
             get: { viewModel.showEndSessionEarlyConfirmation && viewModel.hasLoggedAnySets },
             set: { if !$0 { viewModel.showEndSessionEarlyConfirmation = false } }
-        )) {
-            Button("End Workout", role: .destructive) {
-                viewModel.onEndSessionEarly()
+        ), titleVisibility: .visible) {
+            // S1: one tap captures WHY the session ended early (see ActiveSetView).
+            ForEach(EarlyExitReason.allCases, id: \.self) { reason in
+                Button(reason.chipLabel) { viewModel.onEndSessionEarly(reason: reason) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Your progress so far will be saved. You can review your partial session summary.")
+            Text("What cut it short? Your progress so far is saved either way.")
         }
         .task {
             // Check notification authorization once per appearance (G-F5).

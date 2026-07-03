@@ -635,6 +635,41 @@ final class WorkoutSessionManagerTests: XCTestCase {
         )
     }
 
+    // MARK: Test 5b: Early-exit reason threads into the summary (S1)
+
+    func testEndSessionEarly_withReason_threadsReasonIntoSummary() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 3)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        await manager.completeSet(actualReps: 10, rpeFelt: 6, intent: .top)
+        await manager.endSessionEarly(reason: .tooLong)
+
+        let state = await manager.sessionState
+        guard case .sessionComplete(let summary) = state else {
+            XCTFail("Expected .sessionComplete after endSessionEarly(reason:), got \(state)")
+            return
+        }
+        // S1: the chosen reason chip must be recorded on the stored summary so the
+        // "why" (not just "that") an early exit happened survives for adaptation.
+        XCTAssertEqual(
+            summary.earlyExitReason, EarlyExitReason.tooLong.rawValue,
+            "Early-exit reason chip must thread into the session summary"
+        )
+    }
+
+    func testEarlyExitReason_rawValuesAreStableCanonicalForm() {
+        // Raw values are persisted (early_exit_reason) + used as RAG tags — pin them
+        // so a rename can't silently orphan stored data.
+        XCTAssertEqual(EarlyExitReason.allCases.count, 5)
+        XCTAssertEqual(EarlyExitReason.ranOutOfTime.rawValue, "ran_out_of_time")
+        XCTAssertEqual(EarlyExitReason.tooLong.rawValue, "too_long")
+        XCTAssertEqual(EarlyExitReason.tired.rawValue, "tired")
+        XCTAssertEqual(EarlyExitReason.hurt.rawValue, "hurt")
+        XCTAssertEqual(EarlyExitReason.gotWhatIWanted.rawValue, "got_what_i_wanted")
+    }
+
     // MARK: Test 6: Reentrancy guard — stale inference must not overwrite state
 
     func testReentrancyGuard_staleInferenceDiscarded() async throws {
