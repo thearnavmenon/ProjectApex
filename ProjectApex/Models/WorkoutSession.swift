@@ -310,6 +310,15 @@ nonisolated struct SessionSummary: Codable, Sendable {
     let durationSeconds: Int
     /// Exercises swapped during this session. Nil when no swaps occurred.
     let swappedExercises: [SwapRecord]?
+    /// S3 (honest DID frame): how many exercises the session PRESENTED (post
+    /// session-size trim) vs how many were actually TRAINED (≥1 logged set).
+    /// Nullable — absent on pre-S3 rows. `exercisesTrained < exercisesPlanned` is
+    /// the drift-free, exercise-level "did they finish what was presented" signal
+    /// that session-length adaptation reads instead of the set-level counts (which
+    /// live on the trimmed frame). The grow-path compares against the full
+    /// committed pool from the program, not this presented count.
+    let exercisesPlanned: Int?
+    let exercisesTrained: Int?
 
     enum CodingKeys: String, CodingKey {
         case totalVolumeKg       = "total_volume_kg"
@@ -321,6 +330,8 @@ nonisolated struct SessionSummary: Codable, Sendable {
         case earlyExitReason     = "early_exit_reason"
         case durationSeconds     = "duration_seconds"
         case swappedExercises    = "swapped_exercises"
+        case exercisesPlanned    = "exercises_planned"
+        case exercisesTrained    = "exercises_trained"
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -334,6 +345,8 @@ nonisolated struct SessionSummary: Codable, Sendable {
         earlyExitReason   = try c.decodeIfPresent(String.self, forKey: .earlyExitReason)
         durationSeconds   = try c.decode(Int.self, forKey: .durationSeconds)
         swappedExercises  = try c.decodeIfPresent([SwapRecord].self, forKey: .swappedExercises)
+        exercisesPlanned  = try c.decodeIfPresent(Int.self, forKey: .exercisesPlanned)
+        exercisesTrained  = try c.decodeIfPresent(Int.self, forKey: .exercisesTrained)
     }
 
     nonisolated init(
@@ -345,7 +358,9 @@ nonisolated struct SessionSummary: Codable, Sendable {
         notableNotes: [String],
         earlyExitReason: String?,
         durationSeconds: Int,
-        swappedExercises: [SwapRecord]? = nil
+        swappedExercises: [SwapRecord]? = nil,
+        exercisesPlanned: Int? = nil,
+        exercisesTrained: Int? = nil
     ) {
         self.totalVolumeKg     = totalVolumeKg
         self.setsCompleted     = setsCompleted
@@ -356,6 +371,8 @@ nonisolated struct SessionSummary: Codable, Sendable {
         self.earlyExitReason   = earlyExitReason
         self.durationSeconds   = durationSeconds
         self.swappedExercises  = swappedExercises
+        self.exercisesPlanned  = exercisesPlanned
+        self.exercisesTrained  = exercisesTrained
     }
 }
 

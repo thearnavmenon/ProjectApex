@@ -670,6 +670,29 @@ final class WorkoutSessionManagerTests: XCTestCase {
         XCTAssertEqual(EarlyExitReason.gotWhatIWanted.rawValue, "got_what_i_wanted")
     }
 
+    // MARK: Test 5c: Honest DID frame — presented vs trained (S3)
+
+    func testFinishSession_recordsHonestExerciseFrame() async throws {
+        let manager = makeManager()
+        let day = makeTrainingDay(exerciseCount: 2, setsPerExercise: 3)
+
+        await manager.startSession(trainingDay: day, programId: UUID())
+        try await Task.sleep(nanoseconds: 200_000_000)
+        // Train exercise 1 only (one set), then exit early → 1 of 2 exercises trained.
+        await manager.completeSet(actualReps: 10, rpeFelt: 6, intent: .top)
+        await manager.endSessionEarly(reason: .ranOutOfTime)
+
+        let state = await manager.sessionState
+        guard case .sessionComplete(let summary) = state else {
+            XCTFail("Expected .sessionComplete, got \(state)")
+            return
+        }
+        // S3: the summary carries the exercise-level frame adaptation reads — the
+        // drift-free "did they finish what was presented" signal.
+        XCTAssertEqual(summary.exercisesPlanned, 2, "Session presented 2 exercises")
+        XCTAssertEqual(summary.exercisesTrained, 1, "Only 1 distinct exercise was trained")
+    }
+
     // MARK: Test 6: Reentrancy guard — stale inference must not overwrite state
 
     func testReentrancyGuard_staleInferenceDiscarded() async throws {
