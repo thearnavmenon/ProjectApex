@@ -7,6 +7,46 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-03 — Built a "digital twin" of each lifter, then let the data tell us an uncomfortable truth
+
+**The idea (in plain words):**
+The big plan for the coach's brain is to stop tracking one number per exercise and
+instead keep a small living model of each person — how strong they really are, how
+fast they're improving, how tired they carry into a session. Before rebuilding
+everything on top of that idea, we made it pass a test: replay every set our real
+users ever logged, have both the old brain and the new twin predict each next
+workout, and see who's closer.
+
+**What I built:**
+The twin itself (a small filter that updates after every set), a replay rig that
+runs any brain over the full logged history and scores it honestly, and a "shadow"
+hookup — the twin now quietly learns from every new workout in production, but it
+touches nothing the user sees and can't break anything. Its math is double-checked
+against a second implementation written independently, and the whole thing gives
+byte-identical answers on repeat runs.
+
+**What the data said:**
+The twin beats the old tracker clearly — its guesses were less than half as wrong.
+But a dumb baseline that just says "they'll do about the same reps as usual" beat
+BOTH, by a lot. Why: people pick weights so they land on their target reps, so the
+rep count barely carries any signal — the real information is in how the weight
+climbs, and there "same as last time" is nearly unbeatable too. Also, the twin's
+uncertainty bands were too narrow (60% of results landed inside its "90%" range).
+
+**What this means:**
+The honest verdict is recorded in ADR-0031: we do NOT green-light the rest of the
+brain overhaul on this evidence. The twin stays in shadow, learning quietly at zero
+risk, and the test rig is ready to re-run once we either design a smarter test
+(planned "experiment sets" would create exactly the data this needs) or simply have
+more users and months of history. Learning this now, for the cost of a week of
+shadow code instead of a quarter of rebuilding — that was the whole point of doing
+Phase 1 first.
+
+**How it was checked:**
+41 new tests (filter math vs an independent reference, covariance health, replay
+determinism, a synthetic golden run in CI), plus the full replay of all 378 real
+logged sets, run twice to prove identical output.
+
 ## 2026-07-02 — Swapping an exercise can now stick for good, not just for one workout
 
 **The problem (in plain words):**
