@@ -137,6 +137,23 @@ private struct GoTrueErrorBody: Decodable {
     }
 }
 
+/// `GET /auth/v1/user` response subset for the #598 link gate: the linked
+/// identity providers and the anonymous flag. Everything optional — older
+/// GoTrue versions and anon users vary the shape.
+private struct GoTrueUserInfo: Decodable {
+    let identities: [Identity]?
+    let isAnonymous: Bool?
+
+    struct Identity: Decodable {
+        let provider: String
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case identities
+        case isAnonymous = "is_anonymous"
+    }
+}
+
 // MARK: - SupabaseAuth
 
 /// Actor that owns the GoTrue session lifecycle: restore-or-sign-in on launch,
@@ -418,6 +435,31 @@ actor SupabaseAuth {
         }
         print("[SupabaseAuth] apple sign-in swapped session — uid: \(newSession.userId) (was: \(previous?.userId.uuidString ?? "none"))")
         return .signedInAsDifferentUser(newSession, previousUserId: previous?.userId)
+    }
+
+    /// `GET /auth/v1/user` — the truthful "is this identity Apple-anchored?"
+    /// check for the #598 backfill gate (identities[].provider + is_anonymous).
+    /// Fail-open by design: returns `nil` when there is no session, the token
+    /// can't be refreshed, or the call fails — the gate then skips this launch
+    /// rather than blocking anything (degradation contract).
+    func fetchIdentityState() async -> (isAppleLinked: Bool, isAnonymous: Bool)? {
+        guard let token = await validAccessToken() else { return nil }
+        guard let url = makeURL(path: "/auth/v1/user", query: nil) else { return nil }
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = perAttemptTimeout
+
+        guard
+            let (data, response) = try? await session.data(for: request),
+            let http = response as? HTTPURLResponse,
+            (200...299).contains(http.statusCode),
+            let user = try? decoder.decode(GoTrueUserInfo.self, from: data)
+        else { return nil }
+
+        let isAppleLinked = (user.identities ?? []).contains { $0.provider == "apple" }
+        return (isAppleLinked, user.isAnonymous ?? false)
     }
 
     /// `POST /auth/v1/logout`. Clears the persisted + cached session regardless

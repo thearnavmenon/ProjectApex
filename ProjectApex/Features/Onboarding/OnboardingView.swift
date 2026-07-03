@@ -462,6 +462,9 @@ struct OnboardingView: View {
         }
         await deps.supabaseClient.setAuthToken(session.accessToken)
         appleLinkDone = true
+        // #598: record the anchor locally so the backfill link gate never
+        // re-prompts an install that linked during onboarding.
+        UserDefaults.standard.set(true, forKey: AppleLinkGate.linkedFlagKey)
 
         var hasActiveProgram = false
         if case .signedInAsDifferentUser = outcome {
