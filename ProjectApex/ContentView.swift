@@ -28,9 +28,9 @@ struct ContentView: View {
     /// Controls which tab is visible.
     @State private var selectedTab: Int = 0
 
-    /// Navigation path for the Program tab's stack. Bound so a re-tap on the already-
-    /// active Program tab pops back to the calendar root (`handleTabReselect`). Day-detail
-    /// pushes are value-based (`ProgramDayRoute`) precisely so this reset works.
+    /// Navigation path for the Program tab's stack. Bound so tapping the Program tab —
+    /// switching in or re-tapping — pops back to the calendar root (`handleTabTap`).
+    /// Day-detail pushes are value-based (`ProgramDayRoute`) precisely so this reset works.
     @State private var programPath = NavigationPath()
 
     /// Shared view model for the Program tab — owned here so SettingsView
@@ -105,7 +105,7 @@ struct ContentView: View {
                         loadingPlaceholder
                     }
                 }
-                // Day-detail is pushed value-based (ProgramDayRoute) so re-tapping the
+                // Day-detail is pushed value-based (ProgramDayRoute) so tapping the
                 // Program tab pops the stack back to this calendar root.
                 .navigationDestination(for: ProgramDayRoute.self) { route in
                     programDayDetail(for: route)
@@ -190,7 +190,7 @@ struct ContentView: View {
                 )
                 .padding(.bottom, 8)
             }
-            ApexTabBar(selection: $selectedTab, onReselect: handleTabReselect)
+            ApexTabBar(selection: $selectedTab, onTap: handleTabTap)
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .environment(\.switchToTab, { selectedTab = $0 })
@@ -396,10 +396,11 @@ struct ContentView: View {
         }
     }
 
-    /// Re-tapping the already-selected tab pops that tab's stack to its root. Only the
-    /// Program tab keeps a bound path today, so a re-tap there returns to the calendar;
-    /// other tabs are a no-op.
-    private func handleTabReselect(_ index: Int) {
+    /// Tapping the Program tab — whether switching to it from another tab or re-tapping
+    /// while already on it — resets its stack to the calendar root, so Program always
+    /// opens at the calendar. Only the Program tab keeps a bound path today; other tabs
+    /// are a no-op.
+    private func handleTabTap(_ index: Int) {
         if index == 0 {
             programPath = NavigationPath()
         }
