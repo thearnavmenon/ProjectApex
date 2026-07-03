@@ -1663,6 +1663,10 @@ enum UserProfileConstants {
     static let primaryGoalKey   = "com.projectapex.user.primaryGoal"
     /// Number of training days per week selected during onboarding. Default 4 if absent.
     static let daysPerWeekKey   = "com.projectapex.user.daysPerWeek"
+    /// Target exercises per session (S2). Absent/0 = unset → prescribe the full
+    /// committed slot (no trim); when set (clamped 3–8), the deterministic
+    /// instantiator trims each session toward this many exercises, floor-aware.
+    static let sessionSizeKey   = "com.projectapex.user.sessionSize"
     /// Incremented after each completed workout session. 0 = no sessions ever completed.
     /// Used to show the first-session calibration banner (FB-005).
     static let sessionCountKey  = "com.projectapex.user.sessionCount"

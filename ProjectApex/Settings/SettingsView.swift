@@ -77,6 +77,10 @@ struct SettingsView: View {
     /// Applied on the user's NEXT regenerate (program generation reads this key);
     /// changing it here does NOT auto-regenerate. Clamped 2–6, default 4.
     @State private var daysPerWeek: Int = 4
+    /// Target exercises per session — backed by `UserProfileConstants.sessionSizeKey`
+    /// (S2). Applied on the NEXT session/regenerate; the deterministic instantiator
+    /// trims toward this many exercises, floor-aware. Clamped 3–8, display default 6.
+    @State private var sessionSize: Int = 6
     @State private var showGoalReview = false
     @State private var showCalibrationReview = false
     /// Projections fetched on demand when "Review targets" is tapped.
@@ -87,6 +91,7 @@ struct SettingsView: View {
     @State private var showResetAllConfirmation = false
 
     private static let daysPerWeekRange = 2...6
+    private static let sessionSizeRange = 3...8
 
     /// Destructive-action red. The production design system has no danger token
     /// (lime stays reserved for additive/commit actions), so this destructive row
@@ -460,6 +465,12 @@ struct SettingsView: View {
         let stored = defaults.integer(forKey: UserProfileConstants.daysPerWeekKey)
         daysPerWeek = (stored <= 0 ? 4 : stored)
             .clamped(to: Self.daysPerWeekRange)
+
+        // S2: session size — display default 6 when unset (0); the stored key stays
+        // 0 (= no trim) until the user actually moves the stepper.
+        let storedSize = defaults.integer(forKey: UserProfileConstants.sessionSizeKey)
+        sessionSize = (storedSize <= 0 ? 6 : storedSize)
+            .clamped(to: Self.sessionSizeRange)
     }
 
     /// Program management section — only shown when a gym profile exists.
@@ -483,6 +494,26 @@ struct SettingsView: View {
                     }
             }
             .settingsCardRow(.first)
+
+            // Session size — target exercises per workout; trims the next session (S2).
+            // Does not auto-regenerate; the deterministic instantiator reads this key.
+            HStack(spacing: 13) {
+                boxedIcon("dumbbell.fill")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Session size")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(Apex.text)
+                    Text("exercises per workout")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Apex.textFaint)
+                }
+                Spacer()
+                DaysStepper(value: $sessionSize, range: Self.sessionSizeRange)
+                    .onChange(of: sessionSize) { _, v in
+                        UserDefaults.standard.set(v, forKey: UserProfileConstants.sessionSizeKey)
+                    }
+            }
+            .settingsCardRow(.middle)
 
             // Goal & focus — presents the goal-review screen.
             Button {

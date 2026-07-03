@@ -856,10 +856,16 @@ final class ProgramViewModel {
         // the root of the "Coach is offline" mid-flow stalls, #555/#556). The
         // trend is sourced from the digest hybrid verdict, not a local Epley dup.
         let digest = await traineeModelService?.digest()
+        // S2: target session size (exercises/session). 0/absent = unset → no trim.
+        let sessionSize: Int? = {
+            let v = UserDefaults.standard.integer(forKey: UserProfileConstants.sessionSizeKey)
+            return v > 0 ? v : nil
+        }()
         guard let generatedDay = SessionAutoregulator.instantiate(
             day: day,
             digest: digest,
-            requiresReturnOverride: temporalContext.requiresReturnPhaseOverride
+            requiresReturnOverride: temporalContext.requiresReturnPhaseOverride,
+            targetExerciseCount: sessionSize
         ) else {
             // #558: the day has no committed exercise pool (stale pre-block-commit
             // program). Do NOT write a corrupt `.generated` day with zero exercises —

@@ -67,7 +67,8 @@ struct SessionAutoregulator {
     static func instantiate(
         day: TrainingDay,
         digest: TraineeModelDigest?,
-        requiresReturnOverride: Bool
+        requiresReturnOverride: Bool,
+        targetExerciseCount: Int? = nil
     ) -> TrainingDay? {
         // #558 (ADR-0030): the committed exercise pool is the frozen identity the
         // block-commit generator (#563) writes onto each day. An empty pool means the
@@ -76,7 +77,11 @@ struct SessionAutoregulator {
         // `.generated` day with zero exercises (the silent "greyed Start" dead-end).
         guard !day.exercises.isEmpty else { return nil }
 
-        let exercises = day.exercises.map { ex -> PlannedExercise in
+        // S2: trim toward the user's target session size (floor-aware selection from
+        // the FROZEN committed pool — invents nothing, keeps identity + rep-range).
+        // nil target → the full committed slot (back-compat / opted-out).
+        let exercises = selectForTarget(day.exercises, target: targetExerciseCount)
+            .map { ex -> PlannedExercise in
             let pattern = ExerciseLibrary.lookup(ex.exerciseId)?.movementPattern
             let patternSummary = pattern.flatMap { p in
                 digest?.perPatternSummary.first { $0.pattern == p }
@@ -120,5 +125,36 @@ struct SessionAutoregulator {
             sessionNotes: day.sessionNotes,
             status: .generated
         )
+    }
+
+    /// Floor-aware, compound-first selection of `target` exercises from the FROZEN
+    /// committed pool (S2). The committed pool is ordered compounds→isolations, so a
+    /// naive prefix would starve small muscles whose only direct work is a tail
+    /// isolation (side/rear delts, biceps, calves). This keeps the compound-first
+    /// prefix but then guarantees ≥1 direct (primary-muscle) exercise for every
+    /// primary muscle the day trains — pulling a dropped exercise back if a muscle
+    /// would otherwise be zeroed. If coverage requires more than `target`, coverage
+    /// wins (never starve a muscle to hit a number). Returns the pool unchanged when
+    /// `target` is nil or ≥ the pool size. Committed order is always preserved, so
+    /// the result is deterministic.
+    static func selectForTarget(_ committed: [PlannedExercise], target: Int?) -> [PlannedExercise] {
+        guard let target, target > 0, target < committed.count else { return committed }
+
+        // 1. Compound-first prefix.
+        var keptIds = Set(committed.prefix(target).map(\.id))
+
+        // 2. Coverage guard: every primary muscle the day trains keeps ≥1 direct exercise.
+        let trainedPrimaries = Set(committed.map(\.primaryMuscle))
+        let coveredPrimaries = Set(committed.filter { keptIds.contains($0.id) }.map(\.primaryMuscle))
+        for muscle in trainedPrimaries.subtracting(coveredPrimaries) {
+            // Pull back the highest-priority (earliest committed) dropped exercise
+            // that directly trains this muscle.
+            if let rescue = committed.first(where: { $0.primaryMuscle == muscle && !keptIds.contains($0.id) }) {
+                keptIds.insert(rescue.id)
+            }
+        }
+
+        // 3. Preserve committed order (deterministic regardless of set iteration).
+        return committed.filter { keptIds.contains($0.id) }
     }
 }

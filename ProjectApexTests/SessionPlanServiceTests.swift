@@ -346,4 +346,71 @@ struct SessionAutoregulatorTests {
 
         #expect(SessionAutoregulator.instantiate(day: day, digest: nil, requiresReturnOverride: false) == nil)
     }
+
+    // MARK: - S2: floor-aware session-size trim
+
+    private func ex(_ id: String, _ muscle: String) -> PlannedExercise {
+        PlannedExercise(
+            id: UUID(), exerciseId: id, name: id, primaryMuscle: muscle,
+            synergists: [], equipmentRequired: .barbell, sets: 3,
+            repRange: RepRange(min: 8, max: 12), tempo: "", restSeconds: 120,
+            rirTarget: 2, coachingCues: [])
+    }
+
+    @Test("selectForTarget: nil target keeps the full committed pool")
+    func selectNilTargetKeepsAll() {
+        let pool = [ex("a", "chest"), ex("b", "shoulders"), ex("c", "chest")]
+        #expect(SessionAutoregulator.selectForTarget(pool, target: nil).map(\.exerciseId) == ["a", "b", "c"])
+    }
+
+    @Test("selectForTarget: target >= pool size keeps the full pool")
+    func selectTargetGeqKeepsAll() {
+        let pool = [ex("a", "chest"), ex("b", "shoulders")]
+        #expect(SessionAutoregulator.selectForTarget(pool, target: 5).count == 2)
+    }
+
+    @Test("selectForTarget: trims to the compound-first prefix when coverage already holds")
+    func selectTrimsPrefixWhenCovered() {
+        // 5 exercises, primaries {chest, shoulders}; target 4 → the prefix already
+        // covers both muscles, so it's a clean compound-first trim (5 → 4).
+        let pool = [ex("bench", "chest"), ex("incline", "chest"), ex("fly", "chest"),
+                    ex("ohp", "shoulders"), ex("lateral", "shoulders")]
+        #expect(SessionAutoregulator.selectForTarget(pool, target: 4).map(\.exerciseId)
+                == ["bench", "incline", "fly", "ohp"])
+    }
+
+    @Test("selectForTarget: pulls a dropped muscle back so no primary is zeroed")
+    func selectPullsBackForCoverage() {
+        // target 3 → prefix [bench, incline, fly] covers only chest; shoulders would be
+        // zeroed, so the first dropped shoulders exercise (ohp) is pulled back → 4, not 3.
+        let pool = [ex("bench", "chest"), ex("incline", "chest"), ex("fly", "chest"),
+                    ex("ohp", "shoulders"), ex("lateral", "shoulders")]
+        let out = SessionAutoregulator.selectForTarget(pool, target: 3)
+        #expect(out.map(\.exerciseId) == ["bench", "incline", "fly", "ohp"])
+        #expect(Set(out.map(\.primaryMuscle)) == ["chest", "shoulders"])   // coverage preserved
+    }
+
+    @Test("instantiate honors targetExerciseCount and re-expands when the target is lifted")
+    func instantiateHonorsTarget() throws {
+        let pool = [ex("bench", "chest"), ex("incline", "chest"), ex("fly", "chest"),
+                    ex("ohp", "shoulders"), ex("lateral", "shoulders")]
+        let day = TrainingDay(id: UUID(), dayOfWeek: 1, dayLabel: "Push_A",
+                              exercises: pool, sessionNotes: nil, status: .pending)
+        let trimmed = try #require(SessionAutoregulator.instantiate(
+            day: day, digest: nil, requiresReturnOverride: false, targetExerciseCount: 4))
+        #expect(trimmed.exercises.count == 4)
+        #expect(trimmed.status == .generated)
+        // Lifting the target back re-expands from the still-frozen pool (nothing destroyed).
+        let full = try #require(SessionAutoregulator.instantiate(
+            day: day, digest: nil, requiresReturnOverride: false, targetExerciseCount: nil))
+        #expect(full.exercises.count == 5)
+    }
+
+    @Test("instantiate still refuses an empty pool even with a target (composes with #613)")
+    func instantiateEmptyPoolStillNilWithTarget() {
+        let day = TrainingDay(id: UUID(), dayOfWeek: 1, dayLabel: "Push_A",
+                              exercises: [], sessionNotes: nil, status: .pending)
+        #expect(SessionAutoregulator.instantiate(
+            day: day, digest: nil, requiresReturnOverride: false, targetExerciseCount: 3) == nil)
+    }
 }
