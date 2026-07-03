@@ -15,6 +15,7 @@
 
 import XCTest
 import Foundation
+import Network
 @testable import ProjectApex
 
 // MARK: - Test Payload
@@ -599,5 +600,58 @@ final class WriteAheadQueueTests: XCTestCase {
         let dead = await queue.failedWrites()
         XCTAssertEqual(pending, 0, "permanently-failed item must leave the pending queue")
         XCTAssertEqual(dead.count, 1, "permanently-failed item must be dead-lettered")
+    }
+}
+
+// MARK: - NetworkMonitor (Act 1 — reachability-triggered WAQ flush)
+
+/// Thread-safe call counter for the `@Sendable` onRestore closure.
+private final class RestoreCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = 0
+    func increment() { lock.lock(); _value += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return _value }
+}
+
+/// Verifies the edge-detection core (`NetworkMonitor.handle(_:)`) that decides
+/// when the WAQ is flushed on network restoration. NWPathMonitor itself is only
+/// exercised in integration; `handle(_:)` is the deterministic seam.
+final class NetworkMonitorTests: XCTestCase {
+
+    private func makeMonitor() -> (NetworkMonitor, RestoreCounter) {
+        let counter = RestoreCounter()
+        let monitor = NetworkMonitor(onRestore: { counter.increment() })
+        return (monitor, counter)
+    }
+
+    func test_offlineToOnline_firesOnce() {
+        let (monitor, counter) = makeMonitor()
+        monitor.handle(.satisfied)     // initial observation — no fire
+        monitor.handle(.unsatisfied)   // went offline — no fire
+        monitor.handle(.satisfied)     // came back online — FIRE
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func test_initialSatisfied_doesNotFire() {
+        let (monitor, counter) = makeMonitor()
+        monitor.handle(.satisfied)
+        XCTAssertEqual(counter.value, 0,
+                       "Launching already-online must not fire; foreground/enqueue flushes cover launch.")
+    }
+
+    func test_repeatedSatisfied_doesNotRefire() {
+        let (monitor, counter) = makeMonitor()
+        monitor.handle(.unsatisfied)
+        monitor.handle(.satisfied)     // FIRE
+        monitor.handle(.satisfied)     // duplicate path update — no refire
+        monitor.handle(.satisfied)
+        XCTAssertEqual(counter.value, 1)
+    }
+
+    func test_multipleRestores_fireEachTime() {
+        let (monitor, counter) = makeMonitor()
+        monitor.handle(.unsatisfied); monitor.handle(.satisfied)   // FIRE 1
+        monitor.handle(.unsatisfied); monitor.handle(.satisfied)   // FIRE 2
+        XCTAssertEqual(counter.value, 2)
     }
 }

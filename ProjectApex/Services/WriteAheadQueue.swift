@@ -9,8 +9,9 @@
 // from the queue on HTTP 201 (success).
 //
 // flush() is called on:
-//   • App returning to foreground (scenePhase → .active)
-//   • Network restoration (NWPathMonitor)
+//   • App returning to foreground (scenePhase → .active, ProjectApexApp)
+//   • Network restoration (NetworkMonitor / NWPathMonitor, wired in AppDependencies)
+//   • Each enqueue() (a non-blocking flush is spawned immediately)
 //
 // Queue processes items in strict FIFO order.
 //

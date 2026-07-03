@@ -40,6 +40,11 @@ final class AppDependencies {
     let exerciseSwapService: ExerciseSwapService
     /// Local write-ahead queue for reliable Supabase writes during workouts.
     let writeAheadQueue: WriteAheadQueue
+    /// Reachability watcher: flushes `writeAheadQueue` the instant the network
+    /// returns, so writes that failed offline retry without waiting for the next
+    /// set-log or app foreground. Held for the app's lifetime to keep the
+    /// underlying NWPathMonitor alive.
+    let networkMonitor: NetworkMonitor
     /// Local SwiftData cache for the trainee model snapshot (Phase 1 / Slice 8).
     let traineeModelLocalStore: TraineeModelLocalStore
     /// WAQ adapter: routes trainee_model_updates items to the Edge Function (Phase 1 / Slice 11).
@@ -236,6 +241,16 @@ final class AppDependencies {
             currentAuthUid: { [auth] in await auth.currentSession?.userId }
         )
         self.writeAheadQueue = waq
+
+        // 9b. NetworkMonitor — flush the WAQ on network restoration. Closes the
+        // previously-documented-but-unwired NWPathMonitor trigger: an offline
+        // write now retries the moment connectivity returns, not just on the next
+        // enqueue or app foreground.
+        let netMonitor = NetworkMonitor(onRestore: { [waq] in
+            Task { await waq.flush() }
+        })
+        netMonitor.start()
+        self.networkMonitor = netMonitor
 
         // 10. TraineeModelLocalStore + TraineeModelUpdateJob (Phase 1 / Slices 8 + 11)
         // makeShared() can fail only if SwiftData can't create the container — treat as fatal.
