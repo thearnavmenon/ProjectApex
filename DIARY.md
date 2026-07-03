@@ -7,6 +7,61 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-03 — Your workouts can now fit how you actually train
+
+**What you told me:**
+You're not in the mood for long sessions — you do four or five of the exercises the app
+gives you, then stop. So we looked at what actually happens to those "unfinished"
+workouts, and what we could change so the app stops handing you sessions that are longer
+than you want.
+
+**The good news first:**
+Your unfinished workouts were never being thrown away. The exercises you *do* log are
+saved, they teach the coach, they count toward your next weights, and the app moves your
+programme forward. The only two places that ignored them were the Progress charts and the
+gym streak.
+
+**What I added (three pieces):**
+- **A "why did you stop?" question.** When you end a workout early, the app now asks with
+  one tap — ran out of time, too long, tired, something hurt, or got what I wanted. The
+  answer is saved so the coach can learn your pattern (and so a busy day never gets
+  mistaken for "make my workouts shorter").
+- **A "Session size" setting.** In Settings you can now choose how many exercises you want
+  per workout (3 to 8). Your sessions trim down to that — but safely: it always keeps at
+  least one exercise for each muscle the day trains, so nothing drops to zero. If it can't
+  hit your number without starving a muscle, it keeps the session a touch longer.
+- **Honest tracking** of how many exercises a session offered versus how many you did — so
+  a future "learn it automatically" feature has real data to work from.
+
+**What I deliberately left for later:**
+The fully automatic version (the app quietly adjusting your session length on its own) and
+a "want to add a training day to keep your volume up?" prompt. With only a couple of people
+using the app, there isn't enough real data to tune those safely yet — so we're waiting
+rather than guessing. The manual setting does the real job today. An outside reviewer agent
+double-checked this call and agreed.
+
+**How it was checked:**
+Each piece was built test-first and merged only once its tests passed. Not yet tried on a
+real phone.
+
+**Status:** Merged to main as pull requests #614, #615, and #616.
+
+## 2026-07-03 — Fixed a greyed-out "Start Workout" that wouldn't generate
+
+**What went wrong:**
+On a program day, "Start Workout" was greyed out and nothing happened — no error, no
+spinner. Your programme was made by an older version of the app, before a big change at
+the end of June. The new code builds each workout from a fixed list of exercises baked
+into the programme; your older programme didn't carry that list, so the app was quietly
+producing an empty workout you couldn't start.
+
+**The fix:**
+The app now refuses to build an empty workout. Instead of a dead greyed button, it tells
+you the programme needs rebuilding and points you to "Regenerate Program" in Settings.
+
+**Status:** Merged to main as pull request #613. (The quickest unblock for an older
+programme is Settings → Reset all data → set up again, which rebuilds it in the new format.)
+
 ## 2026-07-03 — The Programme tab now always takes you back to the calendar
 
 **The gap:**
