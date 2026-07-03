@@ -148,6 +148,7 @@ import { LLMPermanentError, LLMTransientError } from "../_shared/llm-retry.ts";
 import { backfillPatternConfidence } from "../_shared/pattern-confidence-backfill.ts";
 import { backfillPatternSessionCount } from "../_shared/pattern-session-count-backfill.ts";
 import { checkOwnership } from "../_shared/jwt-owner.ts";
+import { applyTwinShadow } from "../_shared/twin/shadow.ts";
 
 export interface UpdateTraineeModelRequest {
   user_id: string;
@@ -2090,6 +2091,27 @@ export async function applySession(
       newModelJson = { ...newModelJson, patterns: readinessRuled.patterns };
       rulesFired.push(...readinessRuled.rulesFired);
       fieldsChanged.push(...readinessRuled.fieldsChanged);
+
+      // ADR-0031 Phase 1: Athlete-Twin SHADOW dual-write. Updates each
+      // trained pattern's `twin` block (UKF posterior) alongside — never
+      // instead of — the legacy fields above; divergences are logged via
+      // observability, not acted on. applyTwinShadow contains per-pattern
+      // failures internally, and this belt-and-braces catch guarantees no
+      // twin defect can ever roll back a Stage-1 apply.
+      try {
+        const twinShadowed = applyTwinShadow(
+          newModelJson.patterns as Record<string, Record<string, unknown>>,
+          newModelJson.exercises as Record<string, Record<string, unknown>>,
+          setLogsArr,
+          incomingLoggedAt,
+          req.user_id,
+        );
+        newModelJson = { ...newModelJson, patterns: twinShadowed.patterns };
+        rulesFired.push(...twinShadowed.rulesFired);
+        fieldsChanged.push(...twinShadowed.fieldsChanged);
+      } catch (e) {
+        console.error("[update-trainee-model] twin shadow stage failed:", e);
+      }
 
       // ADR-0012: global phase-advance trigger. Reads each pattern's
       // post-loop lastPhaseTransitionAtSessionCount (which the per-pattern
