@@ -7,6 +7,40 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-03 — Fixed a quietly-broken build, and shelved the "digital twin" for now
+
+**The problem (plain words):**
+Our automatic checks — the safety net that runs on every change — had been silently
+failing for a while. That's dangerous: once the build is red, a *new* break looks the
+same as the old one, so real bugs can slip through unnoticed. That's roughly how it
+survived several merges.
+
+**What was actually wrong:**
+Not the app — a test. A while back we taught the coach to adjust each muscle's
+weekly-volume target to how *often* you train it (hit a muscle every day and its
+short window needs a smaller target). One old test still expected the answer from
+*before* that change, so it failed. Nothing was broken; the test's expected number
+was just out of date.
+
+**What changed:**
+One number in that test (and its comment), from 3 to 0, to match the correct new
+behaviour. I worked the right answer out straight from the real maths first — a tight
+1-day training cadence scales the chest target from 18 down to 10, and the logged
+volume (15 sets) already clears that, so the shortfall is 0 — then the real check
+suite ran it and went green.
+
+**The bigger call:**
+I also shelved the whole "digital twin" brain overhaul for now (see yesterday's entry
+for what it is). The twin proved it can out-guess the old tracker, but not in a way
+that matters yet — and the data is too thin to prove more (training's been
+infrequent, and only a couple of people have real logs). So the twin stays parked
+safely in shadow, learning quietly at zero risk; we don't build more of it until
+there's real data and a smarter test. Nothing was ripped out.
+
+**Status:** merged as PR #600, closes #593 — the build is green again.
+
+---
+
 ## 2026-07-03 — Built a "digital twin" of each lifter, then let the data tell us an uncomfortable truth
 
 **The idea (in plain words):**
