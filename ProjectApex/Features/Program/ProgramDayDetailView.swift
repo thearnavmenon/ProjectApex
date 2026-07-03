@@ -131,6 +131,12 @@ struct ProgramDayDetailView: View {
     @State private var durableSwapExercise: PlannedExercise? = nil
     @State private var durableSwapVM: ExerciseSwapViewModel? = nil
 
+    /// Measured height of the pinned bottom action dock. The scroll list reserves this
+    /// much clearance so its last card never scrolls under the dock. It varies with the
+    /// dock's content (a one-button primary state vs. the taller locked/skipped states),
+    /// so a fixed spacer would leave tall docks overlapping the content behind them.
+    @State private var dockHeight: CGFloat = 96
+
     // DEBUG-only: read the Start Any Day dev mode flag from UserDefaults.
     #if DEBUG
     private var startAnyDayModeActive: Bool {
@@ -323,8 +329,11 @@ struct ProgramDayDetailView: View {
                             sessionErrorCard(error: error)
                         }
 
-                        // Bottom padding so content clears the Start Workout button
-                        Color.clear.frame(height: 96)
+                        // Bottom padding so content clears the pinned action dock. The
+                        // dock's height varies with its state (locked/skipped days stack
+                        // extra rows), so the clearance tracks its measured height rather
+                        // than a fixed value that only fit the one-button primary state.
+                        Color.clear.frame(height: dockHeight + 12)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 20)
@@ -604,14 +613,27 @@ struct ProgramDayDetailView: View {
         .padding(.horizontal, 16)
         .padding(.top, 22)
         .padding(.bottom, 26)
-        .background(
-            LinearGradient(
-                colors: [Apex.bg.opacity(0), Apex.bg],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-        )
+        .background(alignment: .top) {
+            // Opaque dock surface — the dock is drawn over the scroll list, so its
+            // background must be solid or the content behind it bleeds through (the
+            // tall locked/skipped states put text right where a transparent top used
+            // to be). A short fade strip sits *above* the dock so scrolling content
+            // still dissolves into it instead of hard-cutting at the top edge.
+            Apex.bg
+                .overlay(alignment: .top) {
+                    LinearGradient(
+                        colors: [Apex.bg.opacity(0), Apex.bg],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 24)
+                    .offset(y: -24)
+                }
+                .ignoresSafeArea()
+        }
+        // Feed the dock's measured height back to the scroll list's bottom spacer so
+        // its last card always clears the dock, whatever state the dock is in.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { dockHeight = $0 }
         .sheet(isPresented: $showManualLogSheet) {
             ManualSessionLogView(
                 day: currentDay,
