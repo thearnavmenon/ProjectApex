@@ -15,10 +15,11 @@ struct ApexTabBar: View {
 
     @Binding var selection: Int
 
-    /// Fired when the user taps the tab that is already selected. The host uses this to
-    /// pop that tab's navigation stack back to its root. Defaults to a no-op so previews
-    /// and any other callers are unaffected.
-    var onReselect: (Int) -> Void = { _ in }
+    /// Fired when the user taps a tab — whether switching to it or re-tapping the one
+    /// already active. The host uses this to reset that tab's navigation stack to its
+    /// root, so the tab always opens at its top-level view. Defaults to a no-op so
+    /// previews and any other callers are unaffected.
+    var onTap: (Int) -> Void = { _ in }
 
     /// (title, SF Symbol) per tab — order MUST match ContentView's `.tag` values.
     private let tabs: [(title: String, icon: String)] = [
@@ -32,12 +33,11 @@ struct ApexTabBar: View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
                 Button {
-                    if selection == index {
-                        // Re-tap on the active tab — let the host pop it to root.
-                        onReselect(index)
-                    } else {
-                        selection = index
-                    }
+                    // Notify the host on every tap (switch-in AND re-tap) so it can reset
+                    // that tab's stack, then select the tab. Re-tap leaves selection
+                    // unchanged; the host reset is what returns the tab to its root.
+                    onTap(index)
+                    selection = index
                 } label: {
                     tabItem(index: index, title: tab.title, icon: tab.icon)
                 }
