@@ -83,6 +83,7 @@ struct OnboardingView: View {
     // Intro (no rail) → numbered profile (rail) → generating → ready.
     private enum Step: Int, CaseIterable {
         case welcome, how          // intro
+        case appleSignIn           // required account anchor (#597, ADR-0032) — railless like the intro
         case name, experience, goal, days, body, sex, injuries, equipment, notifications // profile (1…9)
         case generating, ready
     }
@@ -90,6 +91,9 @@ struct OnboardingView: View {
     @State private var step: Step = .welcome
     /// Which concept card (1…3) the "how it works" pager shows.
     @State private var howIndex: Int = 1
+    /// True once Sign in with Apple has anchored (or recovered) the identity
+    /// this run — back-navigation then skips the Apple step (#597).
+    @State private var appleLinkDone: Bool = false
 
     @State private var profile = OnboardingProfile()
     /// Seeded from the UserDefaults cache (#318 U4) so equipment confirmed
@@ -118,6 +122,7 @@ struct OnboardingView: View {
                 switch step {
                 case .welcome:       welcomeView
                 case .how:           howView
+                case .appleSignIn:   appleSignInView
                 case .name:          nameView
                 case .experience:    experienceView
                 case .goal:          goalView
@@ -363,7 +368,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
                     Spacer()
-                    Button { go(to: .name) } label: {
+                    Button { go(to: appleLinkDone ? .name : .appleSignIn) } label: {
                         Text("Skip")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Apex.textFaint)
@@ -403,7 +408,7 @@ struct OnboardingView: View {
                     Spacer()
                 }
                 Button {
-                    if idx >= 3 { go(to: .name) }
+                    if idx >= 3 { go(to: appleLinkDone ? .name : .appleSignIn) }
                     else { withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { howIndex = idx + 1 } }
                 } label: {
                     ApexButton(title: idx >= 3 ? "Let's set up" : "Next", icon: "arrow.right")
@@ -418,6 +423,87 @@ struct OnboardingView: View {
                                startPoint: .top, endPoint: .bottom)
                     .ignoresSafeArea()
             )
+        }
+    }
+
+    // MARK: - Apple sign-in (required account anchor, #597 / ADR-0032)
+
+    /// Railless like the intro beats. The step is REQUIRED — there is no skip;
+    /// the uid-preserving link (Slice A, #596) is what makes the user's data
+    /// recoverable on a new device. Back returns to the last "how" card.
+    private var appleSignInView: some View {
+        AppleSignInStepView(
+            exchange: { idToken, rawNonce in
+                try await deps.supabaseAuth.signInWithApple(idToken: idToken, rawNonce: rawNonce)
+            },
+            onOutcome: { outcome in
+                await handleAppleOutcome(outcome)
+            },
+            onBack: {
+                howIndex = 3
+                go(to: .how)
+            }
+        )
+    }
+
+    /// Post-exchange side-effects + routing:
+    ///   1. Adopt the fresh session token on the REST client (a link mints new
+    ///      tokens for the SAME uid; a swap changes the user — either way the
+    ///      client must send the new JWT for RLS to scope correctly).
+    ///   2. On a swap, refresh the `.userId` Keychain mirror and check whether
+    ///      the recovered uid already has an active program (RLS-scoped).
+    ///   3. Route: continue onboarding, or — the returning-user recovery path —
+    ///      hydrate local state from the server and enter the app directly.
+    private func handleAppleOutcome(_ outcome: AppleSignInOutcome) async {
+        let session: SupabaseSession
+        switch outcome {
+        case .linkedToCurrentUser(let s):            session = s
+        case .signedInAsDifferentUser(let s, _):     session = s
+        }
+        await deps.supabaseClient.setAuthToken(session.accessToken)
+        appleLinkDone = true
+
+        var hasActiveProgram = false
+        if case .signedInAsDifferentUser = outcome {
+            // The identity swapped (Slice A already persisted .supabaseAuthUserId);
+            // refresh the .userId mirror so both Keychain keys agree.
+            try? deps.keychainService.store(session.userId.uuidString, for: .userId)
+            hasActiveProgram = ((try? await deps.supabaseClient.fetchActiveProgram(userId: session.userId)) ?? nil) != nil
+        }
+
+        switch OnboardingAppleRouting.route(outcome: outcome, hasActiveProgram: hasActiveProgram) {
+        case .continueOnboarding:
+            go(to: .name)
+        case .enterApp:
+            await hydrateReturningUser(session.userId)
+            completeOnboarding()
+        }
+    }
+
+    /// Best-effort local hydration for a recovered account: the active gym
+    /// profile (equipment) and the `users` row biometrics the in-session coach
+    /// reads from UserDefaults. The program itself loads through the existing
+    /// `ProgramViewModel.loadProgram()` network path (empty local cache →
+    /// server fetch under the recovered uid). Failures are non-fatal — the
+    /// user still lands in the app; Settings can fill gaps later.
+    private func hydrateReturningUser(_ userId: UUID) async {
+        if let row = try? await deps.supabaseClient.fetchActiveProfile(userId: userId) {
+            let restored = row.toGymProfile()
+            restored.saveToUserDefaults()
+            gymProfile = restored
+        }
+        if let userRow = try? await deps.supabaseClient.fetch(
+            UserFetchRow.self,
+            table: "users",
+            filters: [Filter(column: "id", op: .eq, value: userId.uuidString)],
+            limit: 1
+        ).first {
+            let defaults = UserDefaults.standard
+            if let name = userRow.displayName { profile.displayName = name }
+            if let kg = userRow.bodyweightKg { defaults.set(kg, forKey: UserProfileConstants.bodyweightKgKey) }
+            if let cm = userRow.heightCm { defaults.set(cm, forKey: UserProfileConstants.heightCmKey) }
+            if let age = userRow.age { defaults.set(age, forKey: UserProfileConstants.ageKey) }
+            if let ta = userRow.trainingAge { defaults.set(ta, forKey: UserProfileConstants.trainingAgeKey) }
         }
     }
 
@@ -1582,6 +1668,28 @@ enum UserProfileConstants {
 // MARK: - UserInsertRow (local Codable for users table)
 
 /// Codable row for inserting/updating public.users with all profile fields.
+/// Read-side mirror of `UserInsertRow` (#597): decodes the `users` row of a
+/// RECOVERED account so `hydrateReturningUser` can restore the biometrics the
+/// in-session coach reads from UserDefaults. All fields optional — the
+/// `handle_new_user` trigger provisions bare-id rows.
+private struct UserFetchRow: Decodable, Sendable {
+    let id: UUID
+    let displayName: String?
+    let bodyweightKg: Double?
+    let heightCm: Double?
+    let age: Int?
+    let trainingAge: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case displayName  = "display_name"
+        case bodyweightKg = "bodyweight_kg"
+        case heightCm     = "height_cm"
+        case age
+        case trainingAge  = "training_age"
+    }
+}
+
 private struct UserInsertRow: Codable, Sendable {
     let id: UUID
     let displayName: String?
