@@ -316,10 +316,6 @@ struct ProgramOverviewView: View {
                         week: week,
                         isCurrent: false,
                         weekIndex: index,
-                        mesocycleCreatedAt: mesocycle.createdAt,
-                        mesocycleId: mesocycle.id,
-                        viewModel: viewModel,
-                        gymProfile: gymProfile,
                         liveTrainingDayId: deps.activeSessionCoordinator.liveTrainingDayId,
                         liveSetSummary: deps.activeSessionCoordinator.liveSetSummary
                     )
@@ -380,16 +376,10 @@ struct ProgramOverviewView: View {
         } else if let next = viewModel.nextIncompleteDay(in: mesocycle) {
             // Idle: navigate to the day's detail; the Start/Generate gate lives there
             // (same construction as WeekRowView).
-            NavigationLink {
-                ProgramDayDetailView(
-                    day: next.day,
-                    week: next.week,
-                    mesocycleCreatedAt: mesocycle.createdAt,
-                    programId: mesocycle.id,
-                    viewModel: viewModel,
-                    gymProfile: gymProfile
-                )
-            } label: {
+            // Value-based push so a re-tap on the Program tab can pop the stack back
+            // to this calendar root (ContentView.handleTabReselect). The detail view
+            // re-derives its live day/week from the loaded programme by id.
+            NavigationLink(value: ProgramDayRoute(dayId: next.day.id)) {
                 nextUpHeroCard(day: next.day, week: next.week, state: .idle)
             }
             .buttonStyle(.plain)
@@ -686,10 +676,6 @@ private struct WeekRowView: View {
     let week: TrainingWeek
     let isCurrent: Bool
     let weekIndex: Int
-    let mesocycleCreatedAt: Date
-    let mesocycleId: UUID
-    let viewModel: ProgramViewModel
-    let gymProfile: GymProfile?
     /// The training day ID that currently has a live session, nil when idle.
     var liveTrainingDayId: UUID? = nil
     /// Aggregated set progress for the live session (nil when no session active).
@@ -750,16 +736,9 @@ private struct WeekRowView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(week.trainingDays) { day in
-                        NavigationLink {
-                            ProgramDayDetailView(
-                                day: day,
-                                week: week,
-                                mesocycleCreatedAt: mesocycleCreatedAt,
-                                programId: mesocycleId,
-                                viewModel: viewModel,
-                                gymProfile: gymProfile
-                            )
-                        } label: {
+                        // Value-based push (see the hero link above) so re-tapping the
+                        // Program tab pops the stack back to the calendar root.
+                        NavigationLink(value: ProgramDayRoute(dayId: day.id)) {
                             DayCardView(
                                 day: day,
                                 week: week,

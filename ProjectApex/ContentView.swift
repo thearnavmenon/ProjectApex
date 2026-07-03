@@ -28,6 +28,11 @@ struct ContentView: View {
     /// Controls which tab is visible.
     @State private var selectedTab: Int = 0
 
+    /// Navigation path for the Program tab's stack. Bound so a re-tap on the already-
+    /// active Program tab pops back to the calendar root (`handleTabReselect`). Day-detail
+    /// pushes are value-based (`ProgramDayRoute`) precisely so this reset works.
+    @State private var programPath = NavigationPath()
+
     /// Shared view model for the Program tab — owned here so SettingsView
     /// can trigger a regeneration that updates ProgramOverviewView.
     @State private var programViewModel: ProgramViewModel?
@@ -89,14 +94,21 @@ struct ContentView: View {
         TabView(selection: $selectedTab) {
 
             // ── Tab 0: Program ─────────────────────────────────────────────
-            NavigationStack {
-                if let vm = programViewModel {
-                    ProgramOverviewView(
-                        viewModel: vm,
-                        gymProfile: confirmedProfile
-                    )
-                } else {
-                    loadingPlaceholder
+            NavigationStack(path: $programPath) {
+                Group {
+                    if let vm = programViewModel {
+                        ProgramOverviewView(
+                            viewModel: vm,
+                            gymProfile: confirmedProfile
+                        )
+                    } else {
+                        loadingPlaceholder
+                    }
+                }
+                // Day-detail is pushed value-based (ProgramDayRoute) so re-tapping the
+                // Program tab pops the stack back to this calendar root.
+                .navigationDestination(for: ProgramDayRoute.self) { route in
+                    programDayDetail(for: route)
                 }
             }
             .toolbar(.hidden, for: .tabBar)
@@ -178,7 +190,7 @@ struct ContentView: View {
                 )
                 .padding(.bottom, 8)
             }
-            ApexTabBar(selection: $selectedTab)
+            ApexTabBar(selection: $selectedTab, onReselect: handleTabReselect)
         }
         .ignoresSafeArea(.container, edges: .bottom)
         .environment(\.switchToTab, { selectedTab = $0 })
@@ -360,6 +372,37 @@ struct ContentView: View {
     private var loadingPlaceholder: some View {
         Color(red: 0.04, green: 0.04, blue: 0.06)
             .ignoresSafeArea()
+    }
+
+    // MARK: - Program Tab Navigation
+
+    /// Builds the pushed day-detail from a `ProgramDayRoute`. The route carries only the
+    /// day id; the day/week pair and mesocycle metadata are read live from the loaded
+    /// programme — consistent with `ProgramDayDetailView`, which already re-derives its
+    /// day by id on every render.
+    @ViewBuilder
+    private func programDayDetail(for route: ProgramDayRoute) -> some View {
+        if let vm = programViewModel,
+           let mesocycle = vm.currentMesocycle,
+           let found = vm.findTrainingDay(byId: route.dayId, in: mesocycle) {
+            ProgramDayDetailView(
+                day: found.day,
+                week: found.week,
+                mesocycleCreatedAt: mesocycle.createdAt,
+                programId: mesocycle.id,
+                viewModel: vm,
+                gymProfile: confirmedProfile
+            )
+        }
+    }
+
+    /// Re-tapping the already-selected tab pops that tab's stack to its root. Only the
+    /// Program tab keeps a bound path today, so a re-tap there returns to the calendar;
+    /// other tabs are a no-op.
+    private func handleTabReselect(_ index: Int) {
+        if index == 0 {
+            programPath = NavigationPath()
+        }
     }
 
     // MARK: - Workout Tab
@@ -813,6 +856,16 @@ enum GymProfileSync {
             return false
         }
     }
+}
+
+// MARK: - Program tab navigation route
+
+/// Identifies a day-detail push on the Program tab. Value-based navigation (rather than a
+/// destination-based `NavigationLink`) is what lets `ContentView` pop the stack back to the
+/// calendar root when the Program tab is re-tapped. Only the day id is needed — the detail
+/// view re-derives the live day/week from the loaded programme by id.
+struct ProgramDayRoute: Hashable {
+    let dayId: UUID
 }
 
 // MARK: - Cross-tab navigation environment
