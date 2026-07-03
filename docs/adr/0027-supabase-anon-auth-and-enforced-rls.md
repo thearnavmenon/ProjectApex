@@ -4,6 +4,8 @@
 
 **Relates to**: [ADR-0016](0016-client-cannot-bypass-rls.md) (client cannot bypass RLS — this ADR completes the story by actually turning RLS on), [ADR-0018](0018-atomic-program-persistence-via-security-invoker-rpc.md) (SECURITY INVOKER RPC — its "RLS governs both operations" claim assumed enforcement that this ADR enables).
 
+**Amended by**: [ADR-0032](0032-account-linking-sign-in-with-apple-uid-preserving.md) (2026-07-03) — the "upgrade path to a credentialed account to survive re-installs" deferred in this ADR's consequences shipped as uid-preserving Sign in with Apple identity linking. Everything else here is unchanged and remains authoritative.
+
 ## Context
 
 ### The audit finding (#369)

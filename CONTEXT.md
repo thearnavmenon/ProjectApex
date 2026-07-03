@@ -129,11 +129,15 @@ _Avoid_: gym switch, multi-gym sync, cross-exercise transfer (different concept)
 ### Auth, identity, and access control
 
 **Anonymous identity** (`auth.uid()`):
-Every install signs in via `auth.signInAnonymously()` at launch — Supabase issues a real JWT and a stable `sub` that becomes `auth.uid()` for that device. No user-facing account or sign-in UI. The bundled non-secret anon key (`SUPABASE_ANON_KEY`) is the only credential the client holds. See ADR-0027.
+Every install still signs in via `auth.signInAnonymously()` at launch — Supabase issues a real JWT and a stable `sub` that becomes `auth.uid()` for that device. The bundled non-secret anon key (`SUPABASE_ANON_KEY`) is the only credential the client holds. As of ADR-0032 the anonymous identity is no longer terminal: a required onboarding Sign in with Apple step upgrades it in place (see the next entry). See ADR-0027, ADR-0032.
 _Avoid_: keychain UUID (retired), locally-generated user ID, placeholder identity
 
+**Apple-anchored identity** (account recovery):
+The anonymous `auth.uid()` upgraded in place via Sign in with Apple — `SupabaseAuth.signInWithApple` sends the id_token grant with the anon Bearer **and** `link_identity: true`, so GoTrue links the Apple identity to the existing user and **`auth.uid()` is unchanged** (uid parity is a hard invariant; a mismatched link response is rejected). A returning user on a fresh install hits 422 `identity_already_exists` → plain id_token sign-in → the same uid and all its RLS-scoped data are recovered, onboarding skipped. Installs from before the feature get a skippable launch link-gate (`AppleLinkGate`). No schema/RLS/EF change; GoTrue owns `auth.identities`. Live Apple round-trip is gated on the owner enabling the Apple provider (checklist on #595). See ADR-0032.
+_Avoid_: account creation / sign-up (no separate account is created — the anonymous user is upgraded), email login, "Apple account migration" (nothing migrates; the uid is preserved)
+
 **`resolvedUserId`**:
-The iOS app's canonical user identifier — always `auth.uid()` from the live Supabase session (not a keychain-generated UUID). Written to `users.id` at onboarding, used as `user_id` on all owner-scoped tables. See ADR-0027.
+The iOS app's canonical user identifier — always `auth.uid()` from the live Supabase session (not a keychain-generated UUID). Written to `users.id` at onboarding, used as `user_id` on all owner-scoped tables. On a returning-user Apple sign-in that swaps sessions, `.supabaseAuthUserId` is repointed and this re-resolves to the recovered uid. See ADR-0027, ADR-0032.
 _Avoid_: device UUID, keychain UUID (both were the pre-ADR-0027 source, now retired)
 
 **Row Level Security (RLS)**:

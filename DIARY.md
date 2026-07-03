@@ -7,7 +7,41 @@ Started 2026-06-07.
 
 ---
 
-## 2026-07-03 — Fixed a quietly-broken build, and shelved the "digital twin" for now
+## 2026-07-03 — Your training history now survives losing your phone
+
+**The problem (plain words):**
+Until today, your identity in the app lived only on the phone in your hand. There was
+no account — the app quietly made up an identity the first time it launched, and
+everything you logged hung off it. Lose the phone, reset it, or even restore a backup
+onto a new one, and that identity was gone for good. Months of training history,
+orphaned. This was the biggest missing table-stake in the app.
+
+**What changed:**
+Onboarding now has one new required step: Sign in with Apple. One tap — no email, no
+password. Behind the scenes it does something quietly important: instead of creating a
+*new* account, it ties your Apple ID to the identity the app already made. Your ID
+stays exactly the same, so nothing needs to move — all the security rules and all your
+data keep working untouched. On a new phone, you sign in with Apple and the app finds
+you again: same identity, program and history intact, onboarding skipped. People who
+finished onboarding before this existed get a gentle one-tap prompt on launch (they can
+say "Not now") so their data gets the same protection.
+
+**The trap we dodged:**
+The obvious way to wire this up — just sending the current login token along with the
+Apple sign-in — silently does the wrong thing: the server ignores it and creates a
+*second*, empty account. We caught this before writing the feature by testing against
+the real server and reading the auth server's source: the correct recipe needs an
+explicit "link, don't create" flag. The code refuses to accept any answer where the
+identity changed when it shouldn't — that's tested, hard.
+
+**What's still waiting on a human:**
+The Apple side needs one-time setup only the owner can do (Apple developer portal +
+flipping the Apple switch in the Supabase dashboard). Until then the button can't
+complete a real sign-in — the app just carries on as before, nothing breaks. The
+checklist is on issue #595.
+
+**Status:** merged as PRs #602, #603, #604 (+ this docs PR); issues #596–#598 closed.
+Decision record: ADR-0032.
 
 **The problem (plain words):**
 Our automatic checks — the safety net that runs on every change — had been silently
