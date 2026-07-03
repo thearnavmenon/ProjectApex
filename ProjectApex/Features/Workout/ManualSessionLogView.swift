@@ -335,14 +335,18 @@ struct ManualSessionLogView: View {
         isoFormatter.timeZone = TimeZone.current
 
         // When backfilling an existing completed session, skip creating a new session row.
+        // The session row (when new) and every set_log are persisted together through
+        // the write-ahead queue in the persist step after the set logs are built.
         let sessionId: UUID
+        let newSessionPayload: ManualSessionPayload?
         if let existing = existingSessionId {
             print("[ManualSessionLog] Backfilling set logs for existing session: \(existing)")
             sessionId = existing
+            newSessionPayload = nil
         } else {
             print("[ManualSessionLog] Submitting session for date: \(sessionDateString) (local: \(sessionDate))")
             sessionId = UUID()
-            let sessionPayload = ManualSessionPayload(
+            newSessionPayload = ManualSessionPayload(
                 id: sessionId.uuidString,
                 userId: userId.uuidString,
                 programId: programId.uuidString,
@@ -353,16 +357,6 @@ struct ManualSessionLogView: View {
                 manuallyLogged: true,
                 status: "completed"   // #369 [10] — count toward PR baselines / last-time anchors
             )
-            do {
-                try await deps.supabaseClient.insert(sessionPayload, table: "workout_sessions")
-                // Count this as a completed session so subsequent inference calls
-                // are not treated as first-session calibration (FB-005).
-                let current = UserDefaults.standard.integer(forKey: UserProfileConstants.sessionCountKey)
-                UserDefaults.standard.set(current + 1, forKey: UserProfileConstants.sessionCountKey)
-            } catch {
-                errorMessage = "Could not save session: \(error.localizedDescription)"
-                return
-            }
         }
 
         // Build and write set logs
@@ -402,15 +396,31 @@ struct ManualSessionLogView: View {
             }
         }
 
-        // Write set logs to Supabase
-        for (setLog, _, intent) in allSetLogs {
-            let payload = ManualSetLogPayload(from: setLog, intent: intent)
-            do {
-                try await deps.supabaseClient.insert(payload, table: "set_logs")
-            } catch {
-                // Non-fatal: continue writing remaining sets
-                print("[ManualSessionLog] set_log write failed: \(error.localizedDescription)")
-            }
+        // Persist the session row (when new) + every set log through the write-ahead
+        // queue so a network failure retains them (local-first + retry + dead-letter)
+        // instead of the previous best-effort direct inserts, which aborted the whole
+        // session if the row POST failed and silently dropped individual sets. The
+        // session row is enqueued before its set_logs so FIFO flushing satisfies the
+        // set_logs → workout_sessions foreign key. Mirrors the live workout writer.
+        let setPayloads = allSetLogs.map { ManualSetLogPayload(from: $0.0, intent: $0.2) }
+        do {
+            try await persistManualLog(
+                sessionPayload: newSessionPayload,
+                setPayloads: setPayloads,
+                into: deps.writeAheadQueue
+            )
+        } catch {
+            // enqueue only throws when the local queue is at capacity (500 items);
+            // surface it rather than pretending the log saved.
+            errorMessage = "Could not save session: \(error.localizedDescription)"
+            return
+        }
+
+        // Count a newly-created manual session so subsequent inference calls are not
+        // treated as first-session calibration (FB-005). Skipped when backfilling.
+        if newSessionPayload != nil {
+            let current = UserDefaults.standard.integer(forKey: UserProfileConstants.sessionCountKey)
+            UserDefaults.standard.set(current + 1, forKey: UserProfileConstants.sessionCountKey)
         }
 
         // Embed set logs into RAG memory (fire-and-forget)
@@ -761,7 +771,12 @@ private struct SetInputRow: View {
 // MARK: - Supabase Payload DTOs (Manual logging)
 
 /// workout_sessions row with the additional manually_logged flag.
-private struct ManualSessionPayload: Encodable {
+// internal (not private): exposed to the file-scope persistManualLog() writer and
+// its durability tests, mirroring ManualSetLogPayload (#66).
+// nonisolated: so its Encodable conformance is not main-actor-isolated and can
+// satisfy the write-ahead queue's `T: Encodable & Sendable` requirement, matching
+// the live-path WorkoutSessionPayload/SetLogPayload.
+nonisolated struct ManualSessionPayload: Encodable {
     let id: String
     let userId: String
     let programId: String
@@ -792,7 +807,9 @@ private struct ManualSessionPayload: Encodable {
 
 /// set_logs row for manually entered sets (no ai_prescribed column).
 // internal (not private): exposed for encoder regression tests (#66).
-struct ManualSetLogPayload: Encodable {
+// nonisolated: so its Encodable conformance can satisfy the write-ahead queue's
+// `T: Encodable & Sendable` requirement (matches the live-path SetLogPayload).
+nonisolated struct ManualSetLogPayload: Encodable {
     let id: String
     let sessionId: String
     let exerciseId: String
@@ -845,6 +862,33 @@ struct ManualSetLogPayload: Encodable {
         self.localDate     = SetLog.formatLocalDate(log.loggedAt)
         self.intent        = intent.rawValue
         self.completionFlags = log.completionFlags.map(\.rawValue)
+    }
+}
+
+// MARK: - Manual-log durability writer
+
+/// Persists a manually-logged session and its set logs through the write-ahead
+/// queue so they survive a network failure — the queue persists each item locally
+/// before uploading and retries (then dead-letters) on failure, instead of the
+/// previous best-effort direct inserts that aborted the session on a failed row
+/// POST and silently dropped individual sets. Pulled to file scope so it is
+/// testable without a SwiftUI / @State harness (same pattern as manualLogCanSubmit).
+///
+/// The session row is enqueued before its set_logs so the queue's FIFO flush
+/// satisfies the `set_logs → workout_sessions` foreign key.
+///
+/// - Parameter sessionPayload: nil when backfilling an existing session (no new row).
+/// - Throws: `WriteAheadQueueError.queueFull` when the local queue is at capacity.
+func persistManualLog(
+    sessionPayload: ManualSessionPayload?,
+    setPayloads: [ManualSetLogPayload],
+    into queue: WriteAheadQueue
+) async throws {
+    if let sessionPayload {
+        try await queue.enqueue(sessionPayload, table: "workout_sessions")
+    }
+    for payload in setPayloads {
+        try await queue.enqueue(payload, table: "set_logs")
     }
 }
 
