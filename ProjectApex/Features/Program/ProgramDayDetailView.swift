@@ -1364,6 +1364,16 @@ struct ProgramDayDetailView: View {
             return
         }
         sessionGenerationError = nil
+
+        // #558: a pending day with no committed exercises comes from a program built
+        // before the block-commit generator (pre-2026-06-30). It cannot be instantiated
+        // on-device — the whole program must be regenerated. Surface that specific
+        // guidance instead of the generic connection error below.
+        guard !currentDay.exercises.isEmpty else {
+            sessionGenerationError = "This program was built by an older version and needs rebuilding. Go to Settings → Regenerate Program."
+            return
+        }
+
         isGeneratingSession = true
         defer { isGeneratingSession = false }
 

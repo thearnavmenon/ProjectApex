@@ -68,7 +68,14 @@ struct SessionAutoregulator {
         day: TrainingDay,
         digest: TraineeModelDigest?,
         requiresReturnOverride: Bool
-    ) -> TrainingDay {
+    ) -> TrainingDay? {
+        // #558 (ADR-0030): the committed exercise pool is the frozen identity the
+        // block-commit generator (#563) writes onto each day. An empty pool means the
+        // day predates that generator (a stale pre-2026-06-30 program) — there is
+        // nothing to instantiate. Refuse rather than fabricate an unstartable
+        // `.generated` day with zero exercises (the silent "greyed Start" dead-end).
+        guard !day.exercises.isEmpty else { return nil }
+
         let exercises = day.exercises.map { ex -> PlannedExercise in
             let pattern = ExerciseLibrary.lookup(ex.exerciseId)?.movementPattern
             let patternSummary = pattern.flatMap { p in

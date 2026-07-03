@@ -313,7 +313,7 @@ struct SessionAutoregulatorTests {
     }
 
     @Test("instantiate keeps frozen identity + rep-range; no digest → accumulation baseline; status .generated")
-    func instantiatePreservesFrozenSlot() {
+    func instantiatePreservesFrozenSlot() throws {
         let committed = PlannedExercise(
             id: UUID(), exerciseId: "barbell_bench_press", name: "Bench",
             primaryMuscle: "chest", synergists: [], equipmentRequired: .barbell,
@@ -324,12 +324,26 @@ struct SessionAutoregulatorTests {
             id: UUID(), dayOfWeek: 1, dayLabel: "Push_A",
             exercises: [committed], sessionNotes: nil, status: .pending)
 
-        let out = SessionAutoregulator.instantiate(day: day, digest: nil, requiresReturnOverride: false)
+        let out = try #require(SessionAutoregulator.instantiate(day: day, digest: nil, requiresReturnOverride: false))
         let ex = out.exercises[0]
         #expect(ex.exerciseId == "barbell_bench_press")   // frozen identity
         #expect(ex.repRange == RepRange(min: 5, max: 8))   // frozen rep-range
         #expect(ex.sets == 4)                              // deterministic accumulation baseline
         #expect(ex.rirTarget == 3)
         #expect(out.status == .generated)
+    }
+
+    // #558 (ADR-0030): a program built before the block-commit generator has days
+    // with no committed exercises. Instantiating one would (pre-fix) fabricate an
+    // unstartable `.generated` day with zero exercises — a silent dead-end (greyed
+    // "Start Workout", no error). instantiate must refuse (return nil) so the caller
+    // can prompt a full program regeneration instead.
+    @Test("instantiate returns nil for an empty committed pool (stale pre-block-commit program)")
+    func instantiateRefusesEmptyCommittedPool() {
+        let day = TrainingDay(
+            id: UUID(), dayOfWeek: 1, dayLabel: "Push_A",
+            exercises: [], sessionNotes: nil, status: .pending)
+
+        #expect(SessionAutoregulator.instantiate(day: day, digest: nil, requiresReturnOverride: false) == nil)
     }
 }

@@ -856,11 +856,18 @@ final class ProgramViewModel {
         // the root of the "Coach is offline" mid-flow stalls, #555/#556). The
         // trend is sourced from the digest hybrid verdict, not a local Epley dup.
         let digest = await traineeModelService?.digest()
-        let generatedDay = SessionAutoregulator.instantiate(
+        guard let generatedDay = SessionAutoregulator.instantiate(
             day: day,
             digest: digest,
             requiresReturnOverride: temporalContext.requiresReturnPhaseOverride
-        )
+        ) else {
+            // #558: the day has no committed exercise pool (stale pre-block-commit
+            // program). Do NOT write a corrupt `.generated` day with zero exercises —
+            // return nil so the caller surfaces a "regenerate program" prompt and the
+            // day stays `.pending`.
+            print("[ProgramViewModel] generateDaySession — '\(day.dayLabel)' has no committed exercises (stale program); needs full regeneration")
+            return nil
+        }
 
         // Mutate mesocycle in-place.
         if var mesocycle = currentMesocycle {
