@@ -7,6 +7,38 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-03 — Double-checked that your workouts really get saved, and closed two gaps
+
+**The question:**
+Are your sets actually being saved and uploaded — both while you're mid-workout and
+after you finish? Worth being sure, because it's the one thing that must never fail.
+
+**What we found (the good news):**
+Yes. The moment you log a set, it's written to your phone's local store *first*, then
+uploaded. If the upload fails, the set isn't lost — it stays queued and retries on its
+own, and if it still can't get through it's parked in a recovery bin rather than
+dropped. Kill the app mid-workout and it stitches the local sets back together with the
+server copy on relaunch. We also checked the real server: 378 logged sets across 45
+sessions from 3 people are sitting there safely. So the core path is solid.
+
+**Two gaps we found and fixed:**
+1. The code *claimed* it would retry uploads the instant your internet came back — but
+   that part was never actually wired up. It only retried on your next set or when you
+   reopened the app. Now it genuinely retries the moment the connection returns (PR #606).
+2. The "log a past workout by hand" screen wasn't using the safe save-and-retry path. If
+   your internet was down, hand-entered sets were quietly thrown away. It now uses the
+   exact same durable path as a live workout, so nothing gets dropped (PR #608).
+
+**Still open (flagged, not touched):**
+9 older sessions on the server never got their "finished" stamp — 7 of them have real
+sets logged underneath. The sets are safe, but those sessions look unfinished (one is a
+full 20-set workout). Left as a decision for later — reconciling them is a separate job.
+
+**How it was checked:**
+Built and ran the new tests on a clean copy of the code (isolated from unrelated
+in-progress work), all green: the reachability trigger (4 tests) and the manual-log
+durability (2 tests). Both PRs merged to main.
+
 ## 2026-07-03 — Your training history now survives losing your phone
 
 **The problem (plain words):**
