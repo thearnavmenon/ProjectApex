@@ -7,6 +7,23 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-03 — The Programme tab now always takes you back to the calendar
+
+**The gap:**
+Earlier today I made tapping "Programme" send you back to the calendar — but only if
+you were *already* on the Programme tab when you tapped it. If you were looking at a
+day's exercises, popped over to the Workout tab, then tapped "Programme" to come back,
+the app dropped you back on that day's exercises instead of the calendar. That's the
+phone's normal habit — each tab quietly remembers where you last were — but it's not
+what you wanted here.
+
+**The fix:**
+Now tapping "Programme" always lands you on the calendar, no matter which tab you were
+on before. One simple rule instead of two special cases.
+
+**Heads-up:** you'll only see this (and the earlier tab fix) once the app is rebuilt
+and reinstalled — it isn't in an older build. Merged to main as pull request #611.
+
 ## 2026-07-03 — Fixed a jumbled program screen, and made the tab button take you back
 
 **What you spotted:**
