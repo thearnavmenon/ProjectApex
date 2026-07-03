@@ -2167,7 +2167,13 @@ actor WorkoutSessionManager {
             notableNotes: sessionNotes.map(\.rawTranscript),
             earlyExitReason: earlyExitReason,
             durationSeconds: sessionDuration,
-            swappedExercises: swapRecords.isEmpty ? nil : swapRecords
+            swappedExercises: swapRecords.isEmpty ? nil : swapRecords,
+            // S3 (honest DID frame): exercises presented (post session-size trim)
+            // vs distinct exercises actually trained. Recorded now so adaptation
+            // measures "did they finish what was presented" at exercise grain,
+            // not the set-level counts on the trimmed frame.
+            exercisesPlanned: trainingDay?.exercises.count,
+            exercisesTrained: Set(completedSets.map(\.exerciseId)).count
         )
 
         finalSession.completed = earlyExitReason == nil
