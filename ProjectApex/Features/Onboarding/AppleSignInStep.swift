@@ -67,6 +67,51 @@ enum OnboardingAppleRouting {
     }
 }
 
+// MARK: - Backfill link gate (#598)
+
+/// Launch predicate + local marker for the backfill gate: installs that
+/// finished onboarding BEFORE Sign in with Apple existed carry un-anchored
+/// data (a reinstall would orphan it), so they are prompted to link on launch.
+enum AppleLinkGate {
+
+    /// UserDefaults flag set after any successful link / Apple sign-in on this
+    /// install (onboarding step or gate). Cleared by Reset All's domain wipe —
+    /// correct, since the reset also clears the session it described.
+    static let linkedFlagKey = "com.projectapex.appleIdentityLinked"
+
+    /// Whether launch should even ASK the server about identity state. Only
+    /// installs past onboarding (mid-onboarding users get the required #597
+    /// step instead) and only until a link is locally recorded.
+    static func shouldEvaluate(onboardingComplete: Bool, locallyMarkedLinked: Bool) -> Bool {
+        onboardingComplete && !locallyMarkedLinked
+    }
+}
+
+/// Full-screen prompt the gate presents. Same Slice-A flow as onboarding —
+/// linking preserves the install's current uid. Skippable ("Not now"), and it
+/// re-arms next launch until linked; a skipped or failed prompt never blocks
+/// the app (degradation contract).
+struct AppleLinkGateView: View {
+
+    let exchange: (_ idToken: String, _ rawNonce: String) async throws -> AppleSignInOutcome
+    let onOutcome: (AppleSignInOutcome) async -> Void
+    let onNotNow: () -> Void
+
+    var body: some View {
+        ZStack {
+            Apex.bg.ignoresSafeArea()
+            AppleSignInStepView(
+                exchange: exchange,
+                onOutcome: onOutcome,
+                footer: "One tap — your history stays safe even if this phone doesn't.",
+                onNotNow: onNotNow
+            )
+        }
+        .preferredColorScheme(.dark)
+        .interactiveDismissDisabled(true)
+    }
+}
+
 // MARK: - Step view
 
 /// The onboarding screen itself. Owns the nonce lifecycle and the Apple sheet;
@@ -78,8 +123,14 @@ struct AppleSignInStepView: View {
     let exchange: (_ idToken: String, _ rawNonce: String) async throws -> AppleSignInOutcome
     /// Invoked after a successful exchange (routing + navigation live here).
     let onOutcome: (AppleSignInOutcome) async -> Void
-    /// Back to the previous onboarding beat.
-    let onBack: () -> Void
+    /// Back to the previous onboarding beat. nil (the #598 gate) hides the chevron.
+    var onBack: (() -> Void)? = nil
+    /// Line under the button. Onboarding keeps the "Required" default; the
+    /// #598 backfill gate swaps in its own copy.
+    var footer: String = "Required — it's how your progress stays yours."
+    /// Optional escape hatch — only the #598 backfill gate offers one
+    /// ("Not now" → dismiss, re-prompt next launch). Onboarding never does.
+    var onNotNow: (() -> Void)? = nil
 
     @State private var rawNonce = AppleSignInNonce.generateRaw()
     @State private var isExchanging = false
@@ -87,16 +138,18 @@ struct AppleSignInStepView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .black))
-                        .foregroundStyle(Apex.textDim)
+            if let onBack {
+                HStack {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .black))
+                            .foregroundStyle(Apex.textDim)
+                    }
+                    .buttonStyle(.plain)
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                Spacer()
+                .padding(.top, 8)
             }
-            .padding(.top, 8)
 
             Spacer()
 
@@ -151,11 +204,23 @@ struct AppleSignInStepView: View {
             .opacity(isExchanging ? 0.4 : 1)
             .disabled(isExchanging)
 
-            Text(isExchanging ? "Securing your account…" : "Required — it's how your progress stays yours.")
+            Text(isExchanging ? "Securing your account…" : footer)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Apex.textFaint)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 14)
+
+            if let onNotNow {
+                Button(action: onNotNow) {
+                    Text("Not now")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Apex.textFaint)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .disabled(isExchanging)
+                .padding(.top, 16)
+            }
         }
         .padding(.horizontal, Apex.pad)
         .padding(.bottom, 30)

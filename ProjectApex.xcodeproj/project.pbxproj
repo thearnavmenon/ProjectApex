@@ -24,6 +24,7 @@
 		47BB8E712F6273F30082C53F /* OnboardingProgramPersistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */; };
 		47AE59612F70266A007B3B34 /* SupabaseAuthAppleLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AE59602F70266A007B3B34 /* SupabaseAuthAppleLinkTests.swift */; };
 		47AE59712F70266A007B3B34 /* AppleSignInStepTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AE59702F70266A007B3B34 /* AppleSignInStepTests.swift */; };
+		47AE59812F70266A007B3B34 /* AppleLinkGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AE59802F70266A007B3B34 /* AppleLinkGateTests.swift */; };
 		47BB8E712F6273F30082C5F1 /* GymProfileSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */; };
 		47BB8E8B2F6273F30082C53F /* ProgramOwnerGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E8A2F6273F30082C53F /* ProgramOwnerGateTests.swift */; };
 		47BB8E712F6273F30082C625 /* ProgramBackfillTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BB8E702F6273F30082C625 /* ProgramBackfillTests.swift */; };
@@ -107,6 +108,7 @@
 		47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingProgramPersistTests.swift; sourceTree = "<group>"; };
 		47AE59602F70266A007B3B34 /* SupabaseAuthAppleLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseAuthAppleLinkTests.swift; sourceTree = "<group>"; };
 		47AE59702F70266A007B3B34 /* AppleSignInStepTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSignInStepTests.swift; sourceTree = "<group>"; };
+		47AE59802F70266A007B3B34 /* AppleLinkGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleLinkGateTests.swift; sourceTree = "<group>"; };
 		47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GymProfileSyncTests.swift; sourceTree = "<group>"; };
 		47BB8E8A2F6273F30082C53F /* ProgramOwnerGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramOwnerGateTests.swift; sourceTree = "<group>"; };
 		47BB8E702F6273F30082C625 /* ProgramBackfillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgramBackfillTests.swift; sourceTree = "<group>"; };
@@ -252,6 +254,7 @@
 				47BB8E702F6273F30082C53F /* OnboardingProgramPersistTests.swift */,
 				47AE59602F70266A007B3B34 /* SupabaseAuthAppleLinkTests.swift */,
 				47AE59702F70266A007B3B34 /* AppleSignInStepTests.swift */,
+				47AE59802F70266A007B3B34 /* AppleLinkGateTests.swift */,
 				47BB8E702F6273F30082C5F0 /* GymProfileSyncTests.swift */,
 				47BB8E8A2F6273F30082C53F /* ProgramOwnerGateTests.swift */,
 				47BB8E702F6273F30082C625 /* ProgramBackfillTests.swift */,
@@ -425,6 +428,7 @@
 				47BB8E712F6273F30082C53F /* OnboardingProgramPersistTests.swift in Sources */,
 				47AE59612F70266A007B3B34 /* SupabaseAuthAppleLinkTests.swift in Sources */,
 				47AE59712F70266A007B3B34 /* AppleSignInStepTests.swift in Sources */,
+				47AE59812F70266A007B3B34 /* AppleLinkGateTests.swift in Sources */,
 				47BB8E712F6273F30082C5F1 /* GymProfileSyncTests.swift in Sources */,
 				47BB8E8B2F6273F30082C53F /* ProgramOwnerGateTests.swift in Sources */,
 				47BB8E712F6273F30082C625 /* ProgramBackfillTests.swift in Sources */,

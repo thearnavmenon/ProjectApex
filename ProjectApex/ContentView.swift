@@ -43,6 +43,11 @@ struct ContentView: View {
     /// Evaluated once at launch from UserDefaults; does not re-read during runtime.
     @State private var showOnboarding: Bool = !UserDefaults.standard.bool(forKey: OnboardingConstants.onboardingCompletedKey)
 
+    /// #598 backfill link gate: presents the Sign in with Apple prompt to an
+    /// install already past onboarding whose identity is not yet Apple-anchored
+    /// (server-truth checked in the launch .task; fail-open on any failure).
+    @State private var showAppleLinkGate: Bool = false
+
     /// One-time migration notice: training-time progression replaces calendar-time.
     /// Shown once to users who already have a mesocycle loaded when updating to this build.
     @State private var showTrainingTimeMigrationNotice: Bool = false
@@ -142,6 +147,24 @@ struct ContentView: View {
         // home-indicator zone while its own bottom padding keeps the labels above it.
         VStack(spacing: 0) {
             tabContent
+                // #598: the backfill link gate presents from a DIFFERENT node than
+                // the onboarding cover below — two fullScreenCovers on one view
+                // silently drop one. Gate and onboarding are mutually exclusive
+                // (the gate only evaluates when onboarding is complete).
+                .fullScreenCover(isPresented: $showAppleLinkGate) {
+                    AppleLinkGateView(
+                        exchange: { idToken, rawNonce in
+                            try await deps.supabaseAuth.signInWithApple(idToken: idToken, rawNonce: rawNonce)
+                        },
+                        onOutcome: { outcome in
+                            await handleAppleGateOutcome(outcome)
+                        },
+                        onNotNow: {
+                            // Re-arms next launch (the linked flag stays unset).
+                            showAppleLinkGate = false
+                        }
+                    )
+                }
 
             // #462: "Now Training" pill above the tab bar. Hidden on the Workout
             // tab itself (tab 1), which already shows the full session / paused screen.
@@ -247,6 +270,28 @@ struct ContentView: View {
             if !showOnboarding && !crashAlertArmed && !UserDefaults.standard.bool(forKey: migrationKey) {
                 UserDefaults.standard.set(true, forKey: migrationKey)
                 showTrainingTimeMigrationNotice = true
+            }
+
+            // #598: Apple-link backfill gate. An install past onboarding whose
+            // identity is not yet Apple-anchored gets the (skippable) link
+            // prompt — the uid-preserving Slice-A flow, so its existing data
+            // becomes recoverable. Server-truth check via GET /auth/v1/user;
+            // fail-open (nil → skip this launch, never block). Suppressed when
+            // a crash-recovery alert won this launch (J-F7 collision rule).
+            if !showOnboarding && !crashAlertArmed,
+               AppleLinkGate.shouldEvaluate(
+                   onboardingComplete: true,
+                   locallyMarkedLinked: UserDefaults.standard.bool(forKey: AppleLinkGate.linkedFlagKey)
+               ) {
+                if let state = await deps.supabaseAuth.fetchIdentityState() {
+                    if state.isAppleLinked {
+                        // Already anchored server-side (e.g. flag lost to a domain
+                        // wipe while the session survived) — just record it.
+                        UserDefaults.standard.set(true, forKey: AppleLinkGate.linkedFlagKey)
+                    } else {
+                        showAppleLinkGate = true
+                    }
+                }
             }
         }
         .alert("Workout paused", isPresented: $showCrashRecoveryAlert) {
@@ -660,6 +705,39 @@ struct ContentView: View {
             },
             programViewModel: programViewModel
         )
+    }
+
+    // MARK: - Apple-link backfill gate (#598)
+
+    /// Post-exchange handling for the gate. The overwhelmingly common case is
+    /// `.linkedToCurrentUser` — the uid is preserved and nothing local changes.
+    /// `.signedInAsDifferentUser` is the documented two-device edge (#595): the
+    /// Apple ID already anchored another uid and Slice A swapped to it, so this
+    /// device's caches belong to the abandoned uid — clear the program cache
+    /// and rebuild the ProgramViewModel so everything reloads under the
+    /// recovered identity.
+    private func handleAppleGateOutcome(_ outcome: AppleSignInOutcome) async {
+        let session: SupabaseSession
+        switch outcome {
+        case .linkedToCurrentUser(let s):
+            session = s
+        case .signedInAsDifferentUser(let s, _):
+            session = s
+            try? deps.keychainService.store(s.userId.uuidString, for: .userId)
+            Mesocycle.clearUserDefaults()
+            programViewModel = ProgramViewModel(
+                supabaseClient: deps.supabaseClient,
+                macroPlanService: deps.macroPlanService,
+                sessionPlanService: deps.sessionPlanService,
+                userId: deps.resolvedUserId,
+                resolveOwner: { await deps.resolvedOwnerUserId() },
+                traineeModelService: deps.traineeModelService
+            )
+            Task { await programViewModel?.loadProgram() }
+        }
+        await deps.supabaseClient.setAuthToken(session.accessToken)
+        UserDefaults.standard.set(true, forKey: AppleLinkGate.linkedFlagKey)
+        showAppleLinkGate = false
     }
 
     // MARK: - Crash Recovery Helpers
