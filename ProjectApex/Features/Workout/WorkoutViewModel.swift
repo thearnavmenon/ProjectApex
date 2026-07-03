@@ -253,11 +253,11 @@ class WorkoutViewModel {
         showEndSessionEarlyConfirmation = true
     }
 
-    /// Called when user confirms the end-early dialog.
-    func onEndSessionEarly() {
+    /// Called when the user picks a reason on the end-early chooser (S1).
+    func onEndSessionEarly(reason: EarlyExitReason, note: String? = nil) {
         showEndSessionEarlyConfirmation = false
         Task {
-            await manager.endSessionEarly()
+            await manager.endSessionEarly(reason: reason, note: note)
             await pullState()
         }
     }

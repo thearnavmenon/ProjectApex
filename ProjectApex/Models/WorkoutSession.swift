@@ -272,6 +272,30 @@ nonisolated struct SwapRecord: Codable, Sendable {
 // MARK: - SessionSummary
 
 /// Post-session aggregate written to `workout_sessions.summary` as JSONB.
+/// Why the user ended a session early — a one-tap chip on the end-early sheet (S1).
+/// Raw values are the canonical STORED form (`SessionSummary.earlyExitReason`) and
+/// the RAG memory tag; `chipLabel` is the user-facing text. Structured (not a free
+/// string) so later adaptation can route each reason to the right lever — e.g.
+/// `.tired` → fatigue, `.hurt` → limitations, `.tooLong` → session size.
+nonisolated enum EarlyExitReason: String, Codable, Sendable, CaseIterable {
+    case ranOutOfTime   = "ran_out_of_time"
+    case tooLong        = "too_long"
+    case tired          = "tired"
+    case hurt           = "hurt"
+    case gotWhatIWanted = "got_what_i_wanted"
+
+    /// User-facing chip label shown on the end-early chooser.
+    var chipLabel: String {
+        switch self {
+        case .ranOutOfTime:   return "Ran out of time"
+        case .tooLong:        return "Too long / not feeling it"
+        case .tired:          return "Tired / beat up"
+        case .hurt:           return "Something hurt"
+        case .gotWhatIWanted: return "Got what I wanted"
+        }
+    }
+}
+
 nonisolated struct SessionSummary: Codable, Sendable {
     let totalVolumeKg: Double
     let setsCompleted: Int

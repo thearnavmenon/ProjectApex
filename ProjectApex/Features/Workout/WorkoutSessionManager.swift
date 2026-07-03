@@ -722,9 +722,12 @@ actor WorkoutSessionManager {
         }
     }
 
-    /// Terminates the session early. Writes a partial summary.
-    func endSessionEarly() async {
-        await finishSession(earlyExitReason: "User ended session early")
+    /// Terminates the session early. Writes a partial summary tagged with the
+    /// user's reason (S1). `reason` is optional so internal / no-choice callers
+    /// (the rest-timer-vs-UI race, tests) still resolve to a non-nil partial
+    /// marker; the UI always passes a real chip.
+    func endSessionEarly(reason: EarlyExitReason? = nil, note: String? = nil) async {
+        await finishSession(earlyExitReason: reason?.rawValue ?? "unspecified", earlyExitNote: note)
     }
 
     /// Completes the session after all exercises are done. Writes a full summary.
@@ -2089,7 +2092,7 @@ actor WorkoutSessionManager {
 
     // MARK: - Session Termination
 
-    private func finishSession(earlyExitReason: String?) async {
+    private func finishSession(earlyExitReason: String?, earlyExitNote: String? = nil) async {
         // #369 [8] — idempotency guard. endSession() (rest-timer Task, completeSet
         // last-set, skip last-set, resume edge case) and endSessionEarly() can both
         // reach here for the same session; the actor serialises them but each would
@@ -2205,17 +2208,24 @@ actor WorkoutSessionManager {
 
         // Queue early-exit memory event (TDD §9.3 / P4-T07)
         // Format: "Early exit: {partial_exercises_completed}" per ARCHITECTURE.md §9.3
-        if earlyExitReason != nil {
+        if let earlyExitReason {
             let completedExerciseNames = sessionHistoryToday.map(\.exerciseName).joined(separator: ", ")
             let partialDescription = completedExerciseNames.isEmpty ? "no exercises completed" : completedExerciseNames
-            let text = "Early exit: \(partialDescription)"
+            let notePart: String = {
+                guard let note = earlyExitNote, !note.isEmpty else { return "" }
+                return " — note: \(note)"
+            }()
+            let text = "Early exit (\(earlyExitReason)): \(partialDescription)\(notePart)"
             let metaSessionId = finalSession.id.uuidString
             let userId = finalSession.userId.uuidString
-            Task.detached { [memoryService, text, metaSessionId, userId] in
+            // S1: tag with the specific reason so RAG (and later adaptation) can
+            // retrieve WHY, not just THAT, the session ended early.
+            let reasonTag = "early_exit_reason:\(earlyExitReason)"
+            Task.detached { [memoryService, text, metaSessionId, userId, reasonTag] in
                 await memoryService.embed(
                     text: text,
                     sessionId: metaSessionId,
-                    tags: ["session_incomplete"],
+                    tags: ["session_incomplete", reasonTag],
                     userId: userId
                 )
             }
