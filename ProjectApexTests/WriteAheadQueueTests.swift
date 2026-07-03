@@ -655,3 +655,117 @@ final class NetworkMonitorTests: XCTestCase {
         XCTAssertEqual(counter.value, 2)
     }
 }
+
+// MARK: - Manual-log durability (Act 2 — route manual log through the WAQ)
+
+/// Thread-safe recorder of the tables the mock received, in POST order.
+private final class TableRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _tables: [String] = []
+    func record(_ t: String) { lock.lock(); _tables.append(t); lock.unlock() }
+    var tables: [String] { lock.lock(); defer { lock.unlock() }; return _tables }
+}
+
+private func makeManualSetLog(setNumber: Int) -> SetLog {
+    SetLog(
+        id: UUID(),
+        sessionId: UUID(),
+        exerciseId: "barbell_bench_press",
+        setNumber: setNumber,
+        weightKg: 100.0,
+        repsCompleted: 5,
+        rpeFelt: 8,
+        rirEstimated: 2,
+        aiPrescribed: nil,
+        loggedAt: Date(timeIntervalSince1970: 1_781_524_800),
+        primaryMuscle: "pectoralis_major",
+        intent: .top
+    )
+}
+
+private func makeManualSession() -> ManualSessionPayload {
+    ManualSessionPayload(
+        id: UUID().uuidString,
+        userId: UUID().uuidString,
+        programId: UUID().uuidString,
+        sessionDate: "2026-07-03",
+        weekNumber: 1,
+        dayType: "Push_A",
+        completed: true,
+        manuallyLogged: true,
+        status: "completed"
+    )
+}
+
+/// Verifies `persistManualLog(...)` (the extracted manual-log writer) routes the
+/// session row + set logs through the write-ahead queue, so they are durable on a
+/// network failure — the exact loss the old direct-insert path silently swallowed.
+final class ManualLogDurabilityTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        WAQMockURLProtocol.requestCount = 0
+        WAQMockURLProtocol.requestHandler = nil
+        UserDefaults.standard.removeObject(forKey: "com.projectapex.writeAheadQueue")
+        UserDefaults.standard.removeObject(forKey: "com.projectapex.writeAheadQueue.deadLetter")
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: "com.projectapex.writeAheadQueue")
+        UserDefaults.standard.removeObject(forKey: "com.projectapex.writeAheadQueue.deadLetter")
+        super.tearDown()
+    }
+
+    /// Network always fails → every manual item must remain recoverable (still
+    /// queued or dead-lettered), never silently dropped like the old path.
+    func test_manualLog_survivesNetworkFailure_neverDropped() async throws {
+        WAQMockURLProtocol.requestHandler = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 500,
+                                           httpVersion: nil, headerFields: nil)!
+            return (response, Data("{\"message\":\"server error\"}".utf8))
+        }
+        // baseRetryDelay 0 so retry-to-dead-letter completes fast; either way the
+        // items must be retained.
+        let queue = WriteAheadQueue(supabase: makeMockSupabase(), baseRetryDelay: 0)
+
+        try await persistManualLog(
+            sessionPayload: makeManualSession(),
+            setPayloads: [
+                ManualSetLogPayload(from: makeManualSetLog(setNumber: 1), intent: .top),
+                ManualSetLogPayload(from: makeManualSetLog(setNumber: 2), intent: .backoff),
+            ],
+            into: queue
+        )
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        let pending = await queue.pendingCount
+        let dead = await queue.failedWrites().count
+        XCTAssertEqual(pending + dead, 3,
+                       "1 session + 2 sets must all be retained (queued or dead-lettered), never dropped")
+    }
+
+    /// On a healthy network every manual item flushes, and the session row is
+    /// POSTed before its set_logs (FIFO → FK-safe).
+    func test_manualLog_flushesAll_sessionBeforeSets() async throws {
+        let recorder = TableRecorder()
+        WAQMockURLProtocol.requestHandler = { request in
+            recorder.record(request.url!.lastPathComponent)
+            let response = HTTPURLResponse(url: request.url!, statusCode: 201,
+                                           httpVersion: nil, headerFields: nil)!
+            return (response, Data("[]".utf8))
+        }
+        let queue = WriteAheadQueue(supabase: makeMockSupabase())
+
+        try await persistManualLog(
+            sessionPayload: makeManualSession(),
+            setPayloads: [ManualSetLogPayload(from: makeManualSetLog(setNumber: 1), intent: .top)],
+            into: queue
+        )
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        let pending = await queue.pendingCount
+        XCTAssertEqual(pending, 0, "healthy network flushes all manual items")
+        XCTAssertEqual(recorder.tables.first, "workout_sessions",
+                       "session row must POST before its set_logs (FK-safe FIFO)")
+    }
+}
