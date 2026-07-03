@@ -19,6 +19,7 @@
 // GoTrue endpoints used (all relative to Config.supabaseURL):
 //   POST /auth/v1/signup                              — anonymous sign-up
 //   POST /auth/v1/token?grant_type=refresh_token      — refresh
+//   POST /auth/v1/token?grant_type=id_token           — Apple sign-in / identity link (#596)
 //   POST /auth/v1/logout                              — logout
 //
 // Security: token values are never logged.
@@ -45,6 +46,20 @@ struct SupabaseSession: Equatable, Sendable {
     }
 }
 
+// MARK: - AppleSignInOutcome
+
+/// Result of `signInWithApple` (#596, ADR-0032). Two shapes because the caller
+/// must behave differently:
+///   - `linkedToCurrentUser`: the Apple identity now anchors the CURRENT uid —
+///     `auth.uid()` is unchanged, nothing to re-resolve.
+///   - `signedInAsDifferentUser`: the session was swapped to an existing
+///     Apple-bound user (returning-user recovery) — the caller must re-resolve
+///     `resolvedUserId` and route on an RLS-scoped existence check.
+enum AppleSignInOutcome: Equatable, Sendable {
+    case linkedToCurrentUser(SupabaseSession)
+    case signedInAsDifferentUser(SupabaseSession, previousUserId: UUID?)
+}
+
 // MARK: - SupabaseAuthError
 
 enum SupabaseAuthError: LocalizedError {
@@ -52,6 +67,10 @@ enum SupabaseAuthError: LocalizedError {
     case decodingError
     case invalidURL
     case noRefreshToken
+    /// A "successful" link response carried a DIFFERENT uid than the session it
+    /// was meant to anchor — the uid-parity invariant (#595) was violated. The
+    /// mismatched session is never adopted. Carries uids only, never tokens.
+    case appleLinkUidMismatch(expected: UUID, received: UUID)
 
     var errorDescription: String? {
         switch self {
@@ -59,6 +78,8 @@ enum SupabaseAuthError: LocalizedError {
         case .decodingError:        return "GoTrue response could not be decoded"
         case .invalidURL:           return "Could not construct a GoTrue request URL"
         case .noRefreshToken:       return "No refresh token available"
+        case .appleLinkUidMismatch(let expected, let received):
+            return "Apple link violated uid parity (expected \(expected), got \(received))"
         }
     }
 }
@@ -102,6 +123,17 @@ private struct GoTrueTokenResponse: Decodable {
             expiresAt: expiry,
             userId: user.id
         )
+    }
+}
+
+/// GoTrue HTTPError body shape (`apierrors.go`): `{"code", "error_code", "msg"}`.
+/// Only `error_code` is read — it discriminates the returning-user case
+/// (`identity_already_exists`) from genuine failures on the link path (#596).
+private struct GoTrueErrorBody: Decodable {
+    let errorCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case errorCode = "error_code"
     }
 }
 
@@ -279,6 +311,115 @@ actor SupabaseAuth {
         return newSession
     }
 
+    /// Apple sign-in / identity link via `POST /auth/v1/token?grant_type=id_token`
+    /// (#596, umbrella #595, ADR-0032). Called with the Apple `identityToken`
+    /// (JWT string) and the RAW nonce (GoTrue hashes it server-side to compare
+    /// against the token's `nonce` claim).
+    ///
+    /// Mechanism (Step-0-verified against the live project, GoTrue v2.192.0):
+    /// with a current session, the request carries `Authorization: Bearer` and
+    /// `"link_identity": true` — GoTrue then LINKS the Apple identity to the
+    /// current (anonymous) user, preserving `user.id` (= `auth.uid()`), so every
+    /// RLS policy and the EF `sub`-ownership check keep matching existing rows.
+    /// A bare Bearer WITHOUT the flag is ignored by GoTrue and would mint a
+    /// separate user — never send one without the other.
+    ///
+    /// Fork on 422 `identity_already_exists`: the Apple identity already belongs
+    /// to an existing user (returning-user recovery, e.g. fresh install). We then
+    /// sign in plainly (no Bearer, no link_identity), adopt that user's session,
+    /// and persist it — including `.supabaseAuthUserId`, so `UserIdentityResolver`
+    /// re-resolves to the recovered uid.
+    ///
+    /// uid-parity hard failure: a 2xx link response whose uid differs from the
+    /// current session's is an invariant violation — the response session is NOT
+    /// adopted and `appleLinkUidMismatch` is thrown.
+    ///
+    /// Degradation contract: any thrown error leaves the current (anon) session
+    /// and Keychain untouched — a failed/declined Apple sign-in never bricks the
+    /// anon path. Precondition: launch resolution has already run (callers sit
+    /// behind `awaitFirstResolution`, like every owned write).
+    func signInWithApple(idToken: String, rawNonce: String) async throws -> AppleSignInOutcome {
+        // A restored session's access token can be stale (Slice-C link prompts
+        // run on launch) — refresh best-effort so the link Bearer is valid. A
+        // failed refresh falls through; the server then rejects and we surface.
+        if let current = currentSession, current.isNearExpiry() {
+            _ = try? await refresh()
+        }
+        let previous = currentSession
+
+        if let previous {
+            // Link path: anchor the Apple identity to the CURRENT uid.
+            let linkBody = try JSONSerialization.data(withJSONObject: [
+                "provider": "apple",
+                "id_token": idToken,
+                "nonce": rawNonce,
+                "link_identity": true
+            ])
+            let (status, data) = try await performTokenRequest(
+                path: "/auth/v1/token",
+                query: [URLQueryItem(name: "grant_type", value: "id_token")],
+                body: linkBody,
+                bearer: previous.accessToken
+            )
+            if (200...299).contains(status) {
+                guard let response = try? decoder.decode(GoTrueTokenResponse.self, from: data) else {
+                    throw SupabaseAuthError.decodingError
+                }
+                let newSession = response.session()
+                guard newSession.userId == previous.userId else {
+                    // Invariant violation — do NOT adopt the mismatched session.
+                    print("[SupabaseAuth] apple link returned a DIFFERENT uid — rejecting (expected \(previous.userId), got \(newSession.userId))")
+                    throw SupabaseAuthError.appleLinkUidMismatch(
+                        expected: previous.userId, received: newSession.userId
+                    )
+                }
+                persist(newSession)
+                currentSession = newSession
+                print("[SupabaseAuth] apple identity linked — uid preserved: \(newSession.userId)")
+                return .linkedToCurrentUser(newSession)
+            }
+            let errorCode = (try? decoder.decode(GoTrueErrorBody.self, from: data))?.errorCode
+            guard status == 422, errorCode == "identity_already_exists" else {
+                print("[SupabaseAuth] apple link FAILED — HTTP \(status), error_code: \(errorCode ?? "nil")")
+                throw SupabaseAuthError.httpError(statusCode: status)
+            }
+            print("[SupabaseAuth] apple identity already bound — falling back to plain sign-in (returning user)")
+        }
+
+        // Plain sign-in: returning user whose Apple identity has an owner, or no
+        // current session at all (anon sign-in failed at launch — Apple still
+        // recovers the account).
+        let signInBody = try JSONSerialization.data(withJSONObject: [
+            "provider": "apple",
+            "id_token": idToken,
+            "nonce": rawNonce
+        ])
+        let (status, data) = try await performTokenRequest(
+            path: "/auth/v1/token",
+            query: [URLQueryItem(name: "grant_type", value: "id_token")],
+            body: signInBody,
+            bearer: nil
+        )
+        guard (200...299).contains(status) else {
+            print("[SupabaseAuth] apple sign-in FAILED — HTTP \(status)")
+            throw SupabaseAuthError.httpError(statusCode: status)
+        }
+        guard let response = try? decoder.decode(GoTrueTokenResponse.self, from: data) else {
+            throw SupabaseAuthError.decodingError
+        }
+        let newSession = response.session()
+        persist(newSession)
+        currentSession = newSession
+        if let previous, newSession.userId == previous.userId {
+            // The identity was already linked to THIS user (e.g. a retry after a
+            // crash between link and persist) — semantically a link.
+            print("[SupabaseAuth] apple sign-in returned the current uid — treating as linked: \(newSession.userId)")
+            return .linkedToCurrentUser(newSession)
+        }
+        print("[SupabaseAuth] apple sign-in swapped session — uid: \(newSession.userId) (was: \(previous?.userId.uuidString ?? "none"))")
+        return .signedInAsDifferentUser(newSession, previousUserId: previous?.userId)
+    }
+
     /// `POST /auth/v1/logout`. Clears the persisted + cached session regardless
     /// of the server response (best-effort sign-out).
     func logout() async {
@@ -315,12 +456,33 @@ actor SupabaseAuth {
     // MARK: - Networking
 
     private func postToken(path: String, query: [URLQueryItem]?, body: Data) async throws -> GoTrueTokenResponse {
+        let (status, data) = try await performTokenRequest(path: path, query: query, body: body, bearer: nil)
+        guard (200...299).contains(status) else {
+            throw SupabaseAuthError.httpError(statusCode: status)
+        }
+        do {
+            return try decoder.decode(GoTrueTokenResponse.self, from: data)
+        } catch {
+            throw SupabaseAuthError.decodingError
+        }
+    }
+
+    /// Performs a GoTrue POST and returns the raw (status, body) so callers that
+    /// need to discriminate error bodies (the Apple link path's 422
+    /// `identity_already_exists`) can do so. `bearer` attaches an
+    /// `Authorization: Bearer` header — required for identity linking.
+    private func performTokenRequest(
+        path: String, query: [URLQueryItem]?, body: Data, bearer: String?
+    ) async throws -> (status: Int, data: Data) {
         guard let url = makeURL(path: path, query: query) else { throw SupabaseAuthError.invalidURL }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        if let bearer {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        }
         request.httpBody = body
         // Bound a single attempt so a stalled (e.g. QUIC-hung) connection fails
         // fast and the caller's retry can force a fresh, TCP-fallback connection
@@ -331,14 +493,7 @@ actor SupabaseAuth {
         guard let http = response as? HTTPURLResponse else {
             throw SupabaseAuthError.httpError(statusCode: 0)
         }
-        guard (200...299).contains(http.statusCode) else {
-            throw SupabaseAuthError.httpError(statusCode: http.statusCode)
-        }
-        do {
-            return try decoder.decode(GoTrueTokenResponse.self, from: data)
-        } catch {
-            throw SupabaseAuthError.decodingError
-        }
+        return (http.statusCode, data)
     }
 
     private func makeURL(path: String, query: [URLQueryItem]?) -> URL? {
