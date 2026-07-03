@@ -1915,8 +1915,11 @@ orchestratorTest(
     const userId = await seedFreshUser();
     const loggedAtBase = new Date("2026-05-10T10:00:00Z");
 
-    // Three consecutive applies on chest, each contributing 5 sets.
-    // Cumulative sets: 5, 10, 15. Deficits: 18−5=13, 18−10=8, 18−15=3.
+    // Three consecutive applies on chest, 1 day apart, each contributing 5 sets.
+    // Cumulative sets: 5, 10, 15. The 1-day session gap is a tight cadence, so
+    // #164 cadence-scales chest tolerance from the 18 baseline down to
+    // round(18 × computeCadenceScalingFactor(1)) = round(18 × 4/7) = 10.
+    // Cumulative 15 already exceeds that, so the deficit closes fully to 0.
     for (let i = 0; i < 3; i++) {
       const loggedAt = new Date(loggedAtBase.getTime() + i * 86_400_000).toISOString();
       await applySession(
@@ -1952,8 +1955,8 @@ orchestratorTest(
     assertEquals(history[1].sets, 5);
     assertEquals(history[2].sets, 5);
 
-    // Cumulative volume = 15 sets; deficit = 18 − 15 = 3.
-    assertEquals(chest.volumeDeficit, 3);
+    // Cumulative volume = 15 sets ≥ cadence-scaled tolerance (10), so deficit = 0.
+    assertEquals(chest.volumeDeficit, 0);
   },
 );
 
