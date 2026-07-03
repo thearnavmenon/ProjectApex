@@ -7,6 +7,39 @@ Started 2026-06-07.
 
 ---
 
+## 2026-07-03 — Fixed a jumbled program screen, and made the tab button take you back
+
+**What you spotted:**
+On a program day screen (the one listing a session's exercises), a line of text —
+"This session unlocks when it becomes your next workout." — was landing on top of the
+exercise details and the button at the bottom, so it all read as a garbled pile.
+
+**Why it happened:**
+That bar of buttons at the bottom floats over the scrolling list. It was set up for the
+simple case where there's just one big "Start Workout" button, so two shortcuts were
+taken: the bar faded to see-through at its top edge, and the list left only a fixed gap
+of space beneath it. On a day that *isn't* your next one, the bar grows taller — it adds
+the "unlocks later" note plus a couple more buttons — so its text sat in the see-through
+zone with the exercise card showing through, and the last exercise slid underneath it.
+Both shortcuts broke at once.
+
+**What I changed:**
+The bottom bar now has a solid black background so nothing shows through it (with just a
+short fade above it). And the gap under the list now measures the bar's real height
+instead of guessing, so the last exercise always clears it no matter how tall the bar
+gets.
+
+**The second thing you asked for:**
+When you're looking at a day's detail and you tap "Program" in the bottom nav again, it
+now slides you back to the calendar — the familiar "tap the tab you're already on to go
+back to the top" behaviour. (Tapping Program from a different tab still just takes you
+back to where you left off.)
+
+**How it was checked:**
+Both changes built cleanly on a fresh, isolated copy of the latest code. The tab-tap
+behaviour hasn't been tried on a real phone yet. Merged to main as pull request #607
+(two commits: the overlap fix, then the tab-back behaviour).
+
 ## 2026-07-03 — Double-checked that your workouts really get saved, and closed two gaps
 
 **The question:**
