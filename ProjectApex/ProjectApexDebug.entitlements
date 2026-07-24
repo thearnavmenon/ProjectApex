@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Debug-only entitlements: omits com.apple.developer.applesignin so a free
+	     Personal Team can sign device builds. Sign In with Apple is unavailable in
+	     Debug device builds (onboarding bypasses the step under #if DEBUG). The full
+	     Release entitlements (ProjectApex.entitlements) keep Sign In with Apple. -->
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)RTG.ProjectApex</string>
+	</array>
+</dict>
+</plist>

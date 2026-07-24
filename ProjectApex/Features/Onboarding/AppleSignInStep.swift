@@ -131,6 +131,12 @@ struct AppleSignInStepView: View {
     /// Optional escape hatch — only the #598 backfill gate offers one
     /// ("Not now" → dismiss, re-prompt next launch). Onboarding never does.
     var onNotNow: (() -> Void)? = nil
+    /// DEBUG-only escape. Device builds signed by a free Personal Team use
+    /// ProjectApexDebug.entitlements, which omits the Sign in with Apple
+    /// entitlement, so the real button can never complete. When provided, a
+    /// dev-only skip advances past the step with NO link (the user stays on the
+    /// anonymous session). Compiled out of Release entirely.
+    var onDebugSkip: (() -> Void)? = nil
 
     @State private var rawNonce = AppleSignInNonce.generateRaw()
     @State private var isExchanging = false
@@ -221,6 +227,20 @@ struct AppleSignInStepView: View {
                 .disabled(isExchanging)
                 .padding(.top, 16)
             }
+
+            #if DEBUG
+            if let onDebugSkip {
+                Button(action: onDebugSkip) {
+                    Text("Skip — dev build (no Apple entitlement)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Apex.amber.opacity(0.85))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .disabled(isExchanging)
+                .padding(.top, 12)
+            }
+            #endif
         }
         .padding(.horizontal, Apex.pad)
         .padding(.bottom, 30)

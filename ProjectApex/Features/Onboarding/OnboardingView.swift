@@ -442,8 +442,27 @@ struct OnboardingView: View {
             onBack: {
                 howIndex = 3
                 go(to: .how)
-            }
+            },
+            onDebugSkip: debugSkipAppleStep
         )
+    }
+
+    /// DEBUG-only: on a device build signed by a free Personal Team the Sign in
+    /// with Apple entitlement is stripped (ProjectApexDebug.entitlements), so the
+    /// required step can't complete. This advances past it with NO link — the
+    /// user stays on the launch-minted anonymous session (pre-SiWA behaviour).
+    /// It also records the local link marker so the #598 backfill gate never
+    /// re-prompts this install. nil in Release, so the step stays required.
+    private var debugSkipAppleStep: (() -> Void)? {
+        #if DEBUG
+        return {
+            appleLinkDone = true
+            UserDefaults.standard.set(true, forKey: AppleLinkGate.linkedFlagKey)
+            go(to: .name)
+        }
+        #else
+        return nil
+        #endif
     }
 
     /// Post-exchange side-effects + routing:
