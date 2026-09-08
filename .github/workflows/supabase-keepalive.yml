@@ -1,0 +1,81 @@
+# ============================================================================
+# Supabase keep-alive.
+#
+# In plain words: the app's Supabase project is on the free plan, and Supabase
+# pauses a free project after about a week with no API traffic. A paused
+# project's hostname stops resolving, so the app can't sign in or load anything
+# (2026-09-08 incident: two idle months → paused → every request failed with
+# "A server with the specified hostname could not be found").
+#
+# This workflow runs once a day and makes one real database read through the
+# project's REST API. That counts as activity and keeps the project awake.
+#
+# A red run means the ping did not get a 200 — most likely the project is
+# already paused. Restore it from the Supabase dashboard (project → Restore),
+# then re-run this workflow by hand from the Actions tab.
+#
+# Secrets: reuses SUPABASE_ACCESS_TOKEN (the Management API token CI already
+# has) to look up the project's anon key at run time, so no key is stored in
+# this file and no new secret is needed.
+#
+# Gotcha: GitHub disables scheduled workflows in a repo after 60 days without
+# commits. If the repo goes quiet that long, re-enable it from the Actions tab.
+# ============================================================================
+
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # daily at 03:17 UTC (off the top of the hour, per GitHub's advice)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROJECT_REF: hqjgrlzvrttnyfjqjewe
+      SUPABASE_URL: https://hqjgrlzvrttnyfjqjewe.supabase.co
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - name: Look up the project's anon key
+        id: key
+        run: |
+          set -euo pipefail
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "::error::SUPABASE_ACCESS_TOKEN secret is not set"; exit 1; }
+          anon_key=$(curl -sS --fail --max-time 30 \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/api-keys?reveal=true" \
+            | jq -r 'if type == "array" then . else .keys end | .[] | select(.name == "anon") | .api_key')
+          test -n "$anon_key" || { echo "::error::could not find the anon key in the Management API response"; exit 1; }
+          echo "::add-mask::$anon_key"
+          echo "anon_key=$anon_key" >> "$GITHUB_OUTPUT"
+
+      - name: Read one row through the REST API (real database activity)
+        env:
+          ANON_KEY: ${{ steps.key.outputs.anon_key }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
+            -H "apikey: $ANON_KEY" \
+            -H "Authorization: Bearer $ANON_KEY" \
+            "$SUPABASE_URL/rest/v1/programs?select=id&limit=1")
+          echo "REST /programs → HTTP $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Supabase REST ping failed (HTTP $code). The project is probably paused — restore it from the Supabase dashboard, then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Auth health
+        env:
+          ANON_KEY: ${{ steps.key.outputs.anon_key }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS --max-time 30 -o /dev/null -w '%{http_code}' \
+            -H "apikey: $ANON_KEY" \
+            "$SUPABASE_URL/auth/v1/health")
+          echo "Auth health → HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::Supabase Auth health failed (HTTP $code)"; exit 1; }
