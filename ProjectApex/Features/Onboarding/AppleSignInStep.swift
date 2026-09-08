@@ -96,6 +96,10 @@ struct AppleLinkGateView: View {
     let exchange: (_ idToken: String, _ rawNonce: String) async throws -> AppleSignInOutcome
     let onOutcome: (AppleSignInOutcome) async -> Void
     let onNotNow: () -> Void
+    /// DEBUG-only escape, mirrored from the onboarding step: on a free-team
+    /// device build the real button can never complete and "Not now" re-arms
+    /// the gate every launch, so without this the gate is a dead end.
+    var onDebugSkip: (() -> Void)? = nil
 
     var body: some View {
         ZStack {
@@ -104,7 +108,8 @@ struct AppleLinkGateView: View {
                 exchange: exchange,
                 onOutcome: onOutcome,
                 footer: "One tap — your history stays safe even if this phone doesn't.",
-                onNotNow: onNotNow
+                onNotNow: onNotNow,
+                onDebugSkip: onDebugSkip
             )
         }
         .preferredColorScheme(.dark)
