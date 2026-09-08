@@ -7,6 +7,33 @@ Started 2026-06-07.
 
 ---
 
+## 2026-09-08 — The app went dark because the database fell asleep
+
+**What happened:**
+You opened the app after the summer and nothing worked: no sign-in, no programme, every
+request failed with "server could not be found". It looked like a networking bug in the
+app, but the app was fine. The database we rent (Supabase, free plan) puts a project to
+sleep after about a week with no traffic, and nobody had trained since early July. A
+sleeping project's web address stops existing entirely, so the phone had nowhere to go.
+
+**What we did:**
+You woke the project up from the Supabase dashboard. I checked every door afterwards —
+sign-in, the database API, and both server functions — and they all answer again. Your
+phone signed in on the first try once it was back.
+
+**What I added so it doesn't happen again:**
+A tiny daily job that knocks on the database once a day (one harmless read). That counts
+as "someone is using this", so the project never goes back to sleep. If the knock ever
+fails, the job turns red and tells you to wake the project up from the dashboard.
+
+**Two things to know:**
+- Sign in with Apple is skipped on your dev build (no paid Apple account needed) — that
+  was already handled on the branch you're on.
+- GitHub switches off scheduled jobs in a repo that has had no commits for 60 days. If
+  the repo goes that quiet, turn the job back on from the Actions tab.
+
+---
+
 ## 2026-07-03 — Your workouts can now fit how you actually train
 
 **What you told me:**
