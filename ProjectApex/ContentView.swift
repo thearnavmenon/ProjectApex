@@ -174,7 +174,8 @@ struct ContentView: View {
                         onNotNow: {
                             // Re-arms next launch (the linked flag stays unset).
                             showAppleLinkGate = false
-                        }
+                        },
+                        onDebugSkip: debugSkipAppleGate
                     )
                 }
 
@@ -782,6 +783,24 @@ struct ContentView: View {
         await deps.supabaseClient.setAuthToken(session.accessToken)
         UserDefaults.standard.set(true, forKey: AppleLinkGate.linkedFlagKey)
         showAppleLinkGate = false
+    }
+
+    /// DEBUG-only: same escape as `OnboardingView.debugSkipAppleStep`, for the
+    /// gate. On a free-team device build (ProjectApexDebug.entitlements, no Sign
+    /// in with Apple entitlement) the real button can never complete and "Not
+    /// now" re-arms the gate every launch, so an install that finished
+    /// onboarding without the local link marker would be stuck. Records the
+    /// marker (no link — the user stays on the anonymous session) and dismisses.
+    /// nil in Release, so the gate keeps only its real exits.
+    private var debugSkipAppleGate: (() -> Void)? {
+        #if DEBUG
+        return {
+            UserDefaults.standard.set(true, forKey: AppleLinkGate.linkedFlagKey)
+            showAppleLinkGate = false
+        }
+        #else
+        return nil
+        #endif
     }
 
     // MARK: - Crash Recovery Helpers
