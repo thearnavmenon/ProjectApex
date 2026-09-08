@@ -26,11 +26,19 @@ A tiny daily job that knocks on the database once a day (one harmless read). Tha
 as "someone is using this", so the project never goes back to sleep. If the knock ever
 fails, the job turns red and tells you to wake the project up from the dashboard.
 
-**Two things to know:**
-- Sign in with Apple is skipped on your dev build (no paid Apple account needed) — that
-  was already handled on the branch you're on.
-- GitHub switches off scheduled jobs in a repo that has had no commits for 60 days. If
-  the repo goes that quiet, turn the job back on from the Actions tab.
+**Also merged today — the "no paid Apple account" fix:**
+Your phone builds couldn't even install because Sign in with Apple needs a paid Apple
+developer membership, which you don't have. The dev build now signs without that
+capability and shows a small "Skip — dev build" button on the Apple sign-in screen, so
+you stay on the anonymous account. A review of that change found one gap: the *other*
+Apple sign-in screen (the one that can pop up at launch on older installs) had no skip
+button, so a dev install could get stuck seeing it every time. That screen now has the
+same skip. The real Apple sign-in stays fully intact for the day you get a paid
+membership.
+
+**One thing to know:**
+GitHub switches off scheduled jobs in a repo that has had no commits for 60 days. If
+the repo goes that quiet, turn the daily job back on from the Actions tab.
 
 ---
 
